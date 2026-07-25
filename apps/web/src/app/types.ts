@@ -4,7 +4,10 @@ export type PrimaryView =
 export type DetailView = "bank" | "cards" | "investments" | "manual-assets";
 
 export type MobileSettingsView =
-  "data-sources" | "exchange-rates" | "classification-rules";
+  | "data-sources"
+  | "sync-notifications"
+  | "exchange-rates"
+  | "classification-rules";
 
 export type View = PrimaryView | DetailView | MobileSettingsView | "more";
 

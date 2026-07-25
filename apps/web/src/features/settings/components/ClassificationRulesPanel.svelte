@@ -132,7 +132,7 @@
   <CardHeader class="gap-4 sm:flex-row sm:items-start sm:justify-between">
     <div>
       <h2 class="text-lg font-semibold">分類規則</h2>
-      <p class="text-xs text-muted-foreground">
+      <p class="text-sm text-muted-foreground">
         讓銀行交易依條件自動分類，也可選擇不計入收支
       </p>
     </div>
@@ -145,7 +145,9 @@
       >
         <Plus class="size-4" />新增分類
       </Button>
-      <Badge variant="secondary">{$rules.data?.length ?? 0} 條</Badge>
+      <Badge class="text-sm" variant="secondary"
+        >{$rules.data?.length ?? 0} 條</Badge
+      >
     </div>
   </CardHeader>
   <CardContent>
@@ -224,7 +226,7 @@
           />
           <div class="min-w-0">
             <p class="text-sm font-semibold">符合時不計入收支</p>
-            <p class="text-xs text-muted-foreground">
+            <p class="text-sm text-muted-foreground">
               仍保留所選分類，只排除圖表與收支加總。
             </p>
           </div>
@@ -295,7 +297,7 @@
                     />
                     <div class="min-w-0">
                       <p class="font-semibold">符合時不計入收支</p>
-                      <p class="text-xs text-muted-foreground">
+                      <p class="text-sm text-muted-foreground">
                         仍保留所選分類，只排除圖表與收支加總。
                       </p>
                     </div>
@@ -333,16 +335,18 @@
                 />
                 <div class="min-w-0 flex-1">
                   <div class="flex flex-wrap items-center gap-1.5">
-                    <Badge variant="outline">
+                    <Badge class="text-sm" variant="outline">
                       {categoryLabels[rule.categoryId] ?? rule.categoryId}
                     </Badge>
                     {#if rule.excludedFromCalculation}
-                      <Badge class="border-transparent bg-coral/10 text-coral">
+                      <Badge
+                        class="border-transparent bg-coral/10 text-coral text-sm"
+                      >
                         不計入收支
                       </Badge>
                     {/if}
                     {#if rule.isSystem}
-                      <Badge variant="secondary">內建</Badge>
+                      <Badge class="text-sm" variant="secondary">內建</Badge>
                     {/if}
                   </div>
                   <p class="mt-1.5 break-words text-foreground/80">

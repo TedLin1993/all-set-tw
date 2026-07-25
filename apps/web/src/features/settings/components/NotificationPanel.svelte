@@ -30,9 +30,11 @@
   let {
     api,
     demoMode,
+    variant = "default",
   }: {
     api: ApiClient;
     demoMode: boolean;
+    variant?: "default" | "desktop";
   } = $props();
 
   const queryClient = useQueryClient();
@@ -208,27 +210,43 @@
   }
 </script>
 
-<Card as="section" class="overflow-hidden">
+<Card
+  as="section"
+  class={`overflow-hidden ${variant === "desktop" ? "border-border shadow-xs" : ""}`}
+>
   <div
-    class="flex flex-wrap items-start justify-between gap-4 border-b border-white/10 bg-steel px-5 py-4 text-white"
+    class={`flex flex-wrap items-start justify-between gap-4 border-b px-5 py-4 ${variant === "desktop" ? "border-border bg-card text-foreground" : "border-white/10 bg-steel text-white"}`}
   >
     <div class="flex items-start gap-3">
       <span
-        class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/15 text-white"
+        class={`flex size-10 shrink-0 items-center justify-center rounded-xl ${variant === "desktop" ? "bg-steel/10 text-steel" : "bg-white/15 text-white"}`}
       >
         <BellRing class="size-5" />
       </span>
       <div>
-        <h2 class="font-semibold">同步推播</h2>
-        <p class="mt-1 text-xs text-white/65">
-          排程同步完成、失敗或需要驗證時提醒你。
+        <h2 class="font-semibold">
+          {variant === "desktop" ? "通知設定" : "同步推播"}
+        </h2>
+        <p
+          class={`mt-1 text-sm ${variant === "desktop" ? "text-muted-foreground" : "text-white/65"}`}
+        >
+          {variant === "desktop"
+            ? "選擇需要收到推播的同步事件。"
+            : "排程同步完成、失敗或需要驗證時提醒你。"}
         </p>
       </div>
     </div>
     {#if subscribed}
-      <Badge variant="success" class="bg-white/15 text-white">已啟用</Badge>
+      <Badge
+        variant="success"
+        class={variant === "desktop"
+          ? "text-sm"
+          : "bg-white/15 text-white text-sm"}>已啟用</Badge
+      >
     {:else}
-      <span class="rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/70">
+      <span
+        class={`rounded-full px-3 py-1.5 text-sm ${variant === "desktop" ? "bg-muted text-muted-foreground" : "bg-white/10 text-white/70"}`}
+      >
         尚未啟用
       </span>
     {/if}
@@ -279,7 +297,7 @@
           <p class="font-medium">
             {subscribed ? "這個裝置會收到同步狀態" : "在背景同步完成時收到提醒"}
           </p>
-          <p class="mt-1 text-xs text-muted-foreground">
+          <p class="mt-1 text-sm text-muted-foreground">
             可在多個瀏覽器或裝置各自開啟；通知不會包含金額或交易內容。
           </p>
         </div>
@@ -312,7 +330,7 @@
       {#if subscribed}
         <div class="grid gap-2 border-t border-border pt-4">
           <p
-            class="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+            class="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground"
           >
             通知內容
           </p>
@@ -327,7 +345,7 @@
             >
               <span>
                 <span class="block text-sm font-medium">{item.label}</span>
-                <span class="mt-0.5 block text-xs text-muted-foreground"
+                <span class="mt-0.5 block text-sm text-muted-foreground"
                   >{item.description}</span
                 >
               </span>
@@ -346,7 +364,7 @@
 
     {#if feedback}
       <p
-        class={`border-t border-border pt-3 text-xs font-medium ${feedback.tone === "success" ? "text-moss" : "text-coral"}`}
+        class={`border-t border-border pt-3 text-sm font-medium ${feedback.tone === "success" ? "text-moss" : "text-coral"}`}
       >
         {#if feedback.tone === "success"}<Check
             class="mr-1 inline size-4"

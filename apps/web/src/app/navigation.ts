@@ -11,6 +11,7 @@ const views = new Set<View>([
   "investments",
   "manual-assets",
   "data-sources",
+  "sync-notifications",
   "exchange-rates",
   "classification-rules",
   "more",

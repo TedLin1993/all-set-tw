@@ -75,6 +75,10 @@ export const mobileSettingsLabels: Record<
     label: "資料來源與連接器",
     description: "管理來源狀態、憑證、自動同步與重新驗證。",
   },
+  "sync-notifications": {
+    label: "同步與通知",
+    description: "管理預設同步排程、推播與同步狀態通知。",
+  },
   "exchange-rates": {
     label: "匯率",
     description: "管理資產換算使用的參考匯率。",

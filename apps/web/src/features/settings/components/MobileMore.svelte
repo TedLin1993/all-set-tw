@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Database, Settings, WalletCards } from "@lucide/svelte";
+  import { Clock3, Database, Settings, WalletCards } from "@lucide/svelte";
   import Card from "@/shared/ui/Card.svelte";
   import CardContent from "@/shared/ui/CardContent.svelte";
   import type { ApiClient } from "@/shared/api/client";
@@ -33,12 +33,12 @@
 
 <div class="grid gap-4">
   {#if demoMode}<span
-      class="w-fit rounded-full bg-steel/10 px-3 py-1 text-xs font-semibold text-steel"
+      class="w-fit rounded-full bg-steel/10 px-3 py-1 text-sm font-semibold text-steel"
       >Demo 資料</span
     >{/if}
   <Card
     ><CardContent class="pt-5"
-      ><p class="text-xs font-semibold text-ink/45">資料健康度</p>
+      ><p class="text-sm font-semibold text-ink/45">資料健康度</p>
       <p class="mt-2 text-2xl font-bold">
         {Math.max(sources.length - unhealthy.length, 0)} / {sources.length} 來源正常
       </p>
@@ -48,7 +48,7 @@
     ></Card
   >
   <section>
-    <h2 class="mb-2 text-sm font-semibold text-ink/50">設定與資料</h2>
+    <h2 class="mb-2 text-base font-semibold text-ink/50">設定與資料</h2>
     <Card
       ><div class="divide-y divide-ink/8">
         <button
@@ -59,11 +59,23 @@
             ><Database class="size-5" /></span
           ><span class="flex-1"
             ><span class="block font-semibold">資料來源與連接器</span><span
-              class="block text-xs text-ink/45">狀態、憑證、排程與重新驗證</span
+              class="block text-sm text-ink/45">狀態、憑證、排程與重新驗證</span
             ></span
-          ><span class="text-xs font-semibold text-steel"
+          ><span class="text-sm font-semibold text-steel"
             >{sources.length} 個　›</span
           ></button
+        >
+        <button
+          class="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left"
+          onclick={() => navigate("sync-notifications")}
+          ><span
+            class="flex size-10 items-center justify-center rounded-xl bg-steel/10 text-steel"
+            ><Clock3 class="size-5" /></span
+          ><span class="flex-1"
+            ><span class="block font-semibold">同步與通知</span><span
+              class="block text-sm text-ink/45">預設排程、推播與同步結果</span
+            ></span
+          ><span class="text-sm font-semibold text-steel">›</span></button
         >
         <button
           class="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left"
@@ -73,9 +85,9 @@
             ><WalletCards class="size-5" /></span
           ><span class="flex-1"
             ><span class="block font-semibold">匯率</span><span
-              class="block text-xs text-ink/45">管理外幣換算</span
+              class="block text-sm text-ink/45">管理外幣換算</span
             ></span
-          ><span class="text-xs font-semibold text-steel">›</span></button
+          ><span class="text-sm font-semibold text-steel">›</span></button
         >
         <button
           class="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left"
@@ -85,9 +97,9 @@
             ><Settings class="size-5" /></span
           ><span class="flex-1"
             ><span class="block font-semibold">分類規則</span><span
-              class="block text-xs text-ink/45">銀行交易自動分類</span
+              class="block text-sm text-ink/45">銀行交易自動分類</span
             ></span
-          ><span class="text-xs font-semibold text-steel"
+          ><span class="text-sm font-semibold text-steel"
             >{rules.length} 條　›</span
           ></button
         >
@@ -96,9 +108,9 @@
   </section>
   <section>
     <div class="mb-2 flex items-center justify-between">
-      <h2 class="text-sm font-semibold text-ink/50">資料來源</h2>
+      <h2 class="text-base font-semibold text-ink/50">資料來源</h2>
       <button
-        class="min-h-8 px-2 text-xs font-semibold text-steel"
+        class="min-h-8 px-2 text-sm font-semibold text-steel"
         onclick={() => navigate("data-sources")}>管理</button
       >
     </div>

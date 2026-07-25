@@ -19,6 +19,7 @@ describe("MobileMore", () => {
 
     expect(getByText("6 / 6 來源正常")).toBeInTheDocument();
     expect(getByText(/6 個\s*›/)).toBeInTheDocument();
+    expect(getByText("同步與通知")).toBeInTheDocument();
     expect(getByText("台新銀行")).toBeInTheDocument();
   });
 });

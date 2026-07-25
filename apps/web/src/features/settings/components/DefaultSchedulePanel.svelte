@@ -22,10 +22,12 @@
     api,
     demoMode,
     jobs,
+    variant = "default",
   }: {
     api: ApiClient;
     demoMode: boolean;
     jobs: SyncJobRow[];
+    variant?: "default" | "desktop";
   } = $props();
 
   const queryClient = useQueryClient();
@@ -76,28 +78,37 @@
   });
 </script>
 
-<Card as="section" class="overflow-hidden">
+<Card
+  as="section"
+  class={`overflow-hidden ${variant === "desktop" ? "border-border shadow-xs" : ""}`}
+>
   <div
-    class="flex flex-wrap items-start justify-between gap-4 border-b border-border bg-ink px-5 py-4 text-white"
+    class={`flex flex-wrap items-start justify-between gap-4 border-b px-5 py-4 ${variant === "desktop" ? "border-border bg-card text-foreground" : "border-border bg-ink text-white"}`}
   >
     <div class="flex items-start gap-3">
       <span
-        class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white"
+        class={`flex size-10 shrink-0 items-center justify-center rounded-xl ${variant === "desktop" ? "bg-steel/10 text-steel" : "bg-white/10 text-white"}`}
       >
         <Clock3 class="size-5" />
       </span>
       <div>
         <h2 class="font-semibold">預設同步排程</h2>
-        <p class="mt-1 text-xs text-white/55">
+        <p
+          class={`mt-1 text-sm ${variant === "desktop" ? "text-muted-foreground" : "text-white/55"}`}
+        >
           選擇跟隨預設的連接器，會從設定時間起依序同步。
         </p>
       </div>
     </div>
-    <div class="flex flex-wrap items-center gap-2 text-xs">
-      <span class="rounded-full bg-white/10 px-3 py-1.5 text-white/70">
+    <div class="flex flex-wrap items-center gap-2 text-sm">
+      <span
+        class={`rounded-full px-3 py-1.5 ${variant === "desktop" ? "bg-muted text-muted-foreground" : "bg-white/10 text-white/70"}`}
+      >
         Asia/Taipei
       </span>
-      <span class="rounded-full bg-white/10 px-3 py-1.5 font-semibold">
+      <span
+        class={`rounded-full px-3 py-1.5 font-semibold ${variant === "desktop" ? "bg-moss/10 text-moss" : "bg-white/10"}`}
+      >
         {inheritedJobs} 個連接器跟隨
       </span>
     </div>
@@ -137,7 +148,7 @@
       </div>
     {/if}
     <p
-      class="text-xs leading-relaxed text-muted-foreground md:min-w-52 md:flex-1 md:pb-2"
+      class="text-sm leading-relaxed text-muted-foreground md:min-w-52 md:flex-1 md:pb-2"
     >
       修改後只會影響「跟隨預設」的來源；自訂排程不會改變。
     </p>
@@ -150,13 +161,13 @@
   </div>
   {#if $save.isSuccess}
     <p
-      class="border-t border-border bg-moss/5 px-5 py-2 text-xs font-medium text-moss"
+      class="border-t border-border bg-moss/5 px-5 py-2 text-sm font-medium text-moss"
     >
       預設同步排程已更新，跟隨此設定的連接器也已重新排程。
     </p>
   {:else if $save.isError}
     <p
-      class="border-t border-border bg-coral/5 px-5 py-2 text-xs font-medium text-coral"
+      class="border-t border-border bg-coral/5 px-5 py-2 text-sm font-medium text-coral"
     >
       預設排程儲存失敗，請稍後再試。
     </p>
