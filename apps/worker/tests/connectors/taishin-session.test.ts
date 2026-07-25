@@ -406,6 +406,28 @@ describe("Taishin browser session lifecycle", () => {
     });
   });
 
+  it("reopens the login page once when the CAPTCHA image is slow to load", async () => {
+    const browserPage = page();
+    browserPage.evaluate
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(selectors)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(selectors)
+      .mockResolvedValueOnce(captchaTarget);
+    browserPage.waitForFunction
+      .mockRejectedValueOnce(new Error("CAPTCHA image timeout"))
+      .mockResolvedValueOnce(undefined);
+    const browserInstance = browser(browserPage);
+    puppeteerMock.launch.mockResolvedValue(browserInstance);
+
+    const result = await prepareTaishinCaptcha({} as Fetcher, credentials);
+
+    expect(browserPage.goto).toHaveBeenCalledTimes(2);
+    expect(browserPage.waitForFunction).toHaveBeenCalledTimes(2);
+    expect(result.captchaImage).toBe("data:image/jpeg;base64,AQID");
+    expect(browserInstance.disconnect).toHaveBeenCalledOnce();
+  });
+
   it("closes the manual browser when CAPTCHA verification fails", async () => {
     const browserPage = page();
     browserPage.evaluate

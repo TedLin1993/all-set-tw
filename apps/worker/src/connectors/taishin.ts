@@ -18,6 +18,8 @@ const REALTIME_PATH = `${API_ROOT}/web4/rb0708rwd/qryRealTime`;
 export const TAISHIN_AUTO_LOGIN_ATTEMPTS = 3;
 const CAPTCHA_KEEP_ALIVE_MS = 150_000;
 const CAPTCHA_VALIDITY_MS = 120_000;
+const CAPTCHA_IMAGE_TIMEOUT_MS = 10_000;
+const CAPTCHA_PAGE_RETRY_ATTEMPTS = 1;
 const LOGIN_RESULT_ATTEMPTS = 10;
 const LOGIN_RESULT_POLL_MS = 500;
 const REQUIRED_API_TIMEOUT_MS = 8_000;
@@ -66,6 +68,13 @@ export class TaishinConnectionError extends Error {
   ) {
     super(message);
     this.name = "TaishinConnectionError";
+  }
+}
+
+class TaishinCaptchaUnavailableError extends TaishinConnectionError {
+  constructor(message: string) {
+    super(message);
+    this.name = "TaishinCaptchaUnavailableError";
   }
 }
 
@@ -222,8 +231,7 @@ export async function prepareTaishinCaptcha(
   let preserved = false;
   try {
     await configurePage(page);
-    const frame = await openLoginAndFill(page, config);
-    const captcha = await captureCaptcha(frame);
+    const { captcha } = await openLoginAndCaptureCaptcha(page, config);
     const sessionId = browserInstance.sessionId();
     await browserInstance.disconnect();
     preserved = true;
@@ -250,8 +258,7 @@ async function loginWithOcr(
 ) {
   for (let attempt = 1; attempt <= TAISHIN_AUTO_LOGIN_ATTEMPTS; attempt += 1) {
     try {
-      const frame = await openLoginAndFill(page, config);
-      const captcha = await captureCaptcha(frame);
+      const { frame, captcha } = await openLoginAndCaptureCaptcha(page, config);
       const answer = await recognizeCaptcha(
         toArrayBuffer(captcha.bytes),
         captcha.digitCount,
@@ -562,11 +569,68 @@ async function openLoginAndFill(page: Page, config: TaishinConfig) {
   return frame;
 }
 
+async function openLoginAndCaptureCaptcha(page: Page, config: TaishinConfig) {
+  for (
+    let retry = 0;
+    retry <= CAPTCHA_PAGE_RETRY_ATTEMPTS;
+    retry += 1
+  ) {
+    const frame = await openLoginAndFill(page, config);
+    try {
+      return { frame, captcha: await captureCaptcha(frame) };
+    } catch (error) {
+      if (
+        !(error instanceof TaishinCaptchaUnavailableError) ||
+        retry >= CAPTCHA_PAGE_RETRY_ATTEMPTS
+      ) {
+        throw error;
+      }
+    }
+  }
+  throw new TaishinCaptchaUnavailableError(
+    "台新登入頁沒有在期限內取得圖形驗證碼。",
+  );
+}
+
 async function typeInput(page: BrowserPage, selector: string, value: string) {
   await page.type(selector, value);
 }
 
 async function captureCaptcha(page: BrowserPage) {
+  try {
+    await page.waitForFunction(
+      () => {
+        const captchaInput = document.querySelector<HTMLInputElement>(
+          'input[data-taishin-field="captcha"]',
+        );
+        if (!captchaInput) return false;
+        const images = Array.from(
+          document.querySelectorAll<HTMLImageElement>("img"),
+        );
+        const isHinted = (image: HTMLImageElement) => {
+          const hint = [image.id, image.className, image.alt, image.src].join(
+            " ",
+          );
+          return /captcha|驗證|validate|check.?code|verify.?code|shuffle/i.test(
+            hint,
+          );
+        };
+        const hasHintedImage = images.some(isHinted);
+        return images.some((image) => {
+          if (!image.complete || image.naturalWidth <= 0) return false;
+          const rect = image.getBoundingClientRect();
+          if (rect.width < 50 || rect.height < 20) return false;
+          if (hasHintedImage && !isHinted(image)) return false;
+          return true;
+        });
+      },
+      { timeout: CAPTCHA_IMAGE_TIMEOUT_MS },
+    );
+  } catch {
+    throw new TaishinCaptchaUnavailableError(
+      "台新登入頁沒有在期限內取得圖形驗證碼。",
+    );
+  }
   const target = await page.evaluate(() => {
     const captchaInput = document.querySelector<HTMLInputElement>(
       'input[data-taishin-field="captcha"]',
@@ -585,7 +649,11 @@ async function captureCaptcha(page: BrowserPage) {
         return {
           image,
           score:
-            (/captcha|驗證|validate|checkcode/i.test(hint) ? 1000 : 0) -
+            (/captcha|驗證|validate|check.?code|verify.?code|shuffle/i.test(
+              hint,
+            )
+              ? 1000
+              : 0) -
             Math.abs(rect.top - inputRect.top) -
             Math.abs(rect.left - inputRect.right),
           width: rect.width,
@@ -605,7 +673,9 @@ async function captureCaptcha(page: BrowserPage) {
     };
   });
   if (!target) {
-    throw new TaishinConnectionError("台新登入頁沒有取得圖形驗證碼。");
+    throw new TaishinCaptchaUnavailableError(
+      "台新登入頁沒有在期限內取得圖形驗證碼。",
+    );
   }
   const image = await page.$(target.selector);
   if (!image) throw new TaishinConnectionError("台新圖形驗證碼已失效。");
