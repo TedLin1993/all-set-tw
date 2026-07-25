@@ -1,22 +1,25 @@
 <script lang="ts">
+  import { toStore } from "svelte/store";
   import { createQuery } from "@tanstack/svelte-query";
   import { ChevronDown, Search } from "@lucide/svelte";
-  import Button from "@/shared/ui/Button.svelte";
   import EmptyState from "@/shared/ui/EmptyState.svelte";
   import Input from "@/shared/ui/Input.svelte";
   import type { ApiClient } from "@/shared/api/client";
-  import { invoicesQuery } from "@/data/invoices/queries";
+  import { invoiceDetailQuery, invoicesQuery } from "@/data/invoices/queries";
   import { formatCurrency, formatDate } from "@/shared/format/financial";
 
   let { api }: { api: ApiClient } = $props();
   const invoices = createQuery(invoicesQuery(() => api));
   let search = $state("");
-  let expanded = $state<Record<string, boolean>>({});
+  let expandedInvoiceId = $state<string | null>(null);
+  const invoiceDetail = createQuery(
+    toStore(() => invoiceDetailQuery(() => api, expandedInvoiceId)),
+  );
   const all = $derived($invoices.data ?? []);
   const filtered = $derived(
     all
       .filter((invoice) =>
-        `${invoice.sellerName ?? ""} ${invoice.invoiceNumber ?? ""} ${invoice.items.map((item) => item.description).join(" ")}`
+        `${invoice.sellerName ?? ""} ${invoice.invoiceNumber ?? ""}`
           .toLowerCase()
           .includes(search.trim().toLowerCase()),
       )
@@ -34,16 +37,6 @@
   const thisMonthTotal = $derived(
     thisMonthInvoices.reduce((sum, invoice) => sum + invoice.amount, 0),
   );
-  const allExpanded = $derived(
-    filtered.length > 0 && filtered.every((invoice) => expanded[invoice.id]),
-  );
-  function toggleAll() {
-    if (allExpanded) expanded = {};
-    else
-      expanded = Object.fromEntries(
-        filtered.map((invoice) => [invoice.id, true]),
-      );
-  }
 </script>
 
 {#if $invoices.isPending}
@@ -78,21 +71,16 @@
       </div>
     </div>
 
-    <div class="flex gap-2">
+    <div>
       <div class="relative min-w-0 flex-1">
         <Search
           class="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground"
         /><Input
           class="h-11 pl-9"
-          placeholder="搜尋商店、發票號碼或品項"
+          placeholder="搜尋商店或發票號碼"
           bind:value={search}
         />
       </div>
-      {#if filtered.length > 0}<Button
-          class="h-11"
-          variant="outline"
-          onclick={toggleAll}>{allExpanded ? "全部收合" : "全部展開"}</Button
-        >{/if}
     </div>
 
     {#if months.length === 0}
@@ -122,11 +110,13 @@
             </div>
             <div class="divide-y divide-ink/8">
               {#each group as invoice (invoice.id)}
+                {@const isExpanded = expandedInvoiceId === invoice.id}
                 <div>
                   <button
-                    class={`flex w-full items-center gap-3 px-4 py-3 text-left transition ${expanded[invoice.id] ? "bg-blue-50" : "hover:bg-ink/3"}`}
-                    onclick={() =>
-                      (expanded[invoice.id] = !expanded[invoice.id])}
+                    class={`flex w-full items-center gap-3 px-4 py-3 text-left transition ${isExpanded ? "bg-blue-50" : "hover:bg-ink/3"}`}
+                    onclick={() => {
+                      expandedInvoiceId = isExpanded ? null : invoice.id;
+                    }}
                   >
                     <div class="min-w-0 flex-1">
                       <p class="truncate text-sm font-medium">
@@ -143,22 +133,30 @@
                         <p class="text-sm font-semibold tabular-nums">
                           {formatCurrency(invoice.amount)}
                         </p>
-                        {#if invoice.items.length > 0}<p
+                        {#if isExpanded && $invoiceDetail.data?.id === invoice.id && $invoiceDetail.data.items.length > 0}<p
                             class="text-xs text-ink/40"
                           >
-                            {invoice.items.length} 項
+                            {$invoiceDetail.data.items.length} 項
                           </p>{/if}
                       </div>
                       <ChevronDown
-                        class={`size-4 text-ink/30 transition-transform ${expanded[invoice.id] ? "rotate-180" : ""}`}
+                        class={`size-4 text-ink/30 transition-transform ${isExpanded ? "rotate-180" : ""}`}
                       />
                     </div>
                   </button>
-                  {#if expanded[invoice.id]}
+                  {#if isExpanded}
                     <div class="border-t border-ink/8 bg-paper/60">
-                      {#if invoice.items.length > 0}
+                      {#if $invoiceDetail.isPending}
+                        <p class="px-5 py-3 text-xs text-ink/40">
+                          載入品項明細中。
+                        </p>
+                      {:else if $invoiceDetail.isError}
+                        <p class="px-5 py-3 text-xs text-coral">
+                          無法載入品項明細，請稍後再試。
+                        </p>
+                      {:else if $invoiceDetail.data?.id === invoice.id && $invoiceDetail.data.items.length > 0}
                         <div class="divide-y divide-ink/6">
-                          {#each invoice.items as item (item.id)}<div
+                          {#each $invoiceDetail.data.items as item (item.id)}<div
                               class="flex items-start gap-3 px-5 py-2.5"
                             >
                               <div class="min-w-0 flex-1">

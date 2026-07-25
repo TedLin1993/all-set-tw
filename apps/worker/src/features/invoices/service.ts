@@ -18,28 +18,16 @@ export async function getInvoicePage(
   const rows = await listInvoices(db, limit + 1, cursor);
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
-  const items = await listInvoiceItems(
-    db,
-    page.map((invoice) => invoice.id),
-  );
-  const itemsByInvoiceId = new Map<string, typeof items>();
-  for (const item of items) {
-    const current = itemsByInvoiceId.get(item.invoiceId) ?? [];
-    current.push(item);
-    itemsByInvoiceId.set(item.invoiceId, current);
-  }
   return {
     hasMore,
     last: page.at(-1),
-    invoices: page.map((invoice) =>
-      presentInvoice(invoice, itemsByInvoiceId.get(invoice.id) ?? []),
-    ),
+    invoices: page.map(presentInvoiceSummary),
   };
 }
 
 export async function getInvoicesRange(db: D1Database, range: MonthDateRange) {
   const rows = await listInvoicesInRange(db, range);
-  return presentInvoices(db, rows);
+  return rows.map(presentInvoiceSummary);
 }
 
 export async function getInvoiceDetail(db: D1Database, invoiceId: string) {
@@ -56,27 +44,19 @@ function presentInvoice<T extends Omit<InvoiceRow, "updatedAt"> | InvoiceRow>(
   invoice: T,
   items: unknown[],
 ) {
+  return {
+    ...presentInvoiceSummary(invoice),
+    items,
+  };
+}
+
+function presentInvoiceSummary<
+  T extends Omit<InvoiceRow, "updatedAt"> | InvoiceRow,
+>(invoice: T) {
   const { updatedAt: _updatedAt, ...presented } = invoice as InvoiceRow;
   return {
     ...presented,
     invoiceNumber: invoice.invoiceNumber ?? undefined,
     sellerName: invoice.sellerName ?? undefined,
-    items,
   };
-}
-
-async function presentInvoices(db: D1Database, rows: InvoiceRow[]) {
-  const items = await listInvoiceItems(
-    db,
-    rows.map((invoice) => invoice.id),
-  );
-  const itemsByInvoiceId = new Map<string, typeof items>();
-  for (const item of items) {
-    const current = itemsByInvoiceId.get(item.invoiceId) ?? [];
-    current.push(item);
-    itemsByInvoiceId.set(item.invoiceId, current);
-  }
-  return rows.map((invoice) =>
-    presentInvoice(invoice, itemsByInvoiceId.get(invoice.id) ?? []),
-  );
 }

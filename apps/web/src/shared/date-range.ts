@@ -10,10 +10,9 @@ export function recentMonthRange(count: number, now = new Date()): MonthRange {
 export function monthRangeEndingAt(month: string, count: number): MonthRange {
   const [year, monthNumber] = month.split("-").map(Number);
   const start = new Date(year, monthNumber - count, 1);
-  const end = new Date(year, monthNumber, 1);
   return {
     from: monthKey(start),
-    to: monthKey(end),
+    to: month,
   };
 }
 

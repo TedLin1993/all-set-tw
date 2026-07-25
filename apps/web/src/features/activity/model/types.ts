@@ -13,7 +13,6 @@ export interface ActivityItem {
   excludedFromCalculation?: boolean;
   invoiceId?: string;
   invoiceAmount?: number;
-  invoiceSearchText?: string;
   status: string;
 }
 
