@@ -104,7 +104,7 @@ test("keeps long recent activity inside the overview card", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.route("**/api/bank", async (route) => {
+  await page.route("**/api/bank**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -200,7 +200,7 @@ test("excludes a bank transaction from activity calculations and restores it", a
   let excludedFromCalculation = false;
   const month = new Date().toISOString().slice(0, 7);
 
-  await page.route("**/api/bank", async (route) => {
+  await page.route("**/api/bank**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -390,7 +390,7 @@ test("merges a matching invoice and counts an unmatched invoice as expense", asy
   page,
 }) => {
   const month = new Date().toISOString().slice(0, 7);
-  await page.route("**/api/bank", async (route) => {
+  await page.route("**/api/bank**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -414,7 +414,7 @@ test("merges a matching invoice and counts an unmatched invoice as expense", asy
             sourceId: "transaction-source-1",
             postedDate: `${month}-10`,
             authorizedAt: `${month}-10T12:00:00.000Z`,
-            amount: 860,
+            amount: -860,
             currency: "TWD",
             description: "信用卡消費",
             counterparty: "好食餐飲",
@@ -430,7 +430,7 @@ test("merges a matching invoice and counts an unmatched invoice as expense", asy
       }),
     });
   });
-  await page.route("**/api/invoices", async (route) => {
+  await page.route("**/api/invoices**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -526,7 +526,7 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
     }
     await route.fulfill({ json: mappings });
   });
-  await page.route("**/api/bank", async (route) => {
+  await page.route("**/api/bank**", async (route) => {
     await route.fulfill({
       json: {
         accounts: [
@@ -581,7 +581,7 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
       },
     });
   });
-  await page.route("**/api/invoices", async (route) => {
+  await page.route("**/api/invoices**", async (route) => {
     await route.fulfill({
       json: [
         {

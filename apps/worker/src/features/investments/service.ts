@@ -1,9 +1,11 @@
 import {
   listInvestmentTransactions,
+  listInvestmentTransactionsInRange,
   listLatestInvestmentPositions,
   type InvestmentPageCursor,
   type TransactionPageCursor,
 } from "./repository";
+import type { MonthDateRange } from "../../platform/month-range";
 
 export async function getInvestmentPage(
   db: D1Database,
@@ -36,4 +38,18 @@ export async function getInvestmentTransactionPage(
       }) => transaction,
     ),
   };
+}
+
+export async function getInvestmentTransactionsRange(
+  db: D1Database,
+  range: MonthDateRange,
+) {
+  const rows = await listInvestmentTransactionsInRange(db, range);
+  return rows.map(
+    ({
+      effectiveDate: _effectiveDate,
+      updatedAt: _updatedAt,
+      ...transaction
+    }) => transaction,
+  );
 }

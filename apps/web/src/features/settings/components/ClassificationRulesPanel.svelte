@@ -4,7 +4,7 @@
     createQuery,
     useQueryClient,
   } from "@tanstack/svelte-query";
-  import { Pencil, Plus } from "@lucide/svelte";
+  import { ChevronDown, ChevronUp, Pencil, Plus } from "@lucide/svelte";
   import Card from "@/shared/ui/Card.svelte";
   import CardHeader from "@/shared/ui/CardHeader.svelte";
   import CardContent from "@/shared/ui/CardContent.svelte";
@@ -76,6 +76,16 @@
     qc.invalidateQueries({ queryKey: queryKeys.bank });
   }
 
+  function editableRuleIndex(ruleId: string) {
+    return ($rules.data ?? [])
+      .filter((rule) => !rule.isSystem)
+      .findIndex((rule) => rule.id === ruleId);
+  }
+
+  const editableRuleCount = $derived(
+    ($rules.data ?? []).filter((rule) => !rule.isSystem).length,
+  );
+
   const addCategory = createMutation({
     mutationFn: () =>
       api.post<ClassificationCategoryRow>("/api/classification/categories", {
@@ -126,9 +136,35 @@
     mutationFn: (id: string) => api.delete(`/api/classification/rules/${id}`),
     onSuccess: invalidateRuleResults,
   });
+  const reorder = createMutation({
+    mutationFn: (ruleIds: string[]) =>
+      api.put("/api/classification/rules/order", { ruleIds }),
+    onSuccess: invalidateRuleResults,
+  });
+
+  function moveRule(ruleId: string, direction: -1 | 1) {
+    const editableRules = ($rules.data ?? []).filter((rule) => !rule.isSystem);
+    const currentIndex = editableRules.findIndex(({ id }) => id === ruleId);
+    const nextIndex = currentIndex + direction;
+    if (
+      currentIndex < 0 ||
+      nextIndex < 0 ||
+      nextIndex >= editableRules.length
+    ) {
+      return;
+    }
+
+    const nextOrder = editableRules.map(({ id }) => id);
+    const currentId = nextOrder[currentIndex];
+    const nextId = nextOrder[nextIndex];
+    if (!currentId || !nextId) return;
+    nextOrder[currentIndex] = nextId;
+    nextOrder[nextIndex] = currentId;
+    $reorder.mutate(nextOrder);
+  }
 </script>
 
-<Card>
+<Card class="w-full min-w-0">
   <CardHeader class="gap-4 sm:flex-row sm:items-start sm:justify-between">
     <div>
       <h2 class="text-lg font-semibold">分類規則</h2>
@@ -320,7 +356,7 @@
                 </div>
               </form>
             {:else}
-              <div class="flex items-start gap-3">
+              <div class="flex min-w-0 flex-wrap items-start gap-3">
                 <Checkbox
                   aria-label={`${rule.enabled ? "停用" : "啟用"}${categoryLabels[rule.categoryId] ?? rule.categoryId}規則`}
                   class="mt-1"
@@ -355,11 +391,37 @@
                   </p>
                 </div>
                 {#if !rule.isSystem}
-                  <div class="flex items-center gap-1">
+                  {@const ruleIndex = editableRuleIndex(rule.id)}
+                  <div
+                    class="flex w-full shrink-0 items-center justify-end gap-1 sm:w-auto"
+                  >
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`將${categoryLabels[rule.categoryId] ?? rule.categoryId}規則上移`}
+                      title="上移"
+                      disabled={$reorder.isPending || ruleIndex <= 0}
+                      onclick={() => moveRule(rule.id, -1)}
+                    >
+                      <ChevronUp />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`將${categoryLabels[rule.categoryId] ?? rule.categoryId}規則下移`}
+                      title="下移"
+                      disabled={$reorder.isPending ||
+                        ruleIndex >= editableRuleCount - 1}
+                      onclick={() => moveRule(rule.id, 1)}
+                    >
+                      <ChevronDown />
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={$update.isPending || $remove.isPending}
+                      disabled={$update.isPending ||
+                        $remove.isPending ||
+                        $reorder.isPending}
                       onclick={() => startEditing(rule)}
                     >
                       <Pencil class="size-4" />編輯
@@ -381,10 +443,14 @@
       </div>
     {/if}
 
-    {#if $add.isError || $toggle.isError || $update.isError || $remove.isError}
+    {#if $add.isError || $toggle.isError || $update.isError || $remove.isError || $reorder.isError}
       <p class="mt-3 text-sm text-destructive" role="alert">
         {messageFromError(
-          $add.error ?? $toggle.error ?? $update.error ?? $remove.error,
+          $add.error ??
+            $toggle.error ??
+            $update.error ??
+            $remove.error ??
+            $reorder.error,
         )}
       </p>
     {/if}

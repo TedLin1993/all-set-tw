@@ -1,15 +1,35 @@
 import { queryOptions } from "@tanstack/svelte-query";
+import type { CreateQueryOptions } from "@tanstack/svelte-query";
 import type { ApiClient } from "@/shared/api/client";
 import { queryKeys } from "@/shared/api/query-keys";
+import type { MonthRange } from "@/shared/date-range";
 import type { InvoiceRow, InvoiceTransactionPreference } from "./types";
 
 type ApiProvider = () => ApiClient;
 
-export const invoicesQuery = (getApi: ApiProvider) =>
+export const invoicesRangeQuery = (getApi: ApiProvider, range: MonthRange) =>
   queryOptions({
-    queryKey: queryKeys.invoices,
-    queryFn: () => getApi().get<InvoiceRow[]>("/api/invoices"),
+    queryKey: queryKeys.invoicesRange(range.from, range.to),
+    queryFn: () =>
+      getApi().get<InvoiceRow[]>(
+        `/api/invoices?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
+      ),
   });
+
+export const invoicesQuery = (
+  getApi: ApiProvider,
+  range?: MonthRange,
+): CreateQueryOptions<InvoiceRow[]> => ({
+  queryKey: range
+    ? queryKeys.invoicesRange(range.from, range.to)
+    : queryKeys.invoices,
+  queryFn: () =>
+    getApi().get<InvoiceRow[]>(
+      range
+        ? `/api/invoices?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`
+        : "/api/invoices",
+    ),
+});
 
 export const invoiceTransactionMappingsQuery = (getApi: ApiProvider) =>
   queryOptions({

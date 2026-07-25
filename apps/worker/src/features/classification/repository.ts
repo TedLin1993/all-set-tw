@@ -111,6 +111,39 @@ export async function listClassificationRules(db: D1Database) {
   return rows.results;
 }
 
+export async function listEditableClassificationRuleIds(db: D1Database) {
+  const rows = await db
+    .prepare(
+      `SELECT id
+       FROM classification_rules
+       WHERE is_system = 0
+       ORDER BY priority DESC, updated_at DESC, id ASC`,
+    )
+    .all<{ id: string }>();
+  return rows.results.map((row) => row.id);
+}
+
+export async function updateClassificationRuleOrder(
+  db: D1Database,
+  ruleIds: string[],
+  now: string,
+) {
+  if (ruleIds.length === 0) return;
+
+  const topPriority = 1000 + ruleIds.length;
+  await db.batch(
+    ruleIds.map((ruleId, index) =>
+      db
+        .prepare(
+          `UPDATE classification_rules
+           SET priority = ?, updated_at = ?
+           WHERE id = ? AND is_system = 0`,
+        )
+        .bind(topPriority - index, now, ruleId),
+    ),
+  );
+}
+
 export async function upsertClassificationOverride(
   db: D1Database,
   input: {

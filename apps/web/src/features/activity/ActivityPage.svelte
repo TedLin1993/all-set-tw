@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { SvelteDate } from "svelte/reactivity";
   import {
     createMutation,
     createQuery,
@@ -36,13 +35,13 @@
   import { queryKeys } from "@/shared/api/query-keys";
   import type { View } from "@/app/types";
   import { exchangeRatesQuery } from "@/data/assets/queries";
-  import { bankQuery } from "@/data/bank/queries";
+  import { bankRangeQuery } from "@/data/bank/queries";
   import type { BankData, BankTransactionRow } from "@/data/bank/types";
   import { classificationCategoriesQuery } from "@/data/classification/queries";
-  import { investmentTransactionsQuery } from "@/data/investments/queries";
+  import { investmentTransactionsRangeQuery } from "@/data/investments/queries";
   import {
     invoiceTransactionMappingsQuery,
-    invoicesQuery,
+    invoicesRangeQuery,
   } from "@/data/invoices/queries";
   import type {
     InvoiceRow,
@@ -68,21 +67,26 @@
     normalizeFinancialDate,
     rateMap,
   } from "@/shared/format/financial";
+  import { recentMonthRange, recentMonthKeys } from "@/shared/date-range";
   import { swipeBack } from "@/shared/actions/swipe-back";
   let { api, navigate }: { api: ApiClient; navigate: (view: View) => void } =
     $props();
-  const bank = createQuery(bankQuery(() => api));
-  const invoices = createQuery(invoicesQuery(() => api));
+  const initialSelectedMonth = new Date().toISOString().slice(0, 7);
+  let selectedMonth = $state(initialSelectedMonth);
+  const activityRange = recentMonthRange(6);
+  const bank = createQuery(bankRangeQuery(() => api, activityRange));
+  const invoices = createQuery(invoicesRangeQuery(() => api, activityRange));
   const invoiceMappings = createQuery(
     invoiceTransactionMappingsQuery(() => api),
   );
-  const trades = createQuery(investmentTransactionsQuery(() => api));
+  const trades = createQuery(
+    investmentTransactionsRangeQuery(() => api, activityRange),
+  );
   const rates = createQuery(exchangeRatesQuery(() => api));
   const categoryRows = createQuery(classificationCategoriesQuery(() => api));
   const qc = useQueryClient();
   let source = $state<"all" | "bank" | "card" | "invoice">("all");
   let search = $state("");
-  let selectedMonth = $state(new Date().toISOString().slice(0, 7));
   let selectedCategory = $state<{
     flow: "income" | "expense";
     category: string;
@@ -219,18 +223,8 @@
   const detailItem = $derived(
     rawItems.find((item) => activityKey(item) === detailKey),
   );
-  const months = $derived(
-    [
-      ...new Set(
-        rawItems
-          .map((i) => i.date.slice(0, 7))
-          .filter(Boolean)
-          .concat([new Date().toISOString().slice(0, 7)]),
-      ),
-    ]
-      .sort((a, b) => b.localeCompare(a))
-      .slice(0, 12),
-  );
+  const cashFlowMonths = recentMonthKeys(6);
+  const months = [...cashFlowMonths].reverse();
   const monthlyCalculatedItems = $derived(
     rawItems.filter(
       (item) =>
@@ -261,11 +255,6 @@
         (item.status === "pending" || item.categoryId === "other"),
     ).length,
   );
-  const cashFlowMonths = Array.from({ length: 6 }, (_, index) => {
-    const date = new SvelteDate();
-    date.setMonth(date.getMonth() - (5 - index));
-    return date.toISOString().slice(0, 7);
-  });
   const cashFlow = $derived(
     cashFlowMonths.map((month) => {
       const items = rawItems.filter(
