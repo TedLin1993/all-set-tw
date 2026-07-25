@@ -11,7 +11,7 @@ export interface InvoiceLineItemRow {
   amount: number;
 }
 
-export interface InvoiceRow {
+export interface InvoiceSummaryRow {
   id: string;
   connectorId: ConnectorId;
   sourceId: string;
@@ -19,6 +19,9 @@ export interface InvoiceRow {
   invoiceNumber?: string;
   sellerName?: string;
   amount: number;
+}
+
+export interface InvoiceRow extends InvoiceSummaryRow {
   items: InvoiceLineItemRow[];
 }
 

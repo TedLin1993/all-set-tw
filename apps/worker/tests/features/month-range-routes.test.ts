@@ -92,6 +92,48 @@ describe("month-filtered resource APIs", () => {
     ).toBe(true);
   });
 
+  it("returns invoice summaries without loading every line item", async () => {
+    const queries: string[] = [];
+    const invoiceRows = Array.from({ length: 144 }, (_, index) => ({
+      id: `invoice-${index}`,
+      connectorId: "einvoice",
+      sourceId: `source-${index}`,
+      invoiceNumber: `AB${String(index).padStart(8, "0")}`,
+      invoiceDate: "2026-07-01T00:00:00.000Z",
+      sellerName: `商家 ${index}`,
+      amount: index + 1,
+      updatedAt: "2026-07-01T00:00:00.000Z",
+    }));
+    const db = {
+      prepare(sql: string) {
+        queries.push(sql);
+        if (sql.includes("invoice_line_items"))
+          throw new Error("invoice summaries must not load line items");
+        const statement = {
+          bind() {
+            return statement;
+          },
+          async all() {
+            return { results: invoiceRows };
+          },
+        };
+        return statement;
+      },
+    } as unknown as D1Database;
+
+    const response = await invoiceRoutes.request(
+      "/invoices?from=2026-02&to=2026-07",
+      {},
+      { DB: db } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Array<Record<string, unknown>>;
+    expect(body).toHaveLength(144);
+    expect(body[0]).not.toHaveProperty("items");
+    expect(queries).toHaveLength(1);
+  });
+
   it("rejects malformed or overly broad month ranges", async () => {
     const { db } = createDb();
     const malformed = await bankRoutes.request("/bank?month=2026-13", {}, {

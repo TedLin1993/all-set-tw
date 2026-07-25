@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { toStore } from "svelte/store";
   import {
     createMutation,
     createQuery,
@@ -40,11 +41,12 @@
   import { classificationCategoriesQuery } from "@/data/classification/queries";
   import { investmentTransactionsRangeQuery } from "@/data/investments/queries";
   import {
+    invoiceDetailQuery,
     invoiceTransactionMappingsQuery,
     invoicesRangeQuery,
   } from "@/data/invoices/queries";
   import type {
-    InvoiceRow,
+    InvoiceSummaryRow,
     InvoiceTransactionPreference,
   } from "@/data/invoices/types";
   import type { ActivityItem, PendingCategoryUpdate } from "./model/types";
@@ -93,7 +95,7 @@
   } | null>(null);
   let pending = $state<PendingCategoryUpdate | null>(null);
   let mappingDialog = $state<{
-    invoice: InvoiceRow;
+    invoice: InvoiceSummaryRow;
     step: "candidates" | "confirm" | "actions";
     transactionId?: string;
   } | null>(null);
@@ -179,9 +181,6 @@
           transactionId: t.id,
           invoiceId: matchedInvoice?.id,
           invoiceAmount: matchedInvoice?.amount,
-          invoiceSearchText: matchedInvoice
-            ? `${matchedInvoice.sellerName ?? ""} ${matchedInvoice.invoiceNumber ?? ""} ${matchedInvoice.items.map((item) => item.description).join(" ")}`
-            : undefined,
           excludedFromCalculation: t.excludedFromCalculation,
           status: t.status,
         };
@@ -199,7 +198,6 @@
           category: "發票",
           invoiceId: i.id,
           invoiceAmount: i.amount,
-          invoiceSearchText: i.items.map((item) => item.description).join(" "),
           status: "已開立",
         })),
       ...($trades.data ?? []).map((t) => ({
@@ -222,6 +220,10 @@
   );
   const detailItem = $derived(
     rawItems.find((item) => activityKey(item) === detailKey),
+  );
+  const detailInvoiceId = $derived(detailItem?.invoiceId ?? null);
+  const detailInvoice = createQuery(
+    toStore(() => invoiceDetailQuery(() => api, detailInvoiceId)),
   );
   const cashFlowMonths = recentMonthKeys(6);
   const months = [...cashFlowMonths].reverse();
@@ -296,7 +298,7 @@
         matchesSource &&
         item.date.startsWith(selectedMonth) &&
         (!search.trim() ||
-          `${item.title} ${item.subtitle} ${item.category} ${item.invoiceSearchText ?? ""}`
+          `${item.title} ${item.subtitle} ${item.category}`
             .toLowerCase()
             .includes(search.toLowerCase())) &&
         (!selectedCategory ||
@@ -500,7 +502,7 @@
     );
   }
   function mappingDifference(
-    invoice: InvoiceRow,
+    invoice: InvoiceSummaryRow,
     transaction: BankTransactionRow,
   ) {
     return Math.abs(invoice.amount - Math.abs(transaction.amount));
@@ -955,12 +957,20 @@
 
             {#if invoice}<section class="border-b border-ink/10 py-5">
                 <h3 class="text-base font-semibold">發票細項</h3>
-                {#if invoice.items.length === 0}<p
+                {#if $detailInvoice.isPending}<p
+                    class="mt-3 rounded-xl bg-paper p-4 text-sm text-ink/50"
+                  >
+                    載入發票細項中。
+                  </p>{:else if $detailInvoice.isError}<p
+                    class="mt-3 rounded-xl bg-coral/10 p-4 text-sm text-coral"
+                  >
+                    無法載入發票細項，請稍後再試。
+                  </p>{:else if !$detailInvoice.data || $detailInvoice.data.items.length === 0}<p
                     class="mt-3 rounded-xl bg-paper p-4 text-sm text-ink/50"
                   >
                     此發票沒有品項明細。
                   </p>{:else}<div class="mt-2 divide-y divide-ink/10">
-                    {#each invoice.items as line (line.id)}<div
+                    {#each $detailInvoice.data.items as line (line.id)}<div
                         class="flex items-start justify-between gap-4 py-3"
                       >
                         <div class="min-w-0">

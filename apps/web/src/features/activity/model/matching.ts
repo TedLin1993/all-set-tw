@@ -1,6 +1,6 @@
 import type { BankTransactionRow } from "@/data/bank/types";
 import type {
-  InvoiceRow,
+  InvoiceSummaryRow,
   InvoiceTransactionPreference,
 } from "@/data/invoices/types";
 
@@ -23,11 +23,11 @@ const TAIPEI_DAY_FORMATTER = new Intl.DateTimeFormat("en", {
 
 export interface InvoiceTransactionMatches {
   invoiceToTransactionId: Map<string, string>;
-  transactionToInvoice: Map<string, InvoiceRow>;
+  transactionToInvoice: Map<string, InvoiceSummaryRow>;
 }
 
 type MatchCandidate = {
-  invoice: InvoiceRow;
+  invoice: InvoiceSummaryRow;
   transaction: BankTransactionRow;
   kind: "exact" | "payment-points";
 };
@@ -63,7 +63,7 @@ export function deduplicateBankTransactions(
 
 export function matchInvoicesToTransactions(
   transactions: BankTransactionRow[],
-  invoices: InvoiceRow[],
+  invoices: InvoiceSummaryRow[],
   preferences: InvoiceTransactionPreference[] = [],
 ): InvoiceTransactionMatches {
   const invoiceById = new Map(invoices.map((invoice) => [invoice.id, invoice]));
@@ -71,7 +71,7 @@ export function matchInvoicesToTransactions(
     transactions.map((transaction) => [transaction.id, transaction]),
   );
   const invoiceToTransactionId = new Map<string, string>();
-  const transactionToInvoice = new Map<string, InvoiceRow>();
+  const transactionToInvoice = new Map<string, InvoiceSummaryRow>();
   const separateInvoiceIds = new Set(
     preferences
       .filter(({ decision }) => decision === "separate")
@@ -134,7 +134,7 @@ export function matchInvoicesToTransactions(
 
 export function invoiceTransactionCandidates(
   transactions: BankTransactionRow[],
-  invoice: InvoiceRow,
+  invoice: InvoiceSummaryRow,
   unavailableTransactionIds: ReadonlySet<string> = new Set(),
 ) {
   return transactions
@@ -159,7 +159,7 @@ export function invoiceTransactionCandidates(
 function addUniqueMatches(
   candidates: MatchCandidate[],
   invoiceToTransactionId: Map<string, string>,
-  transactionToInvoice: Map<string, InvoiceRow>,
+  transactionToInvoice: Map<string, InvoiceSummaryRow>,
 ) {
   const invoiceCandidateCount = countBy(
     candidates,
@@ -183,7 +183,7 @@ function addUniqueMatches(
 
 function matchCandidateKind(
   transaction: BankTransactionRow,
-  invoice: InvoiceRow,
+  invoice: InvoiceSummaryRow,
 ): MatchCandidate["kind"] | undefined {
   if (!isSameDayTwdExpense(transaction, invoice)) return undefined;
 
@@ -208,7 +208,7 @@ function matchCandidateKind(
 
 function isSameDayTwdExpense(
   transaction: BankTransactionRow,
-  invoice: InvoiceRow,
+  invoice: InvoiceSummaryRow,
 ) {
   if (
     transaction.amount === 0 ||

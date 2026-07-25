@@ -5,7 +5,7 @@ import {
   matchInvoicesToTransactions,
 } from "./matching";
 import type { BankTransactionRow } from "@/data/bank/types";
-import type { InvoiceRow } from "@/data/invoices/types";
+import type { InvoiceSummaryRow } from "@/data/invoices/types";
 
 function transaction(
   overrides: Partial<BankTransactionRow> = {},
@@ -27,7 +27,9 @@ function transaction(
   };
 }
 
-function invoice(overrides: Partial<InvoiceRow> = {}): InvoiceRow {
+function invoice(
+  overrides: Partial<InvoiceSummaryRow> = {},
+): InvoiceSummaryRow {
   return {
     id: "invoice-1",
     connectorId: "einvoice",
@@ -36,7 +38,6 @@ function invoice(overrides: Partial<InvoiceRow> = {}): InvoiceRow {
     invoiceNumber: "AB12345678",
     sellerName: "好食餐飲有限公司",
     amount: 860,
-    items: [],
     ...overrides,
   };
 }
