@@ -19,6 +19,8 @@
     selected,
     onConfigure,
     jobs,
+    compact = false,
+    compactCard = false,
     children,
   }: {
     api: ApiClient;
@@ -28,6 +30,8 @@
     selected: boolean;
     onConfigure: () => void;
     jobs?: SyncJobRow[];
+    compact?: boolean;
+    compactCard?: boolean;
     children?: Snippet;
   } = $props();
   const settings = createQuery(
@@ -62,59 +66,105 @@
   );
 </script>
 
-<Card
-  class={`transition duration-200 ${selected ? "sm:col-span-2 lg:col-span-3 2xl:col-span-5 border-steel/50 shadow-md ring-2 ring-steel/15" : "hover:-translate-y-0.5 hover:border-ink/20 hover:shadow-sm"}`}
-  ><CardContent class="pt-5"
-    ><div class="flex items-start justify-between gap-4">
-      <div class="flex min-w-0 items-start gap-3">
-        <span
-          class={`flex size-10 shrink-0 items-center justify-center rounded-xl ${selected ? "bg-steel text-white" : "bg-steel/10 text-steel"}`}
-        >
-          <SourceIcon class="size-5" />
-        </span>
-        <div class="min-w-0">
-          <h2 class="font-semibold">{title}</h2>
-          <p class="mt-0.5 text-sm text-muted-foreground">{description}</p>
-        </div>
-      </div>
-      <Badge
-        class="shrink-0 whitespace-nowrap"
-        variant={needsAction
-          ? "destructive"
-          : $settings.data?.configured
-            ? "success"
-            : "secondary"}
-        >{needsAction
-          ? "需要處理"
-          : $settings.data?.configured
-            ? "已設定"
-            : "未設定"}</Badge
-      >
-    </div>
-    <div
-      class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4"
+{#if compact}
+  <button
+    type="button"
+    class={`group flex w-full items-center text-left transition ${compactCard ? "min-h-20 gap-3 rounded-xl border border-border bg-card px-4 py-3 hover:-translate-y-0.5 hover:border-ink/20 hover:shadow-sm" : "min-h-12 gap-3 border-t border-border py-2.5 hover:bg-muted/40"} ${selected && compactCard ? "border-steel/50 ring-2 ring-steel/15" : ""}`}
+    aria-label={`管理${title}`}
+    onclick={onConfigure}
+  >
+    <span
+      class={`flex shrink-0 items-center justify-center rounded-lg bg-steel/10 text-steel ${compactCard ? "size-10" : "size-8"}`}
     >
-      <div class="text-xs text-muted-foreground">
-        <p>
-          上次成功：{job?.lastSuccessAt
-            ? formatDateTime(job.lastSuccessAt)
-            : "尚無紀錄"}
-        </p>
-        <p class="mt-1">
-          排程：{scheduleLabel}
-        </p>
-      </div>
-      <Button
-        size="sm"
-        variant={selected ? "default" : "outline"}
-        aria-expanded={selected}
-        onclick={onConfigure}>{selected ? "收合" : "管理設定"}</Button
+      <SourceIcon class={compactCard ? "size-5" : "size-4.5"} />
+    </span>
+    <span class="min-w-0 flex-1">
+      <span class="block truncate text-sm font-semibold text-foreground"
+        >{title}</span
       >
-    </div>
-    {#if selected && children}
-      <div class="mt-5 border-t border-border pt-5">
-        {@render children()}
+      <span class="block truncate text-sm text-muted-foreground">
+        {job?.lastSuccessAt
+          ? `最近同步 ${formatDateTime(job.lastSuccessAt)}`
+          : $settings.data?.configured
+            ? "尚未成功同步"
+            : "尚未設定"}
+      </span>
+    </span>
+    <Badge
+      class="shrink-0 whitespace-nowrap text-sm"
+      variant={needsAction
+        ? "destructive"
+        : $settings.data?.configured && job?.lastSuccessAt
+          ? "success"
+          : "secondary"}
+      >{needsAction
+        ? "需要處理"
+        : $settings.data?.configured && job?.lastSuccessAt
+          ? "正常"
+          : $settings.data?.configured
+            ? "尚未同步"
+            : "未設定"}</Badge
+    >
+    {#if compactCard}<span
+        aria-hidden="true"
+        class="text-xl leading-none text-muted-foreground">›</span
+      >{/if}
+  </button>
+{:else}
+  <Card
+    class={`transition duration-200 ${selected ? "sm:col-span-2 lg:col-span-3 2xl:col-span-5 border-steel/50 shadow-md ring-2 ring-steel/15" : "hover:-translate-y-0.5 hover:border-ink/20 hover:shadow-sm"}`}
+    ><CardContent class="pt-5"
+      ><div class="flex items-start justify-between gap-4">
+        <div class="flex min-w-0 items-start gap-3">
+          <span
+            class={`flex size-10 shrink-0 items-center justify-center rounded-xl ${selected ? "bg-steel text-white" : "bg-steel/10 text-steel"}`}
+          >
+            <SourceIcon class="size-5" />
+          </span>
+          <div class="min-w-0">
+            <h2 class="font-semibold">{title}</h2>
+            <p class="mt-0.5 text-sm text-muted-foreground">{description}</p>
+          </div>
+        </div>
+        <Badge
+          class="shrink-0 whitespace-nowrap text-sm"
+          variant={needsAction
+            ? "destructive"
+            : $settings.data?.configured
+              ? "success"
+              : "secondary"}
+          >{needsAction
+            ? "需要處理"
+            : $settings.data?.configured
+              ? "已設定"
+              : "未設定"}</Badge
+        >
       </div>
-    {/if}</CardContent
-  ></Card
->
+      <div
+        class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4"
+      >
+        <div class="text-sm text-muted-foreground">
+          <p>
+            上次成功：{job?.lastSuccessAt
+              ? formatDateTime(job.lastSuccessAt)
+              : "尚無紀錄"}
+          </p>
+          <p class="mt-1">
+            排程：{scheduleLabel}
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant={selected ? "default" : "outline"}
+          aria-expanded={selected}
+          onclick={onConfigure}>{selected ? "收合" : "管理設定"}</Button
+        >
+      </div>
+      {#if selected && children}
+        <div class="mt-5 border-t border-border pt-5">
+          {@render children()}
+        </div>
+      {/if}</CardContent
+    ></Card
+  >
+{/if}

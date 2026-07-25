@@ -386,7 +386,7 @@
         >
       {:else if connectorId === "tdcc"}
         <span
-          class="inline-flex items-center gap-1.5 rounded-full border border-steel/20 bg-steel/[0.06] px-3 py-1.5 text-xs font-semibold text-steel"
+          class="inline-flex items-center gap-1.5 rounded-full border border-steel/20 bg-steel/[0.06] px-3 py-1.5 text-sm font-semibold text-steel"
         >
           <ShieldCheck class="size-3.5" />等待完成身分驗證
         </span>
@@ -512,7 +512,7 @@
             >{/if}
         </div>
         {#if job?.lastRunAt}
-          <p class="mt-1 text-xs text-muted-foreground">
+          <p class="mt-1 text-sm text-muted-foreground">
             上次同步：{formatDateTime(job.lastRunAt)}
           </p>
         {/if}
@@ -528,7 +528,7 @@
 
     {#if job?.enabled}
       <div class="mt-3 grid gap-3 border-t border-ink/10 pt-3 md:grid-cols-4">
-        <label class="grid gap-1 text-xs font-semibold text-ink/70">
+        <label class="grid gap-1 text-sm font-semibold text-ink/70">
           排程方式
           <Select
             value={job.scheduleMode ?? "custom"}
@@ -564,7 +564,7 @@
             {/if}
           </div>
         {:else}
-          <label class="grid gap-1 text-xs font-semibold text-ink/70">
+          <label class="grid gap-1 text-sm font-semibold text-ink/70">
             同步頻率
             <Select
               value={job.intervalMinutes}
@@ -582,7 +582,7 @@
             </Select>
           </label>
           {#if job.intervalMinutes === 10080}
-            <label class="grid gap-1 text-xs font-semibold text-ink/70">
+            <label class="grid gap-1 text-sm font-semibold text-ink/70">
               執行日
               <Select
                 value={job.preferredWeekday}
@@ -601,7 +601,7 @@
             </label>
           {/if}
           {#if job.intervalMinutes >= 1440}
-            <label class="grid gap-1 text-xs font-semibold text-ink/70">
+            <label class="grid gap-1 text-sm font-semibold text-ink/70">
               開始時間
               <TimePicker
                 value={job.preferredTime}
@@ -611,7 +611,7 @@
             </label>
           {:else}
             <div
-              class="flex items-end pb-2 text-xs leading-relaxed text-muted-foreground"
+              class="flex items-end pb-2 text-sm leading-relaxed text-muted-foreground"
             >
               從上次同步完成後重新計時。
             </div>
@@ -620,7 +620,7 @@
       </div>
     {/if}
     {#if error || (job?.lastError && !bankCaptchaImage)}<p
-        class="mt-2 text-xs text-coral"
+        class="mt-2 text-sm text-coral"
       >
         {error ? `本次同步：${error}` : `上次同步：${job?.lastError}`}
       </p>{/if}
@@ -633,14 +633,14 @@
         <h3 class="text-sm font-semibold">
           {connectorId === "tdcc" ? "集保 App 身分驗證" : "連線憑證"}
         </h3>
-        <p class="mt-0.5 text-xs text-muted-foreground">
+        <p class="mt-0.5 text-sm text-muted-foreground">
           {connectorId === "tdcc"
             ? "請使用集保 e 存摺 App 的登入資料；不是券商網路下單密碼。"
             : "已儲存的機密欄位不會顯示內容；留白會維持原值。"}
         </p>
       </div>
       {#if $save.isSuccess}<span
-          class="rounded-full bg-moss/10 px-2.5 py-1 text-xs font-semibold text-moss"
+          class="rounded-full bg-moss/10 px-2.5 py-1 text-sm font-semibold text-moss"
           >已安全儲存</span
         >{/if}
     </div>
@@ -668,7 +668,7 @@
               <span>{field.label}</span>
               {#if storedCredential}
                 <span
-                  class={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${hasReplacement ? "bg-steel/10 text-steel" : "bg-moss/10 text-moss"}`}
+                  class={`rounded-full px-2 py-0.5 text-sm font-semibold ${hasReplacement ? "bg-steel/10 text-steel" : "bg-moss/10 text-moss"}`}
                 >
                   {hasReplacement ? "將更新" : "已儲存"}
                 </span>
@@ -695,7 +695,7 @@
     <div
       class="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-paper/70 px-4 py-3"
     >
-      <p class="text-xs text-muted-foreground">
+      <p class="text-sm text-muted-foreground">
         {connectorId === "tdcc"
           ? tdccConnectionReady
             ? "重新填寫任一欄位會清除舊的登入狀態並重新驗證。"
@@ -733,7 +733,7 @@
       {/if}
     </div>
   </section>
-  {#if $save.isError}<p class="mt-2 text-xs font-medium text-coral">
+  {#if $save.isError}<p class="mt-2 text-sm font-medium text-coral">
       儲存失敗：{error}
     </p>{/if}
   {#if connectorId === "tdcc" && (tdccSetupStep === "email" || tdccSetupStep === "sms")}<div
@@ -753,7 +753,7 @@
               ? "簡訊驗證碼已寄出"
               : "Email 驗證碼已寄出"}
           </p>
-          <p class="mt-0.5 text-xs leading-relaxed text-ink/60">
+          <p class="mt-0.5 text-sm leading-relaxed text-ink/60">
             {tdccSetupStep === "sms"
               ? "Email 驗證已通過；請輸入集保寄到手機的驗證碼。"
               : "請查看集保帳號登記的電子信箱，也別忘了檢查垃圾郵件匣。"}
@@ -789,7 +789,7 @@
       >
         <button
           type="button"
-          class="text-xs font-semibold text-ink/55 underline-offset-4 hover:text-ink hover:underline"
+          class="text-sm font-semibold text-ink/55 underline-offset-4 hover:text-ink hover:underline"
           onclick={() => {
             otp = "";
             tdccSetupStep = "credentials";
@@ -810,11 +810,11 @@
       </div>
     </div>{/if}
   {#if connectorId === "tdcc" && error}<p
-      class="mt-3 rounded-lg border border-coral/20 bg-coral/[0.06] px-3 py-2 text-xs font-medium text-coral"
+      class="mt-3 rounded-lg border border-coral/20 bg-coral/[0.06] px-3 py-2 text-sm font-medium text-coral"
     >
       {error}
     </p>{/if}
-  <p class="mt-3 text-xs text-ink/50">
+  <p class="mt-3 text-sm text-ink/50">
     {connectorId === "sinopac"
       ? "永豐 session 失效時會由 Gemma 4 自動辨識並登入，連續三次失敗後才需人工驗證。"
       : connectorId === "tdcc"

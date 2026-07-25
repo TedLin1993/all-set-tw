@@ -151,11 +151,7 @@
       </nav>
     </aside>
 
-    <div
-      class:min-w-0={true}
-      class:pb-20={!mobileSetting}
-      class:pb-5={!!mobileSetting}
-    >
+    <div class="min-w-0 pb-20">
       <div
         class="no-scrollbar hidden border-b border-ink/10 bg-white px-4 py-2 md:flex md:gap-1 md:overflow-x-auto xl:hidden"
       >
@@ -186,7 +182,8 @@
                   <h1
                     class="truncate text-2xl font-semibold tracking-tight xl:text-3xl"
                   >
-                    {mobileSetting.label}
+                    <span class="md:hidden">{mobileSetting.label}</span>
+                    <span class="hidden md:inline">設定</span>
                   </h1>
                 </div>
               {:else}
@@ -218,7 +215,9 @@
             </div>
             <div class="flex shrink-0 items-center gap-2">
               <Button
-                class={mobileSetting ? "hidden" : "rounded-full"}
+                class={mobileSetting
+                  ? "hidden rounded-full md:inline-flex"
+                  : "rounded-full"}
                 aria-label={moneyState.hidden ? "顯示金額" : "隱藏金額"}
                 onclick={toggleMoneyVisibility}
                 size="icon"
@@ -271,27 +270,24 @@
       </footer>
     </div>
 
-    {#if !mobileSetting}
-      <nav
-        aria-label="主要導覽"
-        class="fixed inset-x-0 bottom-0 z-50 grid grid-cols-4 gap-1 border-t border-ink/10 bg-ink px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2 text-white shadow-[0_-8px_28px_rgba(31,41,51,0.12)] md:hidden"
-      >
-        {#each mobilePrimaryViews as mobileView (mobileView)}
-          {@const item = navItems.find(
-            (candidate) => candidate.view === mobileView,
-          )!}{@const NavIcon = item.icon}
-          <button
-            class={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-medium transition ${primaryView === item.view ? "bg-white/10 text-white" : "text-white/65"}`}
-            onclick={() => navigate(item.view)}
-            ><NavIcon class="size-5" />{item.shortLabel}</button
-          >
-        {/each}
+    <nav
+      aria-label="主要導覽"
+      class="fixed inset-x-0 bottom-0 z-50 grid grid-cols-4 gap-1 border-t border-ink/10 bg-ink px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2 text-white shadow-[0_-8px_28px_rgba(31,41,51,0.12)] md:hidden"
+    >
+      {#each mobilePrimaryViews as mobileView (mobileView)}
+        {@const item = navItems.find(
+          (candidate) => candidate.view === mobileView,
+        )!}{@const NavIcon = item.icon}
         <button
-          class={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-medium transition ${view === "more" || !mobilePrimaryViews.includes(primaryView) ? "bg-white/10 text-white" : "text-white/65"}`}
-          onclick={() => navigate("more")}
-          ><Ellipsis class="size-5" />更多</button
+          class={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-medium transition ${primaryView === item.view ? "bg-white/10 text-white" : "text-white/65"}`}
+          onclick={() => navigate(item.view)}
+          ><NavIcon class="size-5" />{item.shortLabel}</button
         >
-      </nav>
-    {/if}
+      {/each}
+      <button
+        class={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-medium transition ${view === "more" || !mobilePrimaryViews.includes(primaryView) ? "bg-white/10 text-white" : "text-white/65"}`}
+        onclick={() => navigate("more")}><Ellipsis class="size-5" />更多</button
+      >
+    </nav>
   </div>
 </QueryClientProvider>

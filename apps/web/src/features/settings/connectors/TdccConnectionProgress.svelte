@@ -18,30 +18,30 @@
     class={`flex items-center gap-3 px-3 py-3 ${step === "credentials" && !connectionReady ? "bg-steel/[0.07] text-steel" : "text-ink/55"}`}
   >
     <span
-      class="grid size-7 shrink-0 place-items-center rounded-full border border-current/20 text-xs font-bold"
+      class="grid size-7 shrink-0 place-items-center rounded-full border border-current/20 text-sm font-bold"
       >1</span
     >
-    <span class="text-xs font-semibold">確認集保帳密</span>
+    <span class="text-sm font-semibold">確認集保帳密</span>
   </div>
   <div
     class={`flex items-center gap-3 border-t border-ink/10 px-3 py-3 sm:border-l sm:border-t-0 ${step === "email" || step === "sms" ? "bg-steel/[0.07] text-steel" : "text-ink/55"}`}
   >
     <span
-      class="grid size-7 shrink-0 place-items-center rounded-full border border-current/20 text-xs font-bold"
+      class="grid size-7 shrink-0 place-items-center rounded-full border border-current/20 text-sm font-bold"
       >2</span
     >
-    <span class="text-xs font-semibold">驗證這台裝置</span>
+    <span class="text-sm font-semibold">驗證這台裝置</span>
   </div>
   <div
     class={`flex items-center gap-3 border-t border-ink/10 px-3 py-3 sm:border-l sm:border-t-0 ${connectionReady || step === "complete" ? "bg-moss/[0.07] text-moss" : "text-ink/55"}`}
   >
     <span
-      class="grid size-7 shrink-0 place-items-center rounded-full border border-current/20 text-xs font-bold"
+      class="grid size-7 shrink-0 place-items-center rounded-full border border-current/20 text-sm font-bold"
       >{#if connectionReady || step === "complete"}<CircleCheckBig
           class="size-4"
         />{:else}3{/if}</span
     >
-    <span class="text-xs font-semibold">完成首次同步</span>
+    <span class="text-sm font-semibold">完成首次同步</span>
   </div>
 </div>
 
