@@ -8,6 +8,7 @@ import { validationHook } from "../../platform/validation";
 import {
   ClassificationCategoryExistsError,
   ClassificationCategoryNotFoundError,
+  ClassificationRuleOrderError,
   ClassificationRuleNotFoundError,
   createClassificationCategory,
   createClassificationRule,
@@ -16,6 +17,7 @@ import {
   getClassificationRules,
   removeClassificationOverride,
   removeClassificationRule,
+  reorderClassificationRules,
   setClassificationOverride,
 } from "./service";
 
@@ -46,6 +48,12 @@ const updateRuleSchema = z
     excludedFromCalculation: z.boolean().optional(),
   })
   .refine((body) => Object.keys(body).length > 0);
+const reorderRulesSchema = z.object({
+  ruleIds: z
+    .array(z.string().min(1).max(128))
+    .max(9_000)
+    .refine((ruleIds) => new Set(ruleIds).size === ruleIds.length),
+});
 
 function extractOverrideTargetId(requestPath: string, targetType: string) {
   const prefix = `/classification/overrides/${targetType}/`;
@@ -92,6 +100,26 @@ function registerClassificationRoutes(api: Hono<AppBindings>) {
 
   api.get("/classification/rules", async (c) =>
     c.json(await getClassificationRules(c.env.DB)),
+  );
+
+  api.put(
+    "/classification/rules/order",
+    zValidator(
+      "json",
+      reorderRulesSchema,
+      validationHook(
+        "INVALID_REQUEST",
+        "Classification rule order is invalid.",
+      ),
+    ),
+    async (c) => {
+      try {
+        await reorderClassificationRules(c.env.DB, c.req.valid("json").ruleIds);
+        return c.json({ success: true });
+      } catch (error) {
+        return classificationServiceError(error);
+      }
+    },
   );
 
   api.put(
@@ -202,6 +230,13 @@ function classificationServiceError(error: unknown) {
   }
   if (error instanceof ClassificationRuleNotFoundError) {
     return jsonError("RULE_NOT_FOUND", "Editable rule was not found.", 404);
+  }
+  if (error instanceof ClassificationRuleOrderError) {
+    return jsonError(
+      "INVALID_REQUEST",
+      "Classification rule order is out of date. Reload and try again.",
+      400,
+    );
   }
   throw error;
 }

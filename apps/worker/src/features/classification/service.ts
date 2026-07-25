@@ -111,6 +111,7 @@ export async function resolveClassifications(
 export class ClassificationCategoryExistsError extends Error {}
 export class ClassificationCategoryNotFoundError extends Error {}
 export class ClassificationRuleNotFoundError extends Error {}
+export class ClassificationRuleOrderError extends Error {}
 
 export async function getClassificationCategories(db: D1Database) {
   const rows = await listClassificationCategories(db);
@@ -142,6 +143,27 @@ export async function getClassificationRules(db: D1Database) {
     isSystem: Boolean(row.isSystem),
     excludedFromCalculation: Boolean(row.excludedFromCalculation),
   }));
+}
+
+export async function reorderClassificationRules(
+  db: D1Database,
+  ruleIds: string[],
+) {
+  const editableRuleIds = await listEditableClassificationRuleIds(db);
+  const editableRuleIdSet = new Set(editableRuleIds);
+  if (
+    ruleIds.length !== editableRuleIds.length ||
+    new Set(ruleIds).size !== ruleIds.length ||
+    ruleIds.some((ruleId) => !editableRuleIdSet.has(ruleId))
+  ) {
+    throw new ClassificationRuleOrderError();
+  }
+
+  await updateClassificationRuleOrder(
+    db,
+    ruleIds,
+    new Date().toISOString(),
+  );
 }
 
 export function setClassificationOverride(
@@ -236,10 +258,12 @@ import {
   insertClassificationCategory,
   insertClassificationRule,
   listClassificationCategories,
+  listEditableClassificationRuleIds,
   listClassificationOverrides,
   listClassificationRules,
   listEnabledClassificationRules,
   nextCategorySortOrder,
   updateClassificationRule,
+  updateClassificationRuleOrder,
   upsertClassificationOverride,
 } from "./repository";

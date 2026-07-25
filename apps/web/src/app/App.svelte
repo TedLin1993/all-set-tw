@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Ellipsis, Eye, EyeOff, RefreshCw } from "@lucide/svelte";
+  import { Ellipsis, Eye, EyeOff } from "@lucide/svelte";
   import { QueryClientProvider } from "@tanstack/svelte-query";
   import Activity from "@/features/activity/ActivityPage.svelte";
   import Assets from "@/features/assets/AssetsPage.svelte";
@@ -227,12 +227,6 @@
                   size="lg"
                 /></Button
               >
-              {#if primaryView === "settings"}<Button
-                  class="hidden md:inline-flex"
-                  onclick={() => queryClient.invalidateQueries()}
-                  variant="secondary"
-                  ><Icon icon={RefreshCw} size="sm" />重新整理</Button
-                >{/if}
             </div>
           </div>
         </div>

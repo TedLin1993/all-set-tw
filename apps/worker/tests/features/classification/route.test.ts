@@ -30,6 +30,33 @@ function createDb(options: { existingLabel?: boolean } = {}) {
   return { calls, db };
 }
 
+function createReorderDb(ruleIds = ["user:rule-1", "user:rule-2"]) {
+  const calls: Array<{ sql: string; values: unknown[] }> = [];
+  const db = {
+    prepare(sql: string) {
+      let values: unknown[] = [];
+      const statement = {
+        bind(...nextValues: unknown[]) {
+          values = nextValues;
+          calls.push({ sql, values });
+          return statement;
+        },
+        async all() {
+          return { results: ruleIds.map((id) => ({ id })) };
+        },
+        async run() {
+          return { meta: { changes: 1 } };
+        },
+      };
+      return statement;
+    },
+    async batch() {
+      return [];
+    },
+  } as unknown as D1Database;
+  return { calls, db };
+}
+
 describe("classification categories", () => {
   it("creates a trimmed user category after the existing sort order", async () => {
     const { calls, db } = createDb();
@@ -127,5 +154,43 @@ describe("classification rule actions", () => {
     expect(update?.sql).toContain("is_system = 0");
     expect(update?.values).toContain("equals");
     expect(update?.values).toContain(0);
+  });
+
+  it("persists the order of editable rules", async () => {
+    const { calls, db } = createReorderDb();
+    const response = await classificationRoutes.request(
+      "/classification/rules/order",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ruleIds: ["user:rule-2", "user:rule-1"] }),
+      },
+      { DB: db } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    const updates = calls.filter(({ sql }) =>
+      sql.includes("UPDATE classification_rules"),
+    );
+    expect(updates.map(({ values }) => values[0])).toEqual([1002, 1001]);
+    expect(updates.map(({ values }) => values[2])).toEqual([
+      "user:rule-2",
+      "user:rule-1",
+    ]);
+  });
+
+  it("rejects an order that does not contain the current editable rules", async () => {
+    const { db } = createReorderDb();
+    const response = await classificationRoutes.request(
+      "/classification/rules/order",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ruleIds: ["user:rule-1"] }),
+      },
+      { DB: db } as Env,
+    );
+
+    expect(response.status).toBe(400);
   });
 });

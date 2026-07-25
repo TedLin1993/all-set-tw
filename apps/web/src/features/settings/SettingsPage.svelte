@@ -384,7 +384,7 @@
 
       <section
         aria-label="分類規則摘要"
-        class="hidden min-w-0 gap-3 md:grid md:grid-cols-3"
+        class="hidden min-w-0 gap-3 md:grid md:grid-cols-2"
       >
         <div class="rounded-xl border border-border bg-card p-3.5 shadow-xs">
           <p class="text-sm font-semibold text-muted-foreground">規則總數</p>
@@ -393,10 +393,6 @@
         <div class="rounded-xl border border-border bg-card p-3.5 shadow-xs">
           <p class="text-sm font-semibold text-muted-foreground">已啟用</p>
           <p class="mt-1 text-lg font-bold text-moss">{enabledRuleCount}</p>
-        </div>
-        <div class="rounded-xl bg-muted p-3.5">
-          <p class="text-sm font-semibold text-muted-foreground">最近套用</p>
-          <p class="mt-1 text-lg font-bold">—</p>
         </div>
       </section>
 
@@ -418,13 +414,12 @@
               將條件較精確的規則放在前面；可在下方調整規則順序。
             </p>
           </div>
-          <span
-            class="mt-5 block w-full rounded-lg border border-steel px-3 py-2.5 text-center text-sm font-bold text-steel"
-            >重新套用到既有交易</span
-          >
+          <p class="mt-5 text-sm leading-relaxed text-muted-foreground">
+            儲存規則後，交易資料重新載入時會依目前順序重新判定；已手動分類的交易仍以手動覆寫為準。
+          </p>
         </aside>
       </div>
-      <div class="md:hidden">
+      <div class="w-full min-w-0 md:hidden">
         <ClassificationRulesPanel {api} />
       </div>
     </div>
