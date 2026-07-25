@@ -1,4 +1,5 @@
 import type { ConnectorId } from "@taiwan-fin-hub/core";
+import type { MonthDateRange } from "../../platform/month-range";
 
 export type InvoicePageCursor = {
   invoiceDate: string;
@@ -56,6 +57,30 @@ export async function listInvoices(
       ? statement.bind(cursor.invoiceDate, cursor.updatedAt, cursor.id, limit)
       : statement.bind(limit)
   ).all<InvoiceRow>();
+  return rows.results;
+}
+
+export async function listInvoicesInRange(
+  db: D1Database,
+  range: MonthDateRange,
+) {
+  const rows = await db
+    .prepare(
+      `SELECT
+      id,
+      connector_id AS connectorId,
+      source_id AS sourceId,
+      invoice_number AS invoiceNumber,
+      invoice_date AS invoiceDate,
+      seller_name AS sellerName,
+      amount,
+      updated_at AS updatedAt
+    FROM invoices
+    WHERE invoice_date >= ? AND invoice_date < ?
+    ORDER BY invoice_date DESC, updated_at DESC, id DESC`,
+    )
+    .bind(range.from, range.to)
+    .all<InvoiceRow>();
   return rows.results;
 }
 

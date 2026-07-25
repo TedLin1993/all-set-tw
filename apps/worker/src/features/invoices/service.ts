@@ -2,9 +2,11 @@ import {
   findInvoice,
   listInvoiceItems,
   listInvoices,
+  listInvoicesInRange,
   type InvoicePageCursor,
   type InvoiceRow,
 } from "./repository";
+import type { MonthDateRange } from "../../platform/month-range";
 
 export class InvoiceNotFoundError extends Error {}
 
@@ -35,6 +37,11 @@ export async function getInvoicePage(
   };
 }
 
+export async function getInvoicesRange(db: D1Database, range: MonthDateRange) {
+  const rows = await listInvoicesInRange(db, range);
+  return presentInvoices(db, rows);
+}
+
 export async function getInvoiceDetail(db: D1Database, invoiceId: string) {
   const invoice = await findInvoice(db, invoiceId);
   if (!invoice) throw new InvoiceNotFoundError();
@@ -56,4 +63,20 @@ function presentInvoice<T extends Omit<InvoiceRow, "updatedAt"> | InvoiceRow>(
     sellerName: invoice.sellerName ?? undefined,
     items,
   };
+}
+
+async function presentInvoices(db: D1Database, rows: InvoiceRow[]) {
+  const items = await listInvoiceItems(
+    db,
+    rows.map((invoice) => invoice.id),
+  );
+  const itemsByInvoiceId = new Map<string, typeof items>();
+  for (const item of items) {
+    const current = itemsByInvoiceId.get(item.invoiceId) ?? [];
+    current.push(item);
+    itemsByInvoiceId.set(item.invoiceId, current);
+  }
+  return rows.map((invoice) =>
+    presentInvoice(invoice, itemsByInvoiceId.get(invoice.id) ?? []),
+  );
 }

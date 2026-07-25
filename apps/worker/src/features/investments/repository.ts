@@ -1,3 +1,5 @@
+import type { MonthDateRange } from "../../platform/month-range";
+
 export type InvestmentPageCursor = {
   asOfDate: string;
   assetType: string;
@@ -119,5 +121,47 @@ export async function listInvestmentTransactions(
       updatedAt: string;
     }
   >();
+  return rows.results;
+}
+
+export async function listInvestmentTransactionsInRange(
+  db: D1Database,
+  range: MonthDateRange,
+) {
+  const rows = await db
+    .prepare(
+      `SELECT
+      id,
+      connector_id AS connectorId,
+      account_id AS accountId,
+      source_id AS sourceId,
+      broker_no AS brokerNo,
+      broker_account AS brokerAccount,
+      broker_name AS brokerName,
+      symbol,
+      name,
+      asset_type AS assetType,
+      trade_date AS tradeDate,
+      posted_date AS postedDate,
+      transaction_code AS transactionCode,
+      transaction_name AS transactionName,
+      quantity,
+      price,
+      amount,
+      currency,
+      effective_date AS effectiveDate,
+      updated_at AS updatedAt
+    FROM investment_transactions
+    WHERE effective_date >= ? AND effective_date < ?
+    ORDER BY effective_date DESC, updated_at DESC, id DESC`,
+    )
+    .bind(range.from, range.to)
+    .all<
+      Record<string, unknown> & {
+        id: string;
+        effectiveDate: string;
+        updatedAt: string;
+      }
+    >();
   return rows.results;
 }
