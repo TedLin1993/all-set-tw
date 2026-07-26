@@ -4,16 +4,6 @@ import type {
   InvoiceTransactionPreference,
 } from "@/data/invoices/types";
 
-const MERCHANT_ENTITY_MARKERS = [
-  "股份有限公司",
-  "有限責任公司",
-  "有限公司",
-  "股份",
-  "公司",
-];
-const MERCHANT_BRANCH_SUFFIXES = ["分公司", "門市"];
-const LINE_PAY_PREFIXES = ["連加", "連支", "linepay"];
-const PAYMENT_PROCESSOR_PREFIXES = ["全支付", ...LINE_PAY_PREFIXES];
 const TAIPEI_DAY_FORMATTER = new Intl.DateTimeFormat("en", {
   timeZone: "Asia/Taipei",
   year: "numeric",
@@ -25,12 +15,6 @@ export interface InvoiceTransactionMatches {
   invoiceToTransactionId: Map<string, string>;
   transactionToInvoice: Map<string, InvoiceSummaryRow>;
 }
-
-type MatchCandidate = {
-  invoice: InvoiceSummaryRow;
-  transaction: BankTransactionRow;
-  kind: "exact" | "payment-points";
-};
 
 const ESUN_LIFECYCLE_MARKER = /:(已入帳|未入帳):(?=\d+$)/u;
 
@@ -96,35 +80,9 @@ export function matchInvoicesToTransactions(
   const autoTransactions = transactions.filter(
     (transaction) => !transactionToInvoice.has(transaction.id),
   );
-  const allStrongCandidates = autoInvoices.flatMap((invoice) =>
-    autoTransactions
-      .map((transaction) => ({
-        invoice,
-        transaction,
-        kind: matchCandidateKind(transaction, invoice),
-      }))
-      .filter(
-        (candidate): candidate is MatchCandidate => candidate.kind != null,
-      ),
-  );
-  const exactInvoiceIds = new Set(
-    allStrongCandidates
-      .filter(({ kind }) => kind === "exact")
-      .map(({ invoice }) => invoice.id),
-  );
-  const exactTransactionIds = new Set(
-    allStrongCandidates
-      .filter(({ kind }) => kind === "exact")
-      .map(({ transaction }) => transaction.id),
-  );
-  const strongCandidates = allStrongCandidates.filter(
-    ({ invoice, transaction, kind }) =>
-      kind === "exact" ||
-      (!exactInvoiceIds.has(invoice.id) &&
-        !exactTransactionIds.has(transaction.id)),
-  );
-  addUniqueMatches(
-    strongCandidates,
+  addAutomaticMatches(
+    autoInvoices,
+    autoTransactions,
     invoiceToTransactionId,
     transactionToInvoice,
   );
@@ -156,148 +114,58 @@ export function invoiceTransactionCandidates(
     });
 }
 
-function addUniqueMatches(
-  candidates: MatchCandidate[],
+function addAutomaticMatches(
+  invoices: InvoiceSummaryRow[],
+  transactions: BankTransactionRow[],
   invoiceToTransactionId: Map<string, string>,
   transactionToInvoice: Map<string, InvoiceSummaryRow>,
 ) {
-  const invoiceCandidateCount = countBy(
-    candidates,
-    ({ invoice }) => invoice.id,
-  );
-  const transactionCandidateCount = countBy(
-    candidates,
-    ({ transaction }) => transaction.id,
-  );
+  const invoicesByKey = groupByMatchKey(invoices, (invoice) => {
+    const invoiceDay = dayNumber(invoice.invoiceDate);
+    return invoiceDay == null ? undefined : `${invoiceDay}:${invoice.amount}`;
+  });
+  const transactionsByKey = groupByMatchKey(transactions, (transaction) => {
+    const transactionDay = expenseDay(transaction);
+    return transactionDay == null
+      ? undefined
+      : `${transactionDay}:${Math.abs(transaction.amount)}`;
+  });
 
-  for (const { invoice, transaction } of candidates) {
-    if (
-      invoiceCandidateCount.get(invoice.id) !== 1 ||
-      transactionCandidateCount.get(transaction.id) !== 1
-    )
-      continue;
-    invoiceToTransactionId.set(invoice.id, transaction.id);
-    transactionToInvoice.set(transaction.id, invoice);
+  for (const [key, matchingInvoices] of invoicesByKey) {
+    const matchingTransactions = transactionsByKey.get(key);
+    if (!matchingTransactions) continue;
+    matchingInvoices.sort(compareById);
+    matchingTransactions.sort(compareById);
+    const pairCount = Math.min(
+      matchingInvoices.length,
+      matchingTransactions.length,
+    );
+    for (let index = 0; index < pairCount; index += 1) {
+      const invoice = matchingInvoices[index];
+      const transaction = matchingTransactions[index];
+      invoiceToTransactionId.set(invoice.id, transaction.id);
+      transactionToInvoice.set(transaction.id, invoice);
+    }
   }
-}
-
-function matchCandidateKind(
-  transaction: BankTransactionRow,
-  invoice: InvoiceSummaryRow,
-): MatchCandidate["kind"] | undefined {
-  if (!isSameDayTwdExpense(transaction, invoice)) return undefined;
-
-  const merchants = [transaction.counterparty, transaction.description];
-  if (
-    !merchants.some((merchant) =>
-      merchantNamesMatch(invoice.sellerName, merchant),
-    )
-  )
-    return undefined;
-
-  const chargedAmount = Math.abs(transaction.amount);
-  if (chargedAmount === invoice.amount) return "exact";
-  if (
-    transaction.accountType === "credit" &&
-    chargedAmount < invoice.amount &&
-    merchants.some(isPaymentProcessorMerchant)
-  )
-    return "payment-points";
-  return undefined;
 }
 
 function isSameDayTwdExpense(
   transaction: BankTransactionRow,
   invoice: InvoiceSummaryRow,
 ) {
+  const transactionDate = expenseDay(transaction);
+  const invoiceDate = dayNumber(invoice.invoiceDate);
+  return invoiceDate != null && transactionDate === invoiceDate;
+}
+
+function expenseDay(transaction: BankTransactionRow) {
   if (
     transaction.amount === 0 ||
     (transaction.accountType !== "credit" && transaction.amount > 0) ||
     transaction.currency !== "TWD"
   )
-    return false;
-
-  const transactionDate = dayNumber(
-    transaction.authorizedAt ?? transaction.postedDate,
-  );
-  const invoiceDate = dayNumber(invoice.invoiceDate);
-  return invoiceDate != null && transactionDate === invoiceDate;
-}
-
-function isPaymentProcessorMerchant(value?: string) {
-  const normalized = normalizeMerchantName(value);
-  return PAYMENT_PROCESSOR_PREFIXES.some((prefix) =>
-    normalized.startsWith(prefix),
-  );
-}
-
-function merchantNamesMatch(left?: string, right?: string) {
-  const normalizedLeft = normalizeMerchantName(left);
-  const normalizedRight = stripPaymentProcessorPrefix(
-    normalizeMerchantName(right),
-  );
-  if (!normalizedLeft || !normalizedRight) return false;
-  if (normalizedLeft === normalizedRight) return true;
-  const shorter =
-    normalizedLeft.length <= normalizedRight.length
-      ? normalizedLeft
-      : normalizedRight;
-  const longer =
-    normalizedLeft.length > normalizedRight.length
-      ? normalizedLeft
-      : normalizedRight;
-  const isContainedName =
-    (shorter.length >= 4 || isShortCjkBrand(shorter)) &&
-    longer.includes(shorter);
-  return isContainedName || hasHighCjkSubsequenceOverlap(shorter, longer);
-}
-
-function normalizeMerchantName(value?: string) {
-  let normalized = (value ?? "")
-    .normalize("NFKC")
-    .toLocaleLowerCase("zh-TW")
-    .replace(/[^\p{Letter}\p{Number}]+/gu, "");
-  for (const marker of MERCHANT_ENTITY_MARKERS)
-    normalized = normalized.replaceAll(marker, "");
-  let removedSuffix = true;
-  while (removedSuffix) {
-    removedSuffix = false;
-    for (const suffix of MERCHANT_BRANCH_SUFFIXES) {
-      if (!normalized.endsWith(suffix)) continue;
-      normalized = normalized.slice(0, -suffix.length);
-      removedSuffix = true;
-      break;
-    }
-  }
-  return normalized;
-}
-
-function stripPaymentProcessorPrefix(value: string) {
-  for (const prefix of PAYMENT_PROCESSOR_PREFIXES) {
-    if (value.startsWith(prefix) && value.length - prefix.length >= 2)
-      return value.slice(prefix.length);
-  }
-  return value;
-}
-
-function isShortCjkBrand(value: string) {
-  return value.length >= 2 && /^[\p{Script=Han}]+$/u.test(value);
-}
-
-function hasHighCjkSubsequenceOverlap(shorter: string, longer: string) {
-  if (
-    shorter.length < 4 ||
-    shorter.length / longer.length < 0.75 ||
-    !isShortCjkBrand(shorter) ||
-    !isShortCjkBrand(longer)
-  )
-    return false;
-
-  let shorterIndex = 0;
-  for (const character of longer) {
-    if (character === shorter[shorterIndex]) shorterIndex += 1;
-  }
-  return shorterIndex === shorter.length;
+    return undefined;
+  return dayNumber(transaction.authorizedAt ?? transaction.postedDate);
 }
 
 function dayNumber(value?: string) {
@@ -323,11 +191,21 @@ function dayNumber(value?: string) {
   );
 }
 
-function countBy<T>(items: T[], key: (item: T) => string) {
-  const counts = new Map<string, number>();
+function groupByMatchKey<T>(
+  items: T[],
+  keyFor: (item: T) => string | undefined,
+) {
+  const groups = new Map<string, T[]>();
   for (const item of items) {
-    const value = key(item);
-    counts.set(value, (counts.get(value) ?? 0) + 1);
+    const key = keyFor(item);
+    if (key == null) continue;
+    const group = groups.get(key) ?? [];
+    group.push(item);
+    groups.set(key, group);
   }
-  return counts;
+  return groups;
+}
+
+function compareById(left: { id: string }, right: { id: string }) {
+  return left.id.localeCompare(right.id);
 }
