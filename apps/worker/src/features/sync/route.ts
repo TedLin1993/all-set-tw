@@ -3,6 +3,7 @@ import {
   TdccConnectionError,
   TdccVerificationRequiredError,
 } from "@taiwan-fin-hub/connectors";
+import type { ConnectorId } from "@taiwan-fin-hub/core";
 import { zValidator } from "@hono/zod-validator";
 import { type Context, type Hono } from "hono";
 import { z } from "zod";
@@ -36,21 +37,15 @@ import {
   type SyncOutcome,
   type SyncScope,
 } from "./service";
-import type { ConnectorId } from "@taiwan-fin-hub/core";
 
 const tdccSyncBodySchema = z.object({
   otp: z.string().min(1).optional(),
   otpChannel: z.enum(["email", "sms"]).optional(),
 });
-
-const einvoiceSyncBodySchema = z.object({
-  fetchDetails: z.boolean().optional(),
-});
-
+const einvoiceSyncBodySchema = z.object({ fetchDetails: z.boolean().optional() });
 const sinopacSyncBodySchema = z.object({
   captcha: z.string().regex(/^\d{6}$/).optional(),
 });
-
 const taishinSyncBodySchema = z.object({
   captcha: z.string().regex(/^\d{4,8}$/).optional(),
 });
@@ -67,130 +62,27 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       validationHook("INVALID_REQUEST", "E-Invoice sync options are invalid."),
     ),
     async (c) =>
-      acceptManualSync(
-        c,
-        "einvoice",
-        SYNC_SCOPE_ALL,
-        () => syncEinvoice(c.env, "manual", c.req.valid("json")),
+      acceptManualSync(c, "einvoice", SYNC_SCOPE_ALL, () =>
+        syncEinvoice(c.env, "manual", c.req.valid("json")),
       ),
   );
 
-  api.post(
-    "/connectors/tdcc/sync",
-    zValidator(
-      "json",
-      tdccSyncBodySchema,
-      validationHook("INVALID_REQUEST", "TDCC sync options are invalid."),
-    ),
-    async (c) => {
-      const overrides = c.req.valid("json");
-      return syncInteractiveOrBackground(
-        c,
-        "tdcc",
-        SYNC_SCOPE_ALL,
-        Boolean(overrides.otp),
-        () =>
-          syncTdcc(c.env, "manual", overrides, [
-            TDCC_SCOPE_INVESTMENTS,
-            TDCC_SCOPE_BANK,
-            TDCC_SCOPE_TRADES,
-          ]),
-      );
-    },
-  );
-
-  api.post(
-    "/connectors/tdcc/sync/investments",
-    zValidator(
-      "json",
-      tdccSyncBodySchema,
-      validationHook("INVALID_REQUEST", "TDCC sync options are invalid."),
-    ),
-    async (c) => {
-      const overrides = c.req.valid("json");
-      return syncInteractiveOrBackground(
-        c,
-        "tdcc",
-        TDCC_SCOPE_INVESTMENTS,
-        Boolean(overrides.otp),
-        () => syncTdcc(c.env, "manual", overrides, [TDCC_SCOPE_INVESTMENTS]),
-      );
-    },
-  );
-
-  api.post(
-    "/connectors/tdcc/sync/bank",
-    zValidator(
-      "json",
-      tdccSyncBodySchema,
-      validationHook("INVALID_REQUEST", "TDCC sync options are invalid."),
-    ),
-    async (c) => {
-      const overrides = c.req.valid("json");
-      return syncInteractiveOrBackground(
-        c,
-        "tdcc",
-        TDCC_SCOPE_BANK,
-        Boolean(overrides.otp),
-        () => syncTdcc(c.env, "manual", overrides, [TDCC_SCOPE_BANK]),
-      );
-    },
-  );
-
-  api.post(
-    "/connectors/tdcc/sync/trades",
-    zValidator(
-      "json",
-      tdccSyncBodySchema,
-      validationHook("INVALID_REQUEST", "TDCC sync options are invalid."),
-    ),
-    async (c) => {
-      const overrides = c.req.valid("json");
-      return syncInteractiveOrBackground(
-        c,
-        "tdcc",
-        TDCC_SCOPE_TRADES,
-        Boolean(overrides.otp),
-        () => syncTdcc(c.env, "manual", overrides, [TDCC_SCOPE_TRADES]),
-      );
-    },
-  );
+  registerTdccRoutes(api);
 
   api.post("/connectors/esun/sync", async (c) =>
     acceptManualSync(c, "esun", SYNC_SCOPE_ALL, () =>
       syncEsun(c.env, "manual"),
     ),
   );
-
   api.post("/connectors/cathaybk/sync", async (c) =>
     acceptManualSync(c, "cathaybk", SYNC_SCOPE_ALL, () =>
       syncCathaybk(c.env, "manual"),
     ),
   );
 
-  api.post("/connectors/sinopac/captcha", async (c) => {
-    try {
-      return c.json(await prepareSinopacCaptchaSession(c.env));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "永豐已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof SinopacBrowserCapacityError) {
-        const response = jsonError("SINOPAC_BROWSER_BUSY", error.message, 429);
-        response.headers.set("Retry-After", String(error.retryAfterSeconds));
-        return response;
-      }
-      if (error instanceof NeedsUserActionError) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      return jsonError("SINOPAC_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-    }
-  });
-
+  api.post("/connectors/sinopac/captcha", (c) =>
+    prepareCaptchaResponse(c, "sinopac"),
+  );
   api.post(
     "/connectors/sinopac/sync",
     zValidator(
@@ -203,40 +95,15 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return syncInteractiveOrBackground(
         c,
         "sinopac",
-        SYNC_SCOPE_ALL,
         Boolean(overrides.captcha),
         () => syncSinopac(c.env, "manual", overrides),
       );
     },
   );
 
-  api.post("/connectors/taishin/captcha", async (c) => {
-    try {
-      return c.json(await prepareTaishinCaptchaSession(c.env));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "台新已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof TaishinBrowserCapacityError) {
-        const response = jsonError("TAISHIN_BROWSER_BUSY", error.message, 429);
-        response.headers.set("Retry-After", String(error.retryAfterSeconds));
-        return response;
-      }
-      if (error instanceof NeedsUserActionError) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      return jsonError(
-        "TAISHIN_CONNECTION_FAILED",
-        safeErrorMessage(error),
-        502,
-      );
-    }
-  });
-
+  api.post("/connectors/taishin/captcha", (c) =>
+    prepareCaptchaResponse(c, "taishin"),
+  );
   api.post(
     "/connectors/taishin/sync",
     zValidator(
@@ -249,7 +116,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return syncInteractiveOrBackground(
         c,
         "taishin",
-        SYNC_SCOPE_ALL,
         Boolean(overrides.captcha),
         () => syncTaishin(c.env, "manual", overrides),
       );
@@ -257,17 +123,103 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
   );
 }
 
+function registerTdccRoutes(api: Hono<AppBindings>) {
+  const register = (
+    path: string,
+    scope: SyncScope,
+    scopes: Array<
+      | typeof TDCC_SCOPE_INVESTMENTS
+      | typeof TDCC_SCOPE_BANK
+      | typeof TDCC_SCOPE_TRADES
+    >,
+  ) =>
+    api.post(
+      path,
+      zValidator(
+        "json",
+        tdccSyncBodySchema,
+        validationHook("INVALID_REQUEST", "TDCC sync options are invalid."),
+      ),
+      async (c) => {
+        const overrides = c.req.valid("json");
+        return syncRouteResponse(
+          c,
+          withManualSyncLock(c.env, "tdcc", scope, () =>
+            syncTdcc(c.env, "manual", overrides, scopes),
+          ),
+        );
+      },
+    );
+
+  register("/connectors/tdcc/sync", SYNC_SCOPE_ALL, [
+    TDCC_SCOPE_INVESTMENTS,
+    TDCC_SCOPE_BANK,
+    TDCC_SCOPE_TRADES,
+  ]);
+  register(
+    "/connectors/tdcc/sync/investments",
+    TDCC_SCOPE_INVESTMENTS,
+    [TDCC_SCOPE_INVESTMENTS],
+  );
+  register("/connectors/tdcc/sync/bank", TDCC_SCOPE_BANK, [TDCC_SCOPE_BANK]);
+  register("/connectors/tdcc/sync/trades", TDCC_SCOPE_TRADES, [
+    TDCC_SCOPE_TRADES,
+  ]);
+}
+
+async function prepareCaptchaResponse(
+  c: Context<AppBindings>,
+  connectorId: "sinopac" | "taishin",
+) {
+  try {
+    return c.json(
+      connectorId === "sinopac"
+        ? await prepareSinopacCaptchaSession(c.env)
+        : await prepareTaishinCaptchaSession(c.env),
+    );
+  } catch (error) {
+    if (error instanceof SyncAlreadyRunningError) {
+      return jsonError(
+        "SYNC_ALREADY_RUNNING",
+        `${connectorId === "sinopac" ? "永豐" : "台新"}已有驗證或同步作業正在進行。`,
+        409,
+      );
+    }
+    if (error instanceof SinopacBrowserCapacityError) {
+      const response = jsonError("SINOPAC_BROWSER_BUSY", error.message, 429);
+      response.headers.set("Retry-After", String(error.retryAfterSeconds));
+      return response;
+    }
+    if (error instanceof TaishinBrowserCapacityError) {
+      const response = jsonError("TAISHIN_BROWSER_BUSY", error.message, 429);
+      response.headers.set("Retry-After", String(error.retryAfterSeconds));
+      return response;
+    }
+    if (error instanceof NeedsUserActionError) {
+      return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+    }
+    return jsonError(
+      connectorId === "sinopac"
+        ? "SINOPAC_CAPTCHA_FAILED"
+        : "TAISHIN_CONNECTION_FAILED",
+      safeErrorMessage(error),
+      502,
+    );
+  }
+}
+
 async function syncInteractiveOrBackground(
   c: Context<AppBindings>,
-  connectorId: ConnectorId,
-  scope: SyncScope,
+  connectorId: "sinopac" | "taishin",
   interactive: boolean,
   task: () => Promise<SyncOutcome>,
 ) {
-  if (!interactive) return acceptManualSync(c, connectorId, scope, task);
+  if (!interactive) {
+    return acceptManualSync(c, connectorId, SYNC_SCOPE_ALL, task);
+  }
   return syncRouteResponse(
     c,
-    withManualSyncLock(c.env, connectorId, scope, task),
+    withManualSyncLock(c.env, connectorId, SYNC_SCOPE_ALL, task),
   );
 }
 
@@ -288,12 +240,7 @@ async function acceptManualSync(
       }),
     );
     return c.json(
-      {
-        accepted: true,
-        connectorId,
-        scope,
-        runId: job.runId,
-      },
+      { accepted: true, connectorId, scope, runId: job.runId },
       202,
     );
   } catch (error) {
