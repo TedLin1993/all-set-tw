@@ -15,6 +15,7 @@ import type { AppBindings } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
 import { jsonError } from "../../platform/http";
 import { validationHook } from "../../platform/validation";
+import { startManualSyncJob } from "./manual-job";
 import {
   NeedsUserActionError,
   prepareSinopacCaptchaSession,
@@ -251,12 +252,33 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     ),
     async (c) => {
       const overrides = c.req.valid("json");
-      return syncRouteResponse(
-        c,
-        withManualSyncLock(c.env, "taishin", SYNC_SCOPE_ALL, () =>
-          syncTaishin(c.env, "manual", overrides),
-        ),
-      );
+      try {
+        const job = await startManualSyncJob(
+          c.env,
+          "taishin",
+          SYNC_SCOPE_ALL,
+          () => syncTaishin(c.env, "manual", overrides),
+        );
+        c.executionCtx.waitUntil(
+          job.completion.catch((error) => {
+            console.error(
+              `[sync] taishin/${SYNC_SCOPE_ALL}: background job ${job.runId} failed`,
+              error,
+            );
+          }),
+        );
+        return c.json(
+          {
+            accepted: true,
+            connectorId: "taishin",
+            scope: SYNC_SCOPE_ALL,
+            runId: job.runId,
+          },
+          202,
+        );
+      } catch (error) {
+        return syncRouteErrorResponse(c, error);
+      }
     },
   );
 }
@@ -268,40 +290,44 @@ async function syncRouteResponse(
   try {
     return c.json(await result);
   } catch (error) {
-    if (error instanceof SyncAlreadyRunningError) {
-      return jsonError("SYNC_ALREADY_RUNNING", error.message, 409);
-    }
-    if (error instanceof TdccVerificationRequiredError) {
-      return jsonError(
-        error.channel === "sms"
-          ? "TDCC_SMS_OTP_REQUIRED"
-          : "TDCC_EMAIL_OTP_REQUIRED",
-        error.message,
-        400,
-      );
-    }
-    if (error instanceof TdccConnectionError) {
-      return jsonError("TDCC_CONNECTION_FAILED", error.message, 400);
-    }
-    if (error instanceof NeedsUserActionError) {
-      return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-    }
-    if (error instanceof EInvoiceProtocolUnavailableError) {
-      return jsonError("CONNECTOR_PROTOCOL_UNAVAILABLE", error.message, 503);
-    }
-    if (error instanceof SinopacBrowserCapacityError) {
-      const response = jsonError("SINOPAC_BROWSER_BUSY", error.message, 429);
-      response.headers.set("Retry-After", String(error.retryAfterSeconds));
-      return response;
-    }
-    if (error instanceof TaishinBrowserCapacityError) {
-      const response = jsonError("TAISHIN_BROWSER_BUSY", error.message, 429);
-      response.headers.set("Retry-After", String(error.retryAfterSeconds));
-      return response;
-    }
-    if (error instanceof TaishinConnectionError) {
-      return jsonError("TAISHIN_CONNECTION_FAILED", error.message, 502);
-    }
-    throw error;
+    return syncRouteErrorResponse(c, error);
   }
+}
+
+function syncRouteErrorResponse(c: Context<AppBindings>, error: unknown) {
+  if (error instanceof SyncAlreadyRunningError) {
+    return jsonError("SYNC_ALREADY_RUNNING", error.message, 409);
+  }
+  if (error instanceof TdccVerificationRequiredError) {
+    return jsonError(
+      error.channel === "sms"
+        ? "TDCC_SMS_OTP_REQUIRED"
+        : "TDCC_EMAIL_OTP_REQUIRED",
+      error.message,
+      400,
+    );
+  }
+  if (error instanceof TdccConnectionError) {
+    return jsonError("TDCC_CONNECTION_FAILED", error.message, 400);
+  }
+  if (error instanceof NeedsUserActionError) {
+    return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+  }
+  if (error instanceof EInvoiceProtocolUnavailableError) {
+    return jsonError("CONNECTOR_PROTOCOL_UNAVAILABLE", error.message, 503);
+  }
+  if (error instanceof SinopacBrowserCapacityError) {
+    const response = jsonError("SINOPAC_BROWSER_BUSY", error.message, 429);
+    response.headers.set("Retry-After", String(error.retryAfterSeconds));
+    return response;
+  }
+  if (error instanceof TaishinBrowserCapacityError) {
+    const response = jsonError("TAISHIN_BROWSER_BUSY", error.message, 429);
+    response.headers.set("Retry-After", String(error.retryAfterSeconds));
+    return response;
+  }
+  if (error instanceof TaishinConnectionError) {
+    return jsonError("TAISHIN_CONNECTION_FAILED", error.message, 502);
+  }
+  throw error;
 }
