@@ -7,7 +7,12 @@ import type { Env } from "../../../src/platform/env";
 
 const mocks = vi.hoisted(() => ({
   prepareTaishinCaptchaSession: vi.fn(),
+  startManualSyncJob: vi.fn(),
   syncTaishin: vi.fn(),
+}));
+
+vi.mock("../../../src/features/sync/manual-job", () => ({
+  startManualSyncJob: mocks.startManualSyncJob,
 }));
 
 vi.mock("../../../src/features/sync/service", () => ({
@@ -38,6 +43,11 @@ vi.mock("../../../src/features/sync/service", () => ({
 import { syncRoutes } from "../../../src/features/sync/route";
 
 const env = {} as Env;
+const executionCtx = {
+  waitUntil: vi.fn(),
+  passThroughOnException: vi.fn(),
+  props: {},
+} as unknown as ExecutionContext;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -53,18 +63,39 @@ beforeEach(() => {
     records: 3,
     cursorUpdated: true,
   });
+  mocks.startManualSyncJob.mockImplementation(
+    async (
+      _env: Env,
+      connectorId: string,
+      scope: string,
+      task: () => Promise<unknown>,
+    ) => ({
+      runId: "manual-run-1",
+      completion: task(),
+      connectorId,
+      scope,
+    }),
+  );
 });
 
 describe("Taishin sync routes", () => {
-  it("accepts an empty sync body and dispatches the manual sync", async () => {
+  it("accepts an empty sync body as a background manual sync", async () => {
     const response = await syncRoutes.request(
       "/connectors/taishin/sync",
       { method: "POST" },
       env,
+      executionCtx,
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      connectorId: "taishin",
+      scope: "all",
+      runId: "manual-run-1",
+    });
     expect(mocks.syncTaishin).toHaveBeenCalledWith(env, "manual", {});
+    expect(executionCtx.waitUntil).toHaveBeenCalledOnce();
   });
 
   it("rejects malformed manual CAPTCHA input", async () => {
@@ -76,6 +107,7 @@ describe("Taishin sync routes", () => {
         body: JSON.stringify({ captcha: "12AB" }),
       },
       env,
+      executionCtx,
     );
 
     expect(response.status).toBe(400);
@@ -90,6 +122,7 @@ describe("Taishin sync routes", () => {
       "/connectors/taishin/captcha",
       { method: "POST" },
       env,
+      executionCtx,
     );
 
     expect(response.status).toBe(200);
@@ -99,7 +132,7 @@ describe("Taishin sync routes", () => {
     });
   });
 
-  it("maps Browser Rendering capacity and connection failures", async () => {
+  it("maps Browser Rendering capacity and interactive connection failures", async () => {
     mocks.prepareTaishinCaptchaSession.mockRejectedValueOnce(
       new TaishinBrowserCapacityError("browser busy", 17),
     );
@@ -107,6 +140,7 @@ describe("Taishin sync routes", () => {
       "/connectors/taishin/captcha",
       { method: "POST" },
       env,
+      executionCtx,
     );
     expect(busy.status).toBe(429);
     expect(busy.headers.get("Retry-After")).toBe("17");
@@ -119,8 +153,13 @@ describe("Taishin sync routes", () => {
     );
     const failed = await syncRoutes.request(
       "/connectors/taishin/sync",
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "123456" }),
+      },
       env,
+      executionCtx,
     );
     expect(failed.status).toBe(502);
     await expect(failed.json()).resolves.toMatchObject({
