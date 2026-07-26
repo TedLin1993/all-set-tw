@@ -13,6 +13,10 @@ export const syncJobsQuery = (getApi: ApiProvider) =>
   queryOptions({
     queryKey: queryKeys.syncJobs,
     queryFn: () => getApi().get<SyncJobRow[]>("/api/sync-jobs"),
+    refetchInterval: (query) => {
+      const jobs = query.state.data as SyncJobRow[] | undefined;
+      return jobs?.some((job) => job.running) ? 2_000 : false;
+    },
   });
 
 export const syncScheduleQuery = (getApi: ApiProvider) =>
