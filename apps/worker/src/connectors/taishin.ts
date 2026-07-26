@@ -24,7 +24,7 @@ const LOGIN_RESULT_ATTEMPTS = 10;
 const LOGIN_RESULT_POLL_MS = 500;
 const REQUIRED_API_TIMEOUT_MS = 8_000;
 const OPTIONAL_API_TIMEOUT_MS = 4_000;
-const REALTIME_BUSY_RETRY_ATTEMPTS = 3;
+const REALTIME_RETRY_ATTEMPTS = 3;
 const USER_AGENT =
   "Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UP1A.231105.003) " +
   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
@@ -75,6 +75,13 @@ class TaishinCaptchaUnavailableError extends TaishinConnectionError {
   constructor(message: string) {
     super(message);
     this.name = "TaishinCaptchaUnavailableError";
+  }
+}
+
+class TaishinTransientConnectionError extends TaishinConnectionError {
+  constructor(message: string) {
+    super(message);
+    this.name = "TaishinTransientConnectionError";
   }
 }
 
@@ -330,20 +337,28 @@ async function fetchCreditCardPayloads(
 }
 
 async function fetchRealtimeTransactions(page: BrowserPage) {
-  for (let attempt = 1; attempt <= REALTIME_BUSY_RETRY_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= REALTIME_RETRY_ATTEMPTS; attempt += 1) {
     try {
       return await postJson(page, REALTIME_PATH, "", REQUIRED_API_TIMEOUT_MS);
     } catch (error) {
       const isBusy =
         error instanceof TaishinConnectionError &&
         /系統忙碌|無法取得資料/.test(error.message);
-      if (!isBusy) throw error;
-      if (attempt < REALTIME_BUSY_RETRY_ATTEMPTS) {
+      const isTransient = error instanceof TaishinTransientConnectionError;
+      if (!isBusy && !isTransient) throw error;
+      if (attempt < REALTIME_RETRY_ATTEMPTS) {
+        console.warn(
+          `[taishin] realtime retry ${attempt}/${REALTIME_RETRY_ATTEMPTS}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
         await new Promise((resolve) => setTimeout(resolve, attempt * 250));
-      } else {
+      } else if (isBusy) {
         console.warn(
           `[taishin] realtime sync skipped after ${attempt} busy responses`,
         );
+      } else {
+        throw error;
       }
     }
   }
@@ -411,15 +426,21 @@ async function postJson(
           contentType: response.headers.get("content-type") ?? "",
           text: await response.text(),
           timedOut: false,
+          errorName: "",
+          errorMessage: "",
         };
       } catch (error) {
+        const errorName = error instanceof Error ? error.name : "UnknownError";
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         return {
           ok: false,
           status: 0,
           contentType: "",
           text: "",
-          timedOut:
-            error instanceof DOMException && error.name === "AbortError",
+          timedOut: controller.signal.aborted || errorName === "AbortError",
+          errorName,
+          errorMessage,
         };
       } finally {
         clearTimeout(timeout);
@@ -429,10 +450,25 @@ async function postJson(
   );
   const endpoint = path.split("/").at(-1) ?? path;
   if (response.timedOut) {
-    throw new TaishinConnectionError(`台新信用卡 API ${endpoint} 請求逾時。`);
+    throw new TaishinTransientConnectionError(
+      `台新信用卡 API ${endpoint} 請求逾時。`,
+    );
+  }
+  if (response.status === 0) {
+    const detail = browserFetchErrorDetail(
+      response.errorName,
+      response.errorMessage,
+    );
+    throw new TaishinTransientConnectionError(
+      `台新信用卡 API ${endpoint} 網路請求失敗${detail ? `（${detail}）` : ""}。`,
+    );
   }
   if (!response.ok) {
-    throw new TaishinConnectionError(
+    const ErrorClass =
+      response.status >= 500
+        ? TaishinTransientConnectionError
+        : TaishinConnectionError;
+    throw new ErrorClass(
       `台新信用卡 API ${endpoint} 回應 HTTP ${response.status}。`,
     );
   }
@@ -458,6 +494,20 @@ async function postJson(
     if (error instanceof TaishinConnectionError) throw error;
     throw new TaishinConnectionError("台新信用卡 API 回應格式無效。");
   }
+}
+
+function browserFetchErrorDetail(name: string, message: string) {
+  const safeName = sanitizeBrowserErrorPart(name, 40);
+  const safeMessage = sanitizeBrowserErrorPart(message, 160);
+  return [safeName, safeMessage].filter(Boolean).join(": ");
+}
+
+function sanitizeBrowserErrorPart(value: string, maxLength: number) {
+  return value
+    .replace(/https?:\/\/\S+/gi, "[URL]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
 }
 
 async function openLoginAndFill(page: Page, config: TaishinConfig) {

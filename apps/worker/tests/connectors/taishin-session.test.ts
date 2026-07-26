@@ -328,6 +328,80 @@ describe("Taishin browser session lifecycle", () => {
     warn.mockRestore();
   });
 
+  it("retries a transient realtime fetch failure and keeps its diagnostics", async () => {
+    const browserPage = page();
+    const response = (value: unknown) => ({
+      ok: true,
+      status: 200,
+      contentType: "application/json",
+      text: JSON.stringify({ value, error: null }),
+    });
+    browserPage.evaluate
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        contentType: "application/json",
+        text: JSON.stringify({
+          RESULT: "SUCCESS",
+          DBSESSIONID: "database-session",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 0,
+        contentType: "",
+        text: "",
+        timedOut: false,
+        errorName: "TypeError",
+        errorMessage:
+          "Failed to fetch https://my.taishinbank.com.tw/private-path",
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        contentType: "application/json",
+        text: "{}",
+      })
+      .mockResolvedValueOnce(response({ fmtRealTxListMap: [] }))
+      .mockResolvedValueOnce(
+        response({
+          "001": { "OUT-DTE-LST-STMT": "20260720" },
+        }),
+      )
+      .mockResolvedValueOnce(response({}));
+    const browserInstance = browser(browserPage);
+    puppeteerMock.launch.mockResolvedValue(browserInstance);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await createTaishinConnector({} as Fetcher).sync({
+      ...credentials,
+      lookbackMonths: 1,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "valid",
+          domain: "my.taishinbank.com.tw",
+        },
+      ]),
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      "[taishin] realtime retry 1/3: 台新信用卡 API qryRealTime 網路請求失敗（TypeError: Failed to fetch [URL]）。",
+    );
+    expect(warn).toHaveBeenCalledWith(
+      "[taishin] realtime retry 2/3: 台新信用卡 API qryRealTime 回應 HTTP 502。",
+    );
+    const realtimeCalls = browserPage.evaluate.mock.calls.filter(
+      ([, input]) =>
+        typeof input === "object" &&
+        input !== null &&
+        "path" in input &&
+        input.path === "/TIBNetBank/svc/web4/rb0708rwd/qryRealTime",
+    );
+    expect(realtimeCalls).toHaveLength(3);
+    warn.mockRestore();
+  });
+
   it("returns fresh session cookies when an API fails after login", async () => {
     const browserPage = page();
     const activeSession = {
@@ -339,16 +413,18 @@ describe("Taishin browser session lifecycle", () => {
         DBSESSIONID: "database-session",
       }),
     };
-    browserPage.evaluate
-      .mockResolvedValueOnce(activeSession)
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 502,
-        contentType: "application/json",
-        text: "{}",
-      });
+    browserPage.evaluate.mockResolvedValueOnce(activeSession).mockResolvedValue({
+      ok: false,
+      status: 0,
+      contentType: "",
+      text: "",
+      timedOut: false,
+      errorName: "TypeError",
+      errorMessage: "Failed to fetch",
+    });
     const browserInstance = browser(browserPage);
     puppeteerMock.launch.mockResolvedValue(browserInstance);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const error = await createTaishinConnector({} as Fetcher)
       .sync({
@@ -366,7 +442,8 @@ describe("Taishin browser session lifecycle", () => {
 
     expect(error).toBeInstanceOf(TaishinConnectionError);
     expect(error).toMatchObject({
-      message: "台新信用卡 API qryRealTime 回應 HTTP 502。",
+      message:
+        "台新信用卡 API qryRealTime 網路請求失敗（TypeError: Failed to fetch）。",
       sessionCookies: JSON.stringify([
         {
           name: "SESSION",
@@ -376,7 +453,18 @@ describe("Taishin browser session lifecycle", () => {
       ]),
       sessionCreatedAt: expect.any(String),
     });
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(
+      browserPage.evaluate.mock.calls.filter(
+        ([, input]) =>
+          typeof input === "object" &&
+          input !== null &&
+          "path" in input &&
+          input.path === "/TIBNetBank/svc/web4/rb0708rwd/qryRealTime",
+      ),
+    ).toHaveLength(3);
     expect(browserInstance.close).toHaveBeenCalledOnce();
+    warn.mockRestore();
   });
 
   it("reuses the same browser for manual CAPTCHA and disconnects it", async () => {
