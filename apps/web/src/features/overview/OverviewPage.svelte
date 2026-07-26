@@ -12,13 +12,18 @@
     manualAssetsQuery,
     netWorthHistoryQuery,
   } from "@/data/assets/queries";
-  import { bankQuery } from "@/data/bank/queries";
+  import { bankQuery, bankRangeQuery } from "@/data/bank/queries";
   import { syncJobsQuery } from "@/data/connectors/queries";
   import {
     investmentsQuery,
     investmentTransactionsQuery,
   } from "@/data/investments/queries";
-  import { invoicesQuery } from "@/data/invoices/queries";
+  import {
+    invoiceTransactionMappingsQuery,
+    invoicesQuery,
+    invoicesRangeQuery,
+  } from "@/data/invoices/queries";
+  import { calculateMonthlyActivityTotals } from "@/data/activity/monthly-totals";
   import type { View } from "@/app/types";
   import {
     formatBankAccountName,
@@ -27,7 +32,6 @@
     formatDate,
     normalizeFinancialDate,
     rateMap,
-    transactionValueTwd,
   } from "@/shared/format/financial";
   import NetWorthHistoryChart from "./components/NetWorthHistoryChart.svelte";
 
@@ -35,8 +39,17 @@
     $props();
 
   const bank = createQuery(bankQuery(() => api));
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const currentMonthRange = { from: monthKey, to: monthKey };
+  const monthlyBank = createQuery(bankRangeQuery(() => api, currentMonthRange));
   const investments = createQuery(investmentsQuery(() => api));
   const invoices = createQuery(invoicesQuery(() => api));
+  const monthlyInvoices = createQuery(
+    invoicesRangeQuery(() => api, currentMonthRange),
+  );
+  const invoiceMappings = createQuery(
+    invoiceTransactionMappingsQuery(() => api),
+  );
   const trades = createQuery(investmentTransactionsQuery(() => api));
   const manualAssets = createQuery(manualAssetsQuery(() => api));
   const rates = createQuery(exchangeRatesQuery(() => api));
@@ -107,33 +120,16 @@
       detail: "保險、房產",
     },
   ]);
-  const monthKey = new Date().toISOString().slice(0, 7);
-  const monthlyBank = $derived(
-    bankData.transactions.filter(
-      (transaction) =>
-        (transaction.postedDate ?? transaction.authorizedAt ?? "").startsWith(
-          monthKey,
-        ) &&
-        transaction.accountType !== "credit" &&
-        !transaction.excludedFromCalculation,
+  const monthlyTotals = $derived(
+    calculateMonthlyActivityTotals(
+      $monthlyBank.data ?? { accounts: [], transactions: [] },
+      $monthlyInvoices.data ?? [],
+      $invoiceMappings.data ?? [],
+      rateValues,
     ),
   );
-  const monthlyIncome = $derived(
-    monthlyBank.reduce(
-      (sum, transaction) =>
-        sum + Math.max(transactionValueTwd(transaction, rateValues), 0),
-      0,
-    ),
-  );
-  const monthlyExpense = $derived(
-    Math.abs(
-      monthlyBank.reduce(
-        (sum, transaction) =>
-          sum + Math.min(transactionValueTwd(transaction, rateValues), 0),
-        0,
-      ),
-    ),
-  );
+  const monthlyIncome = $derived(monthlyTotals.income);
+  const monthlyExpense = $derived(monthlyTotals.expense);
   const unhealthy = $derived(
     ($jobs.data ?? []).filter(
       (job) =>
@@ -182,10 +178,20 @@
     ),
   ]);
   const loading = $derived(
-    $bank.isPending || $investments.isPending || $manualAssets.isPending,
+    $bank.isPending ||
+      $monthlyBank.isPending ||
+      $monthlyInvoices.isPending ||
+      $invoiceMappings.isPending ||
+      $investments.isPending ||
+      $manualAssets.isPending,
   );
   const failed = $derived(
-    $bank.isError || $investments.isError || $manualAssets.isError,
+    $bank.isError ||
+      $monthlyBank.isError ||
+      $monthlyInvoices.isError ||
+      $invoiceMappings.isError ||
+      $investments.isError ||
+      $manualAssets.isError,
   );
 </script>
 

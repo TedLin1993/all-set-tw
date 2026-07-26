@@ -3,7 +3,7 @@ import {
   deduplicateBankTransactions,
   invoiceTransactionCandidates,
   matchInvoicesToTransactions,
-} from "./matching";
+} from "@/data/activity/matching";
 import type { BankTransactionRow } from "@/data/bank/types";
 import type { InvoiceSummaryRow } from "@/data/invoices/types";
 
@@ -169,10 +169,7 @@ describe("invoice transaction matching", () => {
         }),
         transaction({ id: "transaction-c", amount: -860 }),
       ],
-      [
-        invoice({ id: "invoice-b" }),
-        invoice({ id: "invoice-a" }),
-      ],
+      [invoice({ id: "invoice-b" }), invoice({ id: "invoice-a" })],
     );
 
     expect(Array.from(result.invoiceToTransactionId)).toEqual([

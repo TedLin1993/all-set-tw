@@ -60,7 +60,7 @@
     deduplicateBankTransactions,
     invoiceTransactionCandidates,
     matchInvoicesToTransactions,
-  } from "./model/matching";
+  } from "@/data/activity/matching";
   import {
     formatCompactTwd,
     formatCurrency,
@@ -719,7 +719,7 @@
               class="p-8 text-center text-sm text-ink/50"
             >
               沒有符合條件的活動。
-            </p>{:else}{#each filtered.slice(0, 100) as item (item.source + "-" + item.id)}{@const amount =
+            </p>{:else}{#each filtered as item (item.source + "-" + item.id)}{@const amount =
                 activityDisplayAmount(item)}
               <button
                 aria-label={`查看 ${item.title} 活動詳情`}
@@ -771,7 +771,7 @@
                   ><td class="px-5 py-8 text-center text-ink/50" colspan="5"
                     >沒有符合條件的活動。</td
                   ></tr
-                >{:else}{#each filtered.slice(0, 100) as item (item.source + "-" + item.id)}{@const amount =
+                >{:else}{#each filtered as item (item.source + "-" + item.id)}{@const amount =
                     activityDisplayAmount(item)}<tr
                     aria-label={`查看 ${item.title} 活動詳情`}
                     class={`cursor-pointer transition hover:bg-paper focus-visible:outline-2 focus-visible:outline-steel ${item.excludedFromCalculation ? "bg-ink/[0.025]" : ""}`}
