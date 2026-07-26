@@ -43,8 +43,11 @@ function invoice(
 }
 
 describe("invoice transaction matching", () => {
-  it("matches an exact amount, same date, and normalized merchant name", () => {
-    const result = matchInvoicesToTransactions([transaction()], [invoice()]);
+  it("matches the same day and amount without checking the merchant", () => {
+    const result = matchInvoicesToTransactions(
+      [transaction({ counterparty: "完全不同的商家" })],
+      [invoice()],
+    );
 
     expect(result.invoiceToTransactionId.get("invoice-1")).toBe(
       "transaction-1",
@@ -54,25 +57,10 @@ describe("invoice transaction matching", () => {
     );
   });
 
-  it("matches a positive pending card amount through a payment processor", () => {
+  it("matches a positive pending credit-card expense by absolute amount", () => {
     const result = matchInvoicesToTransactions(
-      [
-        transaction({
-          accountType: "credit",
-          postedDate: "2026-07-06T00:00:00.000Z",
-          authorizedAt: undefined,
-          amount: 134,
-          description: "全支付﹘全聯",
-          counterparty: "全支付﹘全聯",
-        }),
-      ],
-      [
-        invoice({
-          invoiceDate: "2026-07-06T14:06:40.000Z",
-          sellerName: "全聯實業股份有限公司台中旅順分公司",
-          amount: 134,
-        }),
-      ],
+      [transaction({ accountType: "credit", amount: 860 })],
+      [invoice()],
     );
 
     expect(result.invoiceToTransactionId.get("invoice-1")).toBe(
@@ -80,91 +68,22 @@ describe("invoice transaction matching", () => {
     );
   });
 
-  it("matches a LINE Pay card charge reduced by redeemed points", () => {
-    const result = matchInvoicesToTransactions(
-      [
-        transaction({
-          accountType: "credit",
-          postedDate: "2026-07-09T00:00:00.000Z",
-          authorizedAt: undefined,
-          amount: -125,
-          description: "連支×楓康超市",
-          counterparty: "連支×楓康超市",
-        }),
-      ],
-      [
-        invoice({
-          invoiceDate: "2026-07-09T13:20:00.000Z",
-          sellerName: "台灣楓康超市股份有限公司大連分公司",
-          amount: 168,
-        }),
-      ],
-    );
-
-    expect(result.invoiceToTransactionId.get("invoice-1")).toBe(
-      "transaction-1",
-    );
-  });
-
-  it("prefers an exact amount over a possible LINE Pay points match", () => {
+  it("does not auto-match a payment with a different amount", () => {
     const result = matchInvoicesToTransactions(
       [
         transaction({
           accountType: "credit",
           amount: -125,
           description: "連支×楓康超市",
-          counterparty: "連支×楓康超市",
         }),
       ],
-      [
-        invoice({
-          id: "exact-invoice",
-          sellerName: "台灣楓康超市股份有限公司大連分公司",
-          amount: 125,
-        }),
-        invoice({
-          id: "points-invoice",
-          sellerName: "台灣楓康超市股份有限公司大連分公司",
-          amount: 168,
-        }),
-      ],
+      [invoice({ amount: 168 })],
     );
 
-    expect(result.invoiceToTransactionId.get("exact-invoice")).toBe(
-      "transaction-1",
-    );
-    expect(result.invoiceToTransactionId.has("points-invoice")).toBe(false);
+    expect(result.invoiceToTransactionId.size).toBe(0);
   });
 
-  it("does not allow amount differences outside LINE Pay point redemption", () => {
-    const ordinaryCard = transaction({
-      accountType: "credit",
-      amount: -125,
-      description: "楓康超市",
-      counterparty: "楓康超市",
-    });
-    const linePayOvercharge = transaction({
-      accountType: "credit",
-      amount: -180,
-      description: "連支×楓康超市",
-      counterparty: "連支×楓康超市",
-    });
-    const targetInvoice = invoice({
-      sellerName: "台灣楓康超市股份有限公司大連分公司",
-      amount: 168,
-    });
-
-    expect(
-      matchInvoicesToTransactions([ordinaryCard], [targetInvoice])
-        .invoiceToTransactionId.size,
-    ).toBe(0);
-    expect(
-      matchInvoicesToTransactions([linePayOvercharge], [targetInvoice])
-        .invoiceToTransactionId.size,
-    ).toBe(0);
-  });
-
-  it("offers same-day expenses for manual mapping without auto-linking unrelated merchants", () => {
+  it("still offers same-day expenses with different amounts for manual mapping", () => {
     const transactions = [
       transaction({
         id: "pxpay-tea",
@@ -237,29 +156,39 @@ describe("invoice transaction matching", () => {
     expect(result.transactionToInvoice.size).toBe(0);
   });
 
-  it("leaves unrelated payment-processor candidates unpaired when the remainder is ambiguous", () => {
+  it("pairs ambiguous same-day amounts deterministically and one-to-one", () => {
     const result = matchInvoicesToTransactions(
       [
         transaction({
-          id: "payment-1",
-          accountType: "credit",
-          amount: -37,
-          description: "全支付﹘品牌甲",
-          counterparty: "全支付﹘品牌甲",
+          id: "transaction-b",
+          amount: -860,
         }),
         transaction({
-          id: "payment-2",
-          accountType: "credit",
-          amount: -40,
-          description: "連支＊品牌乙",
-          counterparty: "連支＊品牌乙",
+          id: "transaction-a",
+          amount: -860,
         }),
+        transaction({ id: "transaction-c", amount: -860 }),
       ],
-      [invoice({ sellerName: "無關登記商號", amount: 50 })],
+      [
+        invoice({ id: "invoice-b" }),
+        invoice({ id: "invoice-a" }),
+      ],
     );
 
-    expect(result.invoiceToTransactionId.size).toBe(0);
-    expect(result.transactionToInvoice.size).toBe(0);
+    expect(Array.from(result.invoiceToTransactionId)).toEqual([
+      ["invoice-a", "transaction-a"],
+      ["invoice-b", "transaction-b"],
+    ]);
+    expect(
+      Array.from(result.transactionToInvoice, ([transactionId, row]) => [
+        transactionId,
+        row.id,
+      ]),
+    ).toEqual([
+      ["transaction-a", "invoice-a"],
+      ["transaction-b", "invoice-b"],
+    ]);
+    expect(result.transactionToInvoice.has("transaction-c")).toBe(false);
   });
 
   it("does not treat a positive bank deposit as an expense match", () => {
@@ -308,54 +237,7 @@ describe("invoice transaction matching", () => {
     ).toEqual([]);
   });
 
-  it("matches highly overlapping CJK merchant names with repeated branding", () => {
-    const result = matchInvoicesToTransactions(
-      [
-        transaction({
-          accountType: "credit",
-          postedDate: "2026-07-16T00:00:00.000Z",
-          authorizedAt: undefined,
-          amount: 129,
-          description: "全國加油站昌平站",
-          counterparty: "全國加油站昌平站",
-        }),
-      ],
-      [
-        invoice({
-          invoiceDate: "2026-07-16T10:26:00.000Z",
-          sellerName: "全國加油站股份有限公司全國昌平站",
-          amount: 129,
-        }),
-      ],
-    );
-
-    expect(result.invoiceToTransactionId.get("invoice-1")).toBe(
-      "transaction-1",
-    );
-  });
-
-  it("does not fuzzy-match a different branch", () => {
-    const result = matchInvoicesToTransactions(
-      [
-        transaction({
-          accountType: "credit",
-          amount: 129,
-          description: "全國加油站文心站",
-          counterparty: "全國加油站文心站",
-        }),
-      ],
-      [
-        invoice({
-          sellerName: "全國加油站股份有限公司全國昌平站",
-          amount: 129,
-        }),
-      ],
-    );
-
-    expect(result.invoiceToTransactionId.size).toBe(0);
-  });
-
-  it("does not match when amount, date, or merchant differs", () => {
+  it("does not match when the amount or date differs", () => {
     expect(
       matchInvoicesToTransactions([transaction({ amount: -861 })], [invoice()])
         .invoiceToTransactionId.size,
@@ -366,22 +248,15 @@ describe("invoice transaction matching", () => {
         [invoice()],
       ).invoiceToTransactionId.size,
     ).toBe(0);
-    expect(
-      matchInvoicesToTransactions(
-        [transaction({ counterparty: "另一間商店" })],
-        [invoice()],
-      ).invoiceToTransactionId.size,
-    ).toBe(0);
   });
 
-  it("leaves ambiguous matches unpaired", () => {
+  it("does not match a non-TWD transaction", () => {
     const result = matchInvoicesToTransactions(
-      [transaction(), transaction({ id: "transaction-2" })],
+      [transaction({ currency: "USD" })],
       [invoice()],
     );
 
     expect(result.invoiceToTransactionId.size).toBe(0);
-    expect(result.transactionToInvoice.size).toBe(0);
   });
 });
 
