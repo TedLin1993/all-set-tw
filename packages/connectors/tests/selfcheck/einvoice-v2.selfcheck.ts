@@ -89,16 +89,22 @@ async function main() {
     fetchImpl: fakeFetch
   });
 
+  const loginStartedAt = Date.now() / 1000;
   const session = await client.login({
     mobile: "0912345678",
     password: "synthetic-password",
     androidId: "synthetic-android-id"
   });
+  const loginFinishedAt = Date.now() / 1000;
   assert.equal(session.sid, syntheticSession.sid);
   assert.equal(session.loginAppId, syntheticSession.appid);
   assert.equal(session.loginSsMe, syntheticSession.ssme);
   assert.equal(session.carrierCode, syntheticSession.carrier_code);
-  assert.ok((session.serverTimeOffset ?? 0) >= 122 && (session.serverTimeOffset ?? 0) <= 123);
+  const serverTimeOffset = session.serverTimeOffset ?? 0;
+  assert.ok(
+    serverTimeOffset >= Math.trunc(syntheticServerNow - loginFinishedAt) &&
+      serverTimeOffset <= Math.trunc(syntheticServerNow - loginStartedAt)
+  );
 
   await client.queryCarrierInvoices(session, "2026-07-01", "2026-07-31");
   await client.queryCarrierInvoiceDetail(session, "AA-12345678", "2026/07/01");
