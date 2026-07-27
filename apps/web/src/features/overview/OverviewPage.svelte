@@ -1,9 +1,14 @@
 <script lang="ts">
+  import {
+    ChartNoAxesCombined,
+    ChevronRight,
+    CircleCheckBig,
+    CreditCard,
+    RefreshCw,
+  } from "@lucide/svelte";
   import { createQuery } from "@tanstack/svelte-query";
   import Button from "@/shared/ui/Button.svelte";
-  import Badge from "@/shared/ui/Badge.svelte";
   import Card from "@/shared/ui/Card.svelte";
-  import CardHeader from "@/shared/ui/CardHeader.svelte";
   import CardContent from "@/shared/ui/CardContent.svelte";
   import EmptyState from "@/shared/ui/EmptyState.svelte";
   import type { ApiClient } from "@/shared/api/client";
@@ -14,26 +19,31 @@
   } from "@/data/assets/queries";
   import { bankQuery, bankRangeQuery } from "@/data/bank/queries";
   import { syncJobsQuery } from "@/data/connectors/queries";
-  import {
-    investmentsQuery,
-    investmentTransactionsQuery,
-  } from "@/data/investments/queries";
+  import { investmentsQuery } from "@/data/investments/queries";
   import {
     invoiceTransactionMappingsQuery,
-    invoicesQuery,
     invoicesRangeQuery,
   } from "@/data/invoices/queries";
   import { calculateMonthlyActivityTotals } from "@/data/activity/monthly-totals";
   import type { View } from "@/app/types";
   import {
-    formatBankAccountName,
     formatCompactTwd,
     formatCurrency,
-    formatDate,
-    normalizeFinancialDate,
     rateMap,
   } from "@/shared/format/financial";
   import NetWorthHistoryChart from "./components/NetWorthHistoryChart.svelte";
+
+  type InsightTone = "coral" | "amber" | "moss" | "steel";
+  type InsightIcon = "sync" | "card" | "cashflow";
+
+  interface OverviewInsight {
+    id: string;
+    title: string;
+    detail: string;
+    tone: InsightTone;
+    icon: InsightIcon;
+    view: View;
+  }
 
   let { api, navigate }: { api: ApiClient; navigate: (view: View) => void } =
     $props();
@@ -43,14 +53,12 @@
   const currentMonthRange = { from: monthKey, to: monthKey };
   const monthlyBank = createQuery(bankRangeQuery(() => api, currentMonthRange));
   const investments = createQuery(investmentsQuery(() => api));
-  const invoices = createQuery(invoicesQuery(() => api));
   const monthlyInvoices = createQuery(
     invoicesRangeQuery(() => api, currentMonthRange),
   );
   const invoiceMappings = createQuery(
     invoiceTransactionMappingsQuery(() => api),
   );
-  const trades = createQuery(investmentTransactionsQuery(() => api));
   const manualAssets = createQuery(manualAssetsQuery(() => api));
   const rates = createQuery(exchangeRatesQuery(() => api));
   const jobs = createQuery(syncJobsQuery(() => api));
@@ -130,46 +138,84 @@
   );
   const monthlyIncome = $derived(monthlyTotals.income);
   const monthlyExpense = $derived(monthlyTotals.expense);
+  const monthlyNet = $derived(monthlyIncome - monthlyExpense);
   const unhealthy = $derived(
     ($jobs.data ?? []).filter(
       (job) =>
         job.lastStatus === "failed" || job.lastStatus === "needs_user_action",
     ),
   );
+  const staleJobs = $derived(
+    ($jobs.data ?? []).filter(
+      (job) =>
+        job.enabled &&
+        !job.running &&
+        !unhealthy.some((unhealthyJob) => unhealthyJob.id === job.id) &&
+        (!job.lastSuccessAt ||
+          Date.now() - new Date(job.lastSuccessAt).getTime() >
+            48 * 60 * 60 * 1000),
+    ),
+  );
   const sourceCount = $derived(Math.max(($jobs.data ?? []).length, 4));
   const healthyCount = $derived(Math.max(sourceCount - unhealthy.length, 0));
-  const accountRows = $derived(bankData.accounts.slice(0, 4));
-  const recent = $derived.by(() =>
-    [
-      ...bankData.transactions.map((transaction) => ({
-        id: `bank-${transaction.id}`,
-        date: transaction.postedDate ?? transaction.authorizedAt ?? "",
-        title:
-          transaction.description ?? transaction.counterparty ?? "銀行交易",
-        detail: transaction.institutionName ?? "銀行",
-        amount: transaction.amount,
-        currency: transaction.currency,
-      })),
-      ...($trades.data ?? []).map((trade) => ({
-        id: `trade-${trade.id}`,
-        date: normalizeFinancialDate(trade.tradeDate ?? trade.postedDate),
-        title: trade.name ?? trade.transactionName ?? "投資交易",
-        detail: trade.brokerName ?? "投資",
-        amount: trade.price === 1 ? undefined : trade.amount,
-        currency: trade.currency,
-      })),
-      ...($invoices.data ?? []).map((invoice) => ({
-        id: `invoice-${invoice.id}`,
-        date: invoice.invoiceDate,
-        title: invoice.sellerName ?? "電子發票",
-        detail: "電子發票",
-        amount: -Math.abs(invoice.amount),
-        currency: "TWD",
-      })),
-    ]
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, 4),
-  );
+  const insights = $derived.by(() => {
+    const items: OverviewInsight[] = [];
+
+    if (unhealthy.length > 0) {
+      items.push({
+        id: "sync",
+        title: `${unhealthy.length} 個資料來源需要處理`,
+        detail: `目前 ${healthyCount} / ${sourceCount} 個來源正常`,
+        tone: "amber",
+        icon: "sync",
+        view: "data-sources",
+      });
+    }
+
+    if (staleJobs.length > 0) {
+      items.push({
+        id: "stale-sync",
+        title: `${staleJobs.length} 個資料來源超過 48 小時未更新`,
+        detail: "重新同步以取得最新的資產與活動資料",
+        tone: "amber",
+        icon: "sync",
+        view: "data-sources",
+      });
+    }
+
+    if (monthlyNet < 0) {
+      items.push({
+        id: "negative-cashflow",
+        title: `本月支出高於收入 ${formatCurrency(Math.abs(monthlyNet))}`,
+        detail: "查看活動分類，確認主要支出來源",
+        tone: "coral",
+        icon: "cashflow",
+        view: "activity",
+      });
+    }
+
+    const highCardDebt =
+      cardDebt > 0 &&
+      (monthlyIncome > 0
+        ? cardDebt > monthlyIncome * 0.5
+        : depositTotal > 0 && cardDebt > depositTotal * 0.2);
+
+    if (highCardDebt) {
+      items.push({
+        id: "high-card-debt",
+        title: `信用卡負債已達 ${formatCurrency(cardDebt)}`,
+        detail:
+          monthlyIncome > 0
+            ? `約為本月收入的 ${Math.round((cardDebt / monthlyIncome) * 100)}%`
+            : "信用卡負債相對可動用存款偏高",
+        tone: "coral",
+        icon: "card",
+        view: "cards",
+      });
+    }
+
+    return items.slice(0, 2);
+  });
   const missingRates = $derived([
     ...new Set(
       bankData.accounts
@@ -219,18 +265,27 @@
       </div>
     {/if}
 
-    <div class="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,1fr)]">
-      <section class="rounded-2xl bg-ink p-5 text-white shadow-xs md:p-6">
-        <p class="text-xs font-semibold text-white/55">全部資產</p>
+    <div class="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_340px]">
+      <section class="rounded-xl bg-ink p-5 text-white shadow-xs md:p-6">
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-xs font-semibold text-white/55">淨資產</p>
+          <p class="hidden text-xs text-white/40 sm:block">
+            {new Intl.DateTimeFormat("zh-TW", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            }).format(new Date())}
+          </p>
+        </div>
         <p
           class="mt-3 text-4xl font-bold tracking-tight tabular-nums md:text-[40px]"
         >
           {formatCurrency(netWorth)}
         </p>
         <p class="mt-3 text-sm font-semibold text-emerald-300">
-          淨資產 · 已扣除 {formatCurrency(cardDebt)} 信用卡負債
+          已扣除 {formatCurrency(cardDebt)} 信用卡負債
         </p>
-        <div class="mt-5 flex h-3 overflow-hidden rounded-full bg-white/10">
+        <div class="mt-5 flex h-2.5 overflow-hidden rounded-full bg-white/10">
           {#each allocation as item (item.label)}
             <span
               class={`h-full ${item.bar}`}
@@ -238,185 +293,280 @@
             ></span>
           {/each}
         </div>
-        <p class="mt-3 hidden text-xs text-white/65 md:block">
-          {allocation
-            .map((item) => `${item.label} ${pct(item.value)}%`)
-            .join("　")}
-        </p>
       </section>
 
-      <Card class="hidden xl:block">
-        <CardContent class="pt-6">
-          <h2 class="text-lg font-semibold">同步健康度</h2>
-          <p class="mt-3 text-3xl font-bold">
-            {healthyCount} / {sourceCount} 來源正常
-          </p>
-          <Badge
-            class="mt-3"
-            variant={unhealthy.length ? "destructive" : "success"}
-            >{unhealthy.length
-              ? `${unhealthy.length} 個來源需要處理`
-              : "所有來源同步正常"}</Badge
-          >
-          <p class="mt-2 text-xs text-ink/45">銀行與發票使用最近同步紀錄</p>
-          <Button
-            class="mt-4"
-            variant="secondary"
-            size="sm"
-            onclick={() => navigate("settings")}>前往同步設定</Button
-          >
-        </CardContent>
-      </Card>
+      <section
+        class="hidden xl:block"
+        aria-labelledby="overview-desktop-cashflow"
+      >
+        <Card class="h-full">
+          <CardContent class="grid h-full gap-3 p-5">
+            <div class="flex items-center justify-between gap-3">
+              <h2
+                id="overview-desktop-cashflow"
+                class="text-base font-semibold"
+              >
+                本月財務脈動
+              </h2>
+              <Button
+                variant="ghost"
+                size="sm"
+                onclick={() => navigate("activity")}>查看活動 →</Button
+              >
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="min-w-0 rounded-xl bg-moss/10 p-3">
+                <p class="text-[11px] font-semibold text-ink/50">收入</p>
+                <p
+                  class="mt-1.5 truncate text-base font-bold text-moss tabular-nums"
+                >
+                  +{formatCurrency(monthlyIncome)}
+                </p>
+              </div>
+              <div class="min-w-0 rounded-xl bg-coral/10 p-3">
+                <p class="text-[11px] font-semibold text-ink/50">支出</p>
+                <p
+                  class="mt-1.5 truncate text-base font-bold text-coral tabular-nums"
+                >
+                  −{formatCurrency(monthlyExpense)}
+                </p>
+              </div>
+            </div>
+            <div class="flex items-end justify-between gap-3 px-0.5">
+              <div>
+                <p class="text-xs font-semibold text-ink/50">本月淨流入</p>
+                <p class="mt-1 text-xs text-ink/40">收入 − 支出</p>
+              </div>
+              <p
+                class={`text-xl font-bold tabular-nums ${monthlyNet >= 0 ? "text-moss" : "text-coral"}`}
+              >
+                {formatCurrency(monthlyNet)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
     </div>
 
-    <div class="grid grid-cols-3 gap-2 md:grid-cols-4 md:gap-4">
-      {#each allocation as item (item.label)}
-        <Card>
-          <CardContent class="p-3 md:p-5">
-            <p class="text-xs font-semibold text-ink/50 md:mt-0">
-              {item.label === "其他" ? "其他資產" : item.label}
-            </p>
+    <Card class="overflow-hidden">
+      <CardContent class="grid grid-cols-3 divide-x divide-border p-0">
+        {#each allocation as item (item.label)}
+          <div
+            class="flex min-w-0 flex-col justify-center px-3 py-4 md:min-h-28 md:px-5 md:py-5"
+          >
+            <div class="flex min-w-0 items-center gap-2">
+              <span class={`size-2 shrink-0 rounded-full ${item.bar}`}></span>
+              <p class="truncate text-xs font-semibold text-ink/50">
+                {item.label === "其他" ? "其他資產" : item.label}
+              </p>
+            </div>
             <p
-              class={`mt-2 text-xl font-bold tabular-nums md:hidden ${item.text}`}
+              class={`mt-2 truncate text-lg font-bold tracking-tight tabular-nums sm:text-xl md:hidden ${item.text}`}
             >
               {formatCompactTwd(item.value)}
             </p>
-            <p class="mt-1 text-[11px] text-ink/40 md:hidden">
-              佔全部資產 {pct(item.value)}%
-            </p>
             <p
-              class={`mt-2 hidden text-2xl font-bold tabular-nums md:block ${item.text}`}
+              class="mt-2 hidden truncate text-2xl font-bold tracking-tight tabular-nums md:block"
             >
               {formatCurrency(item.value)}
             </p>
-            <p class="mt-1 hidden text-xs text-ink/40 md:block">
+            <p class="mt-1 truncate text-[11px] text-ink/40 md:text-xs">
               {item.detail}
             </p>
-          </CardContent>
-        </Card>
-      {/each}
-      <Card class="hidden md:block">
-        <CardContent class="p-5">
-          <p class="text-xs font-semibold text-ink/50">本月淨流入</p>
-          <p
-            class={`mt-2 text-2xl font-bold tracking-tight tabular-nums ${monthlyIncome >= monthlyExpense ? "text-moss" : "text-coral"}`}
-          >
-            {formatCurrency(monthlyIncome - monthlyExpense)}
-          </p>
-          <p class="mt-1 text-xs text-ink/45">收入 − 支出</p>
-        </CardContent>
-      </Card>
-    </div>
+          </div>
+        {/each}
+      </CardContent>
+    </Card>
 
-    <div class="xl:hidden">
-      <NetWorthHistoryChart
-        data={$history.data ?? []}
-        loading={$history.isPending}
-      />
-    </div>
-
-    <div class="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,1fr)]">
-      <div class="hidden min-w-0 xl:block">
+    <div class="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_340px]">
+      <div class="min-w-0">
         <NetWorthHistoryChart
           data={$history.data ?? []}
           loading={$history.isPending}
         />
       </div>
-      <Card>
-        <CardHeader class="flex-row items-center justify-between">
-          <h2 class="text-lg font-semibold">資產配置</h2>
-          <Button variant="ghost" size="sm" onclick={() => navigate("assets")}
-            >查看全部 →</Button
-          >
-        </CardHeader>
-        <CardContent class="grid gap-5">
-          {#each allocation as item (item.label)}
-            <div>
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <span class="text-sm font-semibold">{item.label}</span><span
-                    class="ml-2 text-xs text-ink/40">{item.detail}</span
-                  >
+
+      <section
+        class="hidden xl:block"
+        aria-labelledby="overview-desktop-insights"
+      >
+        <Card class="h-full">
+          <CardContent class="grid gap-3 p-5">
+            <h2 id="overview-desktop-insights" class="text-base font-semibold">
+              值得留意
+            </h2>
+            {#if insights.length === 0}
+              <div
+                class="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-4"
+              >
+                <CircleCheckBig class="size-5 shrink-0 text-moss" />
+                <div class="min-w-0">
+                  <p class="text-xs font-semibold">目前沒有需要處理的事項</p>
+                  <p class="mt-1 text-[11px] text-ink/45">
+                    同步與本月收支狀態正常
+                  </p>
                 </div>
-                <span class={`text-sm font-bold tabular-nums ${item.text}`}
-                  >{formatCurrency(item.value)}</span
+              </div>
+            {:else}
+              {#each insights as insight (insight.id)}
+                <button
+                  class={`flex min-w-0 items-center gap-3 rounded-lg border p-3 text-left transition hover:brightness-[0.98] ${
+                    insight.tone === "coral"
+                      ? "border-red-200 bg-red-50/70"
+                      : insight.tone === "amber"
+                        ? "border-amber-200 bg-amber-50/70"
+                        : insight.tone === "moss"
+                          ? "border-emerald-200 bg-emerald-50/70"
+                          : "border-sky-200 bg-sky-50/70"
+                  }`}
+                  onclick={() => navigate(insight.view)}
                 >
-              </div>
-              <div class="mt-2 h-2 overflow-hidden rounded-full bg-ink/10">
-                <span
-                  class={`block h-full rounded-full ${item.bar}`}
-                  style={`width:${pct(item.value)}%`}
-                ></span>
-              </div>
-            </div>
-          {/each}
-        </CardContent>
-      </Card>
-    </div>
-
-    {#if unhealthy.length > 0}
-      <section class="rounded-2xl bg-amber-50 p-5 text-amber-900 md:hidden">
-        <p class="font-semibold">{unhealthy.length} 個來源需要更新</p>
-        <button
-          class="mt-3 text-sm font-semibold"
-          onclick={() => navigate("data-sources")}>立即處理 →</button
-        >
+                  {#if insight.icon === "sync"}
+                    <RefreshCw class="size-5 shrink-0 text-amber-600" />
+                  {:else if insight.icon === "card"}
+                    <CreditCard class="size-5 shrink-0 text-coral" />
+                  {:else}
+                    <ChartNoAxesCombined
+                      class={`size-5 shrink-0 ${insight.tone === "moss" ? "text-moss" : "text-coral"}`}
+                    />
+                  {/if}
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate text-xs font-semibold"
+                      >{insight.title}</span
+                    >
+                    <span class="mt-1 block truncate text-[11px] text-ink/45"
+                      >{insight.detail}</span
+                    >
+                  </span>
+                  <ChevronRight class="size-4 shrink-0 text-ink/40" />
+                </button>
+              {/each}
+            {/if}
+          </CardContent>
+        </Card>
       </section>
-    {/if}
-
-    <div
-      class="hidden gap-5 xl:grid xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,1fr)]"
-    >
-      <Card>
-        <CardHeader class="flex-row items-center justify-between"
-          ><h2 class="text-lg font-semibold">銀行與信用卡</h2>
-          <Button variant="ghost" size="sm" onclick={() => navigate("assets")}
-            >查看資產 →</Button
-          ></CardHeader
-        >
-        <CardContent class="grid gap-4">
-          {#each accountRows as account (account.id)}
-            <div
-              class="grid grid-cols-[120px_minmax(0,1fr)_auto_auto] gap-3 text-sm"
-            >
-              <span class="font-semibold"
-                >{account.institutionName ?? account.connectorId}</span
-              >
-              <span class="truncate text-ink/45"
-                >{account.accountName ?? formatBankAccountName(account)}</span
-              >
-              <span
-                class={`font-semibold tabular-nums ${account.accountType === "credit" ? "text-coral" : ""}`}
-                >{formatCurrency(account.balance ?? 0, account.currency)}</span
-              >
-              <span class="text-xs text-ink/40"
-                >{account.asOfAt ? formatDate(account.asOfAt) : "—"}</span
-              >
-            </div>
-          {/each}
-        </CardContent>
-      </Card>
-      <Card class="min-w-0 overflow-hidden">
-        <CardHeader><h2 class="text-lg font-semibold">近期活動</h2></CardHeader>
-        <CardContent class="grid min-w-0 gap-4">
-          {#each recent as item (item.id)}
-            <div
-              class="flex min-w-0 items-center justify-between gap-3 text-sm"
-            >
-              <div class="min-w-0 flex-1 overflow-hidden">
-                <p class="truncate font-semibold">{item.title}</p>
-                <p class="truncate text-xs text-ink/40">{item.detail}</p>
-              </div>
-              <span
-                class={`max-w-[42%] shrink-0 truncate font-semibold tabular-nums ${item.amount != null && item.amount < 0 ? "text-coral" : item.amount != null ? "text-moss" : "text-ink/40"}`}
-                >{item.amount == null
-                  ? "—"
-                  : `${item.amount >= 0 ? "+" : ""}${formatCurrency(item.amount, item.currency)}`}</span
-              >
-            </div>
-          {/each}
-        </CardContent>
-      </Card>
     </div>
+
+    <section
+      class="grid gap-3 xl:hidden"
+      aria-labelledby="overview-mobile-cashflow"
+    >
+      <div class="flex items-center justify-between gap-3 px-1">
+        <h2 id="overview-mobile-cashflow" class="text-lg font-semibold">
+          本月收支
+        </h2>
+        <Button variant="ghost" size="sm" onclick={() => navigate("activity")}
+          >查看活動 →</Button
+        >
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <Card>
+          <CardContent class="p-4">
+            <p class="text-xs font-semibold text-ink/50">
+              {Number(monthKey.slice(5))} 月收入
+            </p>
+            <p
+              class="mt-2 truncate text-lg font-bold text-moss tabular-nums sm:text-xl"
+            >
+              +{formatCurrency(monthlyIncome)}
+            </p>
+            <p class="mt-1 text-[11px] text-ink/45">銀行與信用卡活動</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent class="p-4">
+            <p class="text-xs font-semibold text-ink/50">
+              {Number(monthKey.slice(5))} 月支出
+            </p>
+            <p
+              class="mt-2 truncate text-lg font-bold text-coral tabular-nums sm:text-xl"
+            >
+              −{formatCurrency(monthlyExpense)}
+            </p>
+            <p class="mt-1 text-[11px] text-ink/45">含未配對發票</p>
+          </CardContent>
+        </Card>
+        <Card class="col-span-2">
+          <CardContent
+            class="grid min-h-20 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 p-4 sm:min-h-24 sm:p-5"
+          >
+            <div>
+              <p class="text-xs font-semibold text-ink/50">
+                {Number(monthKey.slice(5))} 月淨流入
+              </p>
+              <p class="mt-1 text-[11px] text-ink/45">收入 − 支出</p>
+            </div>
+            <p
+              class={`text-2xl font-bold tracking-tight tabular-nums sm:text-3xl ${monthlyNet >= 0 ? "text-moss" : "text-coral"}`}
+            >
+              {formatCurrency(monthlyNet)}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+
+    <section class="xl:hidden" aria-labelledby="overview-mobile-insights">
+      <Card>
+        <CardContent class="grid gap-3 p-4">
+          <div class="flex items-center justify-between gap-3">
+            <h2 id="overview-mobile-insights" class="text-base font-semibold">
+              值得留意
+            </h2>
+            <span
+              class="rounded-full bg-paper px-2.5 py-1 text-xs font-semibold text-ink/50"
+              >{insights.length}</span
+            >
+          </div>
+          {#if insights.length === 0}
+            <div
+              class="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3"
+            >
+              <CircleCheckBig class="size-5 shrink-0 text-moss" />
+              <div class="min-w-0">
+                <p class="text-xs font-semibold">目前沒有需要處理的事項</p>
+                <p class="mt-1 text-[11px] text-ink/45">
+                  同步與本月收支狀態正常
+                </p>
+              </div>
+            </div>
+          {:else}
+            {#each insights as insight (insight.id)}
+              <button
+                class={`flex min-w-0 items-center gap-3 rounded-lg border p-3 text-left ${
+                  insight.tone === "coral"
+                    ? "border-red-200 bg-red-50/70"
+                    : insight.tone === "amber"
+                      ? "border-amber-200 bg-amber-50/70"
+                      : insight.tone === "moss"
+                        ? "border-emerald-200 bg-emerald-50/70"
+                        : "border-sky-200 bg-sky-50/70"
+                }`}
+                onclick={() => navigate(insight.view)}
+              >
+                {#if insight.icon === "sync"}
+                  <RefreshCw class="size-5 shrink-0 text-amber-600" />
+                {:else if insight.icon === "card"}
+                  <CreditCard class="size-5 shrink-0 text-coral" />
+                {:else}
+                  <ChartNoAxesCombined
+                    class={`size-5 shrink-0 ${insight.tone === "moss" ? "text-moss" : "text-coral"}`}
+                  />
+                {/if}
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-xs font-semibold"
+                    >{insight.title}</span
+                  >
+                  <span class="mt-1 block truncate text-[11px] text-ink/45"
+                    >{insight.detail}</span
+                  >
+                </span>
+                <ChevronRight class="size-4 shrink-0 text-ink/40" />
+              </button>
+            {/each}
+          {/if}
+        </CardContent>
+      </Card>
+    </section>
   </div>
 {/if}

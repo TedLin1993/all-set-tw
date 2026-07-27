@@ -1,0 +1,2720 @@
+{
+  "version": "2.14",
+  "children": [
+    {
+      "type": "frame",
+      "id": "g9BPq",
+      "x": 0,
+      "y": 0,
+      "name": "A 平衡總覽｜Desktop",
+      "clip": true,
+      "width": 1440,
+      "height": 1100,
+      "fill": "$canvas",
+      "children": [
+        {
+          "type": "frame",
+          "id": "a4Dtxp",
+          "name": "A Sidebar",
+          "width": 220,
+          "height": "fill_container",
+          "fill": "$surface",
+          "stroke": "$line",
+          "strokeWidth": {
+            "right": 1
+          },
+          "layout": "vertical",
+          "gap": 28,
+          "padding": [
+            28,
+            20
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "MMTx7",
+              "name": "Brand",
+              "gap": 10,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "w7ogHo",
+                  "name": "Brand Mark",
+                  "width": 34,
+                  "height": 34,
+                  "fill": "$ink",
+                  "cornerRadius": 10,
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "V0lfE",
+                      "name": "Brand Glyph",
+                      "fill": "#FFFFFF",
+                      "content": "T",
+                      "fontFamily": "$font-data",
+                      "fontSize": 18,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "U7WScK",
+                  "name": "Brand Name",
+                  "fill": "$ink",
+                  "content": "Taiwan Fin Hub",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 16,
+                  "fontWeight": "700"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "y37wF",
+              "name": "Primary Navigation",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "ptq8y",
+                  "name": "Nav 總覽",
+                  "width": "fill_container",
+                  "fill": "$ink",
+                  "cornerRadius": 10,
+                  "gap": 12,
+                  "padding": [
+                    11,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "FghFO",
+                      "name": "總覽 Icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "layout-dashboard",
+                      "library": "lucide",
+                      "fill": "#FFFFFF"
+                    },
+                    {
+                      "type": "text",
+                      "id": "FC5YA",
+                      "name": "總覽 Label",
+                      "fill": "#FFFFFF",
+                      "content": "總覽",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 14,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pPIMw",
+                  "name": "Nav 資產",
+                  "width": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "cornerRadius": 10,
+                  "gap": 12,
+                  "padding": [
+                    11,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "lsKjr",
+                      "name": "資產 Icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "wallet-cards",
+                      "library": "lucide",
+                      "fill": "$muted"
+                    },
+                    {
+                      "type": "text",
+                      "id": "yqn9c",
+                      "name": "資產 Label",
+                      "fill": "$muted",
+                      "content": "資產",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "sl1uG",
+                  "name": "Nav 活動",
+                  "width": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "cornerRadius": 10,
+                  "gap": 12,
+                  "padding": [
+                    11,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Z0cIS",
+                      "name": "活動 Icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "history",
+                      "library": "lucide",
+                      "fill": "$muted"
+                    },
+                    {
+                      "type": "text",
+                      "id": "IMusY",
+                      "name": "活動 Label",
+                      "fill": "$muted",
+                      "content": "活動",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "B0HFs",
+                  "name": "Nav 發票",
+                  "width": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "cornerRadius": 10,
+                  "gap": 12,
+                  "padding": [
+                    11,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "TKvFR",
+                      "name": "發票 Icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "receipt-text",
+                      "library": "lucide",
+                      "fill": "$muted"
+                    },
+                    {
+                      "type": "text",
+                      "id": "mkrXG",
+                      "name": "發票 Label",
+                      "fill": "$muted",
+                      "content": "發票",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "m9HpY",
+                  "name": "Nav 設定",
+                  "width": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "cornerRadius": 10,
+                  "gap": 12,
+                  "padding": [
+                    11,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "xokGQ",
+                      "name": "設定 Icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "settings",
+                      "library": "lucide",
+                      "fill": "$muted"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Cwy1T",
+                      "name": "設定 Label",
+                      "fill": "$muted",
+                      "content": "設定",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "mozX2",
+              "name": "Sidebar Spacer",
+              "width": "fill_container",
+              "height": "fill_container"
+            },
+            {
+              "type": "frame",
+              "id": "mNPFK",
+              "name": "Sync Status",
+              "width": "fill_container",
+              "fill": "$soft-moss",
+              "cornerRadius": 12,
+              "layout": "vertical",
+              "gap": 8,
+              "padding": 14,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "JWfYL",
+                  "name": "Sync Label",
+                  "fill": "$muted",
+                  "content": "同步狀態",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 11,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "W61XxT",
+                  "name": "Sync Value",
+                  "fill": "$moss",
+                  "content": "4 / 4 來源正常",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 14,
+                  "fontWeight": "700"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "t3GEk",
+          "name": "A Main",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 20,
+          "padding": [
+            30,
+            36
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "Wi8cM",
+              "name": "Page Header",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "m3nrG",
+                  "name": "Header Copy",
+                  "layout": "vertical",
+                  "gap": 4,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "iUS8e",
+                      "name": "Financial Overview Eyebrow",
+                      "fill": "$steel",
+                      "content": "FINANCIAL OVERVIEW",
+                      "fontFamily": "$font-data",
+                      "fontSize": 10,
+                      "fontWeight": "600",
+                      "letterSpacing": 0.12
+                    },
+                    {
+                      "type": "text",
+                      "id": "Fe7bj",
+                      "name": "Page Title",
+                      "fill": "$ink",
+                      "content": "資產總覽",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 28,
+                      "fontWeight": "750"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "dI8Qb",
+                  "name": "Header Actions",
+                  "gap": 10,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "nzeZd",
+                      "name": "Last Sync",
+                      "fill": "$surface",
+                      "cornerRadius": 9,
+                      "stroke": "$line",
+                      "strokeWidth": 1,
+                      "gap": 8,
+                      "padding": [
+                        9,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "H3ovc",
+                          "name": "Refresh Icon",
+                          "width": 15,
+                          "height": 15,
+                          "icon": "refresh-cw",
+                          "library": "lucide",
+                          "fill": "$muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "SSamd",
+                          "name": "Last Sync Text",
+                          "fill": "$muted",
+                          "content": "剛剛更新",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "w9f2F",
+                      "name": "Hide Amount",
+                      "width": 38,
+                      "height": 38,
+                      "fill": "$surface",
+                      "cornerRadius": 19,
+                      "stroke": "$line",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "offAM",
+                          "name": "Eye Off",
+                          "width": 17,
+                          "height": 17,
+                          "icon": "eye-off",
+                          "library": "lucide",
+                          "fill": "$ink"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "a2IMv",
+              "name": "Hero Row",
+              "width": "fill_container",
+              "height": 188,
+              "gap": 18,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "KMBTn",
+                  "name": "Net Worth Hero",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "$ink",
+                  "cornerRadius": 12,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000A",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 3
+                  },
+                  "layout": "vertical",
+                  "gap": 13,
+                  "padding": 24,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "x9GJ1W",
+                      "name": "Worth Header",
+                      "width": "fill_container",
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ogwTw",
+                          "name": "Worth Label",
+                          "fill": "#FFFFFF99",
+                          "content": "淨資產",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "RYARU",
+                          "name": "Worth Date",
+                          "fill": "#FFFFFF66",
+                          "content": "2026 年 7 月 27 日",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "Rcj5a",
+                      "name": "Worth Amount",
+                      "fill": "#FFFFFF",
+                      "content": "NT$2,486,350",
+                      "fontFamily": "$font-data",
+                      "fontSize": 42,
+                      "fontWeight": "650",
+                      "letterSpacing": -0.03
+                    },
+                    {
+                      "type": "text",
+                      "id": "UMwt4",
+                      "name": "Worth Debt",
+                      "fill": "#6EE7B7",
+                      "content": "已扣除 NT$40,000 信用卡負債",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 12,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "MfuR5",
+                      "name": "Allocation Bar",
+                      "clip": true,
+                      "width": "fill_container",
+                      "height": 10,
+                      "cornerRadius": 5,
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "id": "kqVNg",
+                          "name": "Investment Segment",
+                          "fill": "$steel",
+                          "width": 430,
+                          "height": 10
+                        },
+                        {
+                          "type": "rectangle",
+                          "id": "pPczo",
+                          "name": "Deposit Segment",
+                          "fill": "$moss",
+                          "width": 95,
+                          "height": 10
+                        },
+                        {
+                          "type": "rectangle",
+                          "id": "iobkm",
+                          "name": "Other Segment",
+                          "fill": "$coral",
+                          "width": "fill_container",
+                          "height": 10
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "qldUC",
+                  "name": "Monthly Pulse",
+                  "width": 340,
+                  "height": "fill_container",
+                  "fill": "$surface",
+                  "cornerRadius": 12,
+                  "stroke": "$line",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000A",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 3
+                  },
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": 20,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "S6evoW",
+                      "name": "Pulse Header",
+                      "width": "fill_container",
+                      "justifyContent": "space_between",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "D8Gppj",
+                          "name": "Pulse Title",
+                          "fill": "$ink",
+                          "content": "本月財務脈動",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 15,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "E8lnqj",
+                          "name": "Pulse Link",
+                          "fill": "$steel",
+                          "content": "查看活動 →",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 11,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "M8cWo",
+                      "name": "Pulse Values",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "W6l8IA",
+                          "name": "收入 Metric",
+                          "width": "fill_container",
+                          "fill": "$soft-moss",
+                          "cornerRadius": 10,
+                          "layout": "vertical",
+                          "gap": 6,
+                          "padding": 12,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "CerOa",
+                              "name": "收入 Label",
+                              "fill": "$muted",
+                              "content": "收入",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 10,
+                              "fontWeight": "600"
+                            },
+                            {
+                              "type": "text",
+                              "id": "CWRcQ",
+                              "name": "收入 Value",
+                              "fill": "$moss",
+                              "content": "+NT$88,500",
+                              "fontFamily": "$font-data",
+                              "fontSize": 16,
+                              "fontWeight": "650"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "umMMt",
+                          "name": "支出 Metric",
+                          "width": "fill_container",
+                          "fill": "$soft-coral",
+                          "cornerRadius": 10,
+                          "layout": "vertical",
+                          "gap": 6,
+                          "padding": 12,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "hHrjN",
+                              "name": "支出 Label",
+                              "fill": "$muted",
+                              "content": "支出",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 10,
+                              "fontWeight": "600"
+                            },
+                            {
+                              "type": "text",
+                              "id": "fclwG",
+                              "name": "支出 Value",
+                              "fill": "$coral",
+                              "content": "−NT$61,240",
+                              "fontFamily": "$font-data",
+                              "fontSize": 16,
+                              "fontWeight": "650"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "H4sEX7",
+                      "name": "Net Flow",
+                      "width": "fill_container",
+                      "padding": [
+                        3,
+                        2
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "XI8zQ",
+                          "name": "Net Flow Label",
+                          "fill": "$muted",
+                          "content": "本月淨流入",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "eLiAz",
+                          "name": "Net Flow Value",
+                          "fill": "$moss",
+                          "content": "NT$27,260",
+                          "fontFamily": "$font-data",
+                          "fontSize": 20,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "cc4wp",
+              "name": "Asset Summary",
+              "width": "fill_container",
+              "height": 104,
+              "fill": "$surface",
+              "cornerRadius": 12,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "effect": {
+                "type": "shadow",
+                "shadowType": "outer",
+                "color": "#0000000A",
+                "offset": {
+                  "x": 0,
+                  "y": 1
+                },
+                "blur": 3
+              },
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "HXHBa",
+                  "name": "投資 Summary",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "stroke": "$line",
+                  "strokeWidth": {
+                    "right": 1
+                  },
+                  "layout": "vertical",
+                  "gap": 7,
+                  "padding": [
+                    16,
+                    18
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "yLu7R",
+                      "name": "投資 Header",
+                      "width": "fill_container",
+                      "justifyContent": "space_between",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "lS6fj",
+                          "name": "投資 Label",
+                          "fill": "$muted",
+                          "content": "投資",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "hrc1Q",
+                          "name": "投資 Percent",
+                          "fill": "$steel",
+                          "content": "52%",
+                          "fontFamily": "$font-data",
+                          "fontSize": 12,
+                          "fontWeight": "650"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "RY8D7",
+                      "name": "投資 Amount",
+                      "fill": "$ink",
+                      "content": "NT$1,320,000",
+                      "fontFamily": "$font-data",
+                      "fontSize": 21,
+                      "fontWeight": "650"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "r58J74",
+                  "name": "存款 Summary",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "stroke": "$line",
+                  "strokeWidth": {
+                    "right": 1
+                  },
+                  "layout": "vertical",
+                  "gap": 7,
+                  "padding": [
+                    16,
+                    18
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "cTPPh",
+                      "name": "存款 Header",
+                      "width": "fill_container",
+                      "justifyContent": "space_between",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "V1TFE",
+                          "name": "存款 Label",
+                          "fill": "$muted",
+                          "content": "存款",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "KOhKB",
+                          "name": "存款 Percent",
+                          "fill": "$moss",
+                          "content": "19%",
+                          "fontFamily": "$font-data",
+                          "fontSize": 12,
+                          "fontWeight": "650"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "A5ls5",
+                      "name": "存款 Amount",
+                      "fill": "$ink",
+                      "content": "NT$486,350",
+                      "fontFamily": "$font-data",
+                      "fontSize": 21,
+                      "fontWeight": "650"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "d4VOw",
+                  "name": "其他資產 Summary",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "stroke": "#FFFFFF00",
+                  "layout": "vertical",
+                  "gap": 7,
+                  "padding": [
+                    16,
+                    18
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "sCj4z",
+                      "name": "其他資產 Header",
+                      "width": "fill_container",
+                      "justifyContent": "space_between",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "mlaWz",
+                          "name": "其他資產 Label",
+                          "fill": "$muted",
+                          "content": "其他資產",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 12,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "obXXD",
+                          "name": "其他資產 Percent",
+                          "fill": "$coral",
+                          "content": "29%",
+                          "fontFamily": "$font-data",
+                          "fontSize": 12,
+                          "fontWeight": "650"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "Q3a0ps",
+                      "name": "其他資產 Amount",
+                      "fill": "$ink",
+                      "content": "NT$720,000",
+                      "fontFamily": "$font-data",
+                      "fontSize": 21,
+                      "fontWeight": "650"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "PetCs",
+              "name": "Trend and Insights",
+              "width": "fill_container",
+              "height": 330,
+              "gap": 18,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "xrUoz",
+                  "name": "Asset Trend",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "$surface",
+                  "cornerRadius": 12,
+                  "stroke": "$line",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000A",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 3
+                  },
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 20,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "fLYeY",
+                      "name": "Trend Header",
+                      "width": "fill_container",
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "CMviw",
+                          "name": "Trend Copy",
+                          "layout": "vertical",
+                          "gap": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "jlKcn",
+                              "name": "Trend Title",
+                              "fill": "$ink",
+                              "content": "資產走勢",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 16,
+                              "fontWeight": "700"
+                            },
+                            {
+                              "type": "text",
+                              "id": "DGUKu",
+                              "name": "Trend Subtitle",
+                              "fill": "$muted",
+                              "content": "每日資產總額",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "bjqb0",
+                          "name": "Trend Range",
+                          "fill": "$canvas",
+                          "cornerRadius": 9,
+                          "gap": 4,
+                          "padding": 3,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "QZAXi",
+                              "name": "Range 1M",
+                              "fill": "#FFFFFF00",
+                              "cornerRadius": 7,
+                              "padding": [
+                                6,
+                                9
+                              ],
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "pRmi5",
+                                  "name": "Range Label 1M",
+                                  "fill": "$muted",
+                                  "content": "1M",
+                                  "fontFamily": "$font-ui",
+                                  "fontSize": 10,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "U58WKx",
+                              "name": "Range 3M",
+                              "fill": "#FFFFFF00",
+                              "cornerRadius": 7,
+                              "padding": [
+                                6,
+                                9
+                              ],
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "uScTC",
+                                  "name": "Range Label 3M",
+                                  "fill": "$muted",
+                                  "content": "3M",
+                                  "fontFamily": "$font-ui",
+                                  "fontSize": 10,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "T9w3i",
+                              "name": "Range 6M",
+                              "fill": "#FFFFFF00",
+                              "cornerRadius": 7,
+                              "padding": [
+                                6,
+                                9
+                              ],
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "g40SB",
+                                  "name": "Range Label 6M",
+                                  "fill": "$muted",
+                                  "content": "6M",
+                                  "fontFamily": "$font-ui",
+                                  "fontSize": 10,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "WtHw6",
+                              "name": "Range 1Y",
+                              "fill": "$surface",
+                              "cornerRadius": 7,
+                              "padding": [
+                                6,
+                                9
+                              ],
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "TRHBm",
+                                  "name": "Range Label 1Y",
+                                  "fill": "$ink",
+                                  "content": "1Y",
+                                  "fontFamily": "$font-ui",
+                                  "fontSize": 10,
+                                  "fontWeight": "700"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "G5V3D",
+                              "name": "Range 全部",
+                              "fill": "#FFFFFF00",
+                              "cornerRadius": 7,
+                              "padding": [
+                                6,
+                                9
+                              ],
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "c7Vf0f",
+                                  "name": "Range Label 全部",
+                                  "fill": "$muted",
+                                  "content": "全部",
+                                  "fontFamily": "$font-ui",
+                                  "fontSize": 10,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "UJbqR",
+                      "name": "Asset Trend Line Chart",
+                      "width": "fill_container",
+                      "height": 180,
+                      "layout": "none",
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "id": "LyBVM",
+                          "x": 0,
+                          "y": 10,
+                          "name": "Grid Line Top",
+                          "fill": "#DDE2DE88",
+                          "width": 750,
+                          "height": 1
+                        },
+                        {
+                          "type": "rectangle",
+                          "id": "o7QYz",
+                          "x": 0,
+                          "y": 64,
+                          "name": "Grid Line Upper",
+                          "fill": "#DDE2DE88",
+                          "width": 750,
+                          "height": 1
+                        },
+                        {
+                          "type": "rectangle",
+                          "id": "DWq7N",
+                          "x": 0,
+                          "y": 118,
+                          "name": "Grid Line Lower",
+                          "fill": "#DDE2DE88",
+                          "width": 750,
+                          "height": 1
+                        },
+                        {
+                          "type": "rectangle",
+                          "id": "Oz4lT",
+                          "x": 0,
+                          "y": 171,
+                          "name": "Grid Line Bottom",
+                          "fill": "#DDE2DE",
+                          "width": 750,
+                          "height": 1
+                        },
+                        {
+                          "type": "path",
+                          "id": "Mn7lA",
+                          "x": 0,
+                          "y": 0,
+                          "name": "Asset Trend Area",
+                          "geometry": "M0 146l34-4 34 1 35-8 35-7 34 4 35-9 34-8 35 4 34-12 35-11 34 4 34-12 35-13 34 7 35-15 34-13 35 5 34-24 35-19 34 10 35-8 26 2 0 152-750 0z",
+                          "viewBox": [
+                            0,
+                            0,
+                            750,
+                            172
+                          ],
+                          "fill": "#EAF2F5AA",
+                          "width": 750,
+                          "height": 172
+                        },
+                        {
+                          "type": "path",
+                          "id": "LduCB",
+                          "x": 0,
+                          "y": 0,
+                          "name": "Asset Trend Line",
+                          "geometry": "M0 146l34-4 34 1 35-8 35-7 34 4 35-9 34-8 35 4 34-12 35-11 34 4 34-12 35-13 34 7 35-15 34-13 35 5 34-24 35-19 34 10 35-8 26 2",
+                          "viewBox": [
+                            0,
+                            0,
+                            750,
+                            172
+                          ],
+                          "fill": "#FFFFFF00",
+                          "width": 750,
+                          "height": 172,
+                          "stroke": "#2F6F89",
+                          "strokeWidth": 3,
+                          "strokeLinejoin": "round",
+                          "strokeLinecap": "round"
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "YFEek",
+                          "x": 738,
+                          "y": 14,
+                          "name": "Latest Value Point",
+                          "fill": "#2F6F89",
+                          "width": 12,
+                          "height": 12,
+                          "stroke": "#FFFFFF",
+                          "strokeWidth": 3
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Bk981",
+                      "name": "Trend Axis",
+                      "width": "fill_container",
+                      "justifyContent": "space_between",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "OuF5A",
+                          "name": "Axis 10/1",
+                          "fill": "$muted",
+                          "content": "10/1",
+                          "fontFamily": "$font-data",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "g79qXD",
+                          "name": "Axis 1/1",
+                          "fill": "$muted",
+                          "content": "1/1",
+                          "fontFamily": "$font-data",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "w8IeRn",
+                          "name": "Axis 4/1",
+                          "fill": "$muted",
+                          "content": "4/1",
+                          "fontFamily": "$font-data",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "s5lGIi",
+                          "name": "Axis 7/1",
+                          "fill": "$muted",
+                          "content": "7/1",
+                          "fontFamily": "$font-data",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "m2Qj3w",
+                  "name": "Financial Insights",
+                  "width": 340,
+                  "height": "fill_container",
+                  "fill": "$surface",
+                  "cornerRadius": 12,
+                  "stroke": "$line",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000A",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 3
+                  },
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": 20,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "HFxHm",
+                      "name": "Insights Title",
+                      "fill": "$ink",
+                      "content": "值得留意",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 16,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "jKrTP",
+                      "name": "信用卡到期提醒",
+                      "width": "fill_container",
+                      "fill": "#FFF7F5",
+                      "cornerRadius": 8,
+                      "stroke": "#F1D5CE",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": 13,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "IgjdA",
+                          "name": "信用卡到期 Icon",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "credit-card",
+                          "library": "lucide",
+                          "fill": "#C45A45"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "A26w5",
+                          "name": "信用卡 8/03 到期 Copy",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "CElrL",
+                              "name": "信用卡到期 Title",
+                              "fill": "$ink",
+                              "content": "信用卡將於 7 天內到期",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 12,
+                              "fontWeight": "650"
+                            },
+                            {
+                              "type": "text",
+                              "id": "Vkpcg",
+                              "name": "信用卡到期 Detail",
+                              "fill": "$muted",
+                              "content": "台新 · 待繳 NT$40,000 · 8/03",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 10,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "icon",
+                          "id": "zThlJ",
+                          "name": "信用卡提醒 Chevron",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "chevron-right",
+                          "library": "lucide",
+                          "fill": "#6B7A80"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "t3WdB",
+                      "name": "支出速度偏高提醒",
+                      "width": "fill_container",
+                      "fill": "#FFF9EB",
+                      "cornerRadius": 8,
+                      "stroke": "#F2E2BA",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": 13,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "W9tjVi",
+                          "name": "支出速度偏高 Icon",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "chart-no-axes-combined",
+                          "library": "lucide",
+                          "fill": "#C38B2C"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "vfYTX",
+                          "name": "本月支出較上月少 8% Copy",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "B64JX",
+                              "name": "支出速度偏高 Title",
+                              "fill": "$ink",
+                              "content": "本月支出速度偏高 28%",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 12,
+                              "fontWeight": "650"
+                            },
+                            {
+                              "type": "text",
+                              "id": "DsIqc",
+                              "name": "支出速度偏高 Detail",
+                              "fill": "$muted",
+                              "content": "較近三月同期多 NT$8,420",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 10,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "icon",
+                          "id": "b9TPIx",
+                          "name": "支出提醒 Chevron",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "chevron-right",
+                          "library": "lucide",
+                          "fill": "#6B7A80"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "Q215W",
+      "x": 1540,
+      "y": 0,
+      "name": "A 平衡總覽｜Mobile",
+      "clip": true,
+      "width": 390,
+      "height": 1180,
+      "fill": "$canvas",
+      "layout": "vertical",
+      "children": [
+        {
+          "type": "frame",
+          "id": "SQq5f",
+          "name": "A Mobile Content",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 14,
+          "padding": [
+            20,
+            16,
+            12,
+            16
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "v7PsH",
+              "name": "Mobile Header",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "QZsZp",
+                  "name": "Mobile Header Copy",
+                  "layout": "vertical",
+                  "gap": 3,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "oizFx",
+                      "name": "Mobile Financial Overview Eyebrow",
+                      "fill": "$steel",
+                      "content": "FINANCIAL OVERVIEW",
+                      "fontFamily": "$font-data",
+                      "fontSize": 9,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "b1cb8E",
+                      "name": "Mobile Title",
+                      "fill": "$ink",
+                      "content": "資產總覽",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 23,
+                      "fontWeight": "750"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "JcZzf",
+                  "name": "Mobile Hide Amount",
+                  "width": 36,
+                  "height": 36,
+                  "fill": "$surface",
+                  "cornerRadius": 18,
+                  "stroke": "$line",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "bdet7",
+                      "name": "Mobile Eye Off",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "eye-off",
+                      "library": "lucide",
+                      "fill": "$ink"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "jaAOg",
+              "name": "Mobile Net Worth",
+              "width": "fill_container",
+              "height": 176,
+              "fill": "$ink",
+              "cornerRadius": 12,
+              "effect": {
+                "type": "shadow",
+                "shadowType": "outer",
+                "color": "#0000000A",
+                "offset": {
+                  "x": 0,
+                  "y": 1
+                },
+                "blur": 3
+              },
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "HV3qy",
+                  "name": "Mobile Worth Label",
+                  "fill": "#FFFFFF88",
+                  "content": "淨資產",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 11,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "Uverw",
+                  "name": "Mobile Worth Amount",
+                  "fill": "#FFFFFF",
+                  "content": "NT$2,486,350",
+                  "fontFamily": "$font-data",
+                  "fontSize": 31,
+                  "fontWeight": "650",
+                  "letterSpacing": -0.03
+                },
+                {
+                  "type": "text",
+                  "id": "kynqg",
+                  "name": "Mobile Worth Debt",
+                  "fill": "#6EE7B7",
+                  "content": "已扣除 NT$40,000 信用卡負債",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 11,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "frame",
+                  "id": "lUFCw",
+                  "name": "Mobile Allocation Bar",
+                  "clip": true,
+                  "width": "fill_container",
+                  "height": 9,
+                  "cornerRadius": 5,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "id": "ji6r7",
+                      "name": "Mobile Investment Segment",
+                      "fill": "$steel",
+                      "width": 168,
+                      "height": 9
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "i91Xg7",
+                      "name": "Mobile Deposit Segment",
+                      "fill": "$moss",
+                      "width": 36,
+                      "height": 9
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "vdUGg",
+                      "name": "Mobile Other Segment",
+                      "fill": "$coral",
+                      "width": "fill_container",
+                      "height": 9
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "zR1u0",
+              "name": "Mobile Asset Summary",
+              "width": "fill_container",
+              "height": 88,
+              "fill": "$surface",
+              "cornerRadius": 12,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "effect": {
+                "type": "shadow",
+                "shadowType": "outer",
+                "color": "#0000000A",
+                "offset": {
+                  "x": 0,
+                  "y": 1
+                },
+                "blur": 3
+              },
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "AiNN9",
+                  "name": "Mobile 投資",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "stroke": "$line",
+                  "strokeWidth": {
+                    "right": 1
+                  },
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": [
+                    12,
+                    13
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "GmT7R",
+                      "name": "Mobile 投資 Label",
+                      "fill": "$muted",
+                      "content": "投資",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 10,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "VSEpI",
+                      "name": "Mobile 投資 Value",
+                      "fill": "$steel",
+                      "content": "132萬",
+                      "fontFamily": "$font-data",
+                      "fontSize": 17,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "uoDiR",
+                      "name": "Mobile 投資 Percent",
+                      "fill": "$muted",
+                      "content": "52%",
+                      "fontFamily": "$font-data",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "FqhRq",
+                  "name": "Mobile 存款",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "stroke": "$line",
+                  "strokeWidth": {
+                    "right": 1
+                  },
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": [
+                    12,
+                    13
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Hk7qv",
+                      "name": "Mobile 存款 Label",
+                      "fill": "$muted",
+                      "content": "存款",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 10,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "k2p47",
+                      "name": "Mobile 存款 Value",
+                      "fill": "$moss",
+                      "content": "49萬",
+                      "fontFamily": "$font-data",
+                      "fontSize": 17,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "JOKRd",
+                      "name": "Mobile 存款 Percent",
+                      "fill": "$muted",
+                      "content": "19%",
+                      "fontFamily": "$font-data",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "r47BX",
+                  "name": "Mobile 其他",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "stroke": "#FFFFFF00",
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": [
+                    12,
+                    13
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "q3XxV",
+                      "name": "Mobile 其他 Label",
+                      "fill": "$muted",
+                      "content": "其他",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 10,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "text",
+                      "id": "ntvqb",
+                      "name": "Mobile 其他 Value",
+                      "fill": "$coral",
+                      "content": "72萬",
+                      "fontFamily": "$font-data",
+                      "fontSize": 17,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Q89m7R",
+                      "name": "Mobile 其他 Percent",
+                      "fill": "$muted",
+                      "content": "29%",
+                      "fontFamily": "$font-data",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "eEDAm",
+              "name": "Mobile Trend",
+              "width": "fill_container",
+              "height": 250,
+              "fill": "$surface",
+              "cornerRadius": 12,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "effect": {
+                "type": "shadow",
+                "shadowType": "outer",
+                "color": "#0000000A",
+                "offset": {
+                  "x": 0,
+                  "y": 1
+                },
+                "blur": 3
+              },
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "n3DVGH",
+                  "name": "Mobile Trend Header",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "W720h3",
+                      "name": "Mobile Trend Copy",
+                      "layout": "vertical",
+                      "gap": 3,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "DVPwM",
+                          "name": "Mobile Trend Title",
+                          "fill": "$ink",
+                          "content": "資產走勢",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 15,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "pruNi",
+                          "name": "Mobile Trend Subtitle",
+                          "fill": "$moss",
+                          "content": "近一年資產總額",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 10,
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BPUKP",
+                      "name": "Mobile Trend Range",
+                      "fill": "$canvas",
+                      "cornerRadius": 8,
+                      "gap": 3,
+                      "padding": 3,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "WLG8T",
+                          "name": "Mobile Range 6M",
+                          "fill": "#FFFFFF00",
+                          "cornerRadius": 6,
+                          "padding": [
+                            5,
+                            7
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "o5GrN",
+                              "name": "Mobile Range Label 6M",
+                              "fill": "$muted",
+                              "content": "6M",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 9,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "yDXNC",
+                          "name": "Mobile Range 1Y",
+                          "fill": "$surface",
+                          "cornerRadius": 6,
+                          "padding": [
+                            5,
+                            7
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "V4pliX",
+                              "name": "Mobile Range Label 1Y",
+                              "fill": "$ink",
+                              "content": "1Y",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 9,
+                              "fontWeight": "700"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "SLbi0",
+                          "name": "Mobile Range 全部",
+                          "fill": "#FFFFFF00",
+                          "cornerRadius": 6,
+                          "padding": [
+                            5,
+                            7
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "J2kKBK",
+                              "name": "Mobile Range Label 全部",
+                              "fill": "$muted",
+                              "content": "全部",
+                              "fontFamily": "$font-ui",
+                              "fontSize": 9,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "YXODm",
+                  "name": "Mobile Asset Trend Line Chart",
+                  "width": 326,
+                  "height": 145,
+                  "layout": "none",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "id": "COjJl",
+                      "x": 0,
+                      "y": 8,
+                      "name": "Mobile Grid Line Top",
+                      "fill": "#DDE2DE88",
+                      "width": 326,
+                      "height": 1
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "Q2XBtp",
+                      "x": 0,
+                      "y": 53,
+                      "name": "Mobile Grid Line Upper",
+                      "fill": "#DDE2DE88",
+                      "width": 326,
+                      "height": 1
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "dBWSJ",
+                      "x": 0,
+                      "y": 98,
+                      "name": "Mobile Grid Line Lower",
+                      "fill": "#DDE2DE88",
+                      "width": 326,
+                      "height": 1
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "j5Cg6C",
+                      "x": 0,
+                      "y": 144,
+                      "name": "Mobile Grid Line Bottom",
+                      "fill": "#DDE2DE",
+                      "width": 326,
+                      "height": 1
+                    },
+                    {
+                      "type": "path",
+                      "id": "TqLXK",
+                      "x": 0,
+                      "y": 0,
+                      "name": "Mobile Asset Trend Area",
+                      "geometry": "M0 124l15-3 15-2 15 1 15-7 15-4 15 2 15-8 15-4 15 2 15-9 15-8 16 3 15-10 15-10 15 4 15-13 15-13 15 4 15-21 15 6 15-9 10 2 0 118-326 0z",
+                      "viewBox": [
+                        0,
+                        0,
+                        326,
+                        145
+                      ],
+                      "fill": "#EAF2F5AA",
+                      "width": 326,
+                      "height": 145
+                    },
+                    {
+                      "type": "path",
+                      "id": "cdxnI",
+                      "x": 0,
+                      "y": 0,
+                      "name": "Mobile Asset Trend Line",
+                      "geometry": "M0 124l15-3 15-2 15 1 15-7 15-4 15 2 15-8 15-4 15 2 15-9 15-8 16 3 15-10 15-10 15 4 15-13 15-13 15 4 15-21 15 6 15-9 10 2",
+                      "viewBox": [
+                        0,
+                        0,
+                        326,
+                        145
+                      ],
+                      "fill": "#FFFFFF00",
+                      "width": 326,
+                      "height": 145,
+                      "stroke": "#2F6F89",
+                      "strokeWidth": 3,
+                      "strokeLinejoin": "round",
+                      "strokeLinecap": "round"
+                    },
+                    {
+                      "type": "ellipse",
+                      "id": "ryVHg",
+                      "x": 316,
+                      "y": 22,
+                      "name": "Mobile Latest Value Point",
+                      "fill": "#2F6F89",
+                      "width": 10,
+                      "height": 10,
+                      "stroke": "#FFFFFF",
+                      "strokeWidth": 2
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "SHXoz",
+                  "name": "Mobile Trend Axis",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "FPpq1",
+                      "name": "Mobile Axis 10/1",
+                      "fill": "$muted",
+                      "content": "10/1",
+                      "fontFamily": "$font-data",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "UUi22",
+                      "name": "Mobile Axis 1/1",
+                      "fill": "$muted",
+                      "content": "1/1",
+                      "fontFamily": "$font-data",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "y6dQd",
+                      "name": "Mobile Axis 4/1",
+                      "fill": "$muted",
+                      "content": "4/1",
+                      "fontFamily": "$font-data",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "n1a38",
+                      "name": "Mobile Axis 7/1",
+                      "fill": "$muted",
+                      "content": "7/1",
+                      "fontFamily": "$font-data",
+                      "fontSize": 9,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "qE9Ue",
+              "name": "Mobile Cash Flow Section",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 10,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "GbKkw",
+                  "name": "Mobile Cash Header",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "AdUVS",
+                      "name": "Mobile Cash Title",
+                      "fill": "$ink",
+                      "content": "本月收支",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 16,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "BkXhv",
+                      "name": "Mobile Cash Link",
+                      "fill": "$steel",
+                      "content": "查看活動 →",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 10,
+                      "fontWeight": "600"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "s9CeKC",
+                  "name": "Mobile Cash Metrics",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "I0OFu",
+                      "name": "Mobile 7 月收入",
+                      "width": "fill_container",
+                      "fill": "$surface",
+                      "cornerRadius": 12,
+                      "stroke": "$line",
+                      "strokeWidth": 1,
+                      "effect": {
+                        "type": "shadow",
+                        "shadowType": "outer",
+                        "color": "#0000000A",
+                        "offset": {
+                          "x": 0,
+                          "y": 1
+                        },
+                        "blur": 3
+                      },
+                      "layout": "vertical",
+                      "gap": 6,
+                      "padding": 13,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "g26o4l",
+                          "name": "Mobile 7 月收入 Label",
+                          "fill": "$muted",
+                          "content": "7 月收入",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 10,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "fx6hq",
+                          "name": "Mobile 7 月收入 Value",
+                          "fill": "$moss",
+                          "content": "+NT$88,500",
+                          "fontFamily": "$font-data",
+                          "fontSize": 16,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "sMrGM",
+                          "name": "Mobile 7 月收入 Detail",
+                          "fill": "$muted",
+                          "content": "銀行與信用卡活動",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "bViy7",
+                      "name": "Mobile 7 月支出",
+                      "width": "fill_container",
+                      "fill": "$surface",
+                      "cornerRadius": 12,
+                      "stroke": "$line",
+                      "strokeWidth": 1,
+                      "effect": {
+                        "type": "shadow",
+                        "shadowType": "outer",
+                        "color": "#0000000A",
+                        "offset": {
+                          "x": 0,
+                          "y": 1
+                        },
+                        "blur": 3
+                      },
+                      "layout": "vertical",
+                      "gap": 6,
+                      "padding": 13,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "P1h0H",
+                          "name": "Mobile 7 月支出 Label",
+                          "fill": "$muted",
+                          "content": "7 月支出",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 10,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "yh67k",
+                          "name": "Mobile 7 月支出 Value",
+                          "fill": "$coral",
+                          "content": "−NT$61,240",
+                          "fontFamily": "$font-data",
+                          "fontSize": 16,
+                          "fontWeight": "700"
+                        },
+                        {
+                          "type": "text",
+                          "id": "oPpxk",
+                          "name": "Mobile 7 月支出 Detail",
+                          "fill": "$muted",
+                          "content": "含未配對發票",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Mt1g1",
+                  "name": "Mobile Net Flow",
+                  "width": "fill_container",
+                  "fill": "$surface",
+                  "cornerRadius": 12,
+                  "stroke": "$line",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000A",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 3
+                  },
+                  "padding": 14,
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "B1280",
+                      "name": "Mobile Net Flow Copy",
+                      "layout": "vertical",
+                      "gap": 4,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kRXeu",
+                          "name": "Mobile Net Flow Label",
+                          "fill": "$muted",
+                          "content": "7 月淨流入",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 10,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "text",
+                          "id": "HluBY",
+                          "name": "Mobile Net Flow Detail",
+                          "fill": "$muted",
+                          "content": "收入 − 支出",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "mJblv",
+                      "name": "Mobile Net Flow Value",
+                      "fill": "$moss",
+                      "content": "NT$27,260",
+                      "fontFamily": "$font-data",
+                      "fontSize": 20,
+                      "fontWeight": "700"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "J3qpa3",
+              "name": "Mobile Financial Alerts",
+              "width": "fill_container",
+              "fill": "$surface",
+              "cornerRadius": 12,
+              "stroke": "$line",
+              "strokeWidth": 1,
+              "effect": {
+                "type": "shadow",
+                "shadowType": "outer",
+                "color": "#0000000A",
+                "offset": {
+                  "x": 0,
+                  "y": 1
+                },
+                "blur": 3
+              },
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "q4EkfE",
+                  "name": "Mobile Alerts Header",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Z6fRsM",
+                      "name": "Mobile Alerts Title",
+                      "fill": "$ink",
+                      "content": "值得留意",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "TXjMH",
+                      "name": "Mobile Alerts Count",
+                      "fill": "$canvas",
+                      "cornerRadius": 9999,
+                      "padding": [
+                        4,
+                        8
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "lf2Qc",
+                          "name": "Mobile Alerts Count Label",
+                          "fill": "$muted",
+                          "content": "2",
+                          "fontFamily": "Geist Mono",
+                          "fontSize": 10,
+                          "fontWeight": "650"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "D4tUok",
+                  "name": "Mobile Credit Card Due Alert",
+                  "width": "fill_container",
+                  "fill": "#FFF7F5",
+                  "cornerRadius": 8,
+                  "stroke": "#F1D5CE",
+                  "strokeWidth": 1,
+                  "gap": 10,
+                  "padding": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "YLAUz",
+                      "name": "Mobile Credit Card Due Icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "credit-card",
+                      "library": "lucide",
+                      "fill": "$coral"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "OVSEh",
+                      "name": "Mobile Credit Card Due Copy",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 3,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "uh0a4",
+                          "name": "Mobile Credit Card Due Title",
+                          "fill": "$ink",
+                          "content": "信用卡將於 7 天內到期",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "650"
+                        },
+                        {
+                          "type": "text",
+                          "id": "c7dxJN",
+                          "name": "Mobile Credit Card Due Detail",
+                          "fill": "$muted",
+                          "content": "台新 · 待繳 NT$40,000 · 8/03",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "icon",
+                      "id": "ysNCk",
+                      "name": "Mobile Credit Card Due Chevron",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "chevron-right",
+                      "library": "lucide",
+                      "fill": "$muted"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "lHX1D",
+                  "name": "Mobile Spending Pace Alert",
+                  "width": "fill_container",
+                  "fill": "#FFF9EB",
+                  "cornerRadius": 8,
+                  "stroke": "#F2E2BA",
+                  "strokeWidth": 1,
+                  "gap": 10,
+                  "padding": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "TEYBV",
+                      "name": "Mobile Spending Pace Icon",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "chart-no-axes-combined",
+                      "library": "lucide",
+                      "fill": "$gold"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qYAOC",
+                      "name": "Mobile Spending Pace Copy",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 3,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "DTxt9",
+                          "name": "Mobile Spending Pace Title",
+                          "fill": "$ink",
+                          "content": "本月支出速度偏高 28%",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "650"
+                        },
+                        {
+                          "type": "text",
+                          "id": "w8Z3y5",
+                          "name": "Mobile Spending Pace Detail",
+                          "fill": "$muted",
+                          "content": "較近三月同期多 NT$8,420",
+                          "fontFamily": "Inter",
+                          "fontSize": 9,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "icon",
+                      "id": "Kv4Bz",
+                      "name": "Mobile Spending Pace Chevron",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "chevron-right",
+                      "library": "lucide",
+                      "fill": "$muted"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "k2xhAW",
+          "name": "Mobile Bottom Navigation",
+          "width": "fill_container",
+          "height": 72,
+          "fill": "$ink",
+          "gap": 8,
+          "padding": [
+            10,
+            16
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "TkqAe",
+              "name": "Mobile Nav 總覽",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "#FFFFFF16",
+              "cornerRadius": 10,
+              "layout": "vertical",
+              "gap": 4,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "a8TCfP",
+                  "name": "Mobile Nav 總覽 Icon",
+                  "width": 17,
+                  "height": 17,
+                  "icon": "layout-dashboard",
+                  "library": "lucide",
+                  "fill": "#FFFFFF"
+                },
+                {
+                  "type": "text",
+                  "id": "EQi52",
+                  "name": "Mobile Nav 總覽 Label",
+                  "fill": "#FFFFFF",
+                  "content": "總覽",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 9,
+                  "fontWeight": "700"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "vGQGH",
+              "name": "Mobile Nav 資產",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "#FFFFFF00",
+              "cornerRadius": 10,
+              "layout": "vertical",
+              "gap": 4,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "vzb6A",
+                  "name": "Mobile Nav 資產 Icon",
+                  "width": 17,
+                  "height": 17,
+                  "icon": "wallet-cards",
+                  "library": "lucide",
+                  "fill": "#FFFFFF99"
+                },
+                {
+                  "type": "text",
+                  "id": "iy6Nc",
+                  "name": "Mobile Nav 資產 Label",
+                  "fill": "#FFFFFF99",
+                  "content": "資產",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 9,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "kiyH2",
+              "name": "Mobile Nav 活動",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "#FFFFFF00",
+              "cornerRadius": 10,
+              "layout": "vertical",
+              "gap": 4,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "Q9rsC",
+                  "name": "Mobile Nav 活動 Icon",
+                  "width": 17,
+                  "height": 17,
+                  "icon": "history",
+                  "library": "lucide",
+                  "fill": "#FFFFFF99"
+                },
+                {
+                  "type": "text",
+                  "id": "ebkBe",
+                  "name": "Mobile Nav 活動 Label",
+                  "fill": "#FFFFFF99",
+                  "content": "活動",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 9,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "PU3Fu",
+              "name": "Mobile Nav 更多",
+              "width": "fill_container",
+              "height": "fill_container",
+              "fill": "#FFFFFF00",
+              "cornerRadius": 10,
+              "layout": "vertical",
+              "gap": 4,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "HuCmp",
+                  "name": "Mobile Nav 更多 Icon",
+                  "width": 17,
+                  "height": 17,
+                  "icon": "ellipsis",
+                  "library": "lucide",
+                  "fill": "#FFFFFF99"
+                },
+                {
+                  "type": "text",
+                  "id": "i9Y9S",
+                  "name": "Mobile Nav 更多 Label",
+                  "fill": "#FFFFFF99",
+                  "content": "更多",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 9,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "canvas": {
+      "type": "color",
+      "value": "#F4F5F0"
+    },
+    "surface": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "ink": {
+      "type": "color",
+      "value": "#1B2B34"
+    },
+    "muted": {
+      "type": "color",
+      "value": "#6B7A80"
+    },
+    "line": {
+      "type": "color",
+      "value": "#DDE2DE"
+    },
+    "steel": {
+      "type": "color",
+      "value": "#2F6F89"
+    },
+    "moss": {
+      "type": "color",
+      "value": "#5E7B3D"
+    },
+    "coral": {
+      "type": "color",
+      "value": "#C45A45"
+    },
+    "gold": {
+      "type": "color",
+      "value": "#C38B2C"
+    },
+    "soft-blue": {
+      "type": "color",
+      "value": "#EAF2F5"
+    },
+    "soft-moss": {
+      "type": "color",
+      "value": "#EFF3EA"
+    },
+    "soft-coral": {
+      "type": "color",
+      "value": "#F8ECE9"
+    },
+    "font-ui": {
+      "type": "string",
+      "value": "Inter"
+    },
+    "font-data": {
+      "type": "string",
+      "value": "Geist Mono"
+    }
+  },
+  "fileToken": "9ef986b1-2b0e-4d9a-9b7d-c571893dc926"
+}

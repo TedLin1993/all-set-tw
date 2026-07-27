@@ -100,7 +100,7 @@ test("renders the mobile bottom navigation", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("keeps long recent activity inside the overview card", async ({
+test("keeps the desktop overview within the viewport with long data", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -130,12 +130,71 @@ test("keeps long recent activity inside the overview card", async ({
   });
 
   await page.goto("/#/overview");
-  await expect(page.getByRole("heading", { name: "近期活動" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "本月財務脈動" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "值得留意" })).toBeVisible();
   const pageWidth = await page.evaluate(() => ({
     client: document.documentElement.clientWidth,
     scroll: document.documentElement.scrollWidth,
   }));
   expect(pageWidth.scroll).toBe(pageWidth.client);
+});
+
+test("shows this month's cash flow on the overview and opens activity", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const month = new Date().toISOString().slice(0, 7);
+  await page.route("**/api/bank**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        accounts: [],
+        transactions: [
+          {
+            id: "monthly-income",
+            connectorId: "cathaybk",
+            accountId: "account-1",
+            sourceId: "monthly-income",
+            postedDate: `${month}-02`,
+            amount: 50_000,
+            currency: "TWD",
+            description: "薪資",
+            status: "posted",
+          },
+          {
+            id: "monthly-expense",
+            connectorId: "cathaybk",
+            accountId: "account-1",
+            sourceId: "monthly-expense",
+            postedDate: `${month}-03`,
+            amount: -12_000,
+            currency: "TWD",
+            description: "生活支出",
+            status: "posted",
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/#/overview");
+  const cashFlowSection = page.getByRole("region", { name: "本月收支" });
+  await expect(cashFlowSection).toBeVisible();
+  await expect(cashFlowSection.getByText("+NT$50,000")).toBeVisible();
+  await expect(cashFlowSection.getByText("−NT$12,000")).toBeVisible();
+  await expect(cashFlowSection.getByText("NT$38,000")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "資產配置" })).toHaveCount(0);
+  const insightsSection = page.getByRole("region", { name: "值得留意" });
+  await expect(
+    insightsSection.getByText("目前沒有需要處理的事項"),
+  ).toBeVisible();
+  await expect(page.getByText(/存款佔全部資產/)).toHaveCount(0);
+
+  await cashFlowSection.getByRole("button", { name: "查看活動 →" }).click();
+  await expect(page).toHaveURL(/#\/activity$/);
 });
 
 test("uses app-like scrolling and history only in standalone display mode", async ({
