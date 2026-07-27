@@ -31,6 +31,7 @@
   import TabsList from "@/shared/ui/TabsList.svelte";
   import TabsTrigger from "@/shared/ui/TabsTrigger.svelte";
   import ActivityCategoryChart from "./components/ActivityCategoryChart.svelte";
+  import CalculationUpdateDialog from "./components/CalculationUpdateDialog.svelte";
   import CategoryUpdateDialog from "./components/CategoryUpdateDialog.svelte";
   import type { ApiClient } from "@/shared/api/client";
   import { queryKeys } from "@/shared/api/query-keys";
@@ -49,7 +50,12 @@
     InvoiceSummaryRow,
     InvoiceTransactionPreference,
   } from "@/data/invoices/types";
-  import type { ActivityItem, PendingCategoryUpdate } from "./model/types";
+  import type {
+    ActivityItem,
+    CalculationUpdateInput,
+    PendingCalculationUpdate,
+    PendingCategoryUpdate,
+  } from "./model/types";
   import {
     buildActivityCategorySlices,
     activityCashAmountTwd,
@@ -94,6 +100,7 @@
     category: string;
   } | null>(null);
   let pending = $state<PendingCategoryUpdate | null>(null);
+  let pendingCalculation = $state<PendingCalculationUpdate | null>(null);
   let mappingDialog = $state<{
     invoice: InvoiceSummaryRow;
     step: "candidates" | "confirm" | "actions";
@@ -178,6 +185,8 @@
           category: t.classification?.label ?? "其他",
           categoryId: t.classification?.categoryId ?? "other",
           classificationPattern: t.counterparty ?? t.description,
+          classificationSource: t.classification?.source ?? "fallback",
+          classificationRuleId: t.classification?.ruleId,
           transactionId: t.id,
           invoiceId: matchedInvoice?.id,
           invoiceAmount: matchedInvoice?.amount,
@@ -358,22 +367,61 @@
         { excludedFromCalculation: payload.excludedFromCalculation },
       ),
     onSuccess: (_result, payload) => {
-      qc.setQueryData<BankData>(queryKeys.bank, (current) =>
-        current
-          ? {
-              ...current,
-              transactions: current.transactions.map((transaction) =>
-                transaction.id === payload.transactionId
-                  ? {
-                      ...transaction,
-                      excludedFromCalculation: payload.excludedFromCalculation,
-                    }
-                  : transaction,
-              ),
-            }
-          : current,
+      updateCalculationCache(
+        payload.transactionId,
+        payload.excludedFromCalculation,
       );
       qc.invalidateQueries({ queryKey: queryKeys.bank });
+    },
+  });
+  const calculationUpdateMutation = createMutation({
+    mutationFn: async (payload: CalculationUpdateInput) => {
+      await api.patch(
+        `/api/bank/transactions/${encodeURIComponent(payload.transactionId)}/calculation`,
+        { excludedFromCalculation: true },
+      );
+
+      if (payload.applyRule && payload.ruleId) {
+        await api.put(
+          `/api/classification/rules/${encodeURIComponent(payload.ruleId)}`,
+          {
+            categoryId: payload.categoryId,
+            excludedFromCalculation: true,
+          },
+        );
+        return;
+      }
+
+      if (payload.categoryId !== payload.originalCategoryId) {
+        await api.put(
+          `/api/classification/overrides/bank_transaction/${payload.transactionId}`,
+          { categoryId: payload.categoryId },
+        );
+      }
+
+      if (payload.applyRule) {
+        await api.post("/api/classification/rules", {
+          categoryId: payload.categoryId,
+          targetType: "bank_transaction",
+          field: "any_text",
+          operator: payload.operator,
+          pattern: payload.pattern.trim(),
+          priority: 200,
+          description: "由活動頁排除計算時建立",
+          excludedFromCalculation: true,
+        });
+      }
+    },
+    onSuccess: (_result, payload) => {
+      updateCalculationCache(payload.transactionId, true);
+      qc.invalidateQueries({ queryKey: queryKeys.bank });
+      if (payload.applyRule)
+        qc.invalidateQueries({ queryKey: queryKeys.classificationRules });
+      pendingCalculation = null;
+    },
+    onError: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.bank });
+      qc.invalidateQueries({ queryKey: queryKeys.classificationRules });
     },
   });
   const mappingMutation = createMutation({
@@ -445,10 +493,43 @@
   }
   function toggleCalculation(item: ActivityItem) {
     if (!item.transactionId) return;
+    if (!item.excludedFromCalculation) {
+      pendingCalculation = {
+        item,
+        categoryId: item.categoryId ?? "other",
+        applyRule: false,
+        pattern: item.classificationPattern ?? item.title,
+        operator: "contains",
+      };
+      return;
+    }
     $calculationMutation.mutate({
       transactionId: item.transactionId,
-      excludedFromCalculation: !item.excludedFromCalculation,
+      excludedFromCalculation: false,
     });
+  }
+  function handleCalculationChange(item: ActivityItem, event: Event) {
+    (event.currentTarget as HTMLInputElement).checked = Boolean(
+      item.excludedFromCalculation,
+    );
+    toggleCalculation(item);
+  }
+  function updateCalculationCache(
+    transactionId: string,
+    excludedFromCalculation: boolean,
+  ) {
+    qc.setQueryData<BankData>(queryKeys.bank, (current) =>
+      current
+        ? {
+            ...current,
+            transactions: current.transactions.map((transaction) =>
+              transaction.id === transactionId
+                ? { ...transaction, excludedFromCalculation }
+                : transaction,
+            ),
+          }
+        : current,
+    );
   }
   function updateMappingPreference(preference: InvoiceTransactionPreference) {
     qc.setQueryData<InvoiceTransactionPreference[]>(
@@ -511,12 +592,20 @@
     if (item.invoiceAmount == null || item.amount == null) return 0;
     return Math.abs(item.invoiceAmount - Math.abs(item.amount));
   }
-  function countMatches() {
-    if (!pending) return 0;
+  function countMatches(update: {
+    pattern: string;
+    operator: "contains" | "equals";
+  }) {
+    const pattern = update.pattern.trim().toLowerCase();
+    if (!pattern) return 0;
     return activityBankTransactions.filter((t) =>
-      `${t.description ?? ""} ${t.counterparty ?? ""}`
-        .toLowerCase()
-        .includes(pending!.pattern.toLowerCase()),
+      update.operator === "equals"
+        ? `${t.description ?? ""} ${t.counterparty ?? ""} ${t.sourceId}`
+            .trim()
+            .toLowerCase() === pattern
+        : `${t.description ?? ""} ${t.counterparty ?? ""} ${t.sourceId}`
+            .toLowerCase()
+            .includes(pattern),
     ).length;
   }
 </script>
@@ -1035,10 +1124,12 @@
                     <Checkbox
                       aria-label={`${detailItem.excludedFromCalculation ? "恢復" : "排除"} ${detailItem.title} 的統計計算`}
                       checked={detailItem.excludedFromCalculation}
-                      disabled={$calculationMutation.isPending &&
+                      disabled={($calculationMutation.isPending &&
                         $calculationMutation.variables?.transactionId ===
-                          detailItem.transactionId}
-                      onchange={() => toggleCalculation(detailItem)}
+                          detailItem.transactionId) ||
+                        $calculationUpdateMutation.isPending}
+                      onchange={(event: Event) =>
+                        handleCalculationChange(detailItem, event)}
                     />
                   </label>{/if}
 
@@ -1070,11 +1161,22 @@
       <CategoryUpdateDialog
         update={pending}
         {categories}
-        matchCount={countMatches()}
+        matchCount={countMatches(pending)}
         submitting={$categoryMutation.isPending}
         failed={$categoryMutation.isError}
         onCancel={() => (pending = null)}
         onSubmit={(input) => $categoryMutation.mutate(input)}
+      />
+    {/if}
+    {#if pendingCalculation}
+      <CalculationUpdateDialog
+        bind:update={pendingCalculation}
+        {categoryOptions}
+        matchCount={countMatches(pendingCalculation)}
+        submitting={$calculationUpdateMutation.isPending}
+        failed={$calculationUpdateMutation.isError}
+        onCancel={() => (pendingCalculation = null)}
+        onSubmit={(input) => $calculationUpdateMutation.mutate(input)}
       />
     {/if}
     {#if mappingDialog}<div

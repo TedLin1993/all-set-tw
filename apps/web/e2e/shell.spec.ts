@@ -331,6 +331,27 @@ test("excludes a bank transaction from activity calculations and restores it", a
   await page
     .getByRole("checkbox", { name: "排除 台新卡費 的統計計算" })
     .click();
+  const calculationDialog = page.getByRole("dialog", {
+    name: "排除統計計算",
+  });
+  await expect(calculationDialog).toBeVisible();
+  await expect(
+    calculationDialog.getByRole("checkbox", {
+      name: "同時新增分類規則",
+    }),
+  ).not.toBeChecked();
+  await calculationDialog.getByRole("button", { name: "取消" }).click();
+  await expect(calculationDialog).toBeHidden();
+  await expect(
+    page.getByRole("checkbox", { name: "排除 台新卡費 的統計計算" }),
+  ).not.toBeChecked();
+  await expect(expenseSlice).toBeVisible();
+
+  await page
+    .getByRole("checkbox", { name: "排除 台新卡費 的統計計算" })
+    .click();
+  await calculationDialog.getByRole("button", { name: "確認排除" }).click();
+  await expect(calculationDialog).toBeHidden();
   await expect(
     page.getByRole("checkbox", { name: "恢復 台新卡費 的統計計算" }),
   ).toBeChecked();
@@ -443,6 +464,187 @@ test("excludes a bank transaction from activity calculations and restores it", a
     );
   });
   await expect(detailDialog).toBeHidden();
+});
+
+test("can add a classification rule while excluding a transaction", async ({
+  page,
+}) => {
+  const month = new Date().toISOString().slice(0, 7);
+  let ruleBody: Record<string, unknown> | undefined;
+  let overrideBody: Record<string, unknown> | undefined;
+
+  await page.route("**/api/bank**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        accounts: [],
+        transactions: [
+          {
+            id: "fallback-transaction",
+            connectorId: "cathaybk",
+            accountId: "account-1",
+            sourceId: "fallback-source",
+            postedDate: `${month}-08`,
+            amount: -1200,
+            currency: "TWD",
+            description: "每月家庭轉帳",
+            status: "posted",
+            excludedFromCalculation: false,
+            classification: {
+              categoryId: "other",
+              label: "其他",
+              source: "fallback",
+            },
+          },
+        ],
+      }),
+    });
+  });
+  await page.route(
+    "**/api/bank/transactions/fallback-transaction/calculation",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          excludedFromCalculation: true,
+        }),
+      });
+    },
+  );
+  await page.route(
+    "**/api/classification/overrides/bank_transaction/fallback-transaction",
+    async (route) => {
+      overrideBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
+    },
+  );
+  await page.route("**/api/classification/rules", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    ruleBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ id: "user:new-rule", success: true }),
+    });
+  });
+
+  await page.goto("/#/activity");
+  await page
+    .getByRole("button", { name: "查看 每月家庭轉帳 活動詳情" })
+    .click();
+  await page
+    .getByRole("checkbox", { name: "排除 每月家庭轉帳 的統計計算" })
+    .click();
+
+  const dialog = page.getByRole("dialog", { name: "排除統計計算" });
+  await dialog.getByRole("combobox", { name: "分類" }).selectOption("transfer");
+  await dialog.getByRole("checkbox", { name: "同時新增分類規則" }).check();
+  await dialog.getByRole("textbox").fill("每月家庭轉帳");
+  await dialog.getByRole("button", { name: "確認排除" }).click();
+
+  await expect(dialog).toBeHidden();
+  expect(overrideBody).toEqual({ categoryId: "transfer" });
+  expect(ruleBody).toMatchObject({
+    categoryId: "transfer",
+    targetType: "bank_transaction",
+    field: "any_text",
+    operator: "contains",
+    pattern: "每月家庭轉帳",
+    excludedFromCalculation: true,
+  });
+});
+
+test("can modify an existing user rule while excluding a transaction", async ({
+  page,
+}) => {
+  const month = new Date().toISOString().slice(0, 7);
+  let updatedRuleBody: Record<string, unknown> | undefined;
+
+  await page.route("**/api/bank**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        accounts: [],
+        transactions: [
+          {
+            id: "rule-transaction",
+            connectorId: "cathaybk",
+            accountId: "account-1",
+            sourceId: "rule-source",
+            postedDate: `${month}-09`,
+            amount: -350,
+            currency: "TWD",
+            description: "固定轉帳",
+            status: "posted",
+            excludedFromCalculation: false,
+            classification: {
+              categoryId: "transfer",
+              label: "轉帳",
+              source: "user_rule",
+              ruleId: "user:transfer-rule",
+            },
+          },
+        ],
+      }),
+    });
+  });
+  await page.route(
+    "**/api/bank/transactions/rule-transaction/calculation",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          excludedFromCalculation: true,
+        }),
+      });
+    },
+  );
+  await page.route(
+    "**/api/classification/rules/user%3Atransfer-rule",
+    async (route) => {
+      updatedRuleBody = route.request().postDataJSON() as Record<
+        string,
+        unknown
+      >;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true }),
+      });
+    },
+  );
+
+  await page.goto("/#/activity");
+  await page.getByRole("button", { name: "查看 固定轉帳 活動詳情" }).click();
+  await page
+    .getByRole("checkbox", { name: "排除 固定轉帳 的統計計算" })
+    .click();
+
+  const dialog = page.getByRole("dialog", { name: "排除統計計算" });
+  await expect(
+    dialog.getByRole("checkbox", { name: "同時修改目前分類規則" }),
+  ).not.toBeChecked();
+  await dialog.getByRole("checkbox", { name: "同時修改目前分類規則" }).check();
+  await dialog.getByRole("button", { name: "確認排除" }).click();
+
+  await expect(dialog).toBeHidden();
+  expect(updatedRuleBody).toEqual({
+    categoryId: "transfer",
+    excludedFromCalculation: true,
+  });
 });
 
 test("merges a matching invoice and counts an unmatched invoice as expense", async ({
