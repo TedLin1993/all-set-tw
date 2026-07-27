@@ -165,7 +165,7 @@
     <div class="grid min-w-0 gap-4">
       <section
         aria-label="資料來源頁標題"
-        class="hidden min-w-0 items-center justify-between gap-4 md:flex"
+        class="hidden min-w-0 md:block"
       >
         <div>
           <h2 class="text-2xl font-bold tracking-tight">資料來源與連接器</h2>
@@ -173,10 +173,6 @@
             管理連線、驗證狀態與最近同步結果。
           </p>
         </div>
-        <span
-          class="rounded-lg bg-steel px-4 py-2 text-sm font-bold text-white transition hover:bg-steel/90"
-          >＋ 新增連接器</span
-        >
       </section>
 
       <div
