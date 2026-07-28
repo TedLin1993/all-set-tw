@@ -7,10 +7,6 @@
   } from "@tanstack/svelte-query";
   import {
     Search,
-    Building2,
-    CreditCard,
-    FileText,
-    TrendingUp,
     ArrowDown,
     Check,
     Link2,
@@ -56,6 +52,11 @@
     PendingCalculationUpdate,
     PendingCategoryUpdate,
   } from "./model/types";
+  import {
+    activityStatusLabel,
+    formatActivityDateGroup,
+    groupActivitiesByDate,
+  } from "./model/list";
   import {
     buildActivityCategorySlices,
     activityCashAmountTwd,
@@ -162,12 +163,15 @@
         const matchedInvoice = invoiceMatches.transactionToInvoice.get(t.id);
         const isCard =
           account?.accountType === "credit" || t.accountType === "credit";
-        const accountLabel =
+        const institutionName =
           t.institutionName ??
           account?.institutionName ??
+          (isCard ? "信用卡" : "銀行");
+        const accountLast4 = t.accountLast4 ?? account?.accountLast4;
+        const accountName =
           t.accountName ??
           account?.accountName ??
-          "";
+          (accountLast4 ? `末四碼 ${accountLast4}` : "");
         return {
           id: t.id,
           source: isCard ? ("card" as const) : ("bank" as const),
@@ -177,9 +181,15 @@
             t.description ??
             t.counterparty ??
             "銀行交易",
-          subtitle: [accountLabel, matchedInvoice?.invoiceNumber]
+          subtitle: [
+            institutionName,
+            accountName,
+            matchedInvoice?.invoiceNumber,
+          ]
             .filter(Boolean)
             .join(" · "),
+          institutionName,
+          accountName,
           amount: t.amount,
           currency: t.currency,
           category: t.classification?.label ?? "未分類",
@@ -202,6 +212,8 @@
           date: i.invoiceDate,
           title: i.sellerName ?? "電子發票",
           subtitle: i.invoiceNumber ?? "",
+          institutionName: "電子發票",
+          accountName: i.invoiceNumber ?? "",
           amount: i.amount,
           currency: "TWD",
           category: "發票",
@@ -209,22 +221,27 @@
           invoiceAmount: i.amount,
           status: "已開立",
         })),
-      ...($trades.data ?? []).map((t) => ({
-        id: t.id,
-        source: "investment" as const,
-        date: normalizeFinancialDate(t.tradeDate ?? t.postedDate),
-        title: t.name ?? t.symbol ?? "投資交易",
-        subtitle: [
+      ...($trades.data ?? []).map((t) => {
+        const accountName = [
           t.transactionName ?? t.transactionCode,
           t.quantity != null ? `${formatNumber(t.quantity)} 股` : undefined,
         ]
           .filter(Boolean)
-          .join(" · "),
-        amount: t.price === 1 ? undefined : t.amount,
-        currency: t.currency,
-        category: "投資",
-        status: "已完成",
-      })),
+          .join(" · ");
+        return {
+          id: t.id,
+          source: "investment" as const,
+          date: normalizeFinancialDate(t.tradeDate ?? t.postedDate),
+          title: t.name ?? t.symbol ?? "投資交易",
+          subtitle: accountName,
+          institutionName: "投資",
+          accountName,
+          amount: t.price === 1 ? undefined : t.amount,
+          currency: t.currency,
+          category: "投資",
+          status: "已完成",
+        };
+      }),
     ].sort((a, b) => b.date.localeCompare(a.date)),
   );
   const detailItem = $derived(
@@ -307,7 +324,7 @@
         matchesSource &&
         item.date.startsWith(selectedMonth) &&
         (!search.trim() ||
-          `${item.title} ${item.subtitle} ${item.category}`
+          `${item.title} ${item.subtitle} ${item.institutionName ?? ""} ${item.accountName ?? ""} ${item.category}`
             .toLowerCase()
             .includes(search.toLowerCase())) &&
         (!selectedCategory ||
@@ -315,6 +332,7 @@
       );
     }),
   );
+  const filteredGroups = $derived(groupActivitiesByDate(filtered));
   const mappingCandidates = $derived.by(() => {
     if (!mappingDialog) return [];
     const unavailableTransactionIds = new Set(
@@ -759,16 +777,16 @@
             <h2 class="truncate text-lg font-semibold">
               {selectedCategory
                 ? `${selectedMonthLabel} · ${selectedCategory.category}`
-                : `${selectedMonthLabel}所有活動`}
+                : "所有活動"}
             </h2>
-            <p class="text-xs text-ink/45">銀行、信用卡、投資與發票</p>
+            <p class="text-xs text-ink/45">銀行與帳戶資訊直接顯示於每筆活動</p>
           </div>
           <div class="relative md:w-80">
             <Search
               class="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground"
             /><Input
               class="h-11 pl-9"
-              placeholder="搜尋商家、帳戶、品項或分類"
+              placeholder="搜尋商家、銀行或分類"
               bind:value={search}
             />
           </div>
@@ -788,7 +806,7 @@
           </div>{/if}
         <TabsList class="grid h-auto w-full grid-cols-4"
           >{#each [{ key: "all", label: "全部" }, { key: "bank", label: "銀行" }, { key: "card", label: "信用卡" }, { key: "invoice", label: "發票" }] as filter (filter.key)}<TabsTrigger
-              class={`min-h-9 min-w-0 px-1 text-xs md:text-sm ${source === filter.key ? "bg-ink text-white" : ""}`}
+              class="min-h-9 min-w-0 px-1 text-xs md:text-sm"
               active={source === filter.key}
               onclick={() => {
                 source = filter.key as typeof source;
@@ -803,106 +821,147 @@
           </p>{/if}
       </CardHeader>
       <CardContent class="min-w-0 p-0">
-        <div class="min-w-0 divide-y divide-ink/8 md:hidden">
-          {#if filtered.length === 0}<p
+        <div class="min-w-0 md:hidden">
+          {#if filteredGroups.length === 0}<p
               class="p-8 text-center text-sm text-ink/50"
             >
               沒有符合條件的活動。
-            </p>{:else}{#each filtered as item (item.source + "-" + item.id)}{@const amount =
-                activityDisplayAmount(item)}
-              <button
-                aria-label={`查看 ${item.title} 活動詳情`}
-                class={`flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition hover:bg-paper ${item.excludedFromCalculation ? "bg-ink/[0.025]" : ""}`}
-                onclick={() => openDetail(item)}
+            </p>{:else}{#each filteredGroups as group (group.dateKey)}<div
+                class="flex items-center justify-between bg-paper px-4 py-2.5 text-xs"
               >
-                <span
-                  class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-steel/10 text-steel"
-                  >{#if item.source === "bank"}<Building2
-                      class="size-5"
-                    />{:else if item.source === "card"}<CreditCard
-                      class="size-5"
-                    />{:else if item.source === "invoice"}<FileText
-                      class="size-5"
-                    />{:else}<TrendingUp class="size-5" />{/if}</span
-                >
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-semibold">{item.title}</p>
-                  <p class="mt-0.5 truncate text-xs text-ink/45">
-                    {sourceLabel(item)} · {formatDate(item.date)}
-                  </p>
-                  <Badge variant="secondary" class="mt-1.5"
-                    >{item.category}</Badge
+                <span class="font-semibold text-ink/80"
+                  >{formatActivityDateGroup(group.dateKey)}</span
+                ><span class="text-ink/45">{group.items.length} 筆</span>
+              </div>
+              <div class="divide-y divide-ink/8">
+                {#each group.items as item (item.source + "-" + item.id)}{@const amount =
+                    activityDisplayAmount(item)}
+                  <button
+                    aria-label={`查看 ${item.title} 活動詳情`}
+                    class={`flex w-full min-w-0 items-center gap-3 px-4 py-3.5 text-left transition hover:bg-paper ${item.excludedFromCalculation ? "bg-ink/[0.025]" : ""}`}
+                    onclick={() => openDetail(item)}
                   >
-                </div>
-                <span class="flex shrink-0 items-center gap-1">
-                  <span
-                    class={`max-w-[38vw] truncate text-sm font-semibold tabular-nums ${item.excludedFromCalculation ? "text-ink/35 line-through" : (amount ?? 0) < 0 ? "text-coral" : item.source !== "invoice" ? "text-moss" : ""}`}
-                  >
-                    {amount == null
-                      ? "—"
-                      : `${amount >= 0 && item.source !== "invoice" ? "+" : ""}${formatCurrency(amount, item.currency)}`}
-                  </span>
-                  <ChevronRight class="size-4 text-ink/30" />
-                </span>
-              </button>{/each}{/if}
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-sm font-semibold">{item.title}</p>
+                      <p
+                        class="mt-1 truncate text-xs font-semibold text-ink/75"
+                      >
+                        {item.institutionName ?? sourceLabel(item)}
+                      </p>
+                      <p class="mt-0.5 truncate text-[11px] text-ink/45">
+                        {[item.accountName, item.category]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-1.5">
+                      <div class="max-w-[40vw] text-right">
+                        <p
+                          class={`truncate text-sm font-semibold tabular-nums ${item.excludedFromCalculation ? "text-ink/35 line-through" : (amount ?? 0) < 0 ? "text-coral" : item.source !== "invoice" ? "text-moss" : ""}`}
+                        >
+                          {amount == null
+                            ? "—"
+                            : `${amount >= 0 && item.source !== "invoice" ? "+" : ""}${formatCurrency(amount, item.currency)}`}
+                        </p>
+                        <p class="mt-1 text-[11px] text-ink/40">
+                          {activityStatusLabel(item)}
+                        </p>
+                      </div>
+                      <ChevronRight class="size-4 text-ink/30" />
+                    </div>
+                  </button>{/each}
+              </div>{/each}{/if}
         </div>
         <div class="hidden overflow-x-auto md:block">
-          <table class="w-full min-w-[760px] text-left text-sm">
-            <thead class="bg-paper text-xs font-semibold text-ink/45"
-              ><tr
-                ><th class="px-5 py-3">日期</th><th class="px-4 py-3">來源</th
-                ><th class="px-4 py-3">說明／商家</th><th class="px-4 py-3"
-                  >分類</th
-                ><th class="px-5 py-3 text-right">金額</th></tr
-              ></thead
-            ><tbody class="divide-y divide-ink/8"
-              >{#if filtered.length === 0}<tr
-                  ><td class="px-5 py-8 text-center text-ink/50" colspan="5"
-                    >沒有符合條件的活動。</td
-                  ></tr
-                >{:else}{#each filtered as item (item.source + "-" + item.id)}{@const amount =
-                    activityDisplayAmount(item)}<tr
-                    aria-label={`查看 ${item.title} 活動詳情`}
-                    class={`cursor-pointer transition hover:bg-paper focus-visible:outline-2 focus-visible:outline-steel ${item.excludedFromCalculation ? "bg-ink/[0.025]" : ""}`}
-                    onclick={() => openDetail(item)}
-                    onkeydown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        openDetail(item);
-                      }
-                    }}
-                    role="button"
-                    tabindex="0"
-                    ><td class="whitespace-nowrap px-5 py-3 text-ink/55"
-                      >{formatDate(item.date)}</td
-                    ><td class="px-4 py-3">{sourceLabel(item)}</td><td
-                      class="max-w-xs px-4 py-3"
-                      ><p class="truncate font-semibold">{item.title}</p>
-                      <p class="truncate text-xs text-ink/40">
-                        {item.subtitle}
-                      </p>
-                      {#if item.transactionId && item.invoiceId && itemMappingDifference(item) > 0}<Badge
-                          variant="secondary"
-                          class="mt-1 bg-amber-50 text-amber-800"
-                          >點數折抵 {formatCurrency(
-                            itemMappingDifference(item),
-                          )}</Badge
-                        >{/if}</td
-                    ><td class="px-4 py-3"
-                      ><Badge variant="secondary">{item.category}</Badge></td
-                    ><td
-                      class={`whitespace-nowrap px-5 py-3 text-right font-semibold tabular-nums ${item.excludedFromCalculation ? "text-ink/35 line-through" : (amount ?? 0) < 0 ? "text-coral" : item.source !== "invoice" ? "text-moss" : ""}`}
-                      ><span class="inline-flex items-center gap-2"
-                        >{amount == null
-                          ? "—"
-                          : formatCurrency(amount, item.currency)}<ChevronRight
-                          class="size-4 text-ink/30"
-                        /></span
-                      ></td
-                    ></tr
-                  >{/each}{/if}</tbody
+          {#if filteredGroups.length === 0}<p
+              class="p-8 text-center text-sm text-ink/50"
             >
-          </table>
+              沒有符合條件的活動。
+            </p>{:else}<table
+              class="w-full min-w-[760px] table-fixed text-left text-sm"
+            >
+              <colgroup
+                ><col /><col class="w-56" /><col class="w-36" /><col
+                  class="w-44"
+                /></colgroup
+              >
+              <thead class="text-xs font-semibold text-ink/45"
+                ><tr
+                  ><th class="px-5 py-2.5">商家／說明</th><th
+                    class="px-4 py-2.5">銀行／帳戶</th
+                  ><th class="px-4 py-2.5">分類</th><th
+                    class="px-5 py-2.5 text-right">金額</th
+                  ></tr
+                ></thead
+              >
+            </table>
+            {#each filteredGroups as group (group.dateKey)}<div
+                class="flex min-w-[760px] items-center justify-between bg-paper px-5 py-2.5 text-xs"
+              >
+                <span class="font-semibold text-ink/80"
+                  >{formatActivityDateGroup(group.dateKey)}</span
+                ><span class="text-ink/45">{group.items.length} 筆</span>
+              </div>
+              <table class="w-full min-w-[760px] table-fixed text-left text-sm">
+                <colgroup
+                  ><col /><col class="w-56" /><col class="w-36" /><col
+                    class="w-44"
+                  /></colgroup
+                >
+                <tbody class="divide-y divide-ink/8"
+                  >{#each group.items as item (item.source + "-" + item.id)}{@const amount =
+                      activityDisplayAmount(item)}<tr
+                      aria-label={`查看 ${item.title} 活動詳情`}
+                      class={`cursor-pointer transition hover:bg-paper focus-visible:outline-2 focus-visible:outline-steel ${item.excludedFromCalculation ? "bg-ink/[0.025]" : ""}`}
+                      onclick={() => openDetail(item)}
+                      onkeydown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openDetail(item);
+                        }
+                      }}
+                      role="button"
+                      tabindex="0"
+                      ><td class="min-w-0 px-5 py-3.5"
+                        ><p class="truncate font-semibold">{item.title}</p>
+                        {#if item.transactionId && item.invoiceId && itemMappingDifference(item) > 0}<Badge
+                            variant="secondary"
+                            class="mt-1 bg-amber-50 text-amber-800"
+                            >點數折抵 {formatCurrency(
+                              itemMappingDifference(item),
+                            )}</Badge
+                          >{/if}</td
+                      ><td class="px-4 py-3.5"
+                        ><p class="truncate font-semibold text-ink/80">
+                          {item.institutionName ?? sourceLabel(item)}
+                        </p>
+                        {#if item.accountName}<p
+                            class="mt-1 truncate text-xs text-ink/40"
+                          >
+                            {item.accountName}
+                          </p>{/if}</td
+                      ><td class="px-4 py-3.5"
+                        ><Badge variant="secondary">{item.category}</Badge></td
+                      ><td class="px-5 py-3.5"
+                        ><div class="flex items-center justify-end gap-2">
+                          <div class="min-w-0 text-right">
+                            <p
+                              class={`truncate whitespace-nowrap font-semibold tabular-nums ${item.excludedFromCalculation ? "text-ink/35 line-through" : (amount ?? 0) < 0 ? "text-coral" : item.source !== "invoice" ? "text-moss" : ""}`}
+                            >
+                              {amount == null
+                                ? "—"
+                                : `${amount >= 0 && item.source !== "invoice" ? "+" : ""}${formatCurrency(amount, item.currency)}`}
+                            </p>
+                            <p class="mt-1 text-xs text-ink/40">
+                              {activityStatusLabel(item)}
+                            </p>
+                          </div>
+                          <ChevronRight class="size-4 shrink-0 text-ink/30" />
+                        </div></td
+                      ></tr
+                    >{/each}</tbody
+                >
+              </table>{/each}{/if}
         </div>
       </CardContent>
     </Card>

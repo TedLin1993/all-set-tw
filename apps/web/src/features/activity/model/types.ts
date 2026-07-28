@@ -4,6 +4,8 @@ export interface ActivityItem {
   date: string;
   title: string;
   subtitle: string;
+  institutionName?: string;
+  accountName?: string;
   amount?: number;
   currency: string;
   category: string;

@@ -734,9 +734,12 @@ test("merges a matching invoice and counts an unmatched invoice as expense", asy
 
   const activityRows = page.locator("tbody tr");
   await expect(activityRows).toHaveCount(2);
-  await expect(
-    activityRows.filter({ hasText: "好食餐飲有限公司" }),
-  ).toContainText("信用卡＋發票");
+  const matchedActivityRow = activityRows.filter({
+    hasText: "好食餐飲有限公司",
+  });
+  await expect(matchedActivityRow).toContainText("測試銀行");
+  await expect(matchedActivityRow).toContainText("測試信用卡");
+  await expect(matchedActivityRow).toContainText("已配對發票");
   await expect(
     activityRows.filter({ hasText: "未支援銀行商店" }),
   ).toContainText("−NT$1,490");
@@ -897,12 +900,13 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
   await page.getByRole("button", { name: "確認配對" }).click();
 
   await expect(page.getByText("已完成配對，活動只顯示一筆")).toBeVisible();
-  await expect(
-    page.getByText("信用卡＋發票 · 2026/7/6", { exact: true }),
-  ).toBeVisible();
-  await page
-    .getByRole("button", { name: "查看 菲尖極道商行 活動詳情" })
-    .click();
+  const mappedActivityRow = page.getByRole("button", {
+    name: "查看 菲尖極道商行 活動詳情",
+  });
+  await expect(mappedActivityRow).toContainText("玉山銀行");
+  await expect(mappedActivityRow).toContainText("信用卡 · 餐飲");
+  await expect(mappedActivityRow).toContainText("已配對發票");
+  await mappedActivityRow.click();
   const detail = page.getByRole("dialog", { name: "活動明細" });
   await expect(
     detail
