@@ -38,6 +38,29 @@ describe("matchesClassificationRule", () => {
 });
 
 describe("resolveClassifications", () => {
+  it("labels unmatched transactions as uncategorized", async () => {
+    const db = {
+      prepare() {
+        return {
+          bind() {
+            return this;
+          },
+          async all() {
+            return { results: [] };
+          },
+        };
+      },
+    } as unknown as D1Database;
+
+    const result = await resolveClassifications(db, [transaction]);
+
+    expect(result.get(transaction.id)).toEqual({
+      categoryId: "other",
+      label: "未分類",
+      source: "fallback",
+    });
+  });
+
   it("returns the calculation action from the first matching rule", async () => {
     const calls: Array<{ sql: string; values: unknown[] }> = [];
     const db = {

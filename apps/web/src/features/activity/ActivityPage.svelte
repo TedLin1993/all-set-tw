@@ -122,7 +122,7 @@
     { id: "insurance", label: "保險" },
     { id: "fee", label: "手續費" },
     { id: "tax", label: "稅務" },
-    { id: "other", label: "其他" },
+    { id: "other", label: "未分類" },
   ];
   const categoryOptions = $derived(
     $categoryRows.data?.length ? $categoryRows.data : fallbackCategories,
@@ -182,7 +182,7 @@
             .join(" · "),
           amount: t.amount,
           currency: t.currency,
-          category: t.classification?.label ?? "其他",
+          category: t.classification?.label ?? "未分類",
           categoryId: t.classification?.categoryId ?? "other",
           classificationPattern: t.counterparty ?? t.description,
           classificationSource: t.classification?.source ?? "fallback",
