@@ -49,7 +49,7 @@ test.beforeEach(async ({ page }) => {
         { id: "fee", label: "手續費", sortOrder: 11, isSystem: true },
         { id: "insurance", label: "保險", sortOrder: 12, isSystem: true },
         { id: "tax", label: "稅務", sortOrder: 13, isSystem: true },
-        { id: "other", label: "其他", sortOrder: 14, isSystem: true },
+        { id: "other", label: "未分類", sortOrder: 14, isSystem: true },
       ];
     else if (path === "/api/classification/rules") body = [];
     else if (path.includes("/connectors/") && path.endsWith("/settings"))
@@ -289,7 +289,7 @@ test("excludes a bank transaction from activity calculations and restores it", a
             excludedFromCalculation,
             classification: {
               categoryId: "other",
-              label: "其他",
+              label: "未分類",
               source: "fallback",
             },
           },
@@ -315,7 +315,7 @@ test("excludes a bank transaction from activity calculations and restores it", a
   await page.goto("/#/activity");
   await expect(page.locator("html")).toHaveClass(/is-standalone/);
   const expenseSlice = page.getByRole("button", {
-    name: "其他 100.0% NT$8,318",
+    name: "未分類 100.0% NT$8,318",
   });
   await expect(expenseSlice).toBeVisible();
 
@@ -358,7 +358,7 @@ test("excludes a bank transaction from activity calculations and restores it", a
   await expect(expenseSlice).toBeHidden();
   await page.getByRole("button", { name: "返回活動列表" }).click();
   const excludedExpenseSlice = page.getByRole("button", {
-    name: "其他 0.0% NT$0",
+    name: "未分類 0.0% NT$0",
   });
   await expect(excludedExpenseSlice).toBeVisible();
   await excludedExpenseSlice.click();
@@ -493,7 +493,7 @@ test("can add a classification rule while excluding a transaction", async ({
             excludedFromCalculation: false,
             classification: {
               categoryId: "other",
-              label: "其他",
+              label: "未分類",
               source: "fallback",
             },
           },

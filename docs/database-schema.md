@@ -11,7 +11,7 @@
 - Tables：24
 - Explicit indexes：31
 - Other objects：0
-- Migrations：16
+- Migrations：18
 
 ## Tables
 
@@ -1192,6 +1192,8 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0015_push_notifications.sql`](../packages/db/migrations/0015_push_notifications.sql)
 - [`0016_scheduled_sync_notification_batches.sql`](../packages/db/migrations/0016_scheduled_sync_notification_batches.sql)
 - [`0017_taishin_sync_job.sql`](../packages/db/migrations/0017_taishin_sync_job.sql)
+- [`0018_esun_credit_transaction_signs.sql`](../packages/db/migrations/0018_esun_credit_transaction_signs.sql)
+- [`0019_rename_other_classification.sql`](../packages/db/migrations/0019_rename_other_classification.sql)
 
 ## 程式碼導覽
 

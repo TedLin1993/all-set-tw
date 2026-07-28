@@ -101,7 +101,7 @@ export async function resolveClassifications(
     }
     result.set(
       transaction.id,
-      matched ?? { categoryId: "other", label: "其他", source: "fallback" },
+      matched ?? { categoryId: "other", label: "未分類", source: "fallback" },
     );
   }
 

@@ -36,7 +36,7 @@ INSERT INTO classification_categories
   ('fee',           '手續費', 11, 1, '2026-06-22T00:00:00.000Z', '2026-06-22T00:00:00.000Z'),
   ('insurance',     '保險',   12, 1, '2026-06-22T00:00:00.000Z', '2026-06-22T00:00:00.000Z'),
   ('tax',           '稅務',   13, 1, '2026-06-22T00:00:00.000Z', '2026-06-22T00:00:00.000Z'),
-  ('other',         '其他',   14, 1, '2026-06-22T00:00:00.000Z', '2026-06-22T00:00:00.000Z');
+  ('other',         '未分類', 14, 1, '2026-06-22T00:00:00.000Z', '2026-07-28T00:00:00.000Z');
 
 INSERT INTO classification_rules
   (id, category_id, target_type, field, operator, pattern, priority, enabled, is_system, source, description, created_at, updated_at) VALUES

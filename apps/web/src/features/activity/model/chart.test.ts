@@ -16,7 +16,7 @@ function item(overrides: Partial<ActivityItem>): ActivityItem {
     subtitle: "",
     amount: 0,
     currency: "TWD",
-    category: "其他",
+    category: "未分類",
     status: "posted",
     ...overrides,
   };
@@ -88,7 +88,7 @@ describe("activity category chart", () => {
     expect(activityCashFlow(excluded)).toBe("expense");
     expect(buildActivityCategorySlices([excluded], "expense", {})).toEqual([
       {
-        category: "其他",
+        category: "未分類",
         amount: 0,
         percentage: 0,
         color: "#3e6f7c",
@@ -103,7 +103,7 @@ describe("activity category chart", () => {
         item({
           id: "2",
           amount: -300,
-          category: "其他",
+          category: "未分類",
           excludedFromCalculation: true,
         }),
       ],
@@ -119,7 +119,7 @@ describe("activity category chart", () => {
       })),
     ).toEqual([
       { category: "餐飲", amount: 500, percentage: 100 },
-      { category: "其他", amount: 0, percentage: 0 },
+      { category: "未分類", amount: 0, percentage: 0 },
     ]);
   });
 });

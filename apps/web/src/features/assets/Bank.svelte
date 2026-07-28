@@ -136,7 +136,7 @@
     { id: "insurance", label: "保險" },
     { id: "fee", label: "手續費" },
     { id: "tax", label: "稅務" },
-    { id: "other", label: "其他" },
+    { id: "other", label: "未分類" },
   ];
   const categoryOptions = $derived(
     $categoryRows.data?.length ? $categoryRows.data : fallbackCategories,
@@ -238,7 +238,7 @@
                   <p class="mt-1 truncate text-xs text-ink/40">
                     {formatBankAccountName(t)} · {formatDate(
                       t.postedDate ?? t.authorizedAt,
-                    )} · {t.classification?.label ?? "其他"}
+                    )} · {t.classification?.label ?? "未分類"}
                   </p>
                 </div>
                 <p
@@ -271,7 +271,7 @@
                 {selected.description ?? selected.counterparty ?? "銀行交易"}
               </h2>
               <p class="mt-1 text-sm text-ink/50">
-                目前分類：{selected.classification?.label ?? "其他"}
+                目前分類：{selected.classification?.label ?? "未分類"}
               </p>
             </div>
             <Button
