@@ -12,17 +12,12 @@ import type { Env } from "../../platform/env";
 import {
   canonicalSyncLockRowId,
   isUserActionError,
-  NeedsUserActionError,
   safeErrorMessage,
   startSyncLockHeartbeat,
-  syncCathaybk,
-  syncEinvoice,
-  syncEsun,
-  syncSinopac,
-  syncTaishin,
-  syncTdcc,
   SYNC_LOCK_LEASE_MS,
+  type SyncScope,
 } from "./service";
+import { runConnectorSync } from "./registry";
 import {
   safelySendScheduledSyncSummary,
   safelySendSyncNotification,
@@ -48,17 +43,9 @@ export async function runSchedulerTick(
 
   const openBatchId = await findOpenDefaultScheduleBatchId(env.DB);
   if (openBatchId) {
-    const batchJob = await findNextDefaultScheduleBatchJob(
-      env.DB,
-      openBatchId,
-    );
+    const batchJob = await findNextDefaultScheduleBatchJob(env.DB, openBatchId);
     if (batchJob) {
-      await runDefaultScheduleBatchJob(
-        env,
-        controller,
-        openBatchId,
-        batchJob,
-      );
+      await runDefaultScheduleBatchJob(env, controller, openBatchId, batchJob);
       return;
     }
 
@@ -203,15 +190,11 @@ async function runScheduledJob(
 }
 
 async function runDueSyncJob(env: Env, job: SyncJobRow<ConnectorId>) {
-  if (job.connector_id === "einvoice") {
-    return syncEinvoice(env, "scheduled", { fetchDetails: true });
-  }
-  if (job.connector_id === "tdcc") {
-    return syncTdcc(env, "scheduled", {}, [job.scope]);
-  }
-  if (job.connector_id === "esun") return syncEsun(env, "scheduled");
-  if (job.connector_id === "cathaybk") return syncCathaybk(env, "scheduled");
-  if (job.connector_id === "sinopac") return syncSinopac(env, "scheduled");
-  if (job.connector_id === "taishin") return syncTaishin(env, "scheduled");
-  throw new NeedsUserActionError("Scheduled connector is not supported.");
+  return runConnectorSync(
+    env,
+    job.connector_id,
+    "scheduled",
+    job.scope as SyncScope,
+    job.connector_id === "einvoice" ? { fetchDetails: true } : {},
+  );
 }

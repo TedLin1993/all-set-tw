@@ -30,6 +30,7 @@
 - `packages/db`：跨 feature 共用的 D1 基礎能力與 migrations。
 - `docs/002-backend-architecture.md`：後端分層、相依方向與維護約定的詳細文件。
 - `docs/003-frontend-architecture.md`：前端分層、相依方向與測試 colocate 約定。
+- `docs/004-connector-development.md`：Connector catalog、連接模式、敏感狀態與新增流程規範。
 
 ## 架構約定
 

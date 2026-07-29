@@ -1,4 +1,4 @@
-import type { Connector, Invoice, InvoiceLineItem } from "@taiwan-fin-hub/core";
+import type { Connector, ConnectorId, Invoice, InvoiceLineItem } from "@taiwan-fin-hub/core";
 import { z } from "zod";
 import { currentPeriodIndex, periodFromIndex } from "./invoice-data";
 import { EInvoiceV2Client, type EInvoiceV2Session } from "./tw-einvoice-v2";
@@ -361,30 +361,15 @@ function dedupeInvoiceLineItems(
   return Array.from(bySourceId.values());
 }
 
-export function parseConnectorConfig(connectorId: string, config: unknown) {
-  if (connectorId === "einvoice") {
-    return invoiceConfigSchema.parse(config);
-  }
+export const connectorConfigSchemas = {
+  einvoice: invoiceConfigSchema,
+  tdcc: tdccConfigSchema,
+  esun: esunConfigSchema,
+  cathaybk: cathaybkConfigSchema,
+  sinopac: sinopacConfigSchema,
+  taishin: taishinConfigSchema,
+} satisfies Record<ConnectorId, z.ZodTypeAny>;
 
-  if (connectorId === "tdcc") {
-    return tdccConfigSchema.parse(config);
-  }
-
-  if (connectorId === "esun") {
-    return esunConfigSchema.parse(config);
-  }
-
-  if (connectorId === "cathaybk") {
-    return cathaybkConfigSchema.parse(config);
-  }
-
-  if (connectorId === "sinopac") {
-    return sinopacConfigSchema.parse(config);
-  }
-
-  if (connectorId === "taishin") {
-    return taishinConfigSchema.parse(config);
-  }
-
-  throw new Error("Unsupported connector id.");
+export function parseConnectorConfig(connectorId: ConnectorId, config: unknown) {
+  return connectorConfigSchemas[connectorId].parse(config);
 }

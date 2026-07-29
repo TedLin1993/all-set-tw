@@ -17,31 +17,33 @@ export function connectorEncryptedConfigStatement(
   db: D1Database,
   connectorId: ConnectorId,
   encryptedConfig: string,
+  publicConfig: string | null,
   now: string,
 ) {
   return db
     .prepare(
       `UPDATE connector_settings
-    SET encrypted_config = ?, updated_at = ?
+    SET encrypted_config = ?, public_config = ?, updated_at = ?
     WHERE connector_id = ?`,
     )
-    .bind(encryptedConfig, now, connectorId);
+    .bind(encryptedConfig, publicConfig, now, connectorId);
 }
 
 export function connectorStateStatement(
   db: D1Database,
   connectorId: ConnectorId,
   encryptedConfig: string,
+  publicConfig: string | null,
   cursor: string,
   now: string,
 ) {
   return db
     .prepare(
       `UPDATE connector_settings
-    SET encrypted_config = ?, sync_cursor = ?, updated_at = ?
+    SET encrypted_config = ?, public_config = ?, sync_cursor = ?, updated_at = ?
     WHERE connector_id = ?`,
     )
-    .bind(encryptedConfig, cursor, now, connectorId);
+    .bind(encryptedConfig, publicConfig, cursor, now, connectorId);
 }
 
 export function connectorCursorStatement(

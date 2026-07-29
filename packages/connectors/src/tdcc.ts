@@ -57,6 +57,11 @@ const tdccCashBalanceSchema = z.object({
   raw: z.unknown().optional()
 });
 
+const tdccSessionSchema = z.object({
+  tokenId: z.string().nullable(),
+  richUrl: z.string().nullable()
+});
+
 export const tdccConfigSchema = z.object({
   holdings: z.array(tdccHoldingSchema).default([]),
   cashBalances: z.array(tdccCashBalanceSchema).default([]),
@@ -66,6 +71,7 @@ export const tdccConfigSchema = z.object({
   deviceId: z.string().min(1).optional(),
   devType: z.string().min(1).optional(),
   devModel: z.string().min(1).optional(),
+  session: tdccSessionSchema.optional(),
   otp: z.string().min(1).optional(),
   otpChannel: z.enum(["email", "sms"]).optional(),
   requestOtp: z.boolean().default(true),
@@ -143,7 +149,7 @@ type TdccCursorState = {
   deviceId: string;
   devType: string;
   devModel: string;
-  session: EPassbookSession;
+  session?: EPassbookSession;
   tradeCursors?: Record<string, TdccTradeCursor>;
 };
 
@@ -209,10 +215,12 @@ async function syncTdccLive(config: TdccConfig, cursor?: string) {
   };
 
   try {
-    return await runTdccLogin(config, { ...identity, session: previous?.session }, previous);
+    return await runTdccLogin(config, { ...identity, session: config.session ?? previous?.session }, previous);
   } catch (error) {
     const isStaleSession =
-      error instanceof EPassbookError && SESSION_EXPIRED_CODES.has(error.code) && Boolean(previous?.session?.tokenId);
+      error instanceof EPassbookError &&
+      SESSION_EXPIRED_CODES.has(error.code) &&
+      Boolean(config.session?.tokenId ?? previous?.session?.tokenId);
     if (!isStaleSession) return wrapTdccError(error);
   }
 
@@ -230,10 +238,16 @@ export async function syncTdccTradeHistory(config: TdccConfig, cursor?: string) 
   };
 
   try {
-    return await runTdccTradeHistory(config, { ...identity, session: previous?.session }, previous);
+    return await runTdccTradeHistory(
+      config,
+      { ...identity, session: config.session ?? previous?.session },
+      previous
+    );
   } catch (error) {
     const isStaleSession =
-      error instanceof EPassbookError && SESSION_EXPIRED_CODES.has(error.code) && Boolean(previous?.session?.tokenId);
+      error instanceof EPassbookError &&
+      SESSION_EXPIRED_CODES.has(error.code) &&
+      Boolean(config.session?.tokenId ?? previous?.session?.tokenId);
     if (!isStaleSession) return wrapTdccError(error);
   }
 

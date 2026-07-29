@@ -477,18 +477,18 @@ Connector 不得直接寫入金融資料表。
 
 ## 新增 Connector
 
-新增 connector 時至少需要：
+新增 connector 必須遵循 [`docs/004-connector-development.md`](004-connector-development.md)。核心步驟包括：
 
-1. 在 `packages/core` 新增 connector ID 與必要的共用資料契約。
-2. 在 `packages/connectors` 定義 config schema、parser 與通用 protocol/client。
+1. 在 `connectorCatalog` 宣告 ID、連接模式、scope、資料能力與設定欄位分類。
+2. 在 `connectorConfigSchemas` 註冊 config schema、parser 與通用 protocol/client。
 3. 需要 Worker binding 時，在 `apps/worker/src/connectors` 建立 adapter。
-4. 在 connector settings feature 加入設定與公開設定處理。
-5. 在 sync service 加入同步 use case。
-6. 在 sync route 與 scheduler 註冊 connector。
-7. 將外部資料映射成既有 core contract。
-8. 使用 staged persistence 寫入資料。
-9. 處理登入失效、OTP、CAPTCHA、session 更新與錯誤分類。
-10. 在 `packages/connectors` 增加可執行的 synthetic self-check。
+4. 在 sync service 將資料正規化並透過 staged persistence 寫入。
+5. 在 `connectorRuntimeRegistry` 註冊手動／排程同步與 challenge handler。
+6. 前端使用受 `ConnectorFormFieldKey` 約束的欄位，不得重複維護 connector 顯示 metadata。
+7. 透過 migration 建立預設停用的 `all` sync job。
+8. 完成 registry completeness、state boundary、parser、session lifecycle、route、scheduler 與 synthetic self-check。
+
+Route 與 scheduler 應透過 runtime registry dispatch，不再新增 connector-specific switch。
 
 Connector 回傳的 `raw` 資料只供診斷與未來 migration 使用，不得讓主要功能依賴未標準化的 raw response 結構。
 

@@ -43,7 +43,7 @@
         "description": "儲存連接器設定、同步金融資料及資料庫遷移紀錄的 D1 資料庫。"
       },
       "BROWSER": {
-        "description": "Cloudflare Browser Rendering binding，供需要瀏覽器的連接器（如玉山銀行、永豐銀行、台新銀行）使用。"
+        "description": "Cloudflare Browser Rendering binding，供需要瀏覽器的連接器（如玉山銀行、國泰世華銀行、永豐銀行、台新銀行）使用。"
       },
       "AI": {
         "description": "Cloudflare Workers AI binding，供 Gemma 4 辨識銀行登入驗證碼。"

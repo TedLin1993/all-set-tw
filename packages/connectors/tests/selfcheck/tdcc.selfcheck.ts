@@ -178,8 +178,9 @@ async function main() {
   assert.equal(manualResult.bankTransactions?.[0]?.sourceId, "cash-move-1");
 
   calls.length = 0;
-  await connector.sync(configWithOtp, result.cursor);
-  assert.ok(!calls.includes("AU001"), "second sync should reuse session and skip login");
+  await connector.sync(config, result.cursor);
+  assert.ok(!calls.includes("AU001"), "legacy cursor session should migrate without another login");
+  assert.ok(!calls.includes("AU013"), "legacy cursor session migration must not request another OTP");
 
   // Re-sync with a different time-of-day suffix on the fund's updateTime: the
   // fund's sourceId must stay identical or the upsert dedupe breaks (the bug
