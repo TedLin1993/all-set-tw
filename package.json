@@ -9,8 +9,8 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "format": "npm run format -w @taiwan-fin-hub/web",
-    "format:check": "npm run format:check -w @taiwan-fin-hub/web",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces",
     "test:unit": "npm run test:unit -w @taiwan-fin-hub/web",
     "test:backend": "npm test -w @taiwan-fin-hub/worker && npm test -w @taiwan-fin-hub/db && npm run test:selfcheck -w @taiwan-fin-hub/connectors",
@@ -52,6 +52,8 @@
   },
   "devDependencies": {
     "esbuild": "^0.28.1",
+    "prettier": "^3.9.5",
+    "prettier-plugin-svelte": "^4.1.1",
     "vite": "^8.1.4",
     "typescript": "^5.5.4"
   }

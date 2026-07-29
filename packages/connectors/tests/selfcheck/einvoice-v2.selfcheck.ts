@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   decryptLoginData,
   encryptLoginData,
-  EInvoiceV2Client
+  EInvoiceV2Client,
 } from "../../src/tw-einvoice-v2";
 import { einvoiceConnector, parseInvoiceConfig } from "../../src/index";
 
@@ -19,7 +19,7 @@ const syntheticSession = {
   carrier_code: "/ABCD123456",
   liat: 1_783_947_541,
   ssme: "synthetic-signing-secret",
-  appid: "synthetic-app-id"
+  appid: "synthetic-app-id",
 };
 const syntheticServerNow = Math.floor(Date.now() / 1000) + 123;
 
@@ -29,7 +29,9 @@ const fakeFetch: typeof fetch = async (input, init) => {
   requests.push({ url, init: requestInit });
 
   if (url.endsWith("/mid/v1/login")) {
-    const body = JSON.parse(String(requestInit.body ?? "{}")) as { ldata?: string };
+    const body = JSON.parse(String(requestInit.body ?? "{}")) as {
+      ldata?: string;
+    };
     assert.equal(typeof body.ldata, "string");
     const login = await decryptLoginData(body.ldata!);
     assert.equal(login.type, 0);
@@ -46,7 +48,13 @@ const fakeFetch: typeof fetch = async (input, init) => {
     assert.equal(device.appver, "6.800.2");
     assert.equal(device.lang, "zh");
     assert.equal(device.ccs, "tw");
-    return json({ result: 0, payload: await encryptLoginData({ ...syntheticSession, now: syntheticServerNow }) });
+    return json({
+      result: 0,
+      payload: await encryptLoginData({
+        ...syntheticSession,
+        now: syntheticServerNow,
+      }),
+    });
   }
 
   if (url.endsWith("/einvoice/carriers/query-invoices-header")) {
@@ -60,13 +68,20 @@ const fakeFetch: typeof fetch = async (input, init) => {
     return json({
       result: 0,
       payload: {
-        data: [{
-          invNum: "AA-12345678",
-          invDate: { year: "115", month: "7", date: "1", time: String(Date.parse("2026-07-01T04:34:56.000Z")) },
-          amount: "120",
-          sellerName: "測試商店"
-        }]
-      }
+        data: [
+          {
+            invNum: "AA-12345678",
+            invDate: {
+              year: "115",
+              month: "7",
+              date: "1",
+              time: String(Date.parse("2026-07-01T04:34:56.000Z")),
+            },
+            amount: "120",
+            sellerName: "測試商店",
+          },
+        ],
+      },
     });
   }
 
@@ -75,7 +90,20 @@ const fakeFetch: typeof fetch = async (input, init) => {
     assert.equal(claims.reqdata.action, "carrierInvDetail");
     assert.equal(claims.reqdata.invNum, "AA-12345678");
     assert.equal(claims.reqdata.invDate, "2026/07/01");
-    return json({ result: 0, payload: { details: [{ rowNum: "1", itemName: "測試品項", quantity: "2", unitPrice: "60", amount: "120" }] } });
+    return json({
+      result: 0,
+      payload: {
+        details: [
+          {
+            rowNum: "1",
+            itemName: "測試品項",
+            quantity: "2",
+            unitPrice: "60",
+            amount: "120",
+          },
+        ],
+      },
+    });
   }
 
   throw new Error(`unexpected fake URL: ${url}`);
@@ -86,14 +114,14 @@ async function main() {
     middleHost: "https://fake-middle.test",
     bigHost: "https://fake-big.test",
     androidId: "synthetic-android-id",
-    fetchImpl: fakeFetch
+    fetchImpl: fakeFetch,
   });
 
   const loginStartedAt = Date.now() / 1000;
   const session = await client.login({
     mobile: "0912345678",
     password: "synthetic-password",
-    androidId: "synthetic-android-id"
+    androidId: "synthetic-android-id",
   });
   const loginFinishedAt = Date.now() / 1000;
   assert.equal(session.sid, syntheticSession.sid);
@@ -103,7 +131,7 @@ async function main() {
   const serverTimeOffset = session.serverTimeOffset ?? 0;
   assert.ok(
     serverTimeOffset >= Math.trunc(syntheticServerNow - loginFinishedAt) &&
-      serverTimeOffset <= Math.trunc(syntheticServerNow - loginStartedAt)
+      serverTimeOffset <= Math.trunc(syntheticServerNow - loginStartedAt),
   );
 
   await client.queryCarrierInvoices(session, "2026-07-01", "2026-07-31");
@@ -111,11 +139,20 @@ async function main() {
   assert.equal(requests.length, 3);
 
   const loginHeaders = new Headers(requests[0].init.headers);
-  assert.equal(loginHeaders.get("Content-Type"), "application/json; charset=utf-8");
+  assert.equal(
+    loginHeaders.get("Content-Type"),
+    "application/json; charset=utf-8",
+  );
   assert.equal(loginHeaders.get("appver"), "6.800.2");
   const invoiceHeaders = new Headers(requests[1].init.headers);
-  assert.equal(invoiceHeaders.get("Content-Type"), "application/x-www-form-urlencoded; charset=utf-8");
-  assert.equal(new URL(requests[2].url).pathname, "/einvoice/carriers/query-invoices-details");
+  assert.equal(
+    invoiceHeaders.get("Content-Type"),
+    "application/x-www-form-urlencoded; charset=utf-8",
+  );
+  assert.equal(
+    new URL(requests[2].url).pathname,
+    "/einvoice/carriers/query-invoices-details",
+  );
 
   (globalThis as unknown as { fetch: typeof fetch }).fetch = fakeFetch;
   const connectorConfig = parseInvoiceConfig({
@@ -124,7 +161,7 @@ async function main() {
     password: "synthetic-password",
     androidId: "synthetic-android-id",
     periodsBack: 1,
-    fetchDetails: true
+    fetchDetails: true,
   });
   const syncResult = await einvoiceConnector.sync(connectorConfig);
   assert.equal(syncResult.records.length, 1);
@@ -139,7 +176,7 @@ async function main() {
 function json(body: unknown) {
   return new Response(JSON.stringify(body), {
     status: 200,
-    headers: { "Content-Type": "application/json" }
+    headers: { "Content-Type": "application/json" },
   });
 }
 
@@ -149,7 +186,9 @@ function readJwtClaims(init: RequestInit) {
   assert.ok(token);
   const parts = token.split(".");
   assert.equal(parts.length, 3);
-  const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")) as Record<string, unknown>;
+  const header = JSON.parse(
+    Buffer.from(parts[0], "base64url").toString("utf8"),
+  ) as Record<string, unknown>;
   assert.deepEqual(header, { alg: "HS256", typ: "JWT", ver: "1.0" });
   return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as {
     comms: Record<string, unknown>;

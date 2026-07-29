@@ -5,14 +5,17 @@ import forge from "node-forge";
 import {
   EInvoiceClient,
   EInvoiceProtocolUnavailableError,
-  RSA_PUBLIC_KEY
+  RSA_PUBLIC_KEY,
 } from "../../src/tw-einvoice-api";
 
 const OUTDATED_PROTOCOL_VERSION = "6.800.2";
 const REQUIRED_PROTOCOL_VERSION = "7.9000.40";
 const requests: Array<{ url: string; init: RequestInit }> = [];
 
-(globalThis as unknown as { fetch: typeof fetch }).fetch = (async (url: string, init: RequestInit) => {
+(globalThis as unknown as { fetch: typeof fetch }).fetch = (async (
+  url: string,
+  init: RequestInit,
+) => {
   requests.push({ url, init });
 
   if (url.endsWith("User/Login")) {
@@ -21,7 +24,7 @@ const requests: Array<{ url: string; init: RequestInit }> = [];
       return json({
         Result: null,
         ReturnCode: 6603,
-        Message: "目前系統繁忙，請稍後再試。"
+        Message: "目前系統繁忙，請稍後再試。",
       });
     }
     // Simulate the service's forced-upgrade response whenever the client is not
@@ -31,21 +34,19 @@ const requests: Array<{ url: string; init: RequestInit }> = [];
         Result: null,
         ReturnCode: "6608",
         Message: "請立即更新。",
-        Info: JSON.stringify({ VersionNumber: REQUIRED_PROTOCOL_VERSION })
+        Info: JSON.stringify({ VersionNumber: REQUIRED_PROTOCOL_VERSION }),
       });
     }
 
-    return encryptedJson(
-      {
-        Result: {
-          User: {
-            Mobile: "0912345678",
-            UserToken: "test-user-token",
-            MobileBarcode: "/ABCD123"
-          }
-        }
-      }
-    );
+    return encryptedJson({
+      Result: {
+        User: {
+          Mobile: "0912345678",
+          UserToken: "test-user-token",
+          MobileBarcode: "/ABCD123",
+        },
+      },
+    });
   }
 
   return json({ result: [] }, "mixed");
@@ -64,11 +65,14 @@ async function main() {
     carrierType: "3J0002",
     cardEncrypt: "test-password",
     startDate: "2026/07/01",
-    endDate: "2026/07/31"
+    endDate: "2026/07/31",
   });
 
   const outdatedLoginHeaders = new Headers(requests[0]?.init.headers);
-  assert.equal(outdatedLoginHeaders.get("AppVersion"), OUTDATED_PROTOCOL_VERSION);
+  assert.equal(
+    outdatedLoginHeaders.get("AppVersion"),
+    OUTDATED_PROTOCOL_VERSION,
+  );
   assert.equal(outdatedLoginHeaders.get("encrypt"), "single");
 
   const loginHeaders = new Headers(requests[1]?.init.headers);
@@ -88,11 +92,12 @@ async function main() {
 
   const protocolClient = new EInvoiceClient({ apiKey: "protocol-unavailable" });
   await assert.rejects(
-    () => protocolClient.login({ mobile: "0912345678", password: "test-password" }),
+    () =>
+      protocolClient.login({ mobile: "0912345678", password: "test-password" }),
     (error: unknown) =>
       error instanceof EInvoiceProtocolUnavailableError &&
       /代碼 6603/.test(error.message) &&
-      /不是帳號密碼錯誤/.test(error.message)
+      /不是帳號密碼錯誤/.test(error.message),
   );
   console.log("einvoice.selfcheck: ok");
 }
@@ -100,15 +105,23 @@ async function main() {
 function json(body: unknown, encrypt = "single") {
   return new Response(JSON.stringify(body), {
     status: 200,
-    headers: { "Content-Type": "application/json", encrypt }
+    headers: { "Content-Type": "application/json", encrypt },
   });
 }
 
 function encryptedJson(body: unknown) {
   const keyText = forge.util.encode64(
-    forge.md.sha256.create().update(RSA_PUBLIC_KEY.slice(0, 16), "utf8").digest().getBytes()
+    forge.md.sha256
+      .create()
+      .update(RSA_PUBLIC_KEY.slice(0, 16), "utf8")
+      .digest()
+      .getBytes(),
   );
-  const key = forge.md.sha256.create().update(keyText, "utf8").digest().getBytes();
+  const key = forge.md.sha256
+    .create()
+    .update(keyText, "utf8")
+    .digest()
+    .getBytes();
   const iv = forge.md.md5.create().update(keyText, "utf8").digest().getBytes();
   const cipher = forge.cipher.createCipher("AES-CBC", key);
   cipher.start({ iv });
@@ -116,7 +129,7 @@ function encryptedJson(body: unknown) {
   assert.equal(cipher.finish(), true);
   return new Response(forge.util.encode64(cipher.output.getBytes()), {
     status: 200,
-    headers: { "Content-Type": "application/json", encrypt: "single" }
+    headers: { "Content-Type": "application/json", encrypt: "single" },
   });
 }
 

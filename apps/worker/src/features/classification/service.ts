@@ -159,11 +159,7 @@ export async function reorderClassificationRules(
     throw new ClassificationRuleOrderError();
   }
 
-  await updateClassificationRuleOrder(
-    db,
-    ruleIds,
-    new Date().toISOString(),
-  );
+  await updateClassificationRuleOrder(db, ruleIds, new Date().toISOString());
 }
 
 export function setClassificationOverride(

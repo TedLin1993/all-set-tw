@@ -51,7 +51,8 @@ const PROD_BIG_HOST = "https://upi.einvoice.nat.gov.tw";
 const DEFAULT_APP_VERSION = "6.800.2";
 const DEFAULT_APP_BUILD = 66;
 const DEFAULT_USER_AGENT = "okhttp/5.3.0";
-const ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const ALPHANUMERIC =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 function cryptoApi() {
   const value = globalThis.crypto;
@@ -68,7 +69,10 @@ function base64(bytes: Uint8Array) {
 }
 
 function base64Url(bytes: Uint8Array) {
-  return base64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return base64(bytes)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 function utf8(value: string) {
@@ -94,24 +98,57 @@ function swapPairs(value: string) {
 function randomAlphaNumeric(length: number) {
   const random = new Uint32Array(length);
   cryptoApi().getRandomValues(random);
-  return Array.from(random, (value) => ALPHANUMERIC[value % ALPHANUMERIC.length]).join("");
+  return Array.from(
+    random,
+    (value) => ALPHANUMERIC[value % ALPHANUMERIC.length],
+  ).join("");
 }
 
 async function sha256(value: string) {
-  return new Uint8Array(await cryptoApi().subtle.digest("SHA-256", cryptoSource(utf8(value))));
-}
-
-async function aesGcmEncrypt(plainText: string, key: Uint8Array, iv: Uint8Array) {
-  const cryptoKey = await cryptoApi().subtle.importKey("raw", cryptoSource(key), "AES-GCM", false, ["encrypt"]);
   return new Uint8Array(
-    await cryptoApi().subtle.encrypt({ name: "AES-GCM", iv: cryptoSource(iv), tagLength: 128 }, cryptoKey, cryptoSource(utf8(plainText)))
+    await cryptoApi().subtle.digest("SHA-256", cryptoSource(utf8(value))),
   );
 }
 
-async function aesGcmDecrypt(cipherText: Uint8Array, key: Uint8Array, iv: Uint8Array) {
-  const cryptoKey = await cryptoApi().subtle.importKey("raw", cryptoSource(key), "AES-GCM", false, ["decrypt"]);
+async function aesGcmEncrypt(
+  plainText: string,
+  key: Uint8Array,
+  iv: Uint8Array,
+) {
+  const cryptoKey = await cryptoApi().subtle.importKey(
+    "raw",
+    cryptoSource(key),
+    "AES-GCM",
+    false,
+    ["encrypt"],
+  );
+  return new Uint8Array(
+    await cryptoApi().subtle.encrypt(
+      { name: "AES-GCM", iv: cryptoSource(iv), tagLength: 128 },
+      cryptoKey,
+      cryptoSource(utf8(plainText)),
+    ),
+  );
+}
+
+async function aesGcmDecrypt(
+  cipherText: Uint8Array,
+  key: Uint8Array,
+  iv: Uint8Array,
+) {
+  const cryptoKey = await cryptoApi().subtle.importKey(
+    "raw",
+    cryptoSource(key),
+    "AES-GCM",
+    false,
+    ["decrypt"],
+  );
   return new TextDecoder().decode(
-    await cryptoApi().subtle.decrypt({ name: "AES-GCM", iv: cryptoSource(iv), tagLength: 128 }, cryptoKey, cryptoSource(cipherText))
+    await cryptoApi().subtle.decrypt(
+      { name: "AES-GCM", iv: cryptoSource(iv), tagLength: 128 },
+      cryptoKey,
+      cryptoSource(cipherText),
+    ),
   );
 }
 
@@ -125,13 +162,21 @@ async function encryptLoginDataWithContext(data: Record<string, unknown>) {
   const key = await sha256(seed);
   const iv = utf8(`${a.slice(-6)}${b.slice(-6)}`);
   const cipherText = await aesGcmEncrypt(json, key, iv);
-  return { value: `${a}|${base64(cipherText)}|${b}`, context: { key, iv } satisfies LDataCryptoContext };
+  return {
+    value: `${a}|${base64(cipherText)}|${b}`,
+    context: { key, iv } satisfies LDataCryptoContext,
+  };
 }
 
-async function decryptLDataCiphertext(value: string, context: LDataCryptoContext) {
+async function decryptLDataCiphertext(
+  value: string,
+  context: LDataCryptoContext,
+) {
   const binary = globalThis.atob(value);
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return JSON.parse(await aesGcmDecrypt(bytes, context.key, context.iv)) as Record<string, unknown>;
+  return JSON.parse(
+    await aesGcmDecrypt(bytes, context.key, context.iv),
+  ) as Record<string, unknown>;
 }
 
 /** AppCrypto.lDataEncrypt: random 16+16 seed, SHA-256 key, AES-GCM payload. */
@@ -141,7 +186,9 @@ export async function encryptLoginData(data: Record<string, unknown>) {
     step = "random";
     return (await encryptLoginDataWithContext(data)).value;
   } catch (error) {
-    throw new Error(`新版電子發票登入封包建立失敗（${step}）：${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `新版電子發票登入封包建立失敗（${step}）：${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -166,7 +213,7 @@ function jsonHeaders(options: EInvoiceV2Options) {
     appver: options.appVersion ?? DEFAULT_APP_VERSION,
     appbn: String(options.appBuild ?? DEFAULT_APP_BUILD),
     platform: "android",
-    version: options.appVersion ?? DEFAULT_APP_VERSION
+    version: options.appVersion ?? DEFAULT_APP_VERSION,
   };
 }
 
@@ -178,7 +225,7 @@ function formHeaders(options: EInvoiceV2Options) {
     appver: options.appVersion ?? DEFAULT_APP_VERSION,
     appbn: String(options.appBuild ?? DEFAULT_APP_BUILD),
     platform: "android",
-    version: options.appVersion ?? DEFAULT_APP_VERSION
+    version: options.appVersion ?? DEFAULT_APP_VERSION,
   };
 }
 
@@ -187,7 +234,9 @@ function stringValue(value: unknown) {
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function unwrapBody(body: unknown) {
@@ -214,7 +263,10 @@ async function decodeMiddleBody(body: unknown, context?: LDataCryptoContext) {
   }
 }
 
-function sessionFromLoginData(data: unknown, fallback: Partial<EInvoiceV2Session>) {
+function sessionFromLoginData(
+  data: unknown,
+  fallback: Partial<EInvoiceV2Session>,
+) {
   const value = recordValue(data) ?? {};
   const agree = recordValue(value.agree_ver);
   const serverNow = Number(value.now);
@@ -225,19 +277,38 @@ function sessionFromLoginData(data: unknown, fallback: Partial<EInvoiceV2Session
     sid: stringValue(value.sid ?? fallback.sid),
     token: stringValue(value.token ?? fallback.token),
     iv: stringValue(value.iv ?? fallback.iv) || undefined,
-    svrCode: stringValue(value.svrCode ?? value.svr_code ?? fallback.svrCode) || undefined,
-    clientCode: stringValue(value.clientCode ?? fallback.clientCode) || undefined,
-    loginAppId: stringValue(value.appid ?? value.loginAppId ?? fallback.loginAppId),
+    svrCode:
+      stringValue(value.svrCode ?? value.svr_code ?? fallback.svrCode) ||
+      undefined,
+    clientCode:
+      stringValue(value.clientCode ?? fallback.clientCode) || undefined,
+    loginAppId: stringValue(
+      value.appid ?? value.loginAppId ?? fallback.loginAppId,
+    ),
     loginLiat: Number(value.liat ?? fallback.loginLiat ?? 0),
     loginSsMe: stringValue(value.ssme ?? value.loginSsMe ?? fallback.loginSsMe),
     ltoken: stringValue(value.ltoken ?? fallback.ltoken) || undefined,
     hkey: stringValue(value.hkey ?? value.skey ?? fallback.hkey) || undefined,
-    carrierCode: stringValue(value.carrier_code ?? value.carrierCode ?? fallback.carrierCode) || undefined,
-    serverTimeOffset
+    carrierCode:
+      stringValue(
+        value.carrier_code ?? value.carrierCode ?? fallback.carrierCode,
+      ) || undefined,
+    serverTimeOffset,
   };
-  if (agree?.eula != null) (session as EInvoiceV2Session & { agreedEulaVersion?: number }).agreedEulaVersion = Number(agree.eula);
-  if (!session.sid || !session.token || !session.loginAppId || !session.loginSsMe || !Number.isFinite(session.loginLiat)) {
-    throw new Error(`新版電子發票登入成功回應缺少必要 session 欄位（回應欄位：${Object.keys(value).join(",") || "無"}）。`);
+  if (agree?.eula != null)
+    (
+      session as EInvoiceV2Session & { agreedEulaVersion?: number }
+    ).agreedEulaVersion = Number(agree.eula);
+  if (
+    !session.sid ||
+    !session.token ||
+    !session.loginAppId ||
+    !session.loginSsMe ||
+    !Number.isFinite(session.loginLiat)
+  ) {
+    throw new Error(
+      `新版電子發票登入成功回應缺少必要 session 欄位（回應欄位：${Object.keys(value).join(",") || "無"}）。`,
+    );
   }
   return session;
 }
@@ -251,8 +322,11 @@ function accessToken(session: EInvoiceV2Session) {
 
 export function createInvoiceJwt(
   request: Record<string, unknown>,
-  session: Pick<EInvoiceV2Session, "loginLiat" | "loginAppId" | "loginSsMe" | "carrierCode">,
-  now = Math.floor(Date.now() / 1000) - 10
+  session: Pick<
+    EInvoiceV2Session,
+    "loginLiat" | "loginAppId" | "loginSsMe" | "carrierCode"
+  >,
+  now = Math.floor(Date.now() / 1000) - 10,
 ) {
   const header = { alg: "HS256", typ: "JWT", ver: "1.0" };
   const claims = {
@@ -262,42 +336,62 @@ export function createInvoiceJwt(
       liat: session.loginLiat,
       appid: session.loginAppId,
       barcode: session.carrierCode ?? "",
-      keyType: "2"
+      keyType: "2",
     },
-    reqdata: request
+    reqdata: request,
   };
   const encodedHeader = base64Url(utf8(JSON.stringify(header)));
   const encodedClaims = base64Url(utf8(JSON.stringify(claims)));
   return {
     signingInput: `${encodedHeader}.${encodedClaims}`,
-    secret: session.loginSsMe
+    secret: session.loginSsMe,
   };
 }
 
-function correctedInvoiceTimestamp(session: Pick<EInvoiceV2Session, "serverTimeOffset">) {
+function correctedInvoiceTimestamp(
+  session: Pick<EInvoiceV2Session, "serverTimeOffset">,
+) {
   return Math.floor(Date.now() / 1000) + (session.serverTimeOffset ?? 0) - 10;
 }
 
 export async function signInvoiceJwt(
   request: Record<string, unknown>,
-  session: Pick<EInvoiceV2Session, "loginLiat" | "loginAppId" | "loginSsMe" | "carrierCode">,
-  now?: number
+  session: Pick<
+    EInvoiceV2Session,
+    "loginLiat" | "loginAppId" | "loginSsMe" | "carrierCode"
+  >,
+  now?: number,
 ) {
   const { signingInput, secret } = createInvoiceJwt(request, session, now);
-  const key = await cryptoApi().subtle.importKey("raw", cryptoSource(utf8(secret)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const signature = new Uint8Array(await cryptoApi().subtle.sign("HMAC", key, cryptoSource(utf8(signingInput))));
+  const key = await cryptoApi().subtle.importKey(
+    "raw",
+    cryptoSource(utf8(secret)),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = new Uint8Array(
+    await cryptoApi().subtle.sign(
+      "HMAC",
+      key,
+      cryptoSource(utf8(signingInput)),
+    ),
+  );
   return `${signingInput}.${base64Url(signature)}`;
 }
 
 export class EInvoiceV2Client {
-  private readonly options: Required<Pick<EInvoiceV2Options, "middleHost" | "bigHost">> & EInvoiceV2Options;
+  private readonly options: Required<
+    Pick<EInvoiceV2Options, "middleHost" | "bigHost">
+  > &
+    EInvoiceV2Options;
   private readonly fetcher: typeof fetch;
 
   constructor(options: EInvoiceV2Options = {}) {
     this.options = {
       middleHost: options.middleHost ?? PROD_MIDDLE_HOST,
       bigHost: options.bigHost ?? PROD_BIG_HOST,
-      ...options
+      ...options,
     };
     // Cloudflare's global fetch is Web-IDL bound; storing the bare function and
     // invoking it as a class member causes an Illegal invocation error.
@@ -307,7 +401,10 @@ export class EInvoiceV2Client {
   async login(params: EInvoiceV2LoginOptions) {
     const androidId = params.androidId ?? "taiwan-fin-hub";
     const ptoken = params.ptoken ?? "";
-    const loginClientCode = params.loginClientCode ?? this.options.loginClientCode ?? randomAlphaNumeric(8);
+    const loginClientCode =
+      params.loginClientCode ??
+      this.options.loginClientCode ??
+      randomAlphaNumeric(8);
     const inner = {
       type: params.loginType ?? 0,
       account: params.mobile,
@@ -323,41 +420,74 @@ export class EInvoiceV2Client {
         appver: params.appVersion ?? DEFAULT_APP_VERSION,
         appbn: params.appBuild ?? DEFAULT_APP_BUILD,
         lang: params.language ?? "zh",
-        ccs: params.ccs ?? "tw"
+        ccs: params.ccs ?? "tw",
       },
       ts: Math.floor(Date.now() / 1000),
-      pdid: `a:${androidId}`
+      pdid: `a:${androidId}`,
     };
     const encrypted = await encryptLoginDataWithContext(inner);
-    const body = await this.middleRequest("/mid/v1/login", { ldata: encrypted.value });
+    const body = await this.middleRequest("/mid/v1/login", {
+      ldata: encrypted.value,
+    });
     const data = await decodeMiddleBody(body, encrypted.context);
     try {
-      return sessionFromLoginData(data, { clientCode: loginClientCode, carrierCode: params.carrierCode });
+      return sessionFromLoginData(data, {
+        clientCode: loginClientCode,
+        carrierCode: params.carrierCode,
+      });
     } catch (error) {
-      throw new Error(`${error instanceof Error ? error.message : String(error)}；外層回應形狀：${responseShape(body)}`);
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}；外層回應形狀：${responseShape(body)}`,
+      );
     }
   }
 
-  async loginToken(session: Pick<EInvoiceV2Session, "ltoken"> & Partial<EInvoiceV2Session>, options: EInvoiceV2Options = {}) {
-    if (!session.ltoken) throw new Error("新版電子發票 session 沒有 ltoken，無法使用 token 登入。");
+  async loginToken(
+    session: Pick<EInvoiceV2Session, "ltoken"> & Partial<EInvoiceV2Session>,
+    options: EInvoiceV2Options = {},
+  ) {
+    if (!session.ltoken)
+      throw new Error(
+        "新版電子發票 session 沒有 ltoken，無法使用 token 登入。",
+      );
     const androidId = options.androidId ?? "taiwan-fin-hub";
     const inner = {
       ltoken: session.ltoken,
-      ckey: options.loginClientCode ?? session.clientCode ?? this.options.loginClientCode ?? randomAlphaNumeric(8),
+      ckey:
+        options.loginClientCode ??
+        session.clientCode ??
+        this.options.loginClientCode ??
+        randomAlphaNumeric(8),
       device: {
-        os: "a", os_version: options.osVersion ?? "15", model: "Android", pdid: `a:${androidId}`,
-        ptoken: options.ptoken ?? "", appver: options.appVersion ?? DEFAULT_APP_VERSION,
-        appbn: options.appBuild ?? DEFAULT_APP_BUILD, lang: options.language ?? "zh", ccs: options.ccs ?? "tw"
+        os: "a",
+        os_version: options.osVersion ?? "15",
+        model: "Android",
+        pdid: `a:${androidId}`,
+        ptoken: options.ptoken ?? "",
+        appver: options.appVersion ?? DEFAULT_APP_VERSION,
+        appbn: options.appBuild ?? DEFAULT_APP_BUILD,
+        lang: options.language ?? "zh",
+        ccs: options.ccs ?? "tw",
       },
       ts: Math.floor(Date.now() / 1000),
-      pdid: `a:${androidId}`
+      pdid: `a:${androidId}`,
     };
     const encrypted = await encryptLoginDataWithContext(inner);
-    const body = await this.middleRequest("/mid/v1/logintoken", { ldata: encrypted.value });
-    return sessionFromLoginData(await decodeMiddleBody(body, encrypted.context), session);
+    const body = await this.middleRequest("/mid/v1/logintoken", {
+      ldata: encrypted.value,
+    });
+    return sessionFromLoginData(
+      await decodeMiddleBody(body, encrypted.context),
+      session,
+    );
   }
 
-  async queryCarrierInvoices(session: EInvoiceV2Session, startDate: string, endDate: string, page = 1) {
+  async queryCarrierInvoices(
+    session: EInvoiceV2Session,
+    startDate: string,
+    endDate: string,
+    page = 1,
+  ) {
     const request = {
       version: "1.0",
       cardType: "3J0002",
@@ -366,21 +496,39 @@ export class EInvoiceV2Client {
       startDate,
       endDate,
       onlyWinningInv: "A",
-      page
+      page,
     };
-    return this.bigRequest("/einvoice/carriers/query-invoices-header", await signInvoiceJwt(request, session, correctedInvoiceTimestamp(session)));
+    return this.bigRequest(
+      "/einvoice/carriers/query-invoices-header",
+      await signInvoiceJwt(
+        request,
+        session,
+        correctedInvoiceTimestamp(session),
+      ),
+    );
   }
 
-  async queryCarrierInvoiceDetail(session: EInvoiceV2Session, invNum: string, invDate: string) {
+  async queryCarrierInvoiceDetail(
+    session: EInvoiceV2Session,
+    invNum: string,
+    invDate: string,
+  ) {
     const request = {
       version: "1.0",
       cardType: "3J0002",
       cardNo: session.carrierCode ?? "",
       action: "carrierInvDetail",
       invNum,
-      invDate
+      invDate,
     };
-    return this.bigRequest("/einvoice/carriers/query-invoices-details", await signInvoiceJwt(request, session, correctedInvoiceTimestamp(session)));
+    return this.bigRequest(
+      "/einvoice/carriers/query-invoices-details",
+      await signInvoiceJwt(
+        request,
+        session,
+        correctedInvoiceTimestamp(session),
+      ),
+    );
   }
 
   async queryInvoiceDetail(
@@ -392,20 +540,35 @@ export class EInvoiceV2Client {
     sellerID = "",
     encrypt = "",
     isQrCode = false,
-    isBuyerType = false
+    isBuyerType = false,
   ) {
     const request = {
-      version: "1.0", action: "qryInvDetail", invNum, invDate, randomNumber,
+      version: "1.0",
+      action: "qryInvDetail",
+      invNum,
+      invDate,
+      randomNumber,
       type: randomNumber ? (isQrCode ? "QRCode" : "Barcode") : "NoRandomNumber",
-      invTerm: invPeriod, sellerID, encrypt,
-      isBuyerType: isBuyerType ? "Y" : "N"
+      invTerm: invPeriod,
+      sellerID,
+      encrypt,
+      isBuyerType: isBuyerType ? "Y" : "N",
     };
-    return this.bigRequest("/einvoice/invoices/query-details", await signInvoiceJwt(request, session, correctedInvoiceTimestamp(session)));
+    return this.bigRequest(
+      "/einvoice/invoices/query-details",
+      await signInvoiceJwt(
+        request,
+        session,
+        correctedInvoiceTimestamp(session),
+      ),
+    );
   }
 
   private async middleRequest(path: string, body: Record<string, unknown>) {
     const response = await this.fetcher(`${this.options.middleHost}${path}`, {
-      method: "POST", headers: jsonHeaders(this.options), body: JSON.stringify(body)
+      method: "POST",
+      headers: jsonHeaders(this.options),
+      body: JSON.stringify(body),
     });
     return readJsonResponse(response, path);
   }
@@ -413,7 +576,9 @@ export class EInvoiceV2Client {
   private async bigRequest(path: string, jwt: string) {
     const form = new URLSearchParams({ einvoiceJwt: jwt });
     const response = await this.fetcher(`${this.options.bigHost}${path}`, {
-      method: "POST", headers: formHeaders(this.options), body: form.toString()
+      method: "POST",
+      headers: formHeaders(this.options),
+      body: form.toString(),
     });
     return readJsonResponse(response, path);
   }
@@ -422,24 +587,46 @@ export class EInvoiceV2Client {
 async function readJsonResponse(response: Response, path: string) {
   const text = await response.text();
   let body: unknown;
-  try { body = text ? JSON.parse(text) : {}; } catch { body = text; }
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    body = text;
+  }
   if (!response.ok) {
     const root = recordValue(body);
-    const message = stringValue(root?.message ?? root?.msg ?? root?.description ?? root?.error);
-    throw new Error(`新版電子發票 ${path} HTTP ${response.status}${message ? `：${message}` : ""}`);
+    const message = stringValue(
+      root?.message ?? root?.msg ?? root?.description ?? root?.error,
+    );
+    throw new Error(
+      `新版電子發票 ${path} HTTP ${response.status}${message ? `：${message}` : ""}`,
+    );
   }
   const root = recordValue(body);
   if (typeof root?.result === "number" && root.result !== 0) {
     const payload = recordValue(root.payload);
-    const encryptedPayload = typeof root.payload === "string" ? await tryDecryptErrorPayload(root.payload) : undefined;
+    const encryptedPayload =
+      typeof root.payload === "string"
+        ? await tryDecryptErrorPayload(root.payload)
+        : undefined;
     const decodedPayload = recordValue(encryptedPayload);
     const message = stringValue(
-      root.message ?? root.msg ?? root.description ?? root.error ??
-      payload?.message ?? payload?.msg ?? payload?.description ?? payload?.error ??
-      decodedPayload?.message ?? decodedPayload?.msg ?? decodedPayload?.description ?? decodedPayload?.error ??
-      (typeof root.payload === "string" ? root.payload : undefined)
+      root.message ??
+        root.msg ??
+        root.description ??
+        root.error ??
+        payload?.message ??
+        payload?.msg ??
+        payload?.description ??
+        payload?.error ??
+        decodedPayload?.message ??
+        decodedPayload?.msg ??
+        decodedPayload?.description ??
+        decodedPayload?.error ??
+        (typeof root.payload === "string" ? root.payload : undefined),
     );
-    throw new Error(`新版電子發票 ${path} 回應錯誤（代碼 ${root.result}）${message ? `：${message}` : ""}`);
+    throw new Error(
+      `新版電子發票 ${path} 回應錯誤（代碼 ${root.result}）${message ? `：${message}` : ""}`,
+    );
   }
   return body;
 }

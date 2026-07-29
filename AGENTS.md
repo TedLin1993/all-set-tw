@@ -45,6 +45,8 @@
 
 ## 常用驗證指令
 
+- 全部格式化：`npm run format`
+- 全部格式檢查：`npm run format:check`
 - 全部型別檢查：`npm run typecheck`
 - 前端驗證：`npm run verify:web`
 - 後端測試：`npm run test:backend`

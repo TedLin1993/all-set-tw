@@ -119,7 +119,8 @@ describe("E.SUN credit card timeline normalization", () => {
 
     expect(rows).toEqual([
       expect.objectContaining({
-        sourceId: "2026-07-05T00:00:00.000Z:credit:esun:1204:全支付﹘全聯:252:TWD:1",
+        sourceId:
+          "2026-07-05T00:00:00.000Z:credit:esun:1204:全支付﹘全聯:252:TWD:1",
         status: "posted",
         authorizedAt: "2026-07-05T00:00:00.000Z",
         postedDate: "2026-07-07T00:00:00.000Z",
@@ -138,7 +139,9 @@ describe("E.SUN credit card timeline normalization", () => {
     ]);
 
     expect(rows).toHaveLength(2);
-    expect(rows.map(({ accountId, status }) => ({ accountId, status }))).toEqual([
+    expect(
+      rows.map(({ accountId, status }) => ({ accountId, status })),
+    ).toEqual([
       { accountId: "credit:esun:1204", status: "posted" },
       { accountId: "credit:esun:9876", status: "posted" },
     ]);

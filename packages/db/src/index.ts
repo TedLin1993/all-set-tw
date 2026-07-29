@@ -8,7 +8,10 @@ export interface ConnectorSettingsRow {
   updated_at: string;
 }
 
-export async function getConnectorSettings(db: D1Database, connectorId: string) {
+export async function getConnectorSettings(
+  db: D1Database,
+  connectorId: string,
+) {
   return db
     .prepare("SELECT * FROM connector_settings WHERE connector_id = ?")
     .bind(connectorId)
@@ -23,7 +26,7 @@ export async function upsertConnectorSettings(
     encryptedConfig: string;
     publicConfig: string | null;
     now: string;
-  }
+  },
 ) {
   await db
     .prepare(
@@ -38,9 +41,16 @@ export async function upsertConnectorSettings(
       ON CONFLICT(connector_id) DO UPDATE SET
         encrypted_config = excluded.encrypted_config,
         public_config = excluded.public_config,
-        updated_at = excluded.updated_at`
+        updated_at = excluded.updated_at`,
     )
-    .bind(input.id, input.connectorId, input.encryptedConfig, input.publicConfig, input.now, input.now)
+    .bind(
+      input.id,
+      input.connectorId,
+      input.encryptedConfig,
+      input.publicConfig,
+      input.now,
+      input.now,
+    )
     .run();
 }
 
@@ -48,13 +58,13 @@ export async function updateConnectorPublicConfig(
   db: D1Database,
   connectorId: string,
   publicConfig: string,
-  now: string
+  now: string,
 ) {
   await db
     .prepare(
       `UPDATE connector_settings
       SET public_config = ?, updated_at = ?
-      WHERE connector_id = ?`
+      WHERE connector_id = ?`,
     )
     .bind(publicConfig, now, connectorId)
     .run();
@@ -64,13 +74,13 @@ export async function updateConnectorCursor(
   db: D1Database,
   connectorId: string,
   cursor: string,
-  now: string
+  now: string,
 ) {
   await db
     .prepare(
       `UPDATE connector_settings
       SET sync_cursor = ?, updated_at = ?
-      WHERE connector_id = ?`
+      WHERE connector_id = ?`,
     )
     .bind(cursor, now, connectorId)
     .run();
@@ -79,13 +89,13 @@ export async function updateConnectorCursor(
 export async function clearConnectorCursor(
   db: D1Database,
   connectorId: string,
-  now: string
+  now: string,
 ) {
   await db
     .prepare(
       `UPDATE connector_settings
       SET sync_cursor = NULL, updated_at = ?
-      WHERE connector_id = ?`
+      WHERE connector_id = ?`,
     )
     .bind(now, connectorId)
     .run();
@@ -100,6 +110,11 @@ export {
   markManualSyncSuccess,
   nextSyncRunAt,
   releaseSyncJobLock,
-  renewSyncJobLock
+  renewSyncJobLock,
 } from "./sync-jobs";
-export type { SyncJobRow, SyncScheduleMode, SyncStatus, SyncTrigger } from "./sync-jobs";
+export type {
+  SyncJobRow,
+  SyncScheduleMode,
+  SyncStatus,
+  SyncTrigger,
+} from "./sync-jobs";

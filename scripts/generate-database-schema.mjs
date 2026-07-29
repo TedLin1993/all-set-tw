@@ -17,18 +17,33 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const databaseName = process.env.D1_DATABASE ?? "DB";
 const outputPath = join(projectRoot, "docs", "database-schema.md");
 const migrationsPath = join(projectRoot, "packages", "db", "migrations");
-const metadataPath = join(projectRoot, "packages", "db", "schema-metadata.json");
+const metadataPath = join(
+  projectRoot,
+  "packages",
+  "db",
+  "schema-metadata.json",
+);
 const persistencePath = mkdtempSync(join(tmpdir(), "taiwan-fin-hub-schema-"));
 
 function getWranglerEntry() {
   const configuredEntry = process.env.WRANGLER_ENTRY;
   if (configuredEntry) {
-    return isAbsolute(configuredEntry) ? configuredEntry : resolve(projectRoot, configuredEntry);
+    return isAbsolute(configuredEntry)
+      ? configuredEntry
+      : resolve(projectRoot, configuredEntry);
   }
 
   const candidates = [
     join(projectRoot, "node_modules", "wrangler", "bin", "wrangler.js"),
-    join(projectRoot, "apps", "worker", "node_modules", "wrangler", "bin", "wrangler.js"),
+    join(
+      projectRoot,
+      "apps",
+      "worker",
+      "node_modules",
+      "wrangler",
+      "bin",
+      "wrangler.js",
+    ),
   ];
   const entry = candidates.find((candidate) => existsSync(candidate));
   if (!entry) {
@@ -45,7 +60,8 @@ function runWrangler(args) {
     // Migrations are applied to the temporary D1 below, so this command never
     // changes the developer's existing local database.
     CI: process.env.CI ?? "1",
-    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? join(projectRoot, ".wrangler-config"),
+    XDG_CONFIG_HOME:
+      process.env.XDG_CONFIG_HOME ?? join(projectRoot, ".wrangler-config"),
   };
 
   try {
@@ -59,9 +75,12 @@ function runWrangler(args) {
     const stderr = error?.stderr?.toString().trim();
     const stdout = error?.stdout?.toString().trim();
     const details = [stderr, stdout].filter(Boolean).join("\n");
-    throw new Error(`Wrangler command failed: wrangler ${args.join(" ")}\n${details}`, {
-      cause: error,
-    });
+    throw new Error(
+      `Wrangler command failed: wrangler ${args.join(" ")}\n${details}`,
+      {
+        cause: error,
+      },
+    );
   }
 }
 
@@ -82,7 +101,10 @@ function runJsonQuery(sql) {
   try {
     response = JSON.parse(output);
   } catch (error) {
-    throw new Error(`Wrangler returned invalid JSON for query: ${sql}\n${output}`, { cause: error });
+    throw new Error(
+      `Wrangler returned invalid JSON for query: ${sql}\n${output}`,
+      { cause: error },
+    );
   }
 
   if (!Array.isArray(response)) {
@@ -104,11 +126,19 @@ function readSchemaMetadata() {
   try {
     metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
   } catch (error) {
-    throw new Error(`Cannot read schema metadata at ${metadataPath}.`, { cause: error });
+    throw new Error(`Cannot read schema metadata at ${metadataPath}.`, {
+      cause: error,
+    });
   }
 
-  if (!metadata || typeof metadata.tables !== "object" || metadata.tables === null) {
-    throw new Error(`Schema metadata at ${metadataPath} must contain a tables object.`);
+  if (
+    !metadata ||
+    typeof metadata.tables !== "object" ||
+    metadata.tables === null
+  ) {
+    throw new Error(
+      `Schema metadata at ${metadataPath} must contain a tables object.`,
+    );
   }
   return metadata.tables;
 }
@@ -149,7 +179,9 @@ function readTableDetails(schemaObjects) {
     // index_info needs the index name as an argument, so generate one query
     // per explicit index while still executing all metadata queries in one
     // Wrangler process.
-    for (const index of indexes.filter((candidate) => candidate.table_name === table.name)) {
+    for (const index of indexes.filter(
+      (candidate) => candidate.table_name === table.name,
+    )) {
       statements.push(
         `SELECT ${tableLiteral} AS __schema_table, 'index_columns' AS __schema_kind, ${quoteLiteral(
           index.name,
@@ -160,7 +192,10 @@ function readTableDetails(schemaObjects) {
 
   const metadataRows = runJsonQuery(statements.join(";\n"));
   const detailsByTable = new Map(
-    tables.map((table) => [table.name, { columns: [], foreignKeys: [], indexes: [] }]),
+    tables.map((table) => [
+      table.name,
+      { columns: [], foreignKeys: [], indexes: [] },
+    ]),
   );
 
   for (const row of metadataRows) {
@@ -193,7 +228,9 @@ function readTableDetails(schemaObjects) {
         columns: [],
       });
     } else if (row.__schema_kind === "index_columns") {
-      const index = details.indexes.find((candidate) => candidate.name === row.index_name);
+      const index = details.indexes.find(
+        (candidate) => candidate.name === row.index_name,
+      );
       index?.columns.push({ name: row.name, seqno: row.seqno, cid: row.cid });
     }
   }
@@ -202,7 +239,8 @@ function readTableDetails(schemaObjects) {
     const details = detailsByTable.get(table.name);
     for (const index of details.indexes) {
       const schemaIndex = indexes.find(
-        (candidate) => candidate.table_name === table.name && candidate.name === index.name,
+        (candidate) =>
+          candidate.table_name === table.name && candidate.name === index.name,
       );
       if (schemaIndex) Object.assign(index, { sql: schemaIndex.sql });
     }
@@ -235,11 +273,16 @@ function validateMetadata(detailsByTable, metadataTables) {
       errors.push(`missing table description: ${tableName}`);
       continue;
     }
-    if (typeof tableMetadata.description !== "string" || tableMetadata.description.trim() === "") {
+    if (
+      typeof tableMetadata.description !== "string" ||
+      tableMetadata.description.trim() === ""
+    ) {
       errors.push(`missing table description: ${tableName}`);
     }
 
-    const actualColumns = detailsByTable.get(tableName).columns.map((column) => column.name);
+    const actualColumns = detailsByTable
+      .get(tableName)
+      .columns.map((column) => column.name);
     const describedColumns = Object.keys(tableMetadata.columns ?? {});
     for (const columnName of actualColumns) {
       const description = tableMetadata.columns?.[columnName];
@@ -261,7 +304,9 @@ function validateMetadata(detailsByTable, metadataTables) {
   }
 
   if (errors.length > 0) {
-    throw new Error(`Schema metadata is incomplete or stale:\n- ${errors.join("\n- ")}`);
+    throw new Error(
+      `Schema metadata is incomplete or stale:\n- ${errors.join("\n- ")}`,
+    );
   }
 }
 
@@ -323,7 +368,9 @@ function renderSchema(schemaObjects, migrations, metadataTables) {
   const otherObjects = schemaObjects.filter(
     (object) => object.type !== "table" && object.type !== "index",
   );
-  const totalIndexes = schemaObjects.filter((object) => object.type === "index").length;
+  const totalIndexes = schemaObjects.filter(
+    (object) => object.type === "index",
+  ).length;
 
   const lines = [
     "# Database Schema",
@@ -404,7 +451,10 @@ function renderSchema(schemaObjects, migrations, metadataTables) {
   lines.push(
     "Migration 是 schema 演進的 source of truth；若要了解某欄位的變更原因，請從對應 migration 檔案與 Git history 追查。",
     "",
-    ...migrations.map((migration) => `- [\`${migration}\`](../packages/db/migrations/${migration})`),
+    ...migrations.map(
+      (migration) =>
+        `- [\`${migration}\`](../packages/db/migrations/${migration})`,
+    ),
     "",
     "## 程式碼導覽",
     "",
@@ -420,7 +470,9 @@ function renderSchema(schemaObjects, migrations, metadataTables) {
 function listMigrations() {
   return readdirSync(migrationsPath)
     .filter((file) => file.endsWith(".sql"))
-    .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+    .sort((left, right) =>
+      left.localeCompare(right, undefined, { numeric: true }),
+    );
 }
 
 try {

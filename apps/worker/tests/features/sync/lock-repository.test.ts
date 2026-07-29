@@ -14,10 +14,10 @@ function recordingDb(changes: number) {
         },
         async run() {
           return { meta: { changes } };
-        }
+        },
       };
       return statement;
-    }
+    },
   } as unknown as D1Database;
   return { db, calls };
 }
@@ -25,13 +25,15 @@ function recordingDb(changes: number) {
 describe("sync job lock repository", () => {
   it("acquires a lease with ownership and expiry bindings", async () => {
     const { db, calls } = recordingDb(1);
-    await expect(acquireSyncJobLock(db, {
-      lockRowId: "tdcc:all",
-      scope: "all",
-      trigger: "scheduled",
-      runId: "run-1",
-      leaseMs: 30 * 60 * 1000
-    })).resolves.toBe(true);
+    await expect(
+      acquireSyncJobLock(db, {
+        lockRowId: "tdcc:all",
+        scope: "all",
+        trigger: "scheduled",
+        runId: "run-1",
+        leaseMs: 30 * 60 * 1000,
+      }),
+    ).resolves.toBe(true);
 
     expect(calls[0]?.sql).toContain("locked_until");
     expect(calls[0]?.bindings).toContain("run-1");
@@ -40,10 +42,12 @@ describe("sync job lock repository", () => {
 
   it("reports a lost lease when heartbeat ownership no longer matches", async () => {
     const { db } = recordingDb(0);
-    await expect(renewSyncJobLock(db, {
-      lockRowId: "tdcc:all",
-      runId: "old-run",
-      leaseMs: 30 * 60 * 1000
-    })).resolves.toBe(false);
+    await expect(
+      renewSyncJobLock(db, {
+        lockRowId: "tdcc:all",
+        runId: "old-run",
+        leaseMs: 30 * 60 * 1000,
+      }),
+    ).resolves.toBe(false);
   });
 });
