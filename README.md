@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="apps/web/public/icon-512x512.png" alt="Taiwan Fin Hub Logo" width="160">
+</p>
+
 # Taiwan Fin Hub
 
 自架個人理財整合工具，將銀行、投資、信用卡、電子發票集中在同一個介面查看。
