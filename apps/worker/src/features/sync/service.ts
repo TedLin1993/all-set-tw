@@ -64,12 +64,17 @@ import {
   creditCardBillRecord,
   investmentPositionRecord,
   investmentTransactionRecord,
-  invoiceConfigChanged,
-  invoiceConfigSnapshot,
   invoiceLineItemRecord,
   invoiceRecord,
   netWorthHistoryRecord,
 } from "./record-mapper";
+import {
+  parsePublicConnectorConfig,
+  restoreConfiguredPublicFields,
+  serializePublicConnectorConfig,
+  sensitiveConnectorConfig,
+  splitConnectorCursorState,
+} from "./connector-state";
 
 export type SyncScope =
   | "all"
@@ -225,22 +230,24 @@ export async function syncEinvoice(
   const connectorId = "einvoice";
   const scope = "all";
   const settings = await requireConnectorSettings(env.DB, connectorId);
-  const config = await decryptJson<unknown>(
+  const stored = await decryptJson<Record<string, unknown>>(
     settings.encrypted_config,
     configEncryptionKey(env),
   );
-  const parsedConfig = parseInvoiceConfig({
-    ...(config as Record<string, unknown>),
+  const config = {
+    ...stored,
+    ...parsePublicConnectorConfig(settings.public_config),
+  };
+  const configuredConfig = parseInvoiceConfig(config);
+  const effectiveConfig = parseInvoiceConfig({
+    ...configuredConfig,
     ...overrides,
   });
-  const originalInvoiceConfig = invoiceConfigSnapshot(
-    config as Record<string, unknown>,
-  );
   console.log(
     `[sync] ${connectorId}/${scope}: starting trigger=${trigger} (cursor=${settings.sync_cursor ? "set" : "none"})`,
   );
   const result = await einvoiceConnector.sync(
-    parsedConfig,
+    effectiveConfig,
     settings.sync_cursor ?? undefined,
   );
   const invoiceLineItems = result.invoiceLineItems ?? [];
@@ -270,16 +277,20 @@ export async function syncEinvoice(
     );
   }
 
-  if (invoiceConfigChanged(originalInvoiceConfig, parsedConfig)) {
-    finalizeStatements.push(
-      connectorEncryptedConfigStatement(
-        env.DB,
-        connectorId,
-        await encryptJson(parsedConfig, configEncryptionKey(env)),
-        now,
-      ),
-    );
-  }
+  const persistedConfig = restoreConfiguredPublicFields(
+    connectorId,
+    effectiveConfig,
+    configuredConfig,
+  );
+  finalizeStatements.push(
+    connectorEncryptedConfigStatement(
+      env.DB,
+      connectorId,
+      await encryptConnectorConfig(env, connectorId, persistedConfig),
+      serializePublicConfig(connectorId, persistedConfig),
+      now,
+    ),
+  );
 
   await persistStagedSyncWrite(env.DB, { records, finalizeStatements });
 
@@ -302,11 +313,14 @@ export async function syncEsun(
   const connectorId = "esun";
   const scope = "all";
   const settings = await requireConnectorSettings(env.DB, connectorId);
-  const stored = await decryptJson<unknown>(
+  const stored = await decryptJson<Record<string, unknown>>(
     settings.encrypted_config,
     configEncryptionKey(env),
   );
-  const config = parseEsunConfig(stored);
+  const config = parseEsunConfig({
+    ...stored,
+    ...parsePublicConnectorConfig(settings.public_config),
+  });
 
   console.log(
     `[sync] ${connectorId}/${scope}: starting trigger=${trigger} (cursor=${settings.sync_cursor ? "set" : "none"})`,
@@ -340,15 +354,21 @@ export async function syncEsun(
     ),
   ];
   const finalizeStatements: D1PreparedStatement[] = [];
+  let persistedCursor: string | undefined;
 
   if (result.cursor) {
-    const updatedConfig = { ...config, ...JSON.parse(result.cursor) };
+    const cursorState = splitConnectorCursorState(connectorId, result.cursor);
+    persistedCursor = cursorState.safeCursor;
     finalizeStatements.push(
       connectorStateStatement(
         env.DB,
         connectorId,
-        await encryptJson(updatedConfig, configEncryptionKey(env)),
-        result.cursor,
+        await encryptConnectorConfig(env, connectorId, {
+          ...config,
+          ...cursorState.secretState,
+        }),
+        serializePublicConfig(connectorId, config),
+        persistedCursor,
         now,
       ),
     );
@@ -379,7 +399,7 @@ export async function syncEsun(
       bankBalanceSnapshots.length +
       bankTransactions.length,
     cursorUpdated: Boolean(
-      result.cursor && result.cursor !== settings.sync_cursor,
+      persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
   };
 }
@@ -391,16 +411,13 @@ export async function syncCathaybk(
   const connectorId = "cathaybk";
   const scope = "all";
   const settings = await requireConnectorSettings(env.DB, connectorId);
-  const stored = await decryptJson<unknown>(
+  const stored = await decryptJson<Record<string, unknown>>(
     settings.encrypted_config,
     configEncryptionKey(env),
   );
-  const publicStored = settings.public_config
-    ? JSON.parse(settings.public_config)
-    : {};
   const config = parseCathaybkConfig({
-    ...(stored as object),
-    ...publicStored,
+    ...stored,
+    ...parsePublicConnectorConfig(settings.public_config),
   });
 
   console.log(
@@ -435,16 +452,21 @@ export async function syncCathaybk(
     ),
   ];
   const finalizeStatements: D1PreparedStatement[] = [];
+  let persistedCursor: string | undefined;
 
   if (result.cursor) {
-    const cursorState = JSON.parse(result.cursor) as Record<string, unknown>;
-    const updatedConfig = { ...config, ...cursorState };
+    const cursorState = splitConnectorCursorState(connectorId, result.cursor);
+    persistedCursor = cursorState.safeCursor;
     finalizeStatements.push(
       connectorStateStatement(
         env.DB,
         connectorId,
-        await encryptJson(updatedConfig, configEncryptionKey(env)),
-        result.cursor,
+        await encryptConnectorConfig(env, connectorId, {
+          ...config,
+          ...cursorState.secretState,
+        }),
+        serializePublicConfig(connectorId, config),
+        persistedCursor,
         now,
       ),
     );
@@ -472,7 +494,7 @@ export async function syncCathaybk(
       bankBalanceSnapshots.length +
       bankTransactions.length,
     cursorUpdated: Boolean(
-      result.cursor && result.cursor !== settings.sync_cursor,
+      persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
   };
 }
@@ -489,12 +511,9 @@ export async function syncSinopac(
     settings.encrypted_config,
     configEncryptionKey(env),
   );
-  const publicStored = settings.public_config
-    ? JSON.parse(settings.public_config)
-    : {};
   const config = parseSinopacConfig({
     ...stored,
-    ...publicStored,
+    ...parsePublicConnectorConfig(settings.public_config),
     ...overrides,
   });
 
@@ -592,9 +611,8 @@ export async function syncSinopac(
   const finalizeStatements: D1PreparedStatement[] = [];
   let persistedCursor: string | undefined;
   if (result.cursor) {
-    const cursorState = JSON.parse(result.cursor) as Record<string, unknown>;
-    const { sessionCookies: _sessionCookies, ...safeCursorState } = cursorState;
-    persistedCursor = JSON.stringify(safeCursorState);
+    const cursorState = splitConnectorCursorState(connectorId, result.cursor);
+    persistedCursor = cursorState.safeCursor;
     const {
       browserSessionId: _browserSessionId,
       browserSessionExpiresAt: _browserSessionExpiresAt,
@@ -605,10 +623,11 @@ export async function syncSinopac(
       connectorStateStatement(
         env.DB,
         connectorId,
-        await encryptJson(
-          { ...reusableConfig, ...cursorState },
-          configEncryptionKey(env),
-        ),
+        await encryptConnectorConfig(env, connectorId, {
+          ...reusableConfig,
+          ...cursorState.secretState,
+        }),
+        serializePublicConfig(connectorId, activeConfig),
         persistedCursor,
         now,
       ),
@@ -653,12 +672,9 @@ export async function syncTaishin(
     settings.encrypted_config,
     configEncryptionKey(env),
   );
-  const publicStored = settings.public_config
-    ? JSON.parse(settings.public_config)
-    : {};
   const config = parseTaishinConfig({
     ...stored,
-    ...publicStored,
+    ...parsePublicConnectorConfig(settings.public_config),
     ...overrides,
   });
 
@@ -730,13 +746,8 @@ export async function syncTaishin(
   let persistedCursor: string | undefined;
   const finalizeStatements: D1PreparedStatement[] = [];
   if (result.cursor) {
-    const cursorState = JSON.parse(result.cursor) as Record<string, unknown>;
-    const {
-      sessionCookies: _sessionCookies,
-      sessionCreatedAt: _sessionCreatedAt,
-      ...safeCursorState
-    } = cursorState;
-    persistedCursor = JSON.stringify(safeCursorState);
+    const cursorState = splitConnectorCursorState(connectorId, result.cursor);
+    persistedCursor = cursorState.safeCursor;
     const {
       browserSessionId: _browserSessionId,
       browserSessionExpiresAt: _browserSessionExpiresAt,
@@ -748,10 +759,11 @@ export async function syncTaishin(
       connectorStateStatement(
         env.DB,
         connectorId,
-        await encryptJson(
-          { ...reusableConfig, ...cursorState },
-          configEncryptionKey(env),
-        ),
+        await encryptConnectorConfig(env, connectorId, {
+          ...reusableConfig,
+          ...cursorState.secretState,
+        }),
+        serializePublicConfig(connectorId, config),
         persistedCursor,
         now,
       ),
@@ -908,10 +920,29 @@ async function syncTdccPositionsAndBank(
     ),
   ];
   const finalizeStatements: D1PreparedStatement[] = [];
+  let persistedCursor: string | undefined;
 
   if (result.cursor) {
+    const cursorState = splitConnectorCursorState(connectorId, result.cursor);
+    persistedCursor = cursorState.safeCursor;
+    const {
+      otp: _otp,
+      otpChannel: _otpChannel,
+      requestOtp: _requestOtp,
+      ...reusableConfig
+    } = parsedConfig;
     finalizeStatements.push(
-      connectorCursorStatement(env.DB, connectorId, result.cursor, now),
+      connectorStateStatement(
+        env.DB,
+        connectorId,
+        await encryptConnectorConfig(env, connectorId, {
+          ...reusableConfig,
+          ...cursorState.secretState,
+        }),
+        serializePublicConfig(connectorId, parsedConfig),
+        persistedCursor,
+        now,
+      ),
     );
   }
 
@@ -937,7 +968,7 @@ async function syncTdccPositionsAndBank(
           bankTransactions.length
         : 0),
     cursorUpdated: Boolean(
-      result.cursor && result.cursor !== settings.sync_cursor,
+      persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
   };
 }
@@ -992,10 +1023,29 @@ async function syncTdccTrades(
     investmentTransactionRecord(connectorId, transaction, now),
   );
   const finalizeStatements: D1PreparedStatement[] = [];
+  let persistedCursor: string | undefined;
 
   if (result.cursor) {
+    const cursorState = splitConnectorCursorState(connectorId, result.cursor);
+    persistedCursor = cursorState.safeCursor;
+    const {
+      otp: _otp,
+      otpChannel: _otpChannel,
+      requestOtp: _requestOtp,
+      ...reusableConfig
+    } = parsedConfig;
     finalizeStatements.push(
-      connectorCursorStatement(env.DB, connectorId, result.cursor, now),
+      connectorStateStatement(
+        env.DB,
+        connectorId,
+        await encryptConnectorConfig(env, connectorId, {
+          ...reusableConfig,
+          ...cursorState.secretState,
+        }),
+        serializePublicConfig(connectorId, parsedConfig),
+        persistedCursor,
+        now,
+      ),
     );
   }
 
@@ -1004,7 +1054,7 @@ async function syncTdccTrades(
   return {
     records: investmentTransactions.length,
     cursorUpdated: Boolean(
-      result.cursor && result.cursor !== settings.sync_cursor,
+      persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
   };
 }
@@ -1139,6 +1189,24 @@ export function startSyncLockHeartbeat(
 
 export function canonicalSyncLockRowId(connectorId: ConnectorId) {
   return `${connectorId}:all`;
+}
+
+async function encryptConnectorConfig(
+  env: Env,
+  connectorId: ConnectorId,
+  config: object,
+) {
+  return encryptJson(
+    sensitiveConnectorConfig(connectorId, config as Record<string, unknown>),
+    configEncryptionKey(env),
+  );
+}
+
+function serializePublicConfig(connectorId: ConnectorId, config: object) {
+  return serializePublicConnectorConfig(
+    connectorId,
+    config as Record<string, unknown>,
+  );
 }
 
 export function isUserActionError(error: unknown) {

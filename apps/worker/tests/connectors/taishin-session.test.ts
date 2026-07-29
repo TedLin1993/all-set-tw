@@ -413,15 +413,17 @@ describe("Taishin browser session lifecycle", () => {
         DBSESSIONID: "database-session",
       }),
     };
-    browserPage.evaluate.mockResolvedValueOnce(activeSession).mockResolvedValue({
-      ok: false,
-      status: 0,
-      contentType: "",
-      text: "",
-      timedOut: false,
-      errorName: "TypeError",
-      errorMessage: "Failed to fetch",
-    });
+    browserPage.evaluate
+      .mockResolvedValueOnce(activeSession)
+      .mockResolvedValue({
+        ok: false,
+        status: 0,
+        contentType: "",
+        text: "",
+        timedOut: false,
+        errorName: "TypeError",
+        errorMessage: "Failed to fetch",
+      });
     const browserInstance = browser(browserPage);
     puppeteerMock.launch.mockResolvedValue(browserInstance);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);

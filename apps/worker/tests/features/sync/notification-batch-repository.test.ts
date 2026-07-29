@@ -38,9 +38,8 @@ class SqliteStatement {
 
   async first<T>() {
     return (
-      (this.database
-        .prepare(this.sql)
-        .get(...(this.values as never[])) as T) ?? null
+      (this.database.prepare(this.sql).get(...(this.values as never[])) as T) ??
+      null
     );
   }
 
@@ -170,12 +169,7 @@ describe("default schedule notification rounds", () => {
 
     for (const [index, job] of jobs.entries()) {
       await expect(
-        completeMember(
-          db,
-          batchId,
-          job,
-          index === 0 ? "failed" : "success",
-        ),
+        completeMember(db, batchId, job, index === 0 ? "failed" : "success"),
       ).resolves.toBe(true);
       if (index < jobs.length - 1) {
         await expect(
@@ -262,11 +256,7 @@ describe("default schedule notification rounds", () => {
              next_run_at = ?
          WHERE id = ?`,
       )
-      .run(
-        "2026-07-23T22:05:00.000Z",
-        "2026-07-24T22:05:00.000Z",
-        pending.id,
-      );
+      .run("2026-07-23T22:05:00.000Z", "2026-07-24T22:05:00.000Z", pending.id);
 
     await expect(
       claimCompletedDefaultScheduleBatch(db, batchId),
@@ -284,7 +274,9 @@ describe("default schedule notification rounds", () => {
     const paused = jobs[0]!;
     const batchId = await createBatch(db);
     database
-      .prepare("UPDATE sync_jobs SET last_status = 'needs_user_action' WHERE id = ?")
+      .prepare(
+        "UPDATE sync_jobs SET last_status = 'needs_user_action' WHERE id = ?",
+      )
       .run(paused.id);
 
     for (const job of jobs.slice(1)) {

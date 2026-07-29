@@ -5,10 +5,14 @@ import type {
   Connector,
   InvestmentPosition,
   InvestmentTransaction,
-  NetWorthHistoryPoint
+  NetWorthHistoryPoint,
 } from "@taiwan-fin-hub/core";
 import { z } from "zod";
-import { EPassbookClient, EPassbookError, type EPassbookSession } from "./tdcc-epassbook-client";
+import {
+  EPassbookClient,
+  EPassbookError,
+  type EPassbookSession,
+} from "./tdcc-epassbook-client";
 
 const tdccHoldingSchema = z.object({
   accountId: z.string().min(1).optional(),
@@ -24,7 +28,7 @@ const tdccHoldingSchema = z.object({
   cashBalance: z.union([z.string(), z.number()]).optional(),
   currency: z.string().optional(),
   asOfDate: z.string().min(1),
-  raw: z.unknown().optional()
+  raw: z.unknown().optional(),
 });
 
 const tdccCashMovementSchema = z.object({
@@ -40,7 +44,7 @@ const tdccCashMovementSchema = z.object({
   currency: z.string().optional(),
   description: z.string().optional(),
   counterparty: z.string().optional(),
-  raw: z.unknown().optional()
+  raw: z.unknown().optional(),
 });
 
 const tdccCashBalanceSchema = z.object({
@@ -54,7 +58,12 @@ const tdccCashBalanceSchema = z.object({
   availableBalance: z.union([z.string(), z.number()]).optional(),
   currency: z.string().optional(),
   asOfAt: z.string().min(1),
-  raw: z.unknown().optional()
+  raw: z.unknown().optional(),
+});
+
+const tdccSessionSchema = z.object({
+  tokenId: z.string().nullable(),
+  richUrl: z.string().nullable(),
 });
 
 export const tdccConfigSchema = z.object({
@@ -66,10 +75,11 @@ export const tdccConfigSchema = z.object({
   deviceId: z.string().min(1).optional(),
   devType: z.string().min(1).optional(),
   devModel: z.string().min(1).optional(),
+  session: tdccSessionSchema.optional(),
   otp: z.string().min(1).optional(),
   otpChannel: z.enum(["email", "sms"]).optional(),
   requestOtp: z.boolean().default(true),
-  tradeHistoryMaxPages: z.number().int().min(1).max(100).default(20)
+  tradeHistoryMaxPages: z.number().int().min(1).max(100).default(20),
 });
 
 export type TdccConfig = z.infer<typeof tdccConfigSchema>;
@@ -89,7 +99,7 @@ export interface TdccClient {
 }
 
 export function createTdccConnector(
-  client?: TdccClient
+  client?: TdccClient,
 ): Connector<TdccConfig, Omit<InvestmentPosition, "id" | "connectorId">> {
   return {
     id: "tdcc",
@@ -102,9 +112,16 @@ export function createTdccConnector(
       let nextCursor = cursor;
 
       if (client) {
-        liveHoldings = [...(await client.fetchStockHoldings()), ...(await client.fetchFundHoldings())];
-        liveCashBalances = client.fetchCashBalances ? await client.fetchCashBalances() : [];
-        liveCashMovements = client.fetchCashMovements ? await client.fetchCashMovements() : [];
+        liveHoldings = [
+          ...(await client.fetchStockHoldings()),
+          ...(await client.fetchFundHoldings()),
+        ];
+        liveCashBalances = client.fetchCashBalances
+          ? await client.fetchCashBalances()
+          : [];
+        liveCashMovements = client.fetchCashMovements
+          ? await client.fetchCashMovements()
+          : [];
       } else if (config.userId && config.password) {
         const live = await syncTdccLive(config, cursor);
         liveHoldings = live.holdings;
@@ -117,9 +134,11 @@ export function createTdccConnector(
       const cashBalances = [...config.cashBalances, ...liveCashBalances];
       const cashMovements = [...config.cashMovements, ...liveCashMovements];
       const bankAccounts = dedupeBySourceId([
-        ...holdings.filter((holding) => holding.cashBalance !== undefined).map(toSettlementBankAccount),
+        ...holdings
+          .filter((holding) => holding.cashBalance !== undefined)
+          .map(toSettlementBankAccount),
         ...cashBalances.map(toSettlementBankAccount),
-        ...cashMovements.map(toSettlementBankAccount)
+        ...cashMovements.map(toSettlementBankAccount),
       ]);
 
       return {
@@ -127,13 +146,15 @@ export function createTdccConnector(
         bankAccounts,
         bankBalanceSnapshots: dedupeByAccountAndSourceId([
           ...holdings.flatMap(toSettlementBalanceSnapshot),
-          ...cashBalances.map(toBankBalanceSnapshot)
+          ...cashBalances.map(toBankBalanceSnapshot),
         ]),
-        bankTransactions: dedupeByAccountAndSourceId(cashMovements.map(toBankTransaction)),
+        bankTransactions: dedupeByAccountAndSourceId(
+          cashMovements.map(toBankTransaction),
+        ),
         netWorthHistory: liveNetWorthHistory,
-        cursor: nextCursor
+        cursor: nextCursor,
       };
-    }
+    },
   };
 }
 
@@ -143,7 +164,7 @@ type TdccCursorState = {
   deviceId: string;
   devType: string;
   devModel: string;
-  session: EPassbookSession;
+  session?: EPassbookSession;
   tradeCursors?: Record<string, TdccTradeCursor>;
 };
 
@@ -153,7 +174,9 @@ type TdccTradeCursor = {
   backfillComplete?: boolean;
 };
 
-function readTdccCursor(cursor: string | undefined): TdccCursorState | undefined {
+function readTdccCursor(
+  cursor: string | undefined,
+): TdccCursorState | undefined {
   if (!cursor) return undefined;
   try {
     return JSON.parse(cursor) as TdccCursorState;
@@ -168,7 +191,13 @@ function readTdccCursor(cursor: string | undefined): TdccCursorState | undefined
 const DEVICE_VERIFICATION_CODES = new Set(["C9999", "D0005"]);
 // A previously-trusted session can go stale between syncs; these codes mean
 // "the stored tokenId is dead", not "the account/credentials are wrong".
-const SESSION_EXPIRED_CODES = new Set(["D0006", "D0007", "A0001", "A0002", "T8000"]);
+const SESSION_EXPIRED_CODES = new Set([
+  "D0006",
+  "D0007",
+  "A0001",
+  "A0002",
+  "T8000",
+]);
 // The stored OTP timed out before this sync ran; it's now dead, so the caller
 // must drop it from config and have the user request a fresh one.
 const OTP_EXPIRED_CODES = new Set(["V0017"]);
@@ -176,7 +205,10 @@ const OTP_EXPIRED_CODES = new Set(["V0017"]);
 export class TdccOtpExpiredError extends Error {}
 
 export class TdccConnectionError extends Error {
-  constructor(public readonly code: string, message: string) {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
     super(`TDCC 登入或同步失敗（${code}）：${message}`);
     this.name = "TdccConnectionError";
   }
@@ -185,67 +217,105 @@ export class TdccConnectionError extends Error {
 export class TdccVerificationRequiredError extends Error {
   constructor(
     public readonly channel: "email" | "sms",
-    public readonly deliveryTriggered: boolean
+    public readonly deliveryTriggered: boolean,
   ) {
     super(
       deliveryTriggered
         ? channel === "email"
           ? "TDCC 驗證碼已寄至電子信箱，請輸入驗證碼以完成連線。"
           : "TDCC 驗證碼已寄至手機簡訊，請輸入驗證碼以完成連線。"
-        : "TDCC 登入狀態已失效，請回到設定頁重新驗證。"
+        : "TDCC 登入狀態已失效，請回到設定頁重新驗證。",
     );
     this.name = "TdccVerificationRequiredError";
   }
 }
 
-type TdccIdentity = { deviceId: string; devType: string; devModel: string; session?: EPassbookSession };
+type TdccIdentity = {
+  deviceId: string;
+  devType: string;
+  devModel: string;
+  session?: EPassbookSession;
+};
 
 async function syncTdccLive(config: TdccConfig, cursor?: string) {
   const previous = readTdccCursor(cursor);
   const identity = {
-    deviceId: config.deviceId ?? previous?.deviceId ?? crypto.randomUUID().replace(/-/g, "").slice(0, 16),
+    deviceId:
+      config.deviceId ??
+      previous?.deviceId ??
+      crypto.randomUUID().replace(/-/g, "").slice(0, 16),
     devType: config.devType ?? previous?.devType ?? "Android:14",
-    devModel: config.devModel ?? previous?.devModel ?? "SM-G991B"
+    devModel: config.devModel ?? previous?.devModel ?? "SM-G991B",
   };
 
   try {
-    return await runTdccLogin(config, { ...identity, session: previous?.session }, previous);
+    return await runTdccLogin(
+      config,
+      { ...identity, session: config.session ?? previous?.session },
+      previous,
+    );
   } catch (error) {
     const isStaleSession =
-      error instanceof EPassbookError && SESSION_EXPIRED_CODES.has(error.code) && Boolean(previous?.session?.tokenId);
+      error instanceof EPassbookError &&
+      SESSION_EXPIRED_CODES.has(error.code) &&
+      Boolean(config.session?.tokenId ?? previous?.session?.tokenId);
     if (!isStaleSession) return wrapTdccError(error);
   }
 
   // Stored session was rejected as expired/invalid — drop it and force one fresh login
   // (which re-enters device verification if TDCC no longer trusts this device either).
-  return runTdccLogin(config, { ...identity, session: undefined }, previous).catch(wrapTdccError);
+  return runTdccLogin(
+    config,
+    { ...identity, session: undefined },
+    previous,
+  ).catch(wrapTdccError);
 }
 
-export async function syncTdccTradeHistory(config: TdccConfig, cursor?: string) {
+export async function syncTdccTradeHistory(
+  config: TdccConfig,
+  cursor?: string,
+) {
   const previous = readTdccCursor(cursor);
   const identity = {
-    deviceId: config.deviceId ?? previous?.deviceId ?? crypto.randomUUID().replace(/-/g, "").slice(0, 16),
+    deviceId:
+      config.deviceId ??
+      previous?.deviceId ??
+      crypto.randomUUID().replace(/-/g, "").slice(0, 16),
     devType: config.devType ?? previous?.devType ?? "Android:14",
-    devModel: config.devModel ?? previous?.devModel ?? "SM-G991B"
+    devModel: config.devModel ?? previous?.devModel ?? "SM-G991B",
   };
 
   try {
-    return await runTdccTradeHistory(config, { ...identity, session: previous?.session }, previous);
+    return await runTdccTradeHistory(
+      config,
+      { ...identity, session: config.session ?? previous?.session },
+      previous,
+    );
   } catch (error) {
     const isStaleSession =
-      error instanceof EPassbookError && SESSION_EXPIRED_CODES.has(error.code) && Boolean(previous?.session?.tokenId);
+      error instanceof EPassbookError &&
+      SESSION_EXPIRED_CODES.has(error.code) &&
+      Boolean(config.session?.tokenId ?? previous?.session?.tokenId);
     if (!isStaleSession) return wrapTdccError(error);
   }
 
-  return runTdccTradeHistory(config, { ...identity, session: undefined }, previous).catch(wrapTdccError);
+  return runTdccTradeHistory(
+    config,
+    { ...identity, session: undefined },
+    previous,
+  ).catch(wrapTdccError);
 }
 
-async function runTdccLogin(config: TdccConfig, identity: TdccIdentity, previous?: TdccCursorState) {
+async function runTdccLogin(
+  config: TdccConfig,
+  identity: TdccIdentity,
+  previous?: TdccCursorState,
+) {
   const client = new EPassbookClient({
     devId: identity.deviceId,
     devType: identity.devType,
     devModel: identity.devModel,
-    session: identity.session
+    session: identity.session,
   });
 
   if (!identity.session?.tokenId) {
@@ -253,57 +323,79 @@ async function runTdccLogin(config: TdccConfig, identity: TdccIdentity, previous
     await loginWithDeviceVerification(client, config);
   }
 
-  const [stockPayload, fundPayload, bankBalancesPayload, trendPayload] = await Promise.all([
-    client.getPositions(),
-    client.getFundPositions(),
-    client.getBankBalances(),
-    client.getAssetTrend("1Y").catch(() => null)
-  ]);
+  const [stockPayload, fundPayload, bankBalancesPayload, trendPayload] =
+    await Promise.all([
+      client.getPositions(),
+      client.getFundPositions(),
+      client.getBankBalances(),
+      client.getAssetTrend("1Y").catch(() => null),
+    ]);
 
   const tspInfos = bankBalancesPayload.tspAccountInfos ?? [];
-  console.log(JSON.stringify({
-    event: "tdcc_bank_accounts_fetched",
-    banks: tspInfos.length,
-    accounts: tspInfos.reduce((count, info) => count + (info.tspAccount?.length ?? 0), 0)
-  }));
+  console.log(
+    JSON.stringify({
+      event: "tdcc_bank_accounts_fetched",
+      banks: tspInfos.length,
+      accounts: tspInfos.reduce(
+        (count, info) => count + (info.tspAccount?.length ?? 0),
+        0,
+      ),
+    }),
+  );
   for (const info of tspInfos) {
     const accounts = (info.tspAccount ?? []) as Array<Record<string, unknown>>;
     const hidden = accounts.filter((a) => a.isShow === false);
-    console.log(JSON.stringify({
-      event: "tdcc_bank_accounts_filtered",
-      bankId: info.bankId,
-      accounts: accounts.length,
-      hidden: hidden.length
-    }));
+    console.log(
+      JSON.stringify({
+        event: "tdcc_bank_accounts_filtered",
+        bankId: info.bankId,
+        accounts: accounts.length,
+        hidden: hidden.length,
+      }),
+    );
   }
   const bankEntries = tspInfos.flatMap((info) =>
-    (info.tspAccount ?? []).filter((a) => a.isShow !== false).map((acct) => ({
-      bankId: info.bankId,
-      accountNo: acct.accountNo,
-      accountType: acct.accountType,
-      currency: acct.currency || "TWD",
-      balanceAmt: acct.balanceAmt,
-      availableBalance: acct.availableBalance
-    }))
+    (info.tspAccount ?? [])
+      .filter((a) => a.isShow !== false)
+      .map((acct) => ({
+        bankId: info.bankId,
+        accountNo: acct.accountNo,
+        accountType: acct.accountType,
+        currency: acct.currency || "TWD",
+        balanceAmt: acct.balanceAmt,
+        availableBalance: acct.availableBalance,
+      })),
   );
-  console.log(JSON.stringify({ event: "tdcc_visible_bank_accounts", accounts: bankEntries.length }));
+  console.log(
+    JSON.stringify({
+      event: "tdcc_visible_bank_accounts",
+      accounts: bankEntries.length,
+    }),
+  );
 
   const txnPayloads = await Promise.all(
     bankEntries.map((e) =>
-      client.getBankTransactions(e.bankId, e.accountNo, e.currency).catch((err: unknown) => {
-        console.error(JSON.stringify({
-          event: "tdcc_bank_transactions_failed",
-          bankId: e.bankId,
-          account: maskAccountNumber(e.accountNo),
-          currency: e.currency,
-          errorCode: connectorErrorCode(err)
-        }));
-        if (err instanceof EPassbookError && err.code.startsWith("PAGINATION_")) {
-          throw err;
-        }
-        return { transactions: [] as never[] };
-      })
-    )
+      client
+        .getBankTransactions(e.bankId, e.accountNo, e.currency)
+        .catch((err: unknown) => {
+          console.error(
+            JSON.stringify({
+              event: "tdcc_bank_transactions_failed",
+              bankId: e.bankId,
+              account: maskAccountNumber(e.accountNo),
+              currency: e.currency,
+              errorCode: connectorErrorCode(err),
+            }),
+          );
+          if (
+            err instanceof EPassbookError &&
+            err.code.startsWith("PAGINATION_")
+          ) {
+            throw err;
+          }
+          return { transactions: [] as never[] };
+        }),
+    ),
   );
 
   const cashBalances: TdccCashBalance[] = bankEntries.map((e) => ({
@@ -313,7 +405,7 @@ async function runTdccLogin(config: TdccConfig, identity: TdccIdentity, previous
     availableBalance: e.availableBalance || undefined,
     currency: e.currency.toUpperCase(),
     asOfAt: new Date().toISOString(),
-    raw: e
+    raw: e,
   }));
 
   const cashMovements: TdccCashMovement[] = txnPayloads.flatMap((p, i) => {
@@ -326,45 +418,53 @@ async function runTdccLogin(config: TdccConfig, identity: TdccIdentity, previous
       amount: tx.amount,
       currency: entry.currency.toUpperCase(),
       description: tx.memo,
-      raw: tx
+      raw: tx,
     }));
     const uniqueSourceIds = new Set(txns.map((t) => t.sourceId));
     if (uniqueSourceIds.size < txns.length) {
-      console.warn(JSON.stringify({
-        event: "tdcc_duplicate_transaction_ids",
-        bankId: entry.bankId,
-        account: maskAccountNumber(entry.accountNo),
-        currency: entry.currency,
-        transactions: txns.length,
-        uniqueSourceIds: uniqueSourceIds.size
-      }));
+      console.warn(
+        JSON.stringify({
+          event: "tdcc_duplicate_transaction_ids",
+          bankId: entry.bankId,
+          account: maskAccountNumber(entry.accountNo),
+          currency: entry.currency,
+          transactions: txns.length,
+          uniqueSourceIds: uniqueSourceIds.size,
+        }),
+      );
     }
     return txns;
   });
 
-  const toDate = (d: string) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+  const toDate = (d: string) =>
+    `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
   const netWorthHistory: NetWorthHistoryPoint[] = trendPayload
     ? [
         ...trendPayload.chartDate.map((d, i) => ({
           date: toDate(d),
           netWorth: trendPayload.chartVal[i] ?? 0,
-          assetType: "total" as const
+          assetType: "total" as const,
         })),
         ...trendPayload.chartDate.map((d, i) => ({
           date: toDate(d),
-          netWorth: (trendPayload.chartVal[i] ?? 0) - (trendPayload.fundChartVal[i] ?? 0),
-          assetType: "stock" as const
+          netWorth:
+            (trendPayload.chartVal[i] ?? 0) -
+            (trendPayload.fundChartVal[i] ?? 0),
+          assetType: "stock" as const,
         })),
         ...trendPayload.fundChartDate.map((d, i) => ({
           date: toDate(d),
           netWorth: trendPayload.fundChartVal[i] ?? 0,
-          assetType: "fund" as const
-        }))
+          assetType: "fund" as const,
+        })),
       ]
     : [];
 
   return {
-    holdings: [...parseStockHoldings(stockPayload), ...parseFundHoldings(fundPayload)],
+    holdings: [
+      ...parseStockHoldings(stockPayload),
+      ...parseFundHoldings(fundPayload),
+    ],
     cashBalances,
     cashMovements,
     netWorthHistory,
@@ -373,8 +473,8 @@ async function runTdccLogin(config: TdccConfig, identity: TdccIdentity, previous
       devType: identity.devType,
       devModel: identity.devModel,
       session: client.exportSession(),
-      tradeCursors: previous?.tradeCursors
-    })
+      tradeCursors: previous?.tradeCursors,
+    }),
   };
 }
 
@@ -388,12 +488,16 @@ function connectorErrorCode(error: unknown) {
   return error instanceof Error ? error.name : "UNKNOWN_ERROR";
 }
 
-async function runTdccTradeHistory(config: TdccConfig, identity: TdccIdentity, previous?: TdccCursorState) {
+async function runTdccTradeHistory(
+  config: TdccConfig,
+  identity: TdccIdentity,
+  previous?: TdccCursorState,
+) {
   const client = new EPassbookClient({
     devId: identity.deviceId,
     devType: identity.devType,
     devModel: identity.devModel,
-    session: identity.session
+    session: identity.session,
   });
 
   if (!identity.session?.tokenId) {
@@ -404,13 +508,18 @@ async function runTdccTradeHistory(config: TdccConfig, identity: TdccIdentity, p
   const positionsPayload = await client.getPositions();
   const accounts = stockAccountsFromPayload(positionsPayload);
   const tradeCursors = { ...(previous?.tradeCursors ?? {}) };
-  const investmentTransactions: Array<Omit<InvestmentTransaction, "id" | "connectorId">> = [];
+  const investmentTransactions: Array<
+    Omit<InvestmentTransaction, "id" | "connectorId">
+  > = [];
 
   for (const account of accounts) {
     const cursorKey = `${account.brokerNo}:${account.brokerAccount}`;
     const accountCursor = tradeCursors[cursorKey] ?? {};
     const updateType: "B" | "F" = accountCursor.backfillComplete ? "F" : "B";
-    let txnSerNo = updateType === "F" ? accountCursor.newest ?? "" : accountCursor.oldest ?? "";
+    let txnSerNo =
+      updateType === "F"
+        ? (accountCursor.newest ?? "")
+        : (accountCursor.oldest ?? "");
     let newest = accountCursor.newest;
     let oldest = accountCursor.oldest;
     let backfillComplete = accountCursor.backfillComplete ?? false;
@@ -420,7 +529,7 @@ async function runTdccTradeHistory(config: TdccConfig, identity: TdccIdentity, p
         brokerNo: account.brokerNo,
         brokerAccount: account.brokerAccount,
         txnSerNo,
-        updateType
+        updateType,
       });
 
       if (payload._returnCode === "D0002") {
@@ -428,7 +537,9 @@ async function runTdccTradeHistory(config: TdccConfig, identity: TdccIdentity, p
         break;
       }
 
-      const rows = Array.isArray(payload.items) ? payload.items.filter(Array.isArray) : [];
+      const rows = Array.isArray(payload.items)
+        ? payload.items.filter(Array.isArray)
+        : [];
       if (rows.length === 0) {
         if (updateType === "B") backfillComplete = true;
         break;
@@ -438,7 +549,7 @@ async function runTdccTradeHistory(config: TdccConfig, identity: TdccIdentity, p
       investmentTransactions.push(...parsed);
       newest = newest ?? parsed[0]?.sourceId;
       oldest = parsed.at(-1)?.sourceId ?? oldest;
-      txnSerNo = updateType === "F" ? newest ?? "" : oldest ?? "";
+      txnSerNo = updateType === "F" ? (newest ?? "") : (oldest ?? "");
     }
 
     tradeCursors[cursorKey] = { newest, oldest, backfillComplete };
@@ -451,19 +562,27 @@ async function runTdccTradeHistory(config: TdccConfig, identity: TdccIdentity, p
       devType: identity.devType,
       devModel: identity.devModel,
       session: client.exportSession(),
-      tradeCursors
-    })
+      tradeCursors,
+    }),
   };
 }
 
-async function loginWithDeviceVerification(client: EPassbookClient, config: TdccConfig) {
+async function loginWithDeviceVerification(
+  client: EPassbookClient,
+  config: TdccConfig,
+) {
   let needsOtp = false;
 
   try {
     const loginResult = await client.login(config.userId!, config.password!);
-    needsOtp = loginResult.isDiffDevice === "Y" || loginResult.isEmailValid === "N";
+    needsOtp =
+      loginResult.isDiffDevice === "Y" || loginResult.isEmailValid === "N";
   } catch (error) {
-    if (!(error instanceof EPassbookError) || !DEVICE_VERIFICATION_CODES.has(error.code)) throw error;
+    if (
+      !(error instanceof EPassbookError) ||
+      !DEVICE_VERIFICATION_CODES.has(error.code)
+    )
+      throw error;
     needsOtp = true;
   }
 
@@ -474,7 +593,11 @@ async function loginWithDeviceVerification(client: EPassbookClient, config: Tdcc
     throw new TdccVerificationRequiredError("email", config.requestOtp);
   }
 
-  const otpResult = await client.verifyOtp(config.userId!, config.otp, config.otpChannel ?? "email");
+  const otpResult = await client.verifyOtp(
+    config.userId!,
+    config.otp,
+    config.otpChannel ?? "email",
+  );
   if (otpResult.isMobileValid === "N" && config.otpChannel !== "sms") {
     if (config.requestOtp) await client.requestMobileOtp(config.userId!);
     throw new TdccVerificationRequiredError("sms", config.requestOtp);
@@ -484,7 +607,8 @@ async function loginWithDeviceVerification(client: EPassbookClient, config: Tdcc
 function wrapTdccError(error: unknown): never {
   if (error instanceof EPassbookError) {
     const message = `TDCC 登入或同步失敗（${error.code}）：${error.message}`;
-    if (OTP_EXPIRED_CODES.has(error.code)) throw new TdccOtpExpiredError(message);
+    if (OTP_EXPIRED_CODES.has(error.code))
+      throw new TdccOtpExpiredError(message);
     throw new TdccConnectionError(error.code, error.message);
   }
   throw error;
@@ -496,7 +620,9 @@ type TdccStockAccount = {
   brokerName?: string;
 };
 
-function stockAccountsFromPayload(payload: Record<string, unknown>): TdccStockAccount[] {
+function stockAccountsFromPayload(
+  payload: Record<string, unknown>,
+): TdccStockAccount[] {
   const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
   const byId = new Map<string, TdccStockAccount>();
 
@@ -504,12 +630,16 @@ function stockAccountsFromPayload(payload: Record<string, unknown>): TdccStockAc
     if (typeof account !== "object" || account === null) continue;
     const record = account as Record<string, unknown>;
     const brokerNo = stringField(record.brokerNo);
-    const brokerAccount = stringField(record.brokerAccount) || stringField(record.acctSerNo);
+    const brokerAccount =
+      stringField(record.brokerAccount) || stringField(record.acctSerNo);
     if (!brokerNo || !brokerAccount) continue;
     byId.set(`${brokerNo}:${brokerAccount}`, {
       brokerNo,
       brokerAccount,
-      brokerName: stringField(record.brokerName) || stringField(record.broker) || undefined
+      brokerName:
+        stringField(record.brokerName) ||
+        stringField(record.broker) ||
+        undefined,
     });
   }
 
@@ -518,7 +648,7 @@ function stockAccountsFromPayload(payload: Record<string, unknown>): TdccStockAc
 
 function toInvestmentTransaction(
   row: unknown[],
-  account: TdccStockAccount
+  account: TdccStockAccount,
 ): Omit<InvestmentTransaction, "id" | "connectorId"> {
   const postDate = stringField(row[0]);
   const txnSerNo = stringField(row[1]);
@@ -531,8 +661,13 @@ function toInvestmentTransaction(
   // The live API sometimes returns `1` in the price slot as an exchange-rate
   // placeholder.  Treating quantity × 1 as a cash amount turns 93 shares into
   // a misleading NT$93 transaction.
-  const amount = quantity !== undefined && price !== undefined && price !== 1 ? Math.trunc(quantity * price) : undefined;
-  const sourceId = [txnDate, postDate, txnSerNo].filter(Boolean).join("") || row.map(stringField).join(":");
+  const amount =
+    quantity !== undefined && price !== undefined && price !== 1
+      ? Math.trunc(quantity * price)
+      : undefined;
+  const sourceId =
+    [txnDate, postDate, txnSerNo].filter(Boolean).join("") ||
+    row.map(stringField).join(":");
 
   return {
     accountId: `${account.brokerNo}:${account.brokerAccount}`,
@@ -542,7 +677,11 @@ function toInvestmentTransaction(
     brokerName: account.brokerName,
     symbol: symbol || undefined,
     name: name || undefined,
-    assetType: symbol.startsWith("00") ? "etf" : stockType === "12" ? "fund" : "stock",
+    assetType: symbol.startsWith("00")
+      ? "etf"
+      : stockType === "12"
+        ? "fund"
+        : "stock",
     tradeDate: txnDate ? normalizeTdccDate(txnDate) : undefined,
     postedDate: postDate ? normalizeTdccDate(postDate) : undefined,
     transactionCode: stringField(row[10]) || undefined,
@@ -577,10 +716,10 @@ function toInvestmentTransaction(
         pdate: stringField(row[19]),
         stockCurrency: stringField(row[20]),
         stockRate: stringField(row[21]),
-        stockIndustry: stringField(row[22])
+        stockIndustry: stringField(row[22]),
       },
-      row
-    }
+      row,
+    },
   };
 }
 
@@ -591,7 +730,11 @@ function parseStockHoldings(payload: Record<string, unknown>): TdccHolding[] {
   for (const account of accounts) {
     if (typeof account !== "object" || account === null) continue;
     const accountRecord = account as Record<string, unknown>;
-    const accountId = [stringField(accountRecord.brokerNo), stringField(accountRecord.brokerAccount) || stringField(accountRecord.acctSerNo)]
+    const accountId = [
+      stringField(accountRecord.brokerNo),
+      stringField(accountRecord.brokerAccount) ||
+        stringField(accountRecord.acctSerNo),
+    ]
       .filter(Boolean)
       .join(":");
     const cashBalance =
@@ -608,18 +751,32 @@ function parseStockHoldings(payload: Record<string, unknown>): TdccHolding[] {
       holdings.push({
         accountId: accountId || undefined,
         brokerNo: stringField(accountRecord.brokerNo) || undefined,
-        brokerAccount: stringField(accountRecord.brokerAccount) || stringField(accountRecord.acctSerNo) || undefined,
-        brokerName: stringField(accountRecord.brokerName) || stringField(accountRecord.broker) || undefined,
+        brokerAccount:
+          stringField(accountRecord.brokerAccount) ||
+          stringField(accountRecord.acctSerNo) ||
+          undefined,
+        brokerName:
+          stringField(accountRecord.brokerName) ||
+          stringField(accountRecord.broker) ||
+          undefined,
         accountName: stringField(accountRecord.accountName) || undefined,
         securityName: stringField(item[1]) || symbol,
         symbol,
-        securityType: symbol.startsWith("00") ? "etf" : stringField(item[6]) === "12" ? "fund" : "stock",
+        securityType: symbol.startsWith("00")
+          ? "etf"
+          : stringField(item[6]) === "12"
+            ? "fund"
+            : "stock",
         quantity: stringField(item[7]) || "0",
         marketValue: marketValueFromTradeItem(item),
         cashBalance: cashBalance || undefined,
         currency: stringField(item[19]) || "TWD",
-        asOfDate: stringField(item[21]) || stringField(item[18]) || stringField(payload.lastServerTime) || "19000101",
-        raw: item
+        asOfDate:
+          stringField(item[21]) ||
+          stringField(item[18]) ||
+          stringField(payload.lastServerTime) ||
+          "19000101",
+        raw: item,
       });
     }
   }
@@ -627,11 +784,12 @@ function parseStockHoldings(payload: Record<string, unknown>): TdccHolding[] {
   return holdings;
 }
 
-
 function marketValueFromTradeItem(item: unknown[]) {
   const quantity = Number(stringField(item[7]) || "0");
   const price = Number(stringField(item[17]) || "0");
-  return Number.isFinite(quantity) && Number.isFinite(price) ? quantity * price : undefined;
+  return Number.isFinite(quantity) && Number.isFinite(price)
+    ? quantity * price
+    : undefined;
 }
 
 function parseFundHoldings(payload: Record<string, unknown>): TdccHolding[] {
@@ -639,51 +797,83 @@ function parseFundHoldings(payload: Record<string, unknown>): TdccHolding[] {
   const asOfDate = stringField(payload.updateTime) || "19000101";
 
   return funds
-    .filter((fund): fund is Record<string, unknown> => typeof fund === "object" && fund !== null)
+    .filter(
+      (fund): fund is Record<string, unknown> =>
+        typeof fund === "object" && fund !== null,
+    )
     .map((fund) => {
       const symbol = stringField(fund.fundNo) || stringField(fund.symbol);
       return {
-        accountId: stringField(fund.saleOrgCode) || stringField(fund.saleOrgCodeShort) || undefined,
-        securityName: stringField(fund.fundCHName) || stringField(fund.name) || symbol,
+        accountId:
+          stringField(fund.saleOrgCode) ||
+          stringField(fund.saleOrgCodeShort) ||
+          undefined,
+        securityName:
+          stringField(fund.fundCHName) || stringField(fund.name) || symbol,
         symbol,
         securityType: "fund" as const,
         quantity: stringField(fund.fundSHR) || "0",
-        marketValue: stringField(fund.refORIValue) || stringField(fund.refTWDValue) || undefined,
-        currency: (stringField(fund.currAlias) || stringField(fund.currency) || "TWD").toUpperCase(),
+        marketValue:
+          stringField(fund.refORIValue) ||
+          stringField(fund.refTWDValue) ||
+          undefined,
+        currency: (
+          stringField(fund.currAlias) ||
+          stringField(fund.currency) ||
+          "TWD"
+        ).toUpperCase(),
         asOfDate,
-        raw: fund
+        raw: fund,
       };
     });
 }
 
 function stringField(value: unknown): string {
-  return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+  return typeof value === "string" || typeof value === "number"
+    ? String(value).trim()
+    : "";
 }
 
 function stockAccountId(accountRecord: Record<string, unknown>) {
-  return [stringField(accountRecord.brokerNo), stringField(accountRecord.brokerAccount) || stringField(accountRecord.acctSerNo)]
+  return [
+    stringField(accountRecord.brokerNo),
+    stringField(accountRecord.brokerAccount) ||
+      stringField(accountRecord.acctSerNo),
+  ]
     .filter(Boolean)
     .join(":");
 }
 
-function toInvestmentPosition(holding: TdccConfig["holdings"][number]): Omit<InvestmentPosition, "id" | "connectorId"> {
+function toInvestmentPosition(
+  holding: TdccConfig["holdings"][number],
+): Omit<InvestmentPosition, "id" | "connectorId"> {
   const asOfDate = normalizeTdccDate(holding.asOfDate);
   return {
-    sourceId: [holding.accountId, holding.symbol || holding.securityName, asOfDate]
+    sourceId: [
+      holding.accountId,
+      holding.symbol || holding.securityName,
+      asOfDate,
+    ]
       .filter(Boolean)
       .join(":"),
     assetType:
-      holding.securityType === "etf" || holding.securityType === "fund" ? holding.securityType : "stock",
+      holding.securityType === "etf" || holding.securityType === "fund"
+        ? holding.securityType
+        : "stock",
     symbol: holding.symbol,
     name: holding.securityName,
     quantity: parseTdccNumber(holding.quantity),
     marketValue:
-      holding.marketValue !== undefined ? Math.max(0, Math.trunc(parseTdccNumber(holding.marketValue))) : undefined,
+      holding.marketValue !== undefined
+        ? Math.max(0, Math.trunc(parseTdccNumber(holding.marketValue)))
+        : undefined,
     cashBalance:
-      holding.cashBalance !== undefined ? Math.max(0, Math.trunc(parseTdccNumber(holding.cashBalance))) : undefined,
+      holding.cashBalance !== undefined
+        ? Math.max(0, Math.trunc(parseTdccNumber(holding.cashBalance)))
+        : undefined,
     currency: holding.currency || "TWD",
     asOfDate,
-    raw: holding.raw ?? holding
+    raw: holding.raw ?? holding,
   };
 }
 
@@ -727,26 +917,37 @@ const SETTLEMENT_BANK_NAMES: Record<string, string> = {
   "822": "中國信託銀行",
   "823": "將來銀行",
   "824": "連線銀行",
-  "826": "樂天銀行"
+  "826": "樂天銀行",
 };
 
-function toSettlementBankAccount(input: TdccHolding | TdccCashBalance | TdccCashMovement): Omit<BankAccount, "id" | "connectorId"> {
+function toSettlementBankAccount(
+  input: TdccHolding | TdccCashBalance | TdccCashMovement,
+): Omit<BankAccount, "id" | "connectorId"> {
   const sourceId = settlementAccountSourceId(input);
   const settlement = parseSettlementSourceId(sourceId);
-  const bankName = settlement.bankCode ? SETTLEMENT_BANK_NAMES[settlement.bankCode] : undefined;
-  const accountName = settlement.accountLast5 ? `末五碼 ${settlement.accountLast5}` : "末五碼 -";
+  const bankName = settlement.bankCode
+    ? SETTLEMENT_BANK_NAMES[settlement.bankCode]
+    : undefined;
+  const accountName = settlement.accountLast5
+    ? `末五碼 ${settlement.accountLast5}`
+    : "末五碼 -";
   return {
     sourceId,
-    institutionName: bankName || (settlement.bankCode ? `銀行代碼 ${settlement.bankCode}` : input.brokerName) || "TDCC ePassbook",
+    institutionName:
+      bankName ||
+      (settlement.bankCode
+        ? `銀行代碼 ${settlement.bankCode}`
+        : input.brokerName) ||
+      "TDCC ePassbook",
     accountName,
     accountType: "checking",
     currency: input.currency || "TWD",
-    raw: input.raw ?? input
+    raw: input.raw ?? input,
   };
 }
 
 function toSettlementBalanceSnapshot(
-  holding: TdccHolding
+  holding: TdccHolding,
 ): Array<Omit<BankBalanceSnapshot, "id" | "connectorId">> {
   if (holding.cashBalance === undefined) return [];
 
@@ -759,12 +960,14 @@ function toSettlementBalanceSnapshot(
       balance: Math.trunc(parseTdccNumber(holding.cashBalance)),
       currency: holding.currency || "TWD",
       asOfAt,
-      raw: holding.raw ?? holding
-    }
+      raw: holding.raw ?? holding,
+    },
   ];
 }
 
-function toBankBalanceSnapshot(balance: TdccCashBalance): Omit<BankBalanceSnapshot, "id" | "connectorId"> {
+function toBankBalanceSnapshot(
+  balance: TdccCashBalance,
+): Omit<BankBalanceSnapshot, "id" | "connectorId"> {
   const accountSourceId = settlementAccountSourceId(balance);
   const asOfAt = normalizeTdccDate(balance.asOfAt);
   return {
@@ -772,17 +975,25 @@ function toBankBalanceSnapshot(balance: TdccCashBalance): Omit<BankBalanceSnapsh
     sourceId: balance.sourceId || `${accountSourceId}:${asOfAt}`,
     balance: Math.trunc(parseTdccNumber(balance.balance)),
     availableBalance:
-      balance.availableBalance !== undefined ? Math.trunc(parseTdccNumber(balance.availableBalance)) : undefined,
+      balance.availableBalance !== undefined
+        ? Math.trunc(parseTdccNumber(balance.availableBalance))
+        : undefined,
     currency: balance.currency || "TWD",
     asOfAt,
-    raw: balance.raw ?? balance
+    raw: balance.raw ?? balance,
   };
 }
 
-function toBankTransaction(movement: TdccCashMovement): Omit<BankTransaction, "id" | "connectorId"> {
+function toBankTransaction(
+  movement: TdccCashMovement,
+): Omit<BankTransaction, "id" | "connectorId"> {
   const accountSourceId = settlementAccountSourceId(movement);
-  const postedDate = movement.postedDate ? normalizeTdccDate(movement.postedDate) : undefined;
-  const authorizedAt = movement.authorizedAt ? normalizeTdccDate(movement.authorizedAt) : undefined;
+  const postedDate = movement.postedDate
+    ? normalizeTdccDate(movement.postedDate)
+    : undefined;
+  const authorizedAt = movement.authorizedAt
+    ? normalizeTdccDate(movement.authorizedAt)
+    : undefined;
   const amount = Math.trunc(parseTdccNumber(movement.amount));
   const sourceId =
     movement.sourceId ||
@@ -792,7 +1003,7 @@ function toBankTransaction(movement: TdccCashMovement): Omit<BankTransaction, "i
       amount,
       movement.currency || "TWD",
       movement.description || "",
-      movement.counterparty || ""
+      movement.counterparty || "",
     ].join(":");
 
   return {
@@ -804,7 +1015,7 @@ function toBankTransaction(movement: TdccCashMovement): Omit<BankTransaction, "i
     currency: movement.currency || "TWD",
     description: movement.description,
     counterparty: movement.counterparty,
-    raw: movement.raw ?? movement
+    raw: movement.raw ?? movement,
   };
 }
 
@@ -831,7 +1042,7 @@ function parseSettlementSourceId(sourceId: string) {
   const accountDigits = match[2].replace(/\D/g, "");
   return {
     bankCode: match[1],
-    accountLast5: accountDigits ? accountDigits.slice(-5) : undefined
+    accountLast5: accountDigits ? accountDigits.slice(-5) : undefined,
   };
 }
 
@@ -864,7 +1075,11 @@ function normalizeTdccDate(value: string) {
   }
 
   const normalized = trimmed.replace(/\//g, "-");
-  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(normalized) ? `${normalized}T00:00:00` : normalized);
+  const date = new Date(
+    /^\d{4}-\d{2}-\d{2}$/.test(normalized)
+      ? `${normalized}T00:00:00`
+      : normalized,
+  );
   return Number.isNaN(date.getTime()) ? normalized : date.toISOString();
 }
 
@@ -876,7 +1091,9 @@ function dedupeBySourceId<T extends { sourceId: string }>(records: T[]) {
   return Array.from(bySourceId.values());
 }
 
-function dedupeByAccountAndSourceId<T extends { accountId: string; sourceId: string }>(records: T[]) {
+function dedupeByAccountAndSourceId<
+  T extends { accountId: string; sourceId: string },
+>(records: T[]) {
   const bySourceId = new Map<string, T>();
   for (const record of records) {
     bySourceId.set(`${record.accountId}:${record.sourceId}`, record);

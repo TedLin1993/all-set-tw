@@ -1,7 +1,4 @@
-import type {
-  ConnectorId,
-  SyncNotificationStatus,
-} from "@taiwan-fin-hub/core";
+import type { ConnectorId, SyncNotificationStatus } from "@taiwan-fin-hub/core";
 import type { SyncJobRow } from "@taiwan-fin-hub/db";
 import type { SyncNotificationEvent } from "../notifications/payload";
 

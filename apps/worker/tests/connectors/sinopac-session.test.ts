@@ -4,14 +4,14 @@ const puppeteerMock = vi.hoisted(() => ({
   connect: vi.fn(),
   launch: vi.fn(),
   limits: vi.fn(),
-  sessions: vi.fn()
+  sessions: vi.fn(),
 }));
 const jpegMock = vi.hoisted(() => ({
   decode: vi.fn(() => ({
     width: 1,
     height: 1,
-    data: new Uint8Array([0, 0, 0, 255])
-  }))
+    data: new Uint8Array([0, 0, 0, 255]),
+  })),
 }));
 
 vi.mock("@cloudflare/puppeteer", () => ({ default: puppeteerMock }));
@@ -23,37 +23,45 @@ import {
   prepareSinopacCaptcha,
   SinopacBrowserCapacityError,
   SinopacCredentialRejectedError,
-  SinopacVerificationRequiredError
+  SinopacVerificationRequiredError,
 } from "../../src/connectors/sinopac";
 
 const credentials = {
   userId: "A123456789",
   account: "test-user",
-  password: "test-password"
+  password: "test-password",
 };
 
 function captchaPage() {
   return {
     $: vi.fn().mockResolvedValue({
-      screenshot: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]))
+      screenshot: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
     }),
     goto: vi.fn().mockResolvedValue(undefined),
     setUserAgent: vi.fn().mockResolvedValue(undefined),
     setViewport: vi.fn().mockResolvedValue(undefined),
     type: vi.fn().mockResolvedValue(undefined),
-    url: vi.fn().mockReturnValue("https://m.sinopac.com/m/member/login/m_login.aspx?RequestTrans=MobileCard"),
+    url: vi
+      .fn()
+      .mockReturnValue(
+        "https://m.sinopac.com/m/member/login/m_login.aspx?RequestTrans=MobileCard",
+      ),
     waitForFunction: vi.fn().mockResolvedValue(undefined),
-    waitForSelector: vi.fn().mockResolvedValue(undefined)
+    waitForSelector: vi.fn().mockResolvedValue(undefined),
   };
 }
 
 function automaticLoginPage() {
   return {
     $: vi.fn().mockResolvedValue({
-      screenshot: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]))
+      screenshot: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
     }),
     click: vi.fn().mockResolvedValue(undefined),
-    cookies: vi.fn().mockResolvedValue([{ name: "ASP.NET_SessionId", value: "fresh-session" }]),
+    cookies: vi
+      .fn()
+      .mockResolvedValue([
+        { name: "ASP.NET_SessionId", value: "fresh-session" },
+      ]),
     evaluate: vi.fn().mockResolvedValue(false),
     goto: vi.fn().mockResolvedValue(undefined),
     off: vi.fn(),
@@ -61,10 +69,14 @@ function automaticLoginPage() {
     setUserAgent: vi.fn().mockResolvedValue(undefined),
     setViewport: vi.fn().mockResolvedValue(undefined),
     type: vi.fn().mockResolvedValue(undefined),
-    url: vi.fn().mockReturnValue("https://m.sinopac.com/m/member/login/m_login.aspx?RequestTrans=MobileCard"),
+    url: vi
+      .fn()
+      .mockReturnValue(
+        "https://m.sinopac.com/m/member/login/m_login.aspx?RequestTrans=MobileCard",
+      ),
     waitForFunction: vi.fn().mockResolvedValue(undefined),
     waitForNavigation: vi.fn().mockResolvedValue(undefined),
-    waitForSelector: vi.fn().mockResolvedValue(undefined)
+    waitForSelector: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -73,7 +85,7 @@ function launchedBrowser(page: ReturnType<typeof automaticLoginPage>) {
     close: vi.fn().mockResolvedValue(undefined),
     newPage: vi.fn().mockResolvedValue(page),
     pages: vi.fn().mockResolvedValue([page]),
-    sessionId: vi.fn().mockReturnValue("auto-session")
+    sessionId: vi.fn().mockReturnValue("auto-session"),
   };
 }
 
@@ -84,15 +96,15 @@ beforeEach(() => {
     activeSessions: [],
     maxConcurrentSessions: 3,
     allowedBrowserAcquisitions: 1,
-    timeUntilNextAllowedBrowserAcquisition: 0
+    timeUntilNextAllowedBrowserAcquisition: 0,
   });
 });
 
 describe("sinopac browser session lifecycle", () => {
   it("requires one-time verification before acquiring a browser when no bank cookies exist", async () => {
-    await expect(createSinopacConnector({} as Fetcher).sync(credentials)).rejects.toBeInstanceOf(
-      SinopacVerificationRequiredError
-    );
+    await expect(
+      createSinopacConnector({} as Fetcher).sync(credentials),
+    ).rejects.toBeInstanceOf(SinopacVerificationRequiredError);
     expect(puppeteerMock.launch).not.toHaveBeenCalled();
   });
 
@@ -103,14 +115,16 @@ describe("sinopac browser session lifecycle", () => {
       close: vi.fn().mockResolvedValue(undefined),
       newPage: vi.fn().mockResolvedValue(page),
       pages: vi.fn().mockResolvedValue([page]),
-      sessionId: vi.fn().mockReturnValue("pending-session")
+      sessionId: vi.fn().mockReturnValue("pending-session"),
     };
-    puppeteerMock.sessions.mockResolvedValue([{ sessionId: "pending-session", startTime: Date.now() }]);
+    puppeteerMock.sessions.mockResolvedValue([
+      { sessionId: "pending-session", startTime: Date.now() },
+    ]);
     puppeteerMock.connect.mockResolvedValue(browser);
 
     const result = await prepareSinopacCaptcha({} as Fetcher, {
       ...credentials,
-      browserSessionId: "pending-session"
+      browserSessionId: "pending-session",
     });
 
     expect(puppeteerMock.connect).toHaveBeenCalledWith({}, "pending-session");
@@ -123,12 +137,16 @@ describe("sinopac browser session lifecycle", () => {
   it("closes a submitted CAPTCHA browser when verification fails", async () => {
     const page = {
       type: vi.fn().mockRejectedValue(new Error("invalid captcha")),
-      url: vi.fn().mockReturnValue("https://m.sinopac.com/m/member/login/m_login.aspx?RequestTrans=MobileCard")
+      url: vi
+        .fn()
+        .mockReturnValue(
+          "https://m.sinopac.com/m/member/login/m_login.aspx?RequestTrans=MobileCard",
+        ),
     };
     const browser = {
       close: vi.fn().mockResolvedValue(undefined),
       disconnect: vi.fn().mockResolvedValue(undefined),
-      pages: vi.fn().mockResolvedValue([page])
+      pages: vi.fn().mockResolvedValue([page]),
     };
     puppeteerMock.connect.mockResolvedValue(browser);
 
@@ -137,8 +155,8 @@ describe("sinopac browser session lifecycle", () => {
         ...credentials,
         captcha: "123456",
         browserSessionId: "pending-session",
-        browserSessionExpiresAt: new Date(Date.now() + 60_000).toISOString()
-      })
+        browserSessionExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
     ).rejects.toBeInstanceOf(SinopacVerificationRequiredError);
 
     expect(browser.close).toHaveBeenCalledOnce();
@@ -150,15 +168,15 @@ describe("sinopac browser session lifecycle", () => {
       {
         sessionId: "pending-session",
         startTime: Date.now(),
-        connectionId: "busy-connection"
-      }
+        connectionId: "busy-connection",
+      },
     ]);
 
     await expect(
       prepareSinopacCaptcha({} as Fetcher, {
         ...credentials,
-        browserSessionId: "pending-session"
-      })
+        browserSessionId: "pending-session",
+      }),
     ).rejects.toBeInstanceOf(SinopacBrowserCapacityError);
     expect(puppeteerMock.launch).not.toHaveBeenCalled();
   });
@@ -168,12 +186,14 @@ describe("sinopac browser session lifecycle", () => {
       activeSessions: [],
       maxConcurrentSessions: 3,
       allowedBrowserAcquisitions: 0,
-      timeUntilNextAllowedBrowserAcquisition: 20_000
+      timeUntilNextAllowedBrowserAcquisition: 20_000,
     });
 
-    await expect(prepareSinopacCaptcha({} as Fetcher, credentials)).rejects.toMatchObject({
+    await expect(
+      prepareSinopacCaptcha({} as Fetcher, credentials),
+    ).rejects.toMatchObject({
       name: "SinopacBrowserCapacityError",
-      retryAfterSeconds: 20
+      retryAfterSeconds: 20,
     });
     expect(puppeteerMock.launch).not.toHaveBeenCalled();
   });
@@ -190,9 +210,13 @@ describe("sinopac Gemma automatic login", () => {
       .mockResolvedValueOnce("not-six-digits")
       .mockResolvedValueOnce("575831");
 
-    await expect(loginSinopacWithOcr({} as Fetcher, credentials, recognize)).resolves.toEqual({
-      sessionCookies: JSON.stringify([{ name: "ASP.NET_SessionId", value: "fresh-session" }]),
-      protocol: "sinopac-mobile-app-json-v1"
+    await expect(
+      loginSinopacWithOcr({} as Fetcher, credentials, recognize),
+    ).resolves.toEqual({
+      sessionCookies: JSON.stringify([
+        { name: "ASP.NET_SessionId", value: "fresh-session" },
+      ]),
+      protocol: "sinopac-mobile-app-json-v1",
     });
 
     expect(recognize).toHaveBeenCalledTimes(3);
@@ -207,7 +231,9 @@ describe("sinopac Gemma automatic login", () => {
     puppeteerMock.launch.mockResolvedValue(browser);
     const recognize = vi.fn().mockResolvedValue("invalid");
 
-    await expect(loginSinopacWithOcr({} as Fetcher, credentials, recognize)).rejects.toThrow("連續失敗 3 次");
+    await expect(
+      loginSinopacWithOcr({} as Fetcher, credentials, recognize),
+    ).rejects.toThrow("連續失敗 3 次");
 
     expect(recognize).toHaveBeenCalledTimes(3);
     expect(page.goto).toHaveBeenCalledTimes(3);
@@ -226,8 +252,10 @@ describe("sinopac Gemma automatic login", () => {
     puppeteerMock.launch.mockResolvedValue(browser);
     const recognize = vi.fn().mockResolvedValue("575831");
 
-    await expect(loginSinopacWithOcr({} as Fetcher, credentials, recognize)).resolves.toMatchObject({
-      protocol: "sinopac-mobile-app-json-v1"
+    await expect(
+      loginSinopacWithOcr({} as Fetcher, credentials, recognize),
+    ).resolves.toMatchObject({
+      protocol: "sinopac-mobile-app-json-v1",
     });
 
     expect(recognize).toHaveBeenCalledTimes(3);
@@ -242,9 +270,9 @@ describe("sinopac Gemma automatic login", () => {
     puppeteerMock.launch.mockResolvedValue(browser);
     const recognize = vi.fn().mockResolvedValue("575831");
 
-    await expect(loginSinopacWithOcr({} as Fetcher, credentials, recognize)).rejects.toBeInstanceOf(
-      SinopacCredentialRejectedError
-    );
+    await expect(
+      loginSinopacWithOcr({} as Fetcher, credentials, recognize),
+    ).rejects.toBeInstanceOf(SinopacCredentialRejectedError);
 
     expect(recognize).toHaveBeenCalledOnce();
     expect(page.goto).toHaveBeenCalledOnce();

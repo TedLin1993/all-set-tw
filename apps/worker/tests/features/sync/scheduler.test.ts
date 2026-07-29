@@ -34,6 +34,8 @@ vi.mock("../../../src/features/sync/service", () => ({
   canonicalSyncLockRowId: (connectorId: string) => `${connectorId}:all`,
   isUserActionError: () => false,
   NeedsUserActionError: class NeedsUserActionError extends Error {},
+  prepareSinopacCaptchaSession: vi.fn(),
+  prepareTaishinCaptchaSession: vi.fn(),
   safeErrorMessage: (error: unknown) => String(error),
   startSyncLockHeartbeat: mocks.startSyncLockHeartbeat,
   syncCathaybk: vi.fn(),
@@ -195,6 +197,7 @@ describe("scheduled sync rounds", () => {
     expect(mocks.syncTaishin).toHaveBeenCalledWith(
       expect.anything(),
       "scheduled",
+      {},
     );
   });
 });

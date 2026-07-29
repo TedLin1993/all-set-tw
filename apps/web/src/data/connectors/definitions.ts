@@ -1,3 +1,8 @@
+import {
+  connectorCatalog,
+  supportedConnectorIds,
+  type ConnectorFormFieldKey,
+} from "@taiwan-fin-hub/core";
 import type { ConnectorField, ConnectorId } from "./types";
 
 export interface ConnectorDefinition {
@@ -6,32 +11,20 @@ export interface ConnectorDefinition {
   description: string;
 }
 
-export const connectorDefinitions: ConnectorDefinition[] = [
-  { id: "einvoice", title: "電子發票", description: "財政部載具與品項明細" },
-  {
-    id: "tdcc",
-    title: "集保 e 存摺",
-    description: "持倉、投資交易與銀行帳戶",
-  },
-  { id: "esun", title: "玉山銀行", description: "帳戶、信用卡與交易" },
-  {
-    id: "cathaybk",
-    title: "國泰世華銀行",
-    description: "帳戶與交易",
-  },
-  {
-    id: "sinopac",
-    title: "永豐行動銀行",
-    description: "信用卡帳務、近期帳單與消費",
-  },
-  {
-    id: "taishin",
-    title: "台新銀行",
-    description: "信用卡額度、帳單與即時消費",
-  },
-];
+export const connectorDefinitions: ConnectorDefinition[] =
+  supportedConnectorIds.map((id) => ({
+    id,
+    title: connectorCatalog[id].title,
+    description: connectorCatalog[id].description,
+  }));
 
-export const connectorFields: Record<ConnectorId, ConnectorField[]> = {
+type ConnectorFieldMap = {
+  [TConnectorId in ConnectorId]: Array<
+    ConnectorField<ConnectorFormFieldKey<TConnectorId>>
+  >;
+};
+
+export const connectorFields = {
   einvoice: [
     { key: "mobile", label: "手機號碼（電子發票帳號）", type: "text" },
     { key: "password", label: "電子發票 App 登入密碼", type: "password" },
@@ -48,8 +41,9 @@ export const connectorFields: Record<ConnectorId, ConnectorField[]> = {
     { key: "password", label: "集保 App 密碼", type: "password" },
   ],
   esun: [
-    { key: "username", label: "使用者名稱", type: "text" },
-    { key: "password", label: "密碼", type: "password" },
+    { key: "userId", label: "身分證字號／統編", type: "text" },
+    { key: "account", label: "使用者名稱", type: "text" },
+    { key: "password", label: "使用者密碼", type: "password" },
     {
       key: "lookbackMonths",
       label: "往回月份",
@@ -58,8 +52,9 @@ export const connectorFields: Record<ConnectorId, ConnectorField[]> = {
     },
   ],
   cathaybk: [
-    { key: "username", label: "使用者名稱", type: "text" },
-    { key: "password", label: "密碼", type: "password" },
+    { key: "userId", label: "身分證字號／統編", type: "text" },
+    { key: "account", label: "用戶代號", type: "text" },
+    { key: "password", label: "網銀密碼", type: "password" },
     {
       key: "lookbackMonths",
       label: "往回月份",
@@ -89,4 +84,4 @@ export const connectorFields: Record<ConnectorId, ConnectorField[]> = {
       placeholder: "6",
     },
   ],
-};
+} satisfies ConnectorFieldMap;

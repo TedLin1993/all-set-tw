@@ -36,9 +36,9 @@ export function periodFromIndex(index: number, now = new Date()) {
   return {
     endDate: formatDate(boundedEnd),
     label: `${year}/${String(startMonthIndex + 1).padStart(2, "0")}-${String(
-      startMonthIndex + 2
+      startMonthIndex + 2,
     ).padStart(2, "0")}`,
-    startDate: formatDate(start)
+    startDate: formatDate(start),
   };
 }
 
@@ -47,35 +47,47 @@ export function getInvoices(result: unknown): InvoiceItem[] {
   const rows = Array.isArray(response?.result) ? response.result : [];
 
   return rows
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+    .filter((item): item is Record<string, unknown> =>
+      Boolean(item && typeof item === "object"),
+    )
     .map((item, index) => {
       const invNum = typeof item.invNum === "string" ? item.invNum : "";
       const invDate = typeof item.invDate === "string" ? item.invDate : "";
-      const sellerName = typeof item.sellerName === "string" ? item.sellerName : "未知商店";
-      const amount = typeof item.amount === "number" ? item.amount : Number(item.amount ?? 0);
+      const sellerName =
+        typeof item.sellerName === "string" ? item.sellerName : "未知商店";
+      const amount =
+        typeof item.amount === "number"
+          ? item.amount
+          : Number(item.amount ?? 0);
 
       return {
         amount: Number.isFinite(amount) ? amount : 0,
         id: invNum || `${invDate}-${index}`,
         invDate,
         invNum,
-        sellerName
+        sellerName,
       };
     })
-    .sort((a, b) => new Date(b.invDate).getTime() - new Date(a.invDate).getTime());
+    .sort(
+      (a, b) => new Date(b.invDate).getTime() - new Date(a.invDate).getTime(),
+    );
 }
 
 export function getDetailItems(detail: unknown): InvoiceDetailItem[] {
   const response = detail as { result?: { details?: unknown } };
-  const rows = Array.isArray(response?.result?.details) ? response.result.details : [];
+  const rows = Array.isArray(response?.result?.details)
+    ? response.result.details
+    : [];
 
   return rows
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+    .filter((item): item is Record<string, unknown> =>
+      Boolean(item && typeof item === "object"),
+    )
     .map((item, index) => ({
       amount: String(item.amount ?? ""),
       description: String(item.description ?? "未命名品項"),
       id: String(item.rowNum ?? index),
       quantity: String(item.quantity ?? ""),
-      unitPrice: String(item.unitPrice ?? "")
+      unitPrice: String(item.unitPrice ?? ""),
     }));
 }

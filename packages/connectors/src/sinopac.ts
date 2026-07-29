@@ -8,9 +8,12 @@ export const sinopacConfigSchema = z.object({
   sessionCookies: z.string().optional(),
   browserSessionId: z.string().optional(),
   browserSessionExpiresAt: z.string().optional(),
-  captcha: z.string().regex(/^\d{6}$/).optional(),
+  captcha: z
+    .string()
+    .regex(/^\d{6}$/)
+    .optional(),
   protocol: z.literal("sinopac-mobile-app-json-v1").optional(),
-  lookbackMonths: z.coerce.number().int().min(1).max(24).optional()
+  lookbackMonths: z.coerce.number().int().min(1).max(24).optional(),
 });
 
 export type SinopacConfig = z.infer<typeof sinopacConfigSchema>;

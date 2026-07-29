@@ -9,7 +9,7 @@ export interface CreditCardBill {
   connectorId: string;
   accountId: string;
   sourceId: string;
-  billingPeriod: string;        // "2026-05"
+  billingPeriod: string; // "2026-05"
   statementAmount?: number;
   minimumPayment?: number;
   paidAmount?: number;
@@ -23,17 +23,21 @@ export interface CreditCardBill {
 export interface SyncResult<TResult> {
   records: TResult[];
   cursor?: string;
-  invoiceLineItems?: Array<Omit<InvoiceLineItem, "id" | "connectorId" | "invoiceId">>;
+  invoiceLineItems?: Array<
+    Omit<InvoiceLineItem, "id" | "connectorId" | "invoiceId">
+  >;
   bankAccounts?: Array<Omit<BankAccount, "id" | "connectorId">>;
   bankBalanceSnapshots?: Array<Omit<BankBalanceSnapshot, "id" | "connectorId">>;
   bankTransactions?: Array<Omit<BankTransaction, "id" | "connectorId">>;
   creditCardBills?: Array<Omit<CreditCardBill, "id" | "connectorId">>;
-  investmentTransactions?: Array<Omit<InvestmentTransaction, "id" | "connectorId">>;
+  investmentTransactions?: Array<
+    Omit<InvestmentTransaction, "id" | "connectorId">
+  >;
   netWorthHistory?: NetWorthHistoryPoint[];
 }
 
 export interface Connector<TConfig, TResult> {
-  id: string;
+  id: ConnectorId;
   name: string;
   sync(config: TConfig, cursor?: string): Promise<SyncResult<TResult>>;
 }
@@ -213,8 +217,207 @@ export interface ApiErrorResponse {
   };
 }
 
-export const supportedConnectorIds = ["einvoice", "tdcc", "esun", "cathaybk", "sinopac", "taishin"] as const;
+export const supportedConnectorIds = [
+  "einvoice",
+  "tdcc",
+  "esun",
+  "cathaybk",
+  "sinopac",
+  "taishin",
+] as const;
 export type ConnectorId = (typeof supportedConnectorIds)[number];
+
+export type ConnectorConnectionMode =
+  | "api_credentials"
+  | "api_device_otp"
+  | "browser_per_sync"
+  | "browser_session"
+  | "browser_captcha_session";
+
+export type ConnectorCapability =
+  | "invoice"
+  | "invoice_line_item"
+  | "bank_account"
+  | "bank_balance_snapshot"
+  | "bank_transaction"
+  | "credit_card_bill"
+  | "investment_position"
+  | "investment_transaction"
+  | "net_worth_history";
+
+export interface ConnectorCatalogEntry {
+  id: ConnectorId;
+  title: string;
+  description: string;
+  connectionMode: ConnectorConnectionMode;
+  scopes: readonly string[];
+  capabilities: readonly ConnectorCapability[];
+  publicFields: readonly string[];
+  credentialFields: readonly string[];
+  secretStateFields: readonly string[];
+  resetOnCredentialChangeFields: readonly string[];
+}
+
+export const connectorCatalog = {
+  einvoice: {
+    id: "einvoice",
+    title: "電子發票",
+    description: "財政部載具與品項明細",
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: ["invoice", "invoice_line_item"],
+    publicFields: ["periodsBack", "fetchDetails"],
+    credentialFields: ["mobile", "password"],
+    secretStateFields: [
+      "userToken",
+      "mobileBarcode",
+      "sid",
+      "token",
+      "iv",
+      "svrCode",
+      "loginAppId",
+      "loginLiat",
+      "loginSsMe",
+      "ltoken",
+      "hkey",
+      "serverTimeOffset",
+    ],
+    resetOnCredentialChangeFields: [
+      "userToken",
+      "mobileBarcode",
+      "sid",
+      "token",
+      "iv",
+      "svrCode",
+      "loginAppId",
+      "loginLiat",
+      "loginSsMe",
+      "ltoken",
+      "hkey",
+      "serverTimeOffset",
+    ],
+  },
+  tdcc: {
+    id: "tdcc",
+    title: "集保 e 存摺",
+    description: "持倉、投資交易與銀行帳戶",
+    connectionMode: "api_device_otp",
+    scopes: ["all", "investments", "bank", "trades"],
+    capabilities: [
+      "investment_position",
+      "investment_transaction",
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "net_worth_history",
+    ],
+    publicFields: [],
+    credentialFields: ["userId", "password"],
+    secretStateFields: ["deviceId", "devType", "devModel", "session"],
+    resetOnCredentialChangeFields: [
+      "deviceId",
+      "devType",
+      "devModel",
+      "session",
+      "otp",
+      "otpChannel",
+    ],
+  },
+  esun: {
+    id: "esun",
+    title: "玉山銀行",
+    description: "帳戶、信用卡與交易",
+    connectionMode: "browser_session",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: ["lookbackMonths"],
+    credentialFields: ["userId", "account", "password"],
+    secretStateFields: ["sessionCookies", "sessionExpiresAt"],
+    resetOnCredentialChangeFields: ["sessionCookies", "sessionExpiresAt"],
+  },
+  cathaybk: {
+    id: "cathaybk",
+    title: "國泰世華銀行",
+    description: "帳戶、信用卡與交易",
+    connectionMode: "browser_per_sync",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: ["lookbackMonths"],
+    credentialFields: ["userId", "account", "password"],
+    secretStateFields: ["sessionCookies", "sessionExpiresAt"],
+    resetOnCredentialChangeFields: ["sessionCookies", "sessionExpiresAt"],
+  },
+  sinopac: {
+    id: "sinopac",
+    title: "永豐行動銀行",
+    description: "信用卡帳務、近期帳單與消費",
+    connectionMode: "browser_captcha_session",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: ["lookbackMonths"],
+    credentialFields: ["userId", "account", "password"],
+    secretStateFields: ["sessionCookies", "browserSessionId", "captcha"],
+    resetOnCredentialChangeFields: [
+      "sessionCookies",
+      "candidateSessionCookies",
+      "candidateSessionCreatedAt",
+      "sessionExpiresAt",
+      "sessionKeepAliveFailures",
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captcha",
+      "protocol",
+    ],
+  },
+  taishin: {
+    id: "taishin",
+    title: "台新銀行",
+    description: "信用卡額度、帳單與即時消費",
+    connectionMode: "browser_captcha_session",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: ["lookbackMonths"],
+    credentialFields: ["userId", "account", "password"],
+    secretStateFields: [
+      "sessionCookies",
+      "sessionCreatedAt",
+      "browserSessionId",
+      "captcha",
+    ],
+    resetOnCredentialChangeFields: [
+      "sessionCookies",
+      "sessionCreatedAt",
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captchaDigitCount",
+      "captcha",
+    ],
+  },
+} as const satisfies Record<ConnectorId, ConnectorCatalogEntry>;
+
+export type ConnectorFormFieldKey<TConnectorId extends ConnectorId> =
+  | (typeof connectorCatalog)[TConnectorId]["credentialFields"][number]
+  | (typeof connectorCatalog)[TConnectorId]["publicFields"][number];
 
 export function isConnectorId(value: string): value is ConnectorId {
   return supportedConnectorIds.includes(value as ConnectorId);

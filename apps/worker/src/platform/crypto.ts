@@ -16,7 +16,10 @@ function base64ToBytes(value: string) {
 
 async function encryptionKey(secret: string) {
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(secret));
-  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, [
+    "encrypt",
+    "decrypt",
+  ]);
 }
 
 export async function encryptJson(value: unknown, secret: string) {
@@ -25,14 +28,14 @@ export async function encryptJson(value: unknown, secret: string) {
   const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     key,
-    encoder.encode(JSON.stringify(value))
+    encoder.encode(JSON.stringify(value)),
   );
 
   return JSON.stringify({
     v: 1,
     alg: "AES-GCM",
     iv: bytesToBase64(iv),
-    ciphertext: bytesToBase64(new Uint8Array(ciphertext))
+    ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
   });
 }
 
@@ -52,7 +55,7 @@ export async function decryptJson<TValue>(encrypted: string, secret: string) {
   const plaintext = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: base64ToBytes(parsed.iv) },
     key,
-    base64ToBytes(parsed.ciphertext)
+    base64ToBytes(parsed.ciphertext),
   );
 
   return JSON.parse(decoder.decode(plaintext)) as TValue;

@@ -1,0 +1,102 @@
+import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/core";
+import type { SyncTrigger } from "@taiwan-fin-hub/db";
+import type { Env } from "../../platform/env";
+import {
+  prepareSinopacCaptchaSession,
+  prepareTaishinCaptchaSession,
+  syncCathaybk,
+  syncEinvoice,
+  syncEsun,
+  syncSinopac,
+  syncTaishin,
+  syncTdcc,
+  SYNC_SCOPE_ALL,
+  TDCC_SCOPE_BANK,
+  TDCC_SCOPE_INVESTMENTS,
+  TDCC_SCOPE_TRADES,
+  type EinvoiceSyncOverrides,
+  type SinopacSyncOverrides,
+  type SyncOutcome,
+  type SyncScope,
+  type TaishinSyncOverrides,
+  type TdccSyncOverrides,
+} from "./service";
+
+type ConnectorRuntimeDefinition = {
+  run: (
+    env: Env,
+    trigger: SyncTrigger,
+    scope: SyncScope,
+    overrides: Record<string, unknown>,
+  ) => Promise<SyncOutcome>;
+  prepareChallenge?: (env: Env) => Promise<unknown>;
+};
+
+export const connectorRuntimeRegistry: Record<
+  ConnectorId,
+  ConnectorRuntimeDefinition
+> = {
+  einvoice: {
+    run: (env, trigger, _scope, overrides) =>
+      syncEinvoice(env, trigger, overrides as EinvoiceSyncOverrides),
+  },
+  tdcc: {
+    run: (env, trigger, scope, overrides) =>
+      syncTdcc(
+        env,
+        trigger,
+        overrides as TdccSyncOverrides,
+        scope === SYNC_SCOPE_ALL ? tdccAllScopes() : [scope],
+      ),
+  },
+  esun: {
+    run: (env, trigger) => syncEsun(env, trigger),
+  },
+  cathaybk: {
+    run: (env, trigger) => syncCathaybk(env, trigger),
+  },
+  sinopac: {
+    run: (env, trigger, _scope, overrides) =>
+      syncSinopac(env, trigger, overrides as SinopacSyncOverrides),
+    prepareChallenge: prepareSinopacCaptchaSession,
+  },
+  taishin: {
+    run: (env, trigger, _scope, overrides) =>
+      syncTaishin(env, trigger, overrides as TaishinSyncOverrides),
+    prepareChallenge: prepareTaishinCaptchaSession,
+  },
+};
+
+export function runConnectorSync(
+  env: Env,
+  connectorId: ConnectorId,
+  trigger: SyncTrigger,
+  scope: SyncScope = SYNC_SCOPE_ALL,
+  overrides: Record<string, unknown> = {},
+) {
+  const supportedScopes: readonly string[] =
+    connectorCatalog[connectorId].scopes;
+  if (!supportedScopes.includes(scope)) {
+    throw new Error(`${connectorId} sync scope is not supported: ${scope}`);
+  }
+  return connectorRuntimeRegistry[connectorId].run(
+    env,
+    trigger,
+    scope,
+    overrides,
+  );
+}
+
+export function prepareConnectorChallenge(env: Env, connectorId: ConnectorId) {
+  const prepare = connectorRuntimeRegistry[connectorId].prepareChallenge;
+  if (!prepare) {
+    throw new Error(
+      `${connectorId} does not support an interactive challenge.`,
+    );
+  }
+  return prepare(env);
+}
+
+function tdccAllScopes(): SyncScope[] {
+  return [TDCC_SCOPE_INVESTMENTS, TDCC_SCOPE_BANK, TDCC_SCOPE_TRADES];
+}

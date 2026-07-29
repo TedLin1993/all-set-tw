@@ -43,8 +43,8 @@ export interface SyncScheduleSettings {
   updatedAt: string;
 }
 
-export interface ConnectorField {
-  key: string;
+export interface ConnectorField<TKey extends string = string> {
+  key: TKey;
   label: string;
   type: "text" | "password" | "number" | "checkbox";
   placeholder?: string;

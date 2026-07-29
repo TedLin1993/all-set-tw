@@ -59,15 +59,13 @@ describe("activity repository", () => {
       },
     } as unknown as D1Database;
 
-    await expect(findMappingTransaction(db, "transaction-1")).resolves.toEqual(
-      {
-        id: "transaction-1",
-        postedDate: "2026-07-13",
-        authorizedAt: null,
-        amount: -35,
-        currency: "TWD",
-        accountType: "credit",
-      },
-    );
+    await expect(findMappingTransaction(db, "transaction-1")).resolves.toEqual({
+      id: "transaction-1",
+      postedDate: "2026-07-13",
+      authorizedAt: null,
+      amount: -35,
+      currency: "TWD",
+      accountType: "credit",
+    });
   });
 });

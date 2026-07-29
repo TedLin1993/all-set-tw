@@ -17,15 +17,7 @@ import { jsonError } from "../../platform/http";
 import { validationHook } from "../../platform/validation";
 import {
   NeedsUserActionError,
-  prepareSinopacCaptchaSession,
-  prepareTaishinCaptchaSession,
   safeErrorMessage,
-  syncCathaybk,
-  syncEinvoice,
-  syncEsun,
-  syncSinopac,
-  syncTaishin,
-  syncTdcc,
   SyncAlreadyRunningError,
   SYNC_SCOPE_ALL,
   TDCC_SCOPE_BANK,
@@ -34,6 +26,7 @@ import {
   withManualSyncLock,
   type SyncOutcome,
 } from "./service";
+import { prepareConnectorChallenge, runConnectorSync } from "./registry";
 
 const tdccSyncBodySchema = z.object({
   otp: z.string().min(1).optional(),
@@ -74,7 +67,13 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return syncRouteResponse(
         c,
         withManualSyncLock(c.env, "einvoice", SYNC_SCOPE_ALL, () =>
-          syncEinvoice(c.env, "manual", overrides),
+          runConnectorSync(
+            c.env,
+            "einvoice",
+            "manual",
+            SYNC_SCOPE_ALL,
+            overrides,
+          ),
         ),
       );
     },
@@ -92,11 +91,7 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return syncRouteResponse(
         c,
         withManualSyncLock(c.env, "tdcc", SYNC_SCOPE_ALL, () =>
-          syncTdcc(c.env, "manual", overrides, [
-            TDCC_SCOPE_INVESTMENTS,
-            TDCC_SCOPE_BANK,
-            TDCC_SCOPE_TRADES,
-          ]),
+          runConnectorSync(c.env, "tdcc", "manual", SYNC_SCOPE_ALL, overrides),
         ),
       );
     },
@@ -114,7 +109,13 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return syncRouteResponse(
         c,
         withManualSyncLock(c.env, "tdcc", TDCC_SCOPE_INVESTMENTS, () =>
-          syncTdcc(c.env, "manual", overrides, [TDCC_SCOPE_INVESTMENTS]),
+          runConnectorSync(
+            c.env,
+            "tdcc",
+            "manual",
+            TDCC_SCOPE_INVESTMENTS,
+            overrides,
+          ),
         ),
       );
     },
@@ -132,7 +133,7 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return syncRouteResponse(
         c,
         withManualSyncLock(c.env, "tdcc", TDCC_SCOPE_BANK, () =>
-          syncTdcc(c.env, "manual", overrides, [TDCC_SCOPE_BANK]),
+          runConnectorSync(c.env, "tdcc", "manual", TDCC_SCOPE_BANK, overrides),
         ),
       );
     },
@@ -150,7 +151,13 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return syncRouteResponse(
         c,
         withManualSyncLock(c.env, "tdcc", TDCC_SCOPE_TRADES, () =>
-          syncTdcc(c.env, "manual", overrides, [TDCC_SCOPE_TRADES]),
+          runConnectorSync(
+            c.env,
+            "tdcc",
+            "manual",
+            TDCC_SCOPE_TRADES,
+            overrides,
+          ),
         ),
       );
     },
@@ -160,7 +167,7 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     return syncRouteResponse(
       c,
       withManualSyncLock(c.env, "esun", SYNC_SCOPE_ALL, () =>
-        syncEsun(c.env, "manual"),
+        runConnectorSync(c.env, "esun", "manual"),
       ),
     );
   });
@@ -169,14 +176,14 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     return syncRouteResponse(
       c,
       withManualSyncLock(c.env, "cathaybk", SYNC_SCOPE_ALL, () =>
-        syncCathaybk(c.env, "manual"),
+        runConnectorSync(c.env, "cathaybk", "manual"),
       ),
     );
   });
 
   api.post("/connectors/sinopac/captcha", async (c) => {
     try {
-      return c.json(await prepareSinopacCaptchaSession(c.env));
+      return c.json(await prepareConnectorChallenge(c.env, "sinopac"));
     } catch (error) {
       if (error instanceof SyncAlreadyRunningError) {
         return jsonError(
@@ -209,7 +216,13 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return syncRouteResponse(
         c,
         withManualSyncLock(c.env, "sinopac", SYNC_SCOPE_ALL, () =>
-          syncSinopac(c.env, "manual", overrides),
+          runConnectorSync(
+            c.env,
+            "sinopac",
+            "manual",
+            SYNC_SCOPE_ALL,
+            overrides,
+          ),
         ),
       );
     },
@@ -217,7 +230,7 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
 
   api.post("/connectors/taishin/captcha", async (c) => {
     try {
-      return c.json(await prepareTaishinCaptchaSession(c.env));
+      return c.json(await prepareConnectorChallenge(c.env, "taishin"));
     } catch (error) {
       if (error instanceof SyncAlreadyRunningError) {
         return jsonError(
@@ -254,7 +267,13 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return syncRouteResponse(
         c,
         withManualSyncLock(c.env, "taishin", SYNC_SCOPE_ALL, () =>
-          syncTaishin(c.env, "manual", overrides),
+          runConnectorSync(
+            c.env,
+            "taishin",
+            "manual",
+            SYNC_SCOPE_ALL,
+            overrides,
+          ),
         ),
       );
     },

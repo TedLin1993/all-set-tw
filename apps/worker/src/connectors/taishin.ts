@@ -620,11 +620,7 @@ async function openLoginAndFill(page: Page, config: TaishinConfig) {
 }
 
 async function openLoginAndCaptureCaptcha(page: Page, config: TaishinConfig) {
-  for (
-    let retry = 0;
-    retry <= CAPTCHA_PAGE_RETRY_ATTEMPTS;
-    retry += 1
-  ) {
+  for (let retry = 0; retry <= CAPTCHA_PAGE_RETRY_ATTEMPTS; retry += 1) {
     const frame = await openLoginAndFill(page, config);
     try {
       return { frame, captcha: await captureCaptcha(frame) };

@@ -23,11 +23,12 @@ type AccessJwks = {
   keys: Array<JsonWebKey & { kid?: string }>;
 };
 
-let cachedJwks: { url: string; expiresAt: number; value: AccessJwks } | undefined;
+let cachedJwks:
+  { url: string; expiresAt: number; value: AccessJwks } | undefined;
 
 export async function verifyAccessIdentity(
   request: Request,
-  env: AccessAuthEnv
+  env: AccessAuthEnv,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const token = accessJwtFromRequest(request);
   if (!token) {
@@ -63,11 +64,20 @@ async function verifyAccessJwt(token: string, env: AccessAuthEnv) {
   const parts = token.split(".");
   if (parts.length !== 3) throw new Error("Malformed JWT.");
 
-  const [encodedHeader, encodedPayload, encodedSignature] = parts as [string, string, string];
-  const header = JSON.parse(decodeBase64UrlToString(encodedHeader)) as AccessJwtHeader;
-  const payload = JSON.parse(decodeBase64UrlToString(encodedPayload)) as AccessJwtPayload;
+  const [encodedHeader, encodedPayload, encodedSignature] = parts as [
+    string,
+    string,
+    string,
+  ];
+  const header = JSON.parse(
+    decodeBase64UrlToString(encodedHeader),
+  ) as AccessJwtHeader;
+  const payload = JSON.parse(
+    decodeBase64UrlToString(encodedPayload),
+  ) as AccessJwtPayload;
 
-  if (header.alg !== "RS256" || !header.kid) throw new Error("Unsupported JWT header.");
+  if (header.alg !== "RS256" || !header.kid)
+    throw new Error("Unsupported JWT header.");
 
   const teamDomain = normalizeTeamDomain(env.TEAM_DOMAIN);
   const jwks = await getAccessJwks(teamDomain);
@@ -79,21 +89,24 @@ async function verifyAccessJwt(token: string, env: AccessAuthEnv) {
     jwk,
     { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
     false,
-    ["verify"]
+    ["verify"],
   );
   const signatureValid = await crypto.subtle.verify(
     { name: "RSASSA-PKCS1-v1_5" },
     key,
     decodeBase64UrlToBytes(encodedSignature),
-    new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`)
+    new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
   );
   if (!signatureValid) throw new Error("Invalid JWT signature.");
 
   const now = Math.floor(Date.now() / 1000);
   if (payload.iss !== teamDomain) throw new Error("Invalid JWT issuer.");
-  if (!audienceMatches(payload.aud, acceptedAudiences(env))) throw new Error("Invalid JWT audience.");
-  if (typeof payload.exp !== "number" || payload.exp <= now) throw new Error("Expired JWT.");
-  if (typeof payload.nbf === "number" && payload.nbf > now) throw new Error("JWT not valid yet.");
+  if (!audienceMatches(payload.aud, acceptedAudiences(env)))
+    throw new Error("Invalid JWT audience.");
+  if (typeof payload.exp !== "number" || payload.exp <= now)
+    throw new Error("Expired JWT.");
+  if (typeof payload.nbf === "number" && payload.nbf > now)
+    throw new Error("JWT not valid yet.");
 
   return payload;
 }
@@ -106,13 +119,14 @@ async function getAccessJwks(teamDomain: string) {
   }
 
   const response = await fetch(url);
-  if (!response.ok) throw new Error("Could not fetch Cloudflare Access signing keys.");
+  if (!response.ok)
+    throw new Error("Could not fetch Cloudflare Access signing keys.");
 
   const value = await response.json<AccessJwks>();
   cachedJwks = {
     url,
     expiresAt: now + 60 * 60 * 1000,
-    value
+    value,
   };
   return value;
 }
@@ -133,7 +147,10 @@ function acceptedAudiences(env: AccessAuthEnv) {
   return values;
 }
 
-function audienceMatches(aud: string | string[] | undefined, expected: string[]) {
+function audienceMatches(
+  aud: string | string[] | undefined,
+  expected: string[],
+) {
   if (!aud) return false;
   const actual = Array.isArray(aud) ? aud : [aud];
   return actual.some((value) => expected.includes(value));

@@ -228,11 +228,9 @@ describe("activity invoice transaction mappings", () => {
     } as unknown as D1Database;
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const response = await api.request(
-      "/activity/invoice-mappings",
-      {},
-      { DB: db } as Env,
-    );
+    const response = await api.request("/activity/invoice-mappings", {}, {
+      DB: db,
+    } as Env);
 
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({

@@ -163,10 +163,7 @@
     />
   {:else if mobileView === "data-sources"}
     <div class="grid min-w-0 gap-4">
-      <section
-        aria-label="資料來源頁標題"
-        class="hidden min-w-0 md:block"
-      >
+      <section aria-label="資料來源頁標題" class="hidden min-w-0 md:block">
         <div>
           <h2 class="text-2xl font-bold tracking-tight">資料來源與連接器</h2>
           <p class="mt-1 text-sm text-muted-foreground">

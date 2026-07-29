@@ -5,7 +5,8 @@ const BASE_URL = "https://invoiceapp.nat.gov.tw/UIAPAPP/api/";
 // response. It is not the same as the version shown in Google Play.
 const DEFAULT_APP_VERSION = "7.9000.40";
 const DEFAULT_OS = "Android";
-const DEFAULT_API_KEY = "xkRT21hZ3uDJehRthVlDAdfzpAoPLEoKpTAKyR/eB2iMqErmM7U5IVC6G5eHD/MN";
+const DEFAULT_API_KEY =
+  "xkRT21hZ3uDJehRthVlDAdfzpAoPLEoKpTAKyR/eB2iMqErmM7U5IVC6G5eHD/MN";
 
 export const RSA_PUBLIC_KEY = `<RSAKeyValue><Modulus>wWj/ElSXlSJCJv/ELn47aYNIx8pWec6RFgVWnW836DQwQjh7pL90av6Mvv5kPjNbM4njxeLeuXx9ZuNP2A+JUhVLkU6zdqB+T2Nyj+zhUa5szkmaJm0ntXJvGN7iAwIvLPE2BcMWGlsPBFhWMoRt8goM06AUcFIzI4dL3iDpUWvm/Og/bzeel7/rb0RVbV86zv4MzqIt7PJM7mnw+SCjH59nEBsKkR96kR3Ye6iwztvAZcIGyTihFW2J0GEq+sPO09XW+oobQt62qIaisbR7rVZcY5Qcu8g6qeVzoz1n77/SeG4BZo/hLR13I874ZUZ+rdbFNoOPj9mj+WSPFIPf6Q==</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>`;
 
@@ -34,7 +35,7 @@ export type LoginParams =
 
 export class EInvoiceProtocolUnavailableError extends Error {
   constructor(
-    message = "財政部電子發票服務拒絕目前的 App 登入協定（代碼 6603）。這不是帳號密碼錯誤，也不是暫時忙碌；重複同步不會恢復，需改用新版協定或財政部正式 AppID API。"
+    message = "財政部電子發票服務拒絕目前的 App 登入協定（代碼 6603）。這不是帳號密碼錯誤，也不是暫時忙碌；重複同步不會恢復，需改用新版協定或財政部正式 AppID API。",
   ) {
     super(message);
     this.name = "EInvoiceProtocolUnavailableError";
@@ -51,7 +52,7 @@ export class EInvoiceClient {
     appVersion,
     currentUser,
     host,
-    os
+    os,
   }: {
     apiKey?: string;
     appVersion?: string;
@@ -65,7 +66,7 @@ export class EInvoiceClient {
       "Content-Type": "application/json",
       ApiKey: apiKey?.trim() || DEFAULT_API_KEY,
       AppVersion: appVersion?.trim() || DEFAULT_APP_VERSION,
-      OS: os?.trim() || DEFAULT_OS
+      OS: os?.trim() || DEFAULT_OS,
     };
   }
 
@@ -77,7 +78,8 @@ export class EInvoiceClient {
     // setting `encrypt: single`) when its protocol version changes. Follow the
     // version advertised by the service and retry login once so a future App
     // release does not require another emergency hard-coded version update.
-    const requiredVersion = path === "User/Login" ? forcedUpgradeVersion(data) : undefined;
+    const requiredVersion =
+      path === "User/Login" ? forcedUpgradeVersion(data) : undefined;
     if (requiredVersion && requiredVersion !== this.headers.AppVersion) {
       this.headers.AppVersion = requiredVersion;
       data = await this.send(path, payload);
@@ -92,7 +94,7 @@ export class EInvoiceClient {
     const res = await fetch(this.host + path, {
       method: "POST",
       headers: { ...this.headers, ...headers },
-      body: requestBody
+      body: requestBody,
     });
     return this.readResponse(res, path, cryptoKey);
   }
@@ -106,7 +108,7 @@ export class EInvoiceClient {
         throw new EInvoiceProtocolUnavailableError();
       }
       throw new Error(
-        `${returnCode ? `代碼 ${returnCode}：` : ""}${message || "登入回應未包含使用者資料，請確認帳號、密碼與 App 版本。"}`
+        `${returnCode ? `代碼 ${returnCode}：` : ""}${message || "登入回應未包含使用者資料，請確認帳號、密碼與 App 版本。"}`,
       );
     }
     return data;
@@ -122,7 +124,9 @@ export class EInvoiceClient {
 
   private normalizeRequestBody(path: string, body?: unknown) {
     if (path !== "User/Login") return body;
-    const loginBody = body as Partial<Extract<LoginParams, { mobile: string }>> &
+    const loginBody = body as Partial<
+      Extract<LoginParams, { mobile: string }>
+    > &
       Partial<Extract<LoginParams, { Id: string }>>;
     if (!loginBody || loginBody.Id || loginBody.VerifyCode) return body;
 
@@ -131,7 +135,7 @@ export class EInvoiceClient {
       VerifyCode: loginBody.password,
       DeviceID: loginBody.deviceId ?? "http://OpenUDID.org",
       Platform: loginBody.platform ?? DEFAULT_OS,
-      PushToken: loginBody.pushToken ?? ""
+      PushToken: loginBody.pushToken ?? "",
     };
   }
 
@@ -148,15 +152,15 @@ export class EInvoiceClient {
           ValidationToken: cryptoKey,
           Token: user.userToken,
           UUID: "http://OpenUDID.org",
-          ...(user.mobileBarcode ? { CarrierCode: user.mobileBarcode } : {})
-        }
+          ...(user.mobileBarcode ? { CarrierCode: user.mobileBarcode } : {}),
+        },
       };
     }
 
     return {
       cryptoKey: singleResponseKey(),
       requestBody: rsaEncrypt(json),
-      headers: { encrypt: "single" }
+      headers: { encrypt: "single" },
     };
   }
 
@@ -174,10 +178,14 @@ export class EInvoiceClient {
     } else {
       let text = raw;
       try {
-        if (raw && encrypted === "single") text = aesDecryptString(raw, singleResponseKey());
-        if (raw && encrypted === "mixed" && cryptoKey) text = aesDecryptString(raw, cryptoKey);
+        if (raw && encrypted === "single")
+          text = aesDecryptString(raw, singleResponseKey());
+        if (raw && encrypted === "mixed" && cryptoKey)
+          text = aesDecryptString(raw, cryptoKey);
       } catch {
-        throw new Error(`電子發票服務回傳無法解讀（${path}），可能是官方 App 協定已更新。`);
+        throw new Error(
+          `電子發票服務回傳無法解讀（${path}），可能是官方 App 協定已更新。`,
+        );
       }
       const decryptedJson = parseJson(text);
       data = decryptedJson.parsed ? decryptedJson.value : text;
@@ -185,7 +193,9 @@ export class EInvoiceClient {
 
     if (!res.ok) {
       const message = responseMessage(data);
-      throw new Error(`HTTP ${res.status} - ${path}${message ? `: ${message}` : ""}`);
+      throw new Error(
+        `HTTP ${res.status} - ${path}${message ? `: ${message}` : ""}`,
+      );
     }
 
     return data;
@@ -197,21 +207,33 @@ export class EInvoiceClient {
     const rawUser = asRecord(result?.user ?? result?.User);
     if (!rawUser) return;
 
-    const mobile = firstString(rawUser.mobile, rawUser.Mobile, rawUser.id, rawUser.Id);
-    const userToken = firstString(rawUser.userToken, rawUser.UserToken, rawUser.token, rawUser.Token);
+    const mobile = firstString(
+      rawUser.mobile,
+      rawUser.Mobile,
+      rawUser.id,
+      rawUser.Id,
+    );
+    const userToken = firstString(
+      rawUser.userToken,
+      rawUser.UserToken,
+      rawUser.token,
+      rawUser.Token,
+    );
     const mobileBarcode = firstString(
       rawUser.mobileBarcode,
       rawUser.MobileBarcode,
       rawUser.carrierCode,
-      rawUser.CarrierCode
+      rawUser.CarrierCode,
     );
-    if (mobile && userToken) this.currentUser = { ...rawUser, mobile, userToken, mobileBarcode };
+    if (mobile && userToken)
+      this.currentUser = { ...rawUser, mobile, userToken, mobileBarcode };
   }
 }
 
 function parseJson(text: string): { parsed: boolean; value?: unknown } {
   const trimmed = text.trim();
-  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) return { parsed: false };
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("[")))
+    return { parsed: false };
   try {
     return { parsed: true, value: JSON.parse(trimmed) };
   } catch {
@@ -228,7 +250,7 @@ function responseMessage(data: unknown) {
     response.Msg,
     response.msg,
     response.Description,
-    response.description
+    response.description,
   );
 }
 
@@ -253,11 +275,15 @@ function forcedUpgradeVersion(data: unknown) {
   }
 
   const version = firstString(info?.VersionNumber, info?.versionNumber);
-  return version && /^[0-9A-Za-z._-]{1,32}$/.test(version) ? version : undefined;
+  return version && /^[0-9A-Za-z._-]{1,32}$/.test(version)
+    ? version
+    : undefined;
 }
 
 function asRecord(value: unknown) {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function firstString(...values: unknown[]) {
@@ -282,7 +308,11 @@ function aesDecryptString(text: string, keyText: string) {
 }
 
 function createAesCipher(direction: "encrypt" | "decrypt", keyText: string) {
-  const key = forge.md.sha256.create().update(keyText, "utf8").digest().getBytes();
+  const key = forge.md.sha256
+    .create()
+    .update(keyText, "utf8")
+    .digest()
+    .getBytes();
   const iv = forge.md.md5.create().update(keyText, "utf8").digest().getBytes();
   const cipher =
     direction === "encrypt"
@@ -297,15 +327,23 @@ function rsaEncrypt(text: string) {
   const bytes = forge.util.encodeUtf8(text);
   const chunks: string[] = [];
   for (let offset = 0; offset < bytes.length; offset += 245) {
-    chunks.push(publicKey.encrypt(bytes.slice(offset, offset + 245), "RSAES-PKCS1-V1_5"));
+    chunks.push(
+      publicKey.encrypt(bytes.slice(offset, offset + 245), "RSAES-PKCS1-V1_5"),
+    );
   }
   return forge.util.encode64(chunks.join(""));
 }
 
 function rsaPublicKeyPem() {
   const key = forge.pki.setRsaPublicKey(
-    new forge.jsbn.BigInteger(forge.util.bytesToHex(forge.util.decode64(rsaXmlValue("Modulus"))), 16),
-    new forge.jsbn.BigInteger(forge.util.bytesToHex(forge.util.decode64(rsaXmlValue("Exponent"))), 16)
+    new forge.jsbn.BigInteger(
+      forge.util.bytesToHex(forge.util.decode64(rsaXmlValue("Modulus"))),
+      16,
+    ),
+    new forge.jsbn.BigInteger(
+      forge.util.bytesToHex(forge.util.decode64(rsaXmlValue("Exponent"))),
+      16,
+    ),
   );
   return forge.pki.publicKeyToPem(key);
 }
@@ -318,6 +356,10 @@ function rsaXmlValue(name: string) {
 
 function singleResponseKey() {
   return forge.util.encode64(
-    forge.md.sha256.create().update(RSA_PUBLIC_KEY.slice(0, 16), "utf8").digest().getBytes()
+    forge.md.sha256
+      .create()
+      .update(RSA_PUBLIC_KEY.slice(0, 16), "utf8")
+      .digest()
+      .getBytes(),
   );
 }
