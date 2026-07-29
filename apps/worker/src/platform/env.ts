@@ -13,6 +13,7 @@ export interface Env {
   POLICY_AUD?: string;
   POLICY_AUDS?: string;
   DEMO_MODE?: string | boolean;
+  LOCAL_DEV_MODE?: string | boolean;
 }
 
 export type Variables = {
