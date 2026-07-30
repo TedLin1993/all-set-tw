@@ -58,9 +58,14 @@
     groupActivitiesByDate,
   } from "./model/list";
   import {
+    filterActivities,
+    type ActivityCategoryFilter,
+    type ActivityFlowFilter,
+    type ActivitySourceFilter,
+  } from "./model/filter";
+  import {
     buildActivityCategorySlices,
     activityCashAmountTwd,
-    activityCashFlow,
     activityDisplayAmount,
   } from "./model/chart";
   import {
@@ -94,12 +99,10 @@
   const rates = createQuery(exchangeRatesQuery(() => api));
   const categoryRows = createQuery(classificationCategoriesQuery(() => api));
   const qc = useQueryClient();
-  let source = $state<"all" | "bank" | "card" | "invoice">("all");
+  let flow = $state<ActivityFlowFilter>("all");
+  let source = $state<ActivitySourceFilter>("all");
   let search = $state("");
-  let selectedCategory = $state<{
-    flow: "income" | "expense";
-    category: string;
-  } | null>(null);
+  let selectedCategory = $state<ActivityCategoryFilter | null>(null);
   let pending = $state<PendingCategoryUpdate | null>(null);
   let pendingCalculation = $state<PendingCalculationUpdate | null>(null);
   let mappingDialog = $state<{
@@ -313,23 +316,12 @@
     Math.max(...cashFlow.flatMap((point) => [point.income, point.expense]), 1),
   );
   const filtered = $derived(
-    rawItems.filter((item) => {
-      const matchesFlow =
-        !selectedCategory || activityCashFlow(item) === selectedCategory.flow;
-      const matchesSource =
-        source === "all" ||
-        item.source === source ||
-        (source === "invoice" && Boolean(item.invoiceId));
-      return (
-        matchesSource &&
-        item.date.startsWith(selectedMonth) &&
-        (!search.trim() ||
-          `${item.title} ${item.subtitle} ${item.institutionName ?? ""} ${item.accountName ?? ""} ${item.category}`
-            .toLowerCase()
-            .includes(search.toLowerCase())) &&
-        (!selectedCategory ||
-          (item.category === selectedCategory.category && matchesFlow))
-      );
+    filterActivities(rawItems, {
+      month: selectedMonth,
+      flow,
+      source,
+      search,
+      category: selectedCategory,
     }),
   );
   const filteredGroups = $derived(groupActivitiesByDate(filtered));
@@ -478,10 +470,22 @@
       };
   }
   function chooseCategory(flow: "income" | "expense", category: string) {
-    selectedCategory =
-      selectedCategory?.flow === flow && selectedCategory.category === category
-        ? null
-        : { flow, category };
+    if (
+      selectedCategory?.flow === flow &&
+      selectedCategory.category === category
+    ) {
+      selectedCategory = null;
+      return;
+    }
+    selectedCategory = { flow, category };
+    chooseFlow(flow, false);
+  }
+  function chooseFlow(nextFlow: ActivityFlowFilter, clearCategory = true) {
+    flow = nextFlow;
+    if (clearCategory) selectedCategory = null;
+  }
+  function chooseChartFlow(nextFlow: Exclude<ActivityFlowFilter, "all">) {
+    chooseFlow(flow === nextFlow && !selectedCategory ? "all" : nextFlow);
   }
   function chooseMonth(month: string) {
     selectedMonth = month;
@@ -710,7 +714,9 @@
           selectedCategory={selectedCategory?.flow === "income"
             ? selectedCategory.category
             : undefined}
+          flowSelected={flow === "income" && !selectedCategory}
           onSelect={(category) => chooseCategory("income", category)}
+          onSelectFlow={() => chooseChartFlow("income")}
         />
         <ActivityCategoryChart
           flow="expense"
@@ -718,7 +724,9 @@
           selectedCategory={selectedCategory?.flow === "expense"
             ? selectedCategory.category
             : undefined}
+          flowSelected={flow === "expense" && !selectedCategory}
           onSelect={(category) => chooseCategory("expense", category)}
+          onSelectFlow={() => chooseChartFlow("expense")}
         />
       </div>
     </section>
@@ -776,8 +784,12 @@
           <div class="min-w-0">
             <h2 class="truncate text-lg font-semibold">
               {selectedCategory
-                ? `${selectedMonthLabel} · ${selectedCategory.category}`
-                : "所有活動"}
+                ? `${selectedMonthLabel} · ${selectedCategory.flow === "income" ? "收入" : "支出"} · ${selectedCategory.category}`
+                : flow === "income"
+                  ? `${selectedMonthLabel} · 收入`
+                  : flow === "expense"
+                    ? `${selectedMonthLabel} · 支出`
+                    : "所有活動"}
             </h2>
             <p class="text-xs text-ink/45">銀行與帳戶資訊直接顯示於每筆活動</p>
           </div>
@@ -801,19 +813,20 @@
                 : "支出"}</span
             ><button
               class="min-h-8 px-2 text-xs font-semibold text-steel"
-              onclick={() => (selectedCategory = null)}>顯示全部</button
+              onclick={() => (selectedCategory = null)}>清除分類</button
             >
           </div>{/if}
-        <TabsList class="grid h-auto w-full grid-cols-4"
-          >{#each [{ key: "all", label: "全部" }, { key: "bank", label: "銀行" }, { key: "card", label: "信用卡" }, { key: "invoice", label: "發票" }] as filter (filter.key)}<TabsTrigger
-              class="min-h-9 min-w-0 px-1 text-xs md:text-sm"
-              active={source === filter.key}
-              onclick={() => {
-                source = filter.key as typeof source;
-                selectedCategory = null;
-              }}>{filter.label}</TabsTrigger
-            >{/each}</TabsList
-        >
+        <div class="grid min-w-0 gap-1.5">
+          <span class="text-xs font-semibold text-ink/50">來源</span>
+          <TabsList aria-label="活動來源" class="grid h-auto w-full grid-cols-4"
+            >{#each [{ key: "all", label: "全部" }, { key: "bank", label: "銀行" }, { key: "card", label: "信用卡" }, { key: "invoice", label: "發票" }] as filter (filter.key)}<TabsTrigger
+                class="min-h-9 min-w-0 px-1 text-xs md:text-sm"
+                active={source === filter.key}
+                onclick={() => (source = filter.key as ActivitySourceFilter)}
+                >{filter.label}</TabsTrigger
+              >{/each}</TabsList
+          >
+        </div>
         {#if $calculationMutation.isError}<p
             class="text-sm font-medium text-coral"
           >
