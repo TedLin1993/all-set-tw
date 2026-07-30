@@ -3,6 +3,22 @@ import type { Env } from "../platform/env";
 import { honoFactory } from "../platform/hono";
 import { isDemoMode } from "../platform/http";
 
+const LOCAL_DEV_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+export function isLocalDevRequest(
+  request: Request,
+  env: Pick<Env, "LOCAL_DEV_MODE">,
+) {
+  const enabled =
+    env.LOCAL_DEV_MODE === true ||
+    (typeof env.LOCAL_DEV_MODE === "string" &&
+      ["1", "true", "yes", "on"].includes(
+        env.LOCAL_DEV_MODE.trim().toLowerCase(),
+      ));
+
+  return enabled && LOCAL_DEV_HOSTS.has(new URL(request.url).hostname);
+}
+
 function requireAccessSecrets(
   env: Env,
 ): asserts env is Env & { TEAM_DOMAIN: string } {
@@ -15,7 +31,7 @@ function requireAccessSecrets(
 
 export const accessMiddleware = honoFactory.createMiddleware(
   async (c, next) => {
-    if (isDemoMode(c.env)) {
+    if (isDemoMode(c.env) || isLocalDevRequest(c.req.raw, c.env)) {
       await next();
       return;
     }

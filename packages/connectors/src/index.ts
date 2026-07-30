@@ -60,6 +60,19 @@ export type {
 } from "./taishin";
 import { taishinConfigSchema } from "./taishin";
 
+export { ctbcConfigSchema, parseCtbcData, parseCtbcConfig } from "./ctbc";
+export type { CtbcConfig, CtbcData, CtbcPayloads } from "./ctbc";
+export {
+  classifyCtbcError,
+  createCtbcConnector,
+  CtbcConnectionError,
+  CtbcVerificationRequiredError,
+  encryptCtbcPin,
+  requireCtbcCredentials,
+} from "./ctbc-mobile-api";
+export type { CtbcFetch } from "./ctbc-mobile-api";
+import { ctbcConfigSchema } from "./ctbc";
+
 const invoiceRecordSchema = z.object({
   sourceId: z.string().min(1),
   invoiceNumber: z.string().optional(),
@@ -476,6 +489,7 @@ export const connectorConfigSchemas = {
   cathaybk: cathaybkConfigSchema,
   sinopac: sinopacConfigSchema,
   taishin: taishinConfigSchema,
+  ctbc: ctbcConfigSchema,
 } satisfies Record<ConnectorId, z.ZodTypeAny>;
 
 export function parseConnectorConfig(

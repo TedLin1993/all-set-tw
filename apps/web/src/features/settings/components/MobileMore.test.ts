@@ -1,5 +1,6 @@
 import { render } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
+import { connectorDefinitions } from "@/data/connectors/definitions";
 import type { ApiClient } from "@/shared/api/client";
 import MobileMore from "./MobileMore.svelte";
 
@@ -17,9 +18,14 @@ describe("MobileMore", () => {
       },
     });
 
-    expect(getByText("6 / 6 來源正常")).toBeInTheDocument();
-    expect(getByText(/6 個\s*›/)).toBeInTheDocument();
+    const connectorCount = connectorDefinitions.length;
+    expect(
+      getByText(`${connectorCount} / ${connectorCount} 來源正常`),
+    ).toBeInTheDocument();
+    expect(
+      getByText(new RegExp(`${connectorCount} 個\\s*›`)),
+    ).toBeInTheDocument();
     expect(getByText("同步與通知")).toBeInTheDocument();
-    expect(getByText("台新銀行")).toBeInTheDocument();
+    expect(getByText("中國信託銀行")).toBeInTheDocument();
   });
 });

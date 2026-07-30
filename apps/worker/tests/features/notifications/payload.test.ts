@@ -42,6 +42,15 @@ describe("sync notification payload", () => {
     ).toBe("台新銀行已完成排程同步。");
   });
 
+  it("labels CTBC scheduled sync notifications", () => {
+    expect(
+      syncNotificationPayload({
+        connectorId: "ctbc",
+        status: "success",
+      }).body,
+    ).toBe("中國信託銀行已完成排程同步。");
+  });
+
   it("maps statuses to their preference switches", () => {
     const preferences: NotificationPreferences = {
       success: false,

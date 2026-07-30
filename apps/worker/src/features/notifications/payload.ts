@@ -23,6 +23,7 @@ const connectorLabels: Record<ConnectorId, string> = {
   cathaybk: "國泰世華銀行",
   sinopac: "永豐行動銀行",
   taishin: "台新銀行",
+  ctbc: "中國信託銀行",
 };
 
 export function syncNotificationPayload(

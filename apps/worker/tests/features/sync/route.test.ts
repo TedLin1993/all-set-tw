@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CtbcConnectionError } from "@taiwan-fin-hub/connectors";
 import {
   TaishinBrowserCapacityError,
   TaishinConnectionError,
@@ -7,6 +8,7 @@ import type { Env } from "../../../src/platform/env";
 
 const mocks = vi.hoisted(() => ({
   prepareTaishinCaptchaSession: vi.fn(),
+  syncCtbc: vi.fn(),
   syncTaishin: vi.fn(),
 }));
 
@@ -17,6 +19,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   safeErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
   syncCathaybk: vi.fn(),
+  syncCtbc: mocks.syncCtbc,
   syncEinvoice: vi.fn(),
   syncEsun: vi.fn(),
   syncSinopac: vi.fn(),
@@ -52,6 +55,41 @@ beforeEach(() => {
     scope: "all",
     records: 3,
     cursorUpdated: true,
+  });
+  mocks.syncCtbc.mockResolvedValue({
+    success: true,
+    connectorId: "ctbc",
+    scope: "all",
+    records: 4,
+    cursorUpdated: true,
+  });
+});
+
+describe("CTBC sync route", () => {
+  it("dispatches a manual sync", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/ctbc/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.syncCtbc).toHaveBeenCalledWith(env, "manual");
+  });
+
+  it("maps mobile API connection failures", async () => {
+    mocks.syncCtbc.mockRejectedValueOnce(
+      new CtbcConnectionError("schema drift"),
+    );
+    const failed = await syncRoutes.request(
+      "/connectors/ctbc/sync",
+      { method: "POST" },
+      env,
+    );
+    expect(failed.status).toBe(502);
+    await expect(failed.json()).resolves.toMatchObject({
+      error: { code: "CTBC_CONNECTION_FAILED" },
+    });
   });
 });
 

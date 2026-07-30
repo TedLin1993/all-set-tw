@@ -5,6 +5,7 @@ import {
   prepareSinopacCaptchaSession,
   prepareTaishinCaptchaSession,
   syncCathaybk,
+  syncCtbc,
   syncEinvoice,
   syncEsun,
   syncSinopac,
@@ -54,6 +55,9 @@ export const connectorRuntimeRegistry: Record<
   },
   cathaybk: {
     run: (env, trigger) => syncCathaybk(env, trigger),
+  },
+  ctbc: {
+    run: (env, trigger) => syncCtbc(env, trigger),
   },
   sinopac: {
     run: (env, trigger, _scope, overrides) =>

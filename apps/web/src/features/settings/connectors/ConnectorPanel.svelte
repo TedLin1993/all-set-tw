@@ -158,9 +158,15 @@
       qc.invalidateQueries({ queryKey: queryKeys.summary });
       if (connectorId === "einvoice")
         qc.invalidateQueries({ queryKey: queryKeys.invoices });
-      else if (connectorId === "esun" || connectorId === "cathaybk")
+      else if (
+        connectorId === "esun" ||
+        connectorId === "cathaybk" ||
+        connectorId === "ctbc"
+      ) {
         qc.invalidateQueries({ queryKey: queryKeys.bank });
-      else if (browserBank) {
+        if (connectorId !== "esun")
+          qc.invalidateQueries({ queryKey: queryKeys.bills });
+      } else if (browserBank) {
         qc.invalidateQueries({
           queryKey: queryKeys.connectorSettings(connectorId),
         });
@@ -186,6 +192,7 @@
           queryKey: queryKeys.connectorSettings(connectorId),
         });
     },
+    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.syncJobs }),
   });
   const connectTdcc = createMutation({
     mutationFn: async () => {
@@ -453,9 +460,14 @@
       {:else}
         <Button
           size="sm"
-          disabled={demoMode}
-          onclick={() => $sync.mutate("default")}
-          ><RefreshCw class="size-4" />同步</Button
+          disabled={demoMode || $sync.isPending}
+          onclick={() => {
+            error = "";
+            $sync.mutate("default");
+          }}
+          ><RefreshCw
+            class={$sync.isPending ? "size-4 animate-spin" : "size-4"}
+          />{$sync.isPending ? "同步中…" : "同步"}</Button
         >
       {/if}
     </div>

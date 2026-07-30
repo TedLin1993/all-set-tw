@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run tests",
-    "dev": "npm run db:migrate:local && XDG_CONFIG_HOME=../../.wrangler-config wrangler dev -c wrangler.local.toml",
+    "dev": "npm run db:migrate:local && node ../../scripts/dev-worker.mjs",
     "dev:remote": "XDG_CONFIG_HOME=../../.wrangler-config wrangler dev -c ../../wrangler.toml --remote",
     "deploy": "npm run build -w @taiwan-fin-hub/web && npm run db:migrate:remote && XDG_CONFIG_HOME=../../.wrangler-config node ../../scripts/deploy-with-vapid.mjs -c ../../wrangler.toml",
     "db:migrate:local": "XDG_CONFIG_HOME=../../.wrangler-config wrangler d1 migrations apply DB --local -c wrangler.local.toml",

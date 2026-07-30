@@ -100,6 +100,66 @@ test("renders the mobile bottom navigation", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("shows a loading state while a connector sync is pending", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/runtime", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ demoMode: false }),
+    }),
+  );
+  await page.route("**/api/connectors/ctbc/settings", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        connectorId: "ctbc",
+        configured: true,
+        credentialsComplete: true,
+        sessionAvailable: false,
+        publicConfig: { lookbackMonths: 3 },
+      }),
+    }),
+  );
+
+  let releaseSync!: () => void;
+  const pendingSync = new Promise<void>((resolve) => {
+    releaseSync = resolve;
+  });
+  await page.route("**/api/connectors/ctbc/sync", async (route) => {
+    await pendingSync;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        connectorId: "ctbc",
+        scope: "all",
+        records: 0,
+        cursorUpdated: true,
+      }),
+    });
+  });
+
+  await page.goto("/#/data-sources");
+  await page.getByRole("button", { name: "管理設定" }).last().click();
+  const syncButton = page.getByRole("button", {
+    name: "同步",
+    exact: true,
+  });
+  await syncButton.click();
+
+  const pendingButton = page.getByRole("button", { name: "同步中…" });
+  await expect(pendingButton).toBeDisabled();
+  await expect(pendingButton.locator("svg")).toHaveClass(/animate-spin/);
+
+  releaseSync();
+  await expect(syncButton).toBeEnabled();
+});
+
 test("keeps the desktop overview within the viewport with long data", async ({
   page,
 }) => {

@@ -7,6 +7,7 @@ import {
   type SyncWriteRecord,
 } from "../../../src/features/sync/persistence";
 import {
+  linkCanonicalBankAccountsStatement,
   reconcileEsunLifecycleShadowStatements,
   reconcileSinopacLegacyTransactionStatements,
 } from "../../../src/features/sync/repository";
@@ -153,6 +154,53 @@ function bankTransactionRecord(
 }
 
 describe("staged sync persistence", () => {
+  it("seeds a disabled CTBC all-scope sync job", () => {
+    const db = createDb();
+
+    expect(
+      db.database
+        .prepare(
+          `SELECT connector_id AS connectorId, scope, enabled, interval_minutes AS intervalMinutes
+           FROM sync_jobs WHERE id = 'ctbc:all'`,
+        )
+        .get(),
+    ).toEqual({
+      connectorId: "ctbc",
+      scope: "all",
+      enabled: 0,
+      intervalMinutes: 1440,
+    });
+  });
+
+  it("links TDCC bank 822 records to the direct CTBC account", async () => {
+    const db = createDb();
+    db.database.exec(`
+      INSERT INTO bank_accounts
+        (id, connector_id, source_id, institution_name, account_name, account_type,
+         currency, bank_code, account_last4, raw_payload, created_at, updated_at)
+      VALUES
+        ('ctbc:bank:ctbc:12345', 'ctbc', 'bank:ctbc:12345', '中國信託銀行',
+         '末五碼 12345', 'savings', 'TWD', '822', '2345', '{}', '2026-07-29', '2026-07-29'),
+        ('tdcc:settlement:822:12345', 'tdcc', 'settlement:822:12345', '中國信託銀行',
+         '交割帳戶', 'settlement_cash', 'TWD', '822', '2345', '{}', '2026-07-29', '2026-07-29');
+    `);
+
+    await db.batch([
+      linkCanonicalBankAccountsStatement(
+        db as unknown as D1Database,
+      ) as unknown as D1PreparedStatement,
+    ]);
+
+    expect(
+      db.database
+        .prepare(
+          `SELECT canonical_account_id AS canonicalAccountId
+           FROM bank_accounts WHERE connector_id = 'tdcc' AND bank_code = '822'`,
+        )
+        .get(),
+    ).toEqual({ canonicalAccountId: "ctbc:bank:ctbc:12345" });
+  });
+
   it("migrates preferences and removes E.SUN lifecycle shadow transactions", async () => {
     const db = createDb();
     db.database.exec(`

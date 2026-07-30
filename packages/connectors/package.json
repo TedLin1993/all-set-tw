@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test:selfcheck": "tsx tests/selfcheck/tdcc.selfcheck.ts && tsx tests/selfcheck/einvoice.selfcheck.ts && tsx tests/selfcheck/einvoice-v2.selfcheck.ts && tsx tests/selfcheck/taishin.selfcheck.ts"
+    "test:selfcheck": "tsx tests/selfcheck/tdcc.selfcheck.ts && tsx tests/selfcheck/einvoice.selfcheck.ts && tsx tests/selfcheck/einvoice-v2.selfcheck.ts && tsx tests/selfcheck/taishin.selfcheck.ts && tsx tests/selfcheck/ctbc.selfcheck.ts"
   },
   "dependencies": {
     "@taiwan-fin-hub/core": "0.1.0",
