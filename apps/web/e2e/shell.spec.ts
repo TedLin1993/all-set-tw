@@ -197,6 +197,108 @@ test("shows this month's cash flow on the overview and opens activity", async ({
   await expect(page).toHaveURL(/#\/activity$/);
 });
 
+test("filters activity by cash flow and keeps source filters composable", async ({
+  page,
+}) => {
+  const month = new Date().toISOString().slice(0, 7);
+  await page.route("**/api/bank**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        accounts: [
+          {
+            id: "deposit-account",
+            connectorId: "cathaybk",
+            sourceId: "deposit-account",
+            accountType: "deposit",
+            currency: "TWD",
+          },
+          {
+            id: "card-account",
+            connectorId: "cathaybk",
+            sourceId: "card-account",
+            accountType: "credit",
+            currency: "TWD",
+          },
+        ],
+        transactions: [
+          {
+            id: "bank-income",
+            connectorId: "cathaybk",
+            accountId: "deposit-account",
+            sourceId: "bank-income",
+            postedDate: `${month}-02`,
+            amount: 50_000,
+            currency: "TWD",
+            description: "薪資入帳",
+            status: "posted",
+          },
+          {
+            id: "bank-expense",
+            connectorId: "cathaybk",
+            accountId: "deposit-account",
+            sourceId: "bank-expense",
+            postedDate: `${month}-03`,
+            amount: -18_000,
+            currency: "TWD",
+            description: "房租支出",
+            status: "posted",
+          },
+          {
+            id: "card-income",
+            connectorId: "cathaybk",
+            accountId: "card-account",
+            sourceId: "card-income",
+            postedDate: `${month}-04`,
+            amount: 300,
+            currency: "TWD",
+            description: "信用卡退款",
+            status: "posted",
+          },
+          {
+            id: "card-expense",
+            connectorId: "cathaybk",
+            accountId: "card-account",
+            sourceId: "card-expense",
+            postedDate: `${month}-05`,
+            amount: -600,
+            currency: "TWD",
+            description: "信用卡消費",
+            status: "posted",
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/#/activity");
+
+  const activityRows = page.locator("tbody tr");
+  const sourceFilters = page.getByRole("tablist", { name: "活動來源" });
+
+  await expect(activityRows).toHaveCount(4);
+  await page.getByRole("button", { name: "查看收入活動" }).click();
+  await expect(activityRows).toHaveCount(2);
+  await expect(activityRows.filter({ hasText: "薪資入帳" })).toBeVisible();
+  await expect(activityRows.filter({ hasText: "信用卡退款" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "顯示全部活動" }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  await sourceFilters.getByRole("tab", { name: "銀行" }).click();
+  await expect(activityRows).toHaveCount(1);
+  await expect(activityRows).toContainText("薪資入帳");
+
+  await page.getByRole("button", { name: "查看支出活動" }).click();
+  await expect(activityRows).toHaveCount(1);
+  await expect(activityRows).toContainText("房租支出");
+
+  await sourceFilters.getByRole("tab", { name: "信用卡" }).click();
+  await expect(activityRows).toHaveCount(1);
+  await expect(activityRows).toContainText("信用卡消費");
+});
+
 test("uses app-like scrolling and history only in standalone display mode", async ({
   page,
 }) => {

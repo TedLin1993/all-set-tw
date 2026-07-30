@@ -15,15 +15,20 @@
     flow,
     slices,
     selectedCategory,
+    flowSelected,
     onSelect,
+    onSelectFlow,
   }: {
     flow: ActivityFlow;
     slices: ActivityCategorySlice[];
     selectedCategory?: string;
+    flowSelected: boolean;
     onSelect: (category: string) => void;
+    onSelectFlow: () => void;
   } = $props();
 
   const title = $derived(flow === "income" ? "收入分類" : "支出分類");
+  const flowLabel = $derived(flow === "income" ? "收入" : "支出");
   const total = $derived(slices.reduce((sum, slice) => sum + slice.amount, 0));
   const chartConfig: ChartConfig = {
     default: { label: "金額", color: "#3e6f7c" },
@@ -87,14 +92,20 @@
               props={{ arc: { stroke: "white", strokeWidth: 2 } }}
             />
           </ChartContainer>
-          <div
-            class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"
+          <button
+            type="button"
+            aria-label={flowSelected ? "顯示全部活動" : `查看${flowLabel}活動`}
+            aria-pressed={flowSelected}
+            class={`absolute left-1/2 top-1/2 z-10 flex size-20 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-steel focus-visible:ring-offset-2 ${flowSelected ? "bg-steel/10 ring-2 ring-steel/25" : "hover:bg-paper"}`}
+            onclick={onSelectFlow}
           >
-            <span class="text-[11px] text-ink/40">合計</span>
+            <span class="text-[11px] font-semibold text-steel">
+              {flowSelected ? "顯示全部" : `查看${flowLabel}`}
+            </span>
             <span class="mt-0.5 text-sm font-bold tabular-nums"
               >{formatCompactTwd(total)}</span
             >
-          </div>
+          </button>
         </div>
         <div class="grid min-w-0 gap-1.5">
           {#each slices as slice (slice.category)}
