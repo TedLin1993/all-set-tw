@@ -1,4 +1,5 @@
 import {
+  CtbcConnectionError,
   EInvoiceProtocolUnavailableError,
   TdccConnectionError,
   TdccVerificationRequiredError,
@@ -181,6 +182,15 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     );
   });
 
+  api.post("/connectors/ctbc/sync", async (c) => {
+    return syncRouteResponse(
+      c,
+      withManualSyncLock(c.env, "ctbc", SYNC_SCOPE_ALL, () =>
+        runConnectorSync(c.env, "ctbc", "manual"),
+      ),
+    );
+  });
+
   api.post("/connectors/sinopac/captcha", async (c) => {
     try {
       return c.json(await prepareConnectorChallenge(c.env, "sinopac"));
@@ -317,6 +327,9 @@ async function syncRouteResponse(
       const response = jsonError("TAISHIN_BROWSER_BUSY", error.message, 429);
       response.headers.set("Retry-After", String(error.retryAfterSeconds));
       return response;
+    }
+    if (error instanceof CtbcConnectionError) {
+      return jsonError("CTBC_CONNECTION_FAILED", error.message, 502);
     }
     if (error instanceof TaishinConnectionError) {
       return jsonError("TAISHIN_CONNECTION_FAILED", error.message, 502);

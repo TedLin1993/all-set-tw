@@ -84,4 +84,15 @@ export const connectorFields = {
       placeholder: "6",
     },
   ],
+  ctbc: [
+    { key: "userId", label: "身分證字號／統編", type: "text" },
+    { key: "account", label: "使用者代號", type: "text" },
+    { key: "password", label: "網路密碼", type: "password" },
+    {
+      key: "lookbackMonths",
+      label: "往回月份",
+      type: "number",
+      placeholder: "3",
+    },
+  ],
 } satisfies ConnectorFieldMap;

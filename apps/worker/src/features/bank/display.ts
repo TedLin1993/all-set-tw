@@ -2,6 +2,7 @@ import type { ConnectorId } from "@taiwan-fin-hub/core";
 
 const ESUN_BANK_CODE = "808";
 const CATHAYBK_BANK_CODE = "013";
+const CTBC_BANK_CODE = "822";
 const TAIWAN_BANK_NAMES: Record<string, string> = {
   "004": "台灣銀行",
   "005": "土地銀行",
@@ -65,6 +66,10 @@ export function deriveBankMatchKey(
     const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
     return { bankCode: "807", last4: last4 || null };
   }
+  if (connectorId === "ctbc" && sourceId.startsWith("bank:ctbc:")) {
+    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
+    return { bankCode: CTBC_BANK_CODE, last4: last4 || null };
+  }
   const match = sourceId.match(/^settlement:([^:]+):([^:]+)/);
   const last4 = match?.[2]?.replace(/\D/g, "").slice(-4) ?? "";
   return match
@@ -94,7 +99,9 @@ function normalizeDepositDisplay<T extends BankDisplayRow>(row: T): T {
       ? ESUN_BANK_CODE
       : row.connectorId === "cathaybk"
         ? CATHAYBK_BANK_CODE
-        : undefined);
+        : row.connectorId === "ctbc"
+          ? CTBC_BANK_CODE
+          : undefined);
   const accountLast5 = accountLast5FromSourceId(sourceId);
   return {
     ...row,
@@ -116,6 +123,8 @@ function parseBankAccountSource(sourceId: string): {
   if (cathaybk) return { bankCode: CATHAYBK_BANK_CODE, account: cathaybk[1] };
   const sinopac = sourceId.match(/^bank:sinopac:([^:]+)/);
   if (sinopac) return { bankCode: "807", account: sinopac[1] };
+  const ctbc = sourceId.match(/^bank:ctbc:([^:]+)/);
+  if (ctbc) return { bankCode: CTBC_BANK_CODE, account: ctbc[1] };
   return {};
 }
 

@@ -224,6 +224,7 @@ export const supportedConnectorIds = [
   "cathaybk",
   "sinopac",
   "taishin",
+  "ctbc",
 ] as const;
 export type ConnectorId = (typeof supportedConnectorIds)[number];
 
@@ -412,6 +413,23 @@ export const connectorCatalog = {
       "captchaDigitCount",
       "captcha",
     ],
+  },
+  ctbc: {
+    id: "ctbc",
+    title: "中國信託銀行",
+    description: "存款帳戶、信用卡與交易",
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: ["lookbackMonths"],
+    credentialFields: ["userId", "account", "password"],
+    secretStateFields: [],
+    resetOnCredentialChangeFields: [],
   },
 } as const satisfies Record<ConnectorId, ConnectorCatalogEntry>;
 
