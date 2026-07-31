@@ -67,6 +67,8 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TedLin1993/taiwan-fin-hub)
 
+部署腳本會自動檢查並建立排程同步所需的 Cloudflare Queue；既有安裝更新到使用 Queue 的版本時不需要手動建立資源。
+
 首次使用時，依畫面透過 **Git account → New Github Connection → Install & Authorize** 授權 Cloudflare 存取 GitHub。
 
 部署設定只需先填入 `CONFIG_ENCRYPTION_KEY`；`TEAM_DOMAIN` 與 `POLICY_AUD` 會在步驟二取得：
