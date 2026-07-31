@@ -4,6 +4,8 @@ export class ValidateNumberOcrError extends Error {}
 export class ValidateNumberOcrUnavailableError extends Error {}
 
 export const VALIDATE_NUMBER_MODEL = "@cf/google/gemma-4-26b-a4b-it";
+const TRANSIENT_AI_RETRY_DELAY_MS = 500;
+const TRANSIENT_AI_MAX_ATTEMPTS = 2;
 
 export async function recognizeValidateNumber(
   ai: Ai,
@@ -27,41 +29,61 @@ export async function recognizeNumericCaptcha(
   if (!Number.isInteger(digitCount) || digitCount < 4 || digitCount > 8)
     throw new ValidateNumberOcrError();
 
-  let response: Record<string, unknown>;
-  try {
-    const model: string = VALIDATE_NUMBER_MODEL;
-    response = await ai.run(model, {
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Read the ${digitCount} digits in this CAPTCHA. Return exactly ${digitCount} digits and nothing else.`,
+  const model: string = VALIDATE_NUMBER_MODEL;
+  const input = {
+    messages: [
+      {
+        role: "user" as const,
+        content: [
+          {
+            type: "text" as const,
+            text: `Read the ${digitCount} digits in this CAPTCHA. Return exactly ${digitCount} digits and nothing else.`,
+          },
+          {
+            type: "image_url" as const,
+            image_url: {
+              url: `data:${contentType};base64,${arrayBufferToBase64(imageBytes)}`,
             },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${contentType};base64,${arrayBufferToBase64(imageBytes)}`,
-              },
-            },
-          ],
-        },
-      ],
-      chat_template_kwargs: {
-        enable_thinking: false,
-        clear_thinking: true,
+          },
+        ],
       },
-      skip_special_tokens: true,
-      temperature: 0,
-      max_completion_tokens: 16,
-      stream: false,
-    });
-  } catch (error) {
-    throw new ValidateNumberOcrUnavailableError(
-      error instanceof Error ? error.message : String(error),
-    );
+    ],
+    chat_template_kwargs: {
+      enable_thinking: false,
+      clear_thinking: true,
+    },
+    skip_special_tokens: true,
+    temperature: 0,
+    max_completion_tokens: 16,
+    stream: false,
+  };
+  let response: Record<string, unknown> | undefined;
+  for (let attempt = 1; attempt <= TRANSIENT_AI_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      response = await ai.run(model, input);
+      break;
+    } catch (error) {
+      const transient = isTransientAiError(error);
+      if (transient && attempt < TRANSIENT_AI_MAX_ATTEMPTS) {
+        console.warn(
+          `[ocr] Workers AI CAPTCHA recognition failed temporarily; retrying (${attempt}/${TRANSIENT_AI_MAX_ATTEMPTS})`,
+          error,
+        );
+        await delay(TRANSIENT_AI_RETRY_DELAY_MS);
+        continue;
+      }
+      console.error("[ocr] Workers AI CAPTCHA recognition unavailable", error);
+      throw new ValidateNumberOcrUnavailableError(
+        transient
+          ? "驗證碼辨識服務暫時逾時，請稍後重試。"
+          : "驗證碼辨識服務暫時無法使用，請稍後重試。",
+      );
+    }
   }
+  if (!response)
+    throw new ValidateNumberOcrUnavailableError(
+      "驗證碼辨識服務暫時無法使用，請稍後重試。",
+    );
 
   const number = readMessageContent(response).trim();
   if (!new RegExp(`^\\d{${digitCount}}$`).test(number))
@@ -93,6 +115,19 @@ function arrayBufferToBase64(bytes: ArrayBuffer) {
   for (let index = 0; index < view.length; index += 1)
     binary += String.fromCharCode(view[index] ?? 0);
   return btoa(binary);
+}
+
+function isTransientAiError(error: unknown) {
+  const code = isRecord(error) ? String(error.internalCode ?? "") : "";
+  if (["3007", "3040", "3046"].includes(code)) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(?:3007|3040|3046)\b|request timeout|timed? out|capacity temporarily exceeded|no more data centers|temporarily unavailable/i.test(
+    message,
+  );
+}
+
+function delay(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
