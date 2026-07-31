@@ -897,11 +897,12 @@ test("merges a matching invoice and counts an unmatched invoice as expense", asy
   const activityRows = page.locator("tbody tr");
   await expect(activityRows).toHaveCount(2);
   const matchedActivityRow = activityRows.filter({
-    hasText: "好食餐飲有限公司",
+    hasText: "信用卡消費",
   });
   await expect(matchedActivityRow).toContainText("測試銀行");
   await expect(matchedActivityRow).toContainText("測試信用卡");
   await expect(matchedActivityRow).toContainText("已配對發票");
+  await expect(matchedActivityRow).not.toContainText("好食餐飲有限公司");
   await expect(
     activityRows.filter({ hasText: "未支援銀行商店" }),
   ).toContainText("−NT$1,490");
@@ -960,7 +961,7 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
             id: "card-1",
             connectorId: "sinopac",
             sourceId: "card-source-1",
-            institutionName: "玉山銀行",
+            institutionName: "測試銀行",
             accountName: "信用卡",
             accountType: "credit",
             currency: "TWD",
@@ -968,15 +969,15 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
         ],
         transactions: [
           {
-            id: "pxpay-tea",
+            id: "synthetic-drink",
             connectorId: "sinopac",
             accountId: "card-1",
             sourceId: "transaction-source-1",
             postedDate: `${month}-06`,
-            amount: 37,
+            amount: 100,
             currency: "TWD",
-            description: "全支付﹘樂法 台中漢口店",
-            counterparty: "全支付﹘樂法 台中漢口店",
+            description: "測試飲料店",
+            counterparty: "測試飲料店",
             status: "posted",
             excludedFromCalculation: false,
             classification: {
@@ -986,15 +987,15 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
             },
           },
           {
-            id: "dinner",
+            id: "synthetic-meal",
             connectorId: "sinopac",
             accountId: "card-1",
             sourceId: "transaction-source-2",
             postedDate: `${month}-06`,
-            amount: -265,
+            amount: -250,
             currency: "TWD",
-            description: "連支＊萬川雞飯．肉骨茶",
-            counterparty: "連支＊萬川雞飯．肉骨茶",
+            description: "測試餐飲店",
+            counterparty: "測試餐飲店",
             status: "posted",
             excludedFromCalculation: false,
             classification: {
@@ -1013,10 +1014,10 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
       id: "invoice-1",
       connectorId: "einvoice",
       sourceId: "invoice-source-1",
-      invoiceDate: `${month}-06T04:39:18.000Z`,
-      invoiceNumber: "DR95850239",
-      sellerName: "菲尖極道商行",
-      amount: 50,
+      invoiceDate: `${month}-06T12:00:00.000Z`,
+      invoiceNumber: "TEST-0001",
+      sellerName: "合成發票商店",
+      amount: 120,
     };
     await route.fulfill({
       json:
@@ -1028,10 +1029,10 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
                   id: "invoice-line-1",
                   sourceId: "invoice-line-source-1",
                   lineNumber: 1,
-                  description: "瓶裝飲料",
+                  description: "測試品項",
                   quantity: 1,
-                  unitPrice: 50,
-                  amount: 50,
+                  unitPrice: 120,
+                  amount: 120,
                 },
               ],
             }
@@ -1041,9 +1042,9 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
 
   await page.goto("/#/activity");
   await page
-    .getByRole("button", { name: "查看 菲尖極道商行 活動詳情" })
+    .getByRole("button", { name: "查看 合成發票商店 活動詳情" })
     .click();
-  await expect(page.getByText("瓶裝飲料", { exact: true })).toBeVisible();
+  await expect(page.getByText("測試品項", { exact: true })).toBeVisible();
   await expect(page.getByText("尚未找到銀行／信用卡交易")).toBeVisible();
   await page.getByRole("button", { name: "配對交易" }).click();
   await expect(
@@ -1051,21 +1052,21 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
   ).toBeVisible();
   await page
     .getByRole("button", {
-      name: /^全支付﹘樂法 台中漢口店 玉山銀行/,
+      name: /^測試飲料店 測試銀行/,
     })
     .click();
   await page.getByRole("button", { name: "下一步" }).click();
   await expect(
     page.getByRole("heading", { name: "確認合併這兩筆？" }),
   ).toBeVisible();
-  await expect(page.getByText("差額 NT$13", { exact: true })).toBeVisible();
+  await expect(page.getByText("差額 NT$20", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "確認配對" }).click();
 
   await expect(page.getByText("已完成配對，活動只顯示一筆")).toBeVisible();
   const mappedActivityRow = page.getByRole("button", {
-    name: "查看 菲尖極道商行 活動詳情",
+    name: "查看 測試飲料店 活動詳情",
   });
-  await expect(mappedActivityRow).toContainText("玉山銀行");
+  await expect(mappedActivityRow).toContainText("測試銀行");
   await expect(mappedActivityRow).toContainText("信用卡 · 餐飲");
   await expect(mappedActivityRow).toContainText("已配對發票");
   await mappedActivityRow.click();
@@ -1074,19 +1075,19 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
     detail
       .getByText("銀行／信用卡原始名稱")
       .locator("..")
-      .getByText("全支付﹘樂法 台中漢口店", { exact: true }),
+      .getByText("測試飲料店", { exact: true }),
   ).toBeVisible();
   await expect(
     detail
       .getByText("發票商家名稱")
       .locator("..")
-      .getByText("菲尖極道商行", { exact: true }),
+      .getByText("合成發票商店", { exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "管理配對" }).click();
   await page.getByRole("button", { name: "解除並保持分開" }).click();
   await expect(page.getByText("已解除配對，兩筆活動將保持分開")).toBeVisible();
-  await expect(page.getByText("菲尖極道商行").first()).toBeVisible();
-  await expect(page.getByText("全支付﹘樂法 台中漢口店").first()).toBeVisible();
+  await expect(page.getByText("合成發票商店").first()).toBeVisible();
+  await expect(page.getByText("測試飲料店").first()).toBeVisible();
 });
 
 test("loads invoice line items only after expanding an invoice", async ({

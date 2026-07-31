@@ -179,11 +179,7 @@
           id: t.id,
           source: isCard ? ("card" as const) : ("bank" as const),
           date: t.authorizedAt ?? t.postedDate ?? "",
-          title:
-            matchedInvoice?.sellerName ??
-            t.description ??
-            t.counterparty ??
-            "銀行交易",
+          title: t.description ?? t.counterparty ?? "銀行交易",
           subtitle: [
             institutionName,
             accountName,
