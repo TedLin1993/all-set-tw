@@ -897,11 +897,12 @@ test("merges a matching invoice and counts an unmatched invoice as expense", asy
   const activityRows = page.locator("tbody tr");
   await expect(activityRows).toHaveCount(2);
   const matchedActivityRow = activityRows.filter({
-    hasText: "好食餐飲有限公司",
+    hasText: "信用卡消費",
   });
   await expect(matchedActivityRow).toContainText("測試銀行");
   await expect(matchedActivityRow).toContainText("測試信用卡");
   await expect(matchedActivityRow).toContainText("已配對發票");
+  await expect(matchedActivityRow).not.toContainText("好食餐飲有限公司");
   await expect(
     activityRows.filter({ hasText: "未支援銀行商店" }),
   ).toContainText("−NT$1,490");
@@ -1063,7 +1064,7 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
 
   await expect(page.getByText("已完成配對，活動只顯示一筆")).toBeVisible();
   const mappedActivityRow = page.getByRole("button", {
-    name: "查看 菲尖極道商行 活動詳情",
+    name: "查看 全支付﹘樂法 台中漢口店 活動詳情",
   });
   await expect(mappedActivityRow).toContainText("玉山銀行");
   await expect(mappedActivityRow).toContainText("信用卡 · 餐飲");
