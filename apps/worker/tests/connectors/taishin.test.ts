@@ -64,7 +64,7 @@ function realtime(rows: unknown[][], cardLast4 = "3108") {
 }
 
 describe("Taishin credit-card parser", () => {
-  it("uses one aggregate credit account and limits bills to six periods", () => {
+  it("uses one aggregate credit account and limits bills to three periods", () => {
     const result = parseTaishinCreditCardData(
       {
         summary,
@@ -72,7 +72,6 @@ describe("Taishin credit-card parser", () => {
           bill(`2026/${String(7 - index).padStart(2, "0")}`, []),
         ),
       },
-      6,
       new Date("2026-07-23T00:00:00.000Z"),
     );
 
@@ -81,7 +80,7 @@ describe("Taishin credit-card parser", () => {
       sourceId: "credit:taishin:main",
       creditLimit: 200000,
     });
-    expect(result.creditCardBills).toHaveLength(6);
+    expect(result.creditCardBills).toHaveLength(3);
     expect(result.bankBalanceSnapshots[0]).toMatchObject({
       availableBalance: 168500,
       statementBalance: 10060,

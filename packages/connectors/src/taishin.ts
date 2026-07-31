@@ -5,12 +5,12 @@ import type {
   CreditCardBill,
 } from "@taiwan-fin-hub/core";
 import { z } from "zod";
+import { BANK_SYNC_MONTHS } from "./sync-window";
 
 export const taishinConfigSchema = z.object({
   userId: z.string().min(1).optional(),
   account: z.string().min(1).optional(),
   password: z.string().min(1).optional(),
-  lookbackMonths: z.coerce.number().int().min(1).max(6).default(6),
   sessionCookies: z.string().optional(),
   sessionCreatedAt: z.string().optional(),
   browserSessionId: z.string().optional(),
@@ -55,7 +55,6 @@ const ACCOUNT_SOURCE_ID = "credit:taishin:main";
 
 export function parseTaishinCreditCardData(
   payloads: TaishinCreditCardPayloads,
-  lookbackMonths = 6,
   now = new Date(),
 ): TaishinCreditCardData {
   const summary = responseValue(payloads.summary);
@@ -102,9 +101,7 @@ export function parseTaishinCreditCardData(
   const remainingDue = parsedRemainingDue ?? 0;
   const asOfAt = now.toISOString();
 
-  const bills = billEntries
-    .map(({ bill }) => bill)
-    .slice(0, Math.max(1, Math.min(6, lookbackMonths)));
+  const bills = billEntries.map(({ bill }) => bill).slice(0, BANK_SYNC_MONTHS);
 
   return {
     bankAccounts: [

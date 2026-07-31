@@ -21,7 +21,6 @@ const credentials = {
   userId: "A123456789",
   account: "test-user",
   password: "test-password",
-  lookbackMonths: 6,
 };
 
 const selectors = {
@@ -138,7 +137,6 @@ describe("Taishin browser session lifecycle", () => {
 
     const result = await createTaishinConnector({} as Fetcher, recognize).sync({
       ...credentials,
-      lookbackMonths: 1,
       sessionCookies: JSON.stringify([
         {
           name: "SESSION",
@@ -375,7 +373,6 @@ describe("Taishin browser session lifecycle", () => {
 
     await createTaishinConnector({} as Fetcher).sync({
       ...credentials,
-      lookbackMonths: 1,
       sessionCookies: JSON.stringify([
         {
           name: "SESSION",
@@ -431,7 +428,6 @@ describe("Taishin browser session lifecycle", () => {
     const error = await createTaishinConnector({} as Fetcher)
       .sync({
         ...credentials,
-        lookbackMonths: 1,
         sessionCookies: JSON.stringify([
           {
             name: "SESSION",
@@ -640,7 +636,6 @@ describe("Taishin browser session lifecycle", () => {
 
     const result = await createTaishinConnector({} as Fetcher, recognize).sync({
       ...credentials,
-      lookbackMonths: 1,
     });
 
     expect(result.bankAccounts).toHaveLength(1);

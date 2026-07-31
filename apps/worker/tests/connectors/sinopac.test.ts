@@ -265,7 +265,6 @@ describe("sinopac App JSON parser", () => {
         bills: billPayload,
         unbilled: unbilledPayload,
       },
-      3,
       new Date("2026-07-16T12:00:00.000Z"),
     );
 
@@ -314,7 +313,6 @@ describe("sinopac App JSON parser", () => {
         bills: mobileBillPayload,
         unbilled: mobileUnbilledPayload,
       },
-      3,
       new Date("2026-07-16T12:00:00.000Z"),
     );
 
@@ -354,7 +352,6 @@ describe("sinopac App JSON parser", () => {
         latest: sinoCardLatestPayload,
         outstanding: sinoCardOutstandingPayload,
       },
-      3,
       new Date("2026-07-22T12:00:00.000Z"),
     );
 
@@ -402,7 +399,6 @@ describe("sinopac App JSON parser", () => {
       userId: "A123456789",
       sessionCookies,
       protocol: "sinopac-mobile-app-json-v1",
-      lookbackMonths: 3,
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(6);
@@ -496,7 +492,6 @@ describe("sinopac App JSON parser", () => {
       userId: "A123456789",
       sessionCookies,
       protocol: "sinopac-mobile-app-json-v1",
-      lookbackMonths: 3,
     });
 
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([

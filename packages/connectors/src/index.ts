@@ -6,7 +6,10 @@ import type {
 } from "@taiwan-fin-hub/core";
 import { z } from "zod";
 import { currentPeriodIndex, periodFromIndex } from "./invoice-data";
+import { EINVOICE_SYNC_PERIODS } from "./sync-window";
 import { EInvoiceV2Client, type EInvoiceV2Session } from "./tw-einvoice-v2";
+
+export { BANK_SYNC_MONTHS, EINVOICE_SYNC_PERIODS } from "./sync-window";
 
 export { EInvoiceProtocolUnavailableError } from "./tw-einvoice-api";
 export {
@@ -107,7 +110,6 @@ export const invoiceConfigSchema = z.object({
   ltoken: z.string().optional(),
   hkey: z.string().optional(),
   serverTimeOffset: z.number().int().optional(),
-  periodsBack: z.number().int().min(1).max(24).default(1),
   fetchDetails: z.boolean().default(true),
 });
 
@@ -205,7 +207,7 @@ async function syncTaiwanEInvoicesV2(config: InvoiceConfig, cursor?: string) {
   const now = new Date();
   const currentIndex = currentPeriodIndex(now);
   const periodIndexes = Array.from(
-    { length: config.periodsBack },
+    { length: EINVOICE_SYNC_PERIODS },
     (_, index) => currentIndex - index,
   );
   const records: Array<Omit<Invoice, "id" | "connectorId">> = [];
@@ -279,7 +281,7 @@ async function syncTaiwanEInvoicesV2(config: InvoiceConfig, cursor?: string) {
       syncedAt: now.toISOString(),
       previousSyncedAt: cursor ? readPreviousSyncedAt(cursor) : undefined,
       latestPeriodIndex: currentIndex,
-      periodsBack: config.periodsBack,
+      syncedPeriods: EINVOICE_SYNC_PERIODS,
     }),
   };
 }

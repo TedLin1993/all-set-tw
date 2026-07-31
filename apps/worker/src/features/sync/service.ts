@@ -240,7 +240,7 @@ export async function syncEinvoice(
   );
   const config = {
     ...stored,
-    ...parsePublicConnectorConfig(settings.public_config),
+    ...parsePublicConnectorConfig(connectorId, settings.public_config),
   };
   const configuredConfig = parseInvoiceConfig(config);
   const effectiveConfig = parseInvoiceConfig({
@@ -323,7 +323,7 @@ export async function syncEsun(
   );
   const config = parseEsunConfig({
     ...stored,
-    ...parsePublicConnectorConfig(settings.public_config),
+    ...parsePublicConnectorConfig(connectorId, settings.public_config),
   });
 
   console.log(
@@ -421,7 +421,7 @@ export async function syncCathaybk(
   );
   const config = parseCathaybkConfig({
     ...stored,
-    ...parsePublicConnectorConfig(settings.public_config),
+    ...parsePublicConnectorConfig(connectorId, settings.public_config),
   });
 
   console.log(
@@ -516,7 +516,7 @@ export async function syncCtbc(
   );
   const config = parseCtbcConfig({
     ...stored,
-    ...parsePublicConnectorConfig(settings.public_config),
+    ...parsePublicConnectorConfig(connectorId, settings.public_config),
   });
 
   console.log(
@@ -622,7 +622,7 @@ export async function syncSinopac(
   );
   const config = parseSinopacConfig({
     ...stored,
-    ...parsePublicConnectorConfig(settings.public_config),
+    ...parsePublicConnectorConfig(connectorId, settings.public_config),
     ...overrides,
   });
 
@@ -783,7 +783,7 @@ export async function syncTaishin(
   );
   const config = parseTaishinConfig({
     ...stored,
-    ...parsePublicConnectorConfig(settings.public_config),
+    ...parsePublicConnectorConfig(connectorId, settings.public_config),
     ...overrides,
   });
 

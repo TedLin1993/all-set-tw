@@ -1,6 +1,7 @@
 import type { SyncResult } from "@taiwan-fin-hub/core";
 import forge from "node-forge";
 import { parseCtbcData, type CtbcConfig, type CtbcPayloads } from "./ctbc";
+import { BANK_SYNC_MONTHS } from "./sync-window";
 
 const CTBC_IMP_ORIGIN = "https://eb.ctbcbank.com/IMP";
 const CTBC_APPLICATION = "EBMW_Adapter";
@@ -139,7 +140,6 @@ export function createCtbcConnector(
       _cursor?: string,
     ): Promise<SyncResult<never>> {
       const credentials = requireCtbcCredentials(config);
-      const lookbackMonths = config.lookbackMonths ?? 3;
       const session = new CtbcMobileSession(fetcher);
       let loggedIn = false;
       try {
@@ -154,7 +154,6 @@ export function createCtbcConnector(
         const depositTransactions = await fetchDepositTransactions(
           session,
           depositOverview,
-          lookbackMonths,
         );
         const creditCards = await session.resource(
           CREDIT_CARD_BILLS_RESOURCE,
@@ -178,7 +177,7 @@ export function createCtbcConnector(
           unbilled,
           realtime,
         };
-        const parsed = parseCtbcData(payloads, lookbackMonths, new Date());
+        const parsed = parseCtbcData(payloads, new Date());
         return {
           records: [],
           ...parsed,
@@ -477,7 +476,6 @@ class CtbcMobileSession {
 async function fetchDepositTransactions(
   session: CtbcMobileSession,
   depositOverview: JsonRecord,
-  lookbackMonths: number,
 ) {
   const transactions: unknown[] = [];
   const accountIds = extractDepositAccountIds(depositOverview);
@@ -486,7 +484,7 @@ async function fetchDepositTransactions(
       accountId,
     });
     const queryAccountId = selectTransactionAccountId(initial, accountId);
-    for (const range of monthlyRanges(lookbackMonths)) {
+    for (const range of monthlyRanges(BANK_SYNC_MONTHS)) {
       let response: JsonRecord;
       try {
         response = await session.resource(DEPOSIT_TRANSACTIONS_RESOURCE, {

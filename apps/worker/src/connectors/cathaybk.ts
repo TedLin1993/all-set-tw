@@ -6,7 +6,10 @@ import type {
   CreditCardBill,
   SyncResult,
 } from "@taiwan-fin-hub/core";
-import type { CathaybkConfig } from "@taiwan-fin-hub/connectors";
+import {
+  BANK_SYNC_MONTHS,
+  type CathaybkConfig,
+} from "@taiwan-fin-hub/connectors";
 
 const LOGIN_URL = "https://www.cathaybk.com.tw/MyBank/";
 const DEPOSIT_OVERVIEW_URL =
@@ -82,7 +85,7 @@ async function scrapeWithBrowser(
   console.log("[cathaybk] launching browser");
   const b = await puppeteer.launch(browserBinding);
   const page = await b.newPage();
-  const lookbackDays = config.lookbackMonths ? config.lookbackMonths * 30 : 30;
+  const syncWindowDays = BANK_SYNC_MONTHS * 30;
 
   try {
     await page.setViewport({ width: 1280, height: 800 });
@@ -91,10 +94,10 @@ async function scrapeWithBrowser(
     await login(page, config);
 
     console.log("[cathaybk] collecting deposit accounts");
-    const deposits = await scrapeDeposits(page, lookbackDays);
+    const deposits = await scrapeDeposits(page, syncWindowDays);
 
     console.log("[cathaybk] collecting credit cards");
-    const cards = await scrapeCreditCards(page, config.lookbackMonths ?? 1);
+    const cards = await scrapeCreditCards(page);
 
     const freshCookies = JSON.stringify(await page.cookies());
 
@@ -545,10 +548,7 @@ interface MonthDetail {
   sections: BillDetailSection[];
 }
 
-async function scrapeCreditCards(
-  page: Page,
-  lookbackMonths: number,
-): Promise<Scraped> {
+async function scrapeCreditCards(page: Page): Promise<Scraped> {
   const bankAccounts: Scraped["bankAccounts"] = [];
   const bankBalanceSnapshots: Scraped["bankBalanceSnapshots"] = [];
   const bankTransactions: Scraped["bankTransactions"] = [];
@@ -728,7 +728,7 @@ async function scrapeCreditCards(
     }
 
     return { allBills: targetBills, monthDetails };
-  }, lookbackMonths)) as {
+  }, BANK_SYNC_MONTHS)) as {
     allBills: HistoryBillItem[];
     monthDetails: MonthDetail[];
   } | null;

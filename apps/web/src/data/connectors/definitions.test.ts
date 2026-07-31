@@ -22,4 +22,22 @@ describe("connector definitions", () => {
       );
     }
   });
+
+  it("does not expose fixed sync-window settings", () => {
+    for (const connectorId of supportedConnectorIds) {
+      const fieldKeys = connectorFields[connectorId].map(({ key }) => key);
+
+      expect(fieldKeys).not.toContain("periodsBack");
+      expect(fieldKeys).not.toContain("lookbackMonths");
+    }
+  });
+
+  it("keeps invoice line-item sync as the only public preference", () => {
+    expect(connectorCatalog.einvoice.publicFields).toEqual(["fetchDetails"]);
+
+    for (const connectorId of supportedConnectorIds) {
+      if (connectorId === "einvoice") continue;
+      expect(connectorCatalog[connectorId].publicFields).toEqual([]);
+    }
+  });
 });
