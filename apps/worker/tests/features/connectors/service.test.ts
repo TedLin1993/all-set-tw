@@ -25,7 +25,10 @@ vi.mock("../../../src/platform/crypto", () => ({
   encryptJson: async (value: unknown) => JSON.stringify(value),
 }));
 
-import { updateConnectorSettings } from "../../../src/features/connectors/service";
+import {
+  ConnectorConfigMissingError,
+  updateConnectorSettings,
+} from "../../../src/features/connectors/service";
 
 const env = { DB: {} as D1Database } as Env;
 
@@ -37,7 +40,26 @@ beforeEach(() => {
 });
 
 describe("connector settings state boundaries", () => {
-  it("stores public preferences separately from encrypted credentials", async () => {
+  it("stores the remaining invoice preference separately from credentials", async () => {
+    await updateConnectorSettings(env, "einvoice", {
+      mobile: "0912345678",
+      password: "password",
+      fetchDetails: false,
+    });
+
+    expect(mocks.saveConnectorSettings).toHaveBeenCalledOnce();
+    const saved = mocks.saveConnectorSettings.mock.calls[0]![1];
+    expect(JSON.parse(saved.encryptedConfig)).toMatchObject({
+      mobile: "0912345678",
+      password: "password",
+    });
+    expect(JSON.parse(saved.encryptedConfig)).not.toHaveProperty(
+      "fetchDetails",
+    );
+    expect(JSON.parse(saved.publicConfig)).toEqual({ fetchDetails: false });
+  });
+
+  it("removes retired lookback settings while preserving credentials", async () => {
     await updateConnectorSettings(env, "esun", {
       userId: "A123456789",
       account: "user",
@@ -52,7 +74,14 @@ describe("connector settings state boundaries", () => {
       account: "user",
       password: "password",
     });
-    expect(JSON.parse(saved.publicConfig)).toEqual({ lookbackMonths: 6 });
+    expect(saved.publicConfig).toBeNull();
+  });
+
+  it("does not create a connector from a retired lookback-only payload", async () => {
+    await expect(
+      updateConnectorSettings(env, "esun", { lookbackMonths: 12 }),
+    ).rejects.toBeInstanceOf(ConnectorConfigMissingError);
+    expect(mocks.saveConnectorSettings).not.toHaveBeenCalled();
   });
 
   it("clears derived session state and cursor when credentials change", async () => {
@@ -80,6 +109,7 @@ describe("connector settings state boundaries", () => {
       account: "new-user",
       password: "old-password",
     });
+    expect(saved.publicConfig).toBeNull();
     expect(mocks.clearConnectorCursor).toHaveBeenCalledWith(
       env.DB,
       "esun",
@@ -87,7 +117,7 @@ describe("connector settings state boundaries", () => {
     );
   });
 
-  it("preserves encrypted session state for public-only updates", async () => {
+  it("drops retired lookback values from an existing setting", async () => {
     mocks.findConnectorSettings.mockResolvedValue({
       id: "esun-settings",
       connector_id: "esun",
@@ -111,7 +141,10 @@ describe("connector settings state boundaries", () => {
       sessionCookies: "current-cookie",
       sessionExpiresAt: "2026-07-29T12:00:00.000Z",
     });
-    expect(JSON.parse(saved.publicConfig)).toEqual({ lookbackMonths: 12 });
+    expect(JSON.parse(saved.encryptedConfig)).not.toHaveProperty(
+      "lookbackMonths",
+    );
+    expect(saved.publicConfig).toBeNull();
     expect(mocks.clearConnectorCursor).not.toHaveBeenCalled();
   });
 });

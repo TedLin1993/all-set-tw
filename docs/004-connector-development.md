@@ -36,7 +36,7 @@ Connector 採三層 registry：
 
 | 狀態           | 儲存位置                         | 允許內容                                                     |
 | -------------- | -------------------------------- | ------------------------------------------------------------ |
-| 公開偏好       | `public_config`                  | 回溯月份、是否抓明細等非敏感選項                             |
+| 公開偏好       | `public_config`                  | 是否抓電子發票品項明細等非敏感選項                           |
 | 機密設定       | `encrypted_config`               | 帳密、cookie、access token、device token、Browser session ID |
 | 同步 cursor    | `sync_cursor`                    | 日期、頁碼、watermark、已完成區間等非敏感增量位置            |
 | 暫時 challenge | `encrypted_config`，且必須有 TTL | CAPTCHA、OTP、待提交的 Browser session                       |
@@ -47,6 +47,7 @@ Connector 採三層 registry：
 - Connector 可在內部 cursor 回傳 session，但 sync service 必須透過 `splitConnectorCursorState` 將 secret state 移入加密設定後才持久化。
 - 舊版已存在於 cursor 的 session 不得直接由 D1 migration 刪除；應讓新版 connector 相容讀取一次，並在首次成功同步時搬入 `encrypted_config`，避免強迫使用者重新驗證。
 - 公開設定透過 `parsePublicConnectorConfig` 合併後再交給 config schema；不得把相同欄位複製到 encrypted config。
+- 同步回溯範圍是 connector 的 runtime policy，不得做成公開偏好：電子發票固定同步最近 2 期；銀行 connector 固定同步最近 3 個月或 3 期帳單。舊版 `periodsBack` 與 `lookbackMonths` 必須忽略並在後續設定儲存時移除。
 - 任一 credential 變更時，必須清除 catalog `resetOnCredentialChangeFields` 宣告的衍生狀態與既有 cursor。
 - Challenge 成功、失敗或逾時後都必須清除 CAPTCHA、OTP 與 Browser session reference。
 - Log、錯誤回應與 `raw` 不得包含帳密、完整帳號／卡號、cookie 或 token。

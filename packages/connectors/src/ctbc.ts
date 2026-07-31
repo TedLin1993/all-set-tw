@@ -5,13 +5,13 @@ import type {
   CreditCardBill,
 } from "@taiwan-fin-hub/core";
 import { z } from "zod";
+import { BANK_SYNC_MONTHS } from "./sync-window";
 
 /** 中國信託行動銀行 API 連接器設定。機密欄位由 Worker 加密保存。 */
 export const ctbcConfigSchema = z.object({
   userId: z.string().min(1).optional(),
   account: z.string().min(1).optional(),
   password: z.string().min(1).optional(),
-  lookbackMonths: z.coerce.number().int().min(1).max(6).optional(),
 });
 
 export type CtbcConfig = z.infer<typeof ctbcConfigSchema>;
@@ -75,10 +75,8 @@ const TWD = "TWD";
  */
 export function parseCtbcData(
   payloads: CtbcPayloads,
-  lookbackMonths = 3,
   now = new Date(),
 ): CtbcData {
-  const effectiveLookback = Math.max(1, Math.min(6, lookbackMonths));
   const deposits = parseDepositAccounts(payloads.depositOverview);
   const accountSourceIds = new Map(
     deposits.map((account) => [
@@ -116,11 +114,8 @@ export function parseCtbcData(
   );
   const creditCardGroups = parseCreditCardGroups(payloads.creditCards)
     .sort(compareCreditCardGroups)
-    .slice(0, effectiveLookback * 8);
-  const selectedGroups = selectGroupsByCurrency(
-    creditCardGroups,
-    effectiveLookback,
-  );
+    .slice(0, BANK_SYNC_MONTHS * 8);
+  const selectedGroups = selectGroupsByCurrency(creditCardGroups);
   const unbilledTransactions = parseUnbilledTransactions(payloads.unbilled);
   const realtimeTransactions = parseRealtimeTransactions(payloads.realtime);
   const cardMetadata = parseCardMetadata(payloads.creditCards);
@@ -290,10 +285,7 @@ function parseCreditCardGroups(payload: unknown): CreditCardGroup[] {
   return groups;
 }
 
-function selectGroupsByCurrency(
-  groups: CreditCardGroup[],
-  lookbackMonths: number,
-) {
+function selectGroupsByCurrency(groups: CreditCardGroup[]) {
   const selected: CreditCardGroup[] = [];
   const byCurrency = new Map<string, CreditCardGroup[]>();
   for (const group of groups) {
@@ -303,7 +295,9 @@ function selectGroupsByCurrency(
   }
   for (const currencyGroups of byCurrency.values()) {
     selected.push(
-      ...currencyGroups.sort(compareCreditCardGroups).slice(0, lookbackMonths),
+      ...currencyGroups
+        .sort(compareCreditCardGroups)
+        .slice(0, BANK_SYNC_MONTHS),
     );
   }
   return selected;

@@ -6,7 +6,7 @@ import type {
   CreditCardBill,
   SyncResult,
 } from "@taiwan-fin-hub/core";
-import type { EsunConfig } from "@taiwan-fin-hub/connectors";
+import { BANK_SYNC_MONTHS, type EsunConfig } from "@taiwan-fin-hub/connectors";
 
 const HOME_URL = "https://ebank.esunbank.com.tw/indexMobile.jsp";
 const CREDIT_CARD_DETAIL_URL =
@@ -75,16 +75,9 @@ export function createEsunConnector(browser?: Fetcher) {
       const depositWatermarks: Record<string, string> = {};
 
       console.log("[esun debug] scraping credit cards");
-      const creditCards = await scrapeCreditCards(
-        client,
-        config.lookbackMonths ?? 3,
-      );
+      const creditCards = await scrapeCreditCards(client);
       console.log("[esun debug] scraping deposit accounts");
-      const deposits = await scrapeDepositAccounts(
-        client,
-        depositWatermarks,
-        config.lookbackMonths ?? 3,
-      );
+      const deposits = await scrapeDepositAccounts(client, depositWatermarks);
       const freshCookies = client.exportCookies();
       const expiresAt = new Date(Date.now() + 25 * 60 * 1000).toISOString();
 
@@ -381,10 +374,7 @@ export interface EsunTimelinePage {
   endDate?: string;
 }
 
-async function scrapeCreditCards(
-  client: EsunHttpClient,
-  lookbackMonths: number,
-): Promise<Scraped> {
+async function scrapeCreditCards(client: EsunHttpClient): Promise<Scraped> {
   const [detail, overview] = await Promise.all([
     fetchCreditCardDetail(client),
     client.postJson<EsunCardOverviewData>(CREDIT_CARD_OVERVIEW_URL, {}),
@@ -392,7 +382,9 @@ async function scrapeCreditCards(
   const asOfAt = new Date().toISOString();
 
   const cards = getCreditCards(detail);
-  const bankTransactions = await scrapeTransactions(client);
+  const cutoffDate = new Date();
+  cutoffDate.setMonth(cutoffDate.getMonth() - BANK_SYNC_MONTHS);
+  const bankTransactions = await scrapeTransactions(client, cutoffDate);
   const accountIds = new Set<string>([
     ...cards.map((card) => creditCardSourceId(card.cardNo)),
     ...bankTransactions.map((transaction) => transaction.accountId),
@@ -471,31 +463,33 @@ async function scrapeCreditCards(
     },
   ];
 
-  // Build credit card bills from overview.bills (all periods available)
-  const creditCardBills: Scraped["creditCardBills"] = (
-    overview.bills ?? []
-  ).map((bill) => {
-    const bym6 = bill.bym6 ?? 0;
-    const year = Math.floor(bym6 / 100) + 1911;
-    const month = bym6 % 100;
-    const billingPeriod = `${year}-${String(month).padStart(2, "0")}`;
-    const tamt = bill.tamt ?? 0;
-    const payam = bill.payam ?? 0;
-    const isCurrentPeriod = bym6 === (overview.lstym ?? 0);
-    return {
-      accountId: mainSourceId,
-      sourceId: `${mainSourceId}:bill:${billingPeriod}`,
-      billingPeriod,
-      statementAmount: tamt || undefined,
-      minimumPayment: bill.mimpy ?? undefined,
-      paidAmount: payam || undefined,
-      isPaid: tamt > 0 && payam >= tamt,
-      paymentDueDate: isCurrentPeriod ? paymentDueDate : undefined,
-      statementClosingDate: isCurrentPeriod ? statementClosingDate : undefined,
-      currency: bill.cucid?.trim() || "TWD",
-      raw: bill,
-    };
-  });
+  // Keep only the most recent fixed sync window from the provider's history.
+  const creditCardBills: Scraped["creditCardBills"] = (overview.bills ?? [])
+    .slice(0, BANK_SYNC_MONTHS)
+    .map((bill) => {
+      const bym6 = bill.bym6 ?? 0;
+      const year = Math.floor(bym6 / 100) + 1911;
+      const month = bym6 % 100;
+      const billingPeriod = `${year}-${String(month).padStart(2, "0")}`;
+      const tamt = bill.tamt ?? 0;
+      const payam = bill.payam ?? 0;
+      const isCurrentPeriod = bym6 === (overview.lstym ?? 0);
+      return {
+        accountId: mainSourceId,
+        sourceId: `${mainSourceId}:bill:${billingPeriod}`,
+        billingPeriod,
+        statementAmount: tamt || undefined,
+        minimumPayment: bill.mimpy ?? undefined,
+        paidAmount: payam || undefined,
+        isPaid: tamt > 0 && payam >= tamt,
+        paymentDueDate: isCurrentPeriod ? paymentDueDate : undefined,
+        statementClosingDate: isCurrentPeriod
+          ? statementClosingDate
+          : undefined,
+        currency: bill.cucid?.trim() || "TWD",
+        raw: bill,
+      };
+    });
 
   return {
     bankAccounts,
@@ -528,9 +522,15 @@ function getCreditCards(detail: EsunCardDetailData): EsunCardRow[] {
 
 async function scrapeTransactions(
   client: EsunHttpClient,
+  cutoffDate: Date,
 ): Promise<Array<Omit<BankTransaction, "id" | "connectorId">>> {
   const pages = await fetchTimelinePages(client);
-  return normalizeEsunTimelineTransactions(pages);
+  return normalizeEsunTimelineTransactions(pages).filter((transaction) => {
+    const timestamp = transaction.authorizedAt ?? transaction.postedDate;
+    if (!timestamp) return true;
+    const date = new Date(timestamp);
+    return Number.isNaN(date.getTime()) || date >= cutoffDate;
+  });
 }
 
 type EsunTimelineCandidate = {
@@ -743,10 +743,9 @@ interface EsunTxDetailsData {
 async function scrapeDepositAccounts(
   client: EsunHttpClient,
   watermarks: Record<string, string>,
-  lookbackMonths: number,
 ): Promise<Scraped & { watermarks: Record<string, string> }> {
   const cutoffDate = new Date();
-  cutoffDate.setMonth(cutoffDate.getMonth() - lookbackMonths);
+  cutoffDate.setMonth(cutoffDate.getMonth() - BANK_SYNC_MONTHS);
   const cutoffDateStr = cutoffDate
     .toISOString()
     .slice(0, 10)
@@ -764,7 +763,7 @@ async function scrapeDepositAccounts(
     {},
   );
   console.log(
-    `[esun debug] overview: twDetails=${overview.twDetails?.length ?? 0} frDetails=${overview.frDetails?.length ?? 0} lookbackMonths=${lookbackMonths} cutoffDateStr=${cutoffDateStr}`,
+    `[esun debug] overview: twDetails=${overview.twDetails?.length ?? 0} frDetails=${overview.frDetails?.length ?? 0} syncMonths=${BANK_SYNC_MONTHS} cutoffDateStr=${cutoffDateStr}`,
   );
   const asOfAt = new Date().toISOString();
 

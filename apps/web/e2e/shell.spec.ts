@@ -120,7 +120,7 @@ test("shows a loading state while a connector sync is pending", async ({
         configured: true,
         credentialsComplete: true,
         sessionAvailable: false,
-        publicConfig: { lookbackMonths: 3 },
+        publicConfig: {},
       }),
     }),
   );

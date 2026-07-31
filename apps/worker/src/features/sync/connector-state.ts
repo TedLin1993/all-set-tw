@@ -1,12 +1,20 @@
 import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/core";
 
-export function parsePublicConnectorConfig(value: string | null) {
+export function parsePublicConnectorConfig(
+  connectorId: ConnectorId,
+  value: string | null,
+) {
   if (!value) return {};
   const parsed = JSON.parse(value) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Connector public config must be a JSON object.");
   }
-  return parsed as Record<string, unknown>;
+  const config = parsed as Record<string, unknown>;
+  return Object.fromEntries(
+    connectorCatalog[connectorId].publicFields
+      .filter((key) => config[key] !== undefined)
+      .map((key) => [key, config[key]]),
+  );
 }
 
 export function sensitiveConnectorConfig(

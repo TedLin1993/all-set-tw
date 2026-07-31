@@ -6,7 +6,11 @@ import {
   encryptLoginData,
   EInvoiceV2Client,
 } from "../../src/tw-einvoice-v2";
-import { einvoiceConnector, parseInvoiceConfig } from "../../src/index";
+import {
+  EINVOICE_SYNC_PERIODS,
+  einvoiceConnector,
+  parseInvoiceConfig,
+} from "../../src/index";
 
 const requests: Array<{ url: string; init: RequestInit }> = [];
 const syntheticSession = {
@@ -155,12 +159,12 @@ async function main() {
   );
 
   (globalThis as unknown as { fetch: typeof fetch }).fetch = fakeFetch;
+  const requestsBeforeSync = requests.length;
   const connectorConfig = parseInvoiceConfig({
     protocol: "v2",
     mobile: "0912345678",
     password: "synthetic-password",
     androidId: "synthetic-android-id",
-    periodsBack: 1,
     fetchDetails: true,
   });
   const syncResult = await einvoiceConnector.sync(connectorConfig);
@@ -170,6 +174,14 @@ async function main() {
   assert.equal(connectorConfig.loginAppId, syntheticSession.appid);
   assert.equal(typeof connectorConfig.loginClientCode, "string");
   assert.equal(connectorConfig.loginClientCode?.length, 8);
+  assert.equal(
+    requests
+      .slice(requestsBeforeSync)
+      .filter((request) =>
+        request.url.endsWith("/einvoice/carriers/query-invoices-header"),
+      ).length,
+    EINVOICE_SYNC_PERIODS,
+  );
   console.log("einvoice-v2.selfcheck: ok");
 }
 

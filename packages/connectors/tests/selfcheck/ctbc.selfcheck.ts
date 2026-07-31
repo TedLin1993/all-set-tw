@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { BANK_SYNC_MONTHS } from "../../src/sync-window";
 import { parseCtbcConfig, parseCtbcData } from "../../src/ctbc";
 
 assert.deepEqual(
@@ -6,16 +7,14 @@ assert.deepEqual(
     userId: "A123456789",
     account: "demo-user",
     password: "demo-password",
-    lookbackMonths: "2",
   }),
   {
     userId: "A123456789",
     account: "demo-user",
     password: "demo-password",
-    lookbackMonths: 2,
   },
 );
-assert.throws(() => parseCtbcConfig({ lookbackMonths: 7 }));
+assert.equal(BANK_SYNC_MONTHS, 3);
 
 const payloads = {
   depositOverview: {
@@ -172,7 +171,7 @@ const payloads = {
   },
 };
 
-const result = parseCtbcData(payloads, 2, new Date("2026-07-29T00:00:00.000Z"));
+const result = parseCtbcData(payloads, new Date("2026-07-29T00:00:00.000Z"));
 
 assert.equal(result.bankAccounts.length, 2);
 assert.equal(result.bankBalanceSnapshots.length, 2);
@@ -194,11 +193,7 @@ assert.equal(result.bankBalanceSnapshots[1]?.balance, -8000);
 assert.equal(result.bankBalanceSnapshots[1]?.statementBalance, 10000);
 assert.equal(result.creditCardBills[0]?.minimumPayment, 800);
 
-const repeated = parseCtbcData(
-  payloads,
-  2,
-  new Date("2026-07-29T00:00:00.000Z"),
-);
+const repeated = parseCtbcData(payloads, new Date("2026-07-29T00:00:00.000Z"));
 assert.deepEqual(
   repeated.bankTransactions.map((transaction) => transaction.sourceId),
   result.bankTransactions.map((transaction) => transaction.sourceId),

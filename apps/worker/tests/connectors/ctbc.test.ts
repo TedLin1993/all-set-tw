@@ -104,6 +104,11 @@ describe("CTBC mobile API connector", () => {
       jsonResponse({ sys: "ESB", code: "9201", rsData: {}, token: "token-6" }),
       jsonResponse({
         code: "0000",
+        rsData: { detailList: [] },
+        token: "token-6",
+      }),
+      jsonResponse({
+        code: "0000",
         rsData: {
           curDataList: [{ curCode: "TWD", curName: "新臺幣" }],
           cardDataList: [
@@ -195,7 +200,6 @@ describe("CTBC mobile API connector", () => {
       userId: "A123456789",
       account: "bank-user",
       password: "bank-password",
-      lookbackMonths: 2,
     });
 
     expect(responses).toHaveLength(0);
@@ -207,6 +211,7 @@ describe("CTBC mobile API connector", () => {
       "/twrbm-general/ot001/010",
       "/twrbm-deposit/qu001/010",
       "/twrbm-deposit/qu002/010",
+      "/twrbm-deposit/qu002/011",
       "/twrbm-deposit/qu002/011",
       "/twrbm-deposit/qu002/011",
       "/twrbm-card/qu002/010",

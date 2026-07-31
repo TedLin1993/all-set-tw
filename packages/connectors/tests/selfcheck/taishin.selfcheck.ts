@@ -78,14 +78,13 @@ const result = parseTaishinCreditCardData(
       error: null,
     },
   },
-  6,
   new Date("2026-07-23T00:00:00.000Z"),
 );
 
 assert.equal(result.bankAccounts.length, 1);
 assert.equal(result.bankAccounts[0]?.creditLimit, 200000);
 assert.equal(result.bankBalanceSnapshots[0]?.statementBalance, 10060);
-assert.equal(result.creditCardBills.length, 6);
+assert.equal(result.creditCardBills.length, 3);
 assert.equal(
   result.bankTransactions.filter(({ status }) => status === "posted").length,
   6,

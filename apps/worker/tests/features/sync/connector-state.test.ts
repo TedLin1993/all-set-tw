@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  parsePublicConnectorConfig,
   restoreConfiguredPublicFields,
   sensitiveConnectorConfig,
   serializePublicConnectorConfig,
@@ -9,32 +10,46 @@ import {
 describe("connector state boundaries", () => {
   it("keeps public preferences out of encrypted config", () => {
     expect(
-      sensitiveConnectorConfig("esun", {
-        userId: "A123456789",
+      sensitiveConnectorConfig("einvoice", {
+        mobile: "0912345678",
         password: "secret",
-        lookbackMonths: 6,
+        fetchDetails: false,
       }),
-    ).toEqual({ userId: "A123456789", password: "secret" });
+    ).toEqual({ mobile: "0912345678", password: "secret" });
     expect(
-      serializePublicConnectorConfig("esun", {
-        userId: "A123456789",
-        lookbackMonths: 12,
+      serializePublicConnectorConfig("einvoice", {
+        mobile: "0912345678",
+        fetchDetails: false,
       }),
-    ).toBe(JSON.stringify({ lookbackMonths: 12 }));
+    ).toBe(JSON.stringify({ fetchDetails: false }));
   });
 
   it("does not persist one-time sync overrides as public preferences", () => {
     expect(
       restoreConfiguredPublicFields(
         "einvoice",
-        { periodsBack: 6, fetchDetails: true, sid: "refreshed-session" },
-        { periodsBack: 6, fetchDetails: false },
+        { fetchDetails: true, sid: "refreshed-session" },
+        { fetchDetails: false },
       ),
     ).toEqual({
-      periodsBack: 6,
       fetchDetails: false,
       sid: "refreshed-session",
     });
+  });
+
+  it("filters retired public fields before parsing runtime config", () => {
+    expect(
+      parsePublicConnectorConfig(
+        "esun",
+        JSON.stringify({ lookbackMonths: 12 }),
+      ),
+    ).toEqual({});
+    expect(
+      parsePublicConnectorConfig(
+        "einvoice",
+        JSON.stringify({ periodsBack: 6, fetchDetails: false }),
+      ),
+    ).toEqual({ fetchDetails: false });
   });
 
   it("removes reusable browser sessions from bank cursors", () => {

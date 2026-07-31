@@ -11,7 +11,10 @@ import type {
   CreditCardBill,
   SyncResult,
 } from "@taiwan-fin-hub/core";
-import type { SinopacConfig } from "@taiwan-fin-hub/connectors";
+import {
+  BANK_SYNC_MONTHS,
+  type SinopacConfig,
+} from "@taiwan-fin-hub/connectors";
 
 const MOBILE_HOST = "https://m.sinopac.com";
 const LOGIN_URL = `${MOBILE_HOST}/m/member/login/m_login.aspx?RequestTrans=MobileCard`;
@@ -143,7 +146,6 @@ export function createSinopacConnector(
         );
       }
 
-      const lookbackMonths = config.lookbackMonths ?? 3;
       if (!config.userId) {
         throw new SinopacVerificationRequiredError(
           "永豐最新消費同步需要重新登入以取得身分識別資料。",
@@ -154,8 +156,8 @@ export function createSinopacConnector(
         config.userId,
         fetchImpl,
       );
-      const payloads = await client.fetchCreditCards(lookbackMonths);
-      const cards = parseSinopacCardData(payloads, lookbackMonths);
+      const payloads = await client.fetchCreditCards();
+      const cards = parseSinopacCardData(payloads);
       const now = new Date();
 
       return {
@@ -188,7 +190,7 @@ class SinopacAppClient {
     return this.post(CARD_SUMMARY_PATH, "信用卡總覽");
   }
 
-  async fetchCreditCards(lookbackMonths: number): Promise<SinopacApiPayloads> {
+  async fetchCreditCards(): Promise<SinopacApiPayloads> {
     const summary = await this.fetchSummary();
     const initialBills = await this.post(
       `${CARD_BILLS_PATH}?TxDate=default&TxType=01`,
@@ -196,7 +198,7 @@ class SinopacAppClient {
     );
     const billMonths = extractAdvertisedBillMonths(initialBills).slice(
       1,
-      Math.max(1, Math.min(3, lookbackMonths)),
+      BANK_SYNC_MONTHS,
     );
     const olderBills = [];
     for (const month of billMonths) {
@@ -804,11 +806,10 @@ function sinoCardCustomerId(payload: unknown) {
 
 export function parseSinopacCardData(
   payloads: SinopacApiPayloads,
-  lookbackMonths: number,
   now = new Date(),
 ): Scraped {
   const summary = parseSummary(payloads.summary);
-  const bills = parseBills(payloads.bills, lookbackMonths, now);
+  const bills = parseBills(payloads.bills, now);
   const transactions =
     payloads.outstanding != null || payloads.latest != null
       ? parseSinoCardTransactions(payloads.latest, payloads.outstanding)
@@ -959,7 +960,7 @@ function parseSummary(payload: unknown) {
   };
 }
 
-function parseBills(payload: unknown, lookbackMonths: number, now: Date) {
+function parseBills(payload: unknown, now: Date) {
   const out: Array<Omit<CreditCardBill, "id" | "connectorId" | "accountId">> =
     [];
 
@@ -1011,7 +1012,7 @@ function parseBills(payload: unknown, lookbackMonths: number, now: Date) {
     .sort((left, right) =>
       right.billingPeriod.localeCompare(left.billingPeriod),
     )
-    .slice(0, Math.max(1, lookbackMonths));
+    .slice(0, BANK_SYNC_MONTHS);
 }
 
 function parseTransactions(payload: unknown) {

@@ -50,7 +50,10 @@ export async function getConnectorSettingsView(
     configured: Boolean(settings),
     updatedAt: settings?.updated_at,
     publicConfig: settings?.public_config
-      ? JSON.parse(settings.public_config)
+      ? filterPublicConfig(
+          connectorId,
+          JSON.parse(settings.public_config) as Record<string, unknown>,
+        )
       : null,
     credentialsComplete,
     sessionAvailable,
@@ -64,14 +67,8 @@ export async function updateConnectorSettings(
 ) {
   const definition = connectorCatalog[connectorId];
   const publicKeys: readonly string[] = definition.publicFields;
-  const publicConfig: Record<string, unknown> = {};
-  const sensitiveConfig: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(rawConfig)) {
-    if (publicKeys.includes(key)) publicConfig[key] = value;
-    else sensitiveConfig[key] = value;
-  }
-  const hasSensitive = Object.values(sensitiveConfig).some(
-    (value) => value !== undefined && value !== "",
+  const hasSensitive = definition.credentialFields.some(
+    (key) => rawConfig[key] !== undefined && rawConfig[key] !== "",
   );
   const now = new Date().toISOString();
   const encryptionKey = configEncryptionKey(env);
@@ -89,7 +86,10 @@ export async function updateConnectorSettings(
         )
       : {};
     const storedPublic = existing?.public_config
-      ? JSON.parse(existing.public_config)
+      ? filterPublicConfig(
+          connectorId,
+          JSON.parse(existing.public_config) as Record<string, unknown>,
+        )
       : {};
     const mergedConfig: Record<string, unknown> = {
       ...storedConfig,
@@ -109,7 +109,7 @@ export async function updateConnectorSettings(
       connectorId,
       mergedConfig,
     ) as Record<string, unknown>;
-    mergedPublic = { ...storedPublic, ...publicConfig };
+    mergedPublic = {};
     encryptedConfig = { ...parsedConfig };
     for (const key of publicKeys) {
       if (parsedConfig[key] !== undefined)
@@ -134,6 +134,18 @@ export async function updateConnectorSettings(
     await clearConnectorCursor(env.DB, connectorId, now);
   }
   return { connectorId, configured: true, updatedAt: now };
+}
+
+function filterPublicConfig(
+  connectorId: ConnectorId,
+  config: Record<string, unknown>,
+) {
+  const publicKeys = connectorCatalog[connectorId].publicFields;
+  return Object.fromEntries(
+    publicKeys
+      .filter((key) => config[key] !== undefined)
+      .map((key) => [key, config[key]]),
+  );
 }
 
 function fieldsChanged(

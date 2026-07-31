@@ -13,7 +13,6 @@ export const sinopacConfigSchema = z.object({
     .regex(/^\d{6}$/)
     .optional(),
   protocol: z.literal("sinopac-mobile-app-json-v1").optional(),
-  lookbackMonths: z.coerce.number().int().min(1).max(24).optional(),
 });
 
 export type SinopacConfig = z.infer<typeof sinopacConfigSchema>;

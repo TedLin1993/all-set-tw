@@ -4,6 +4,7 @@ import puppeteer, {
   type Page,
 } from "@cloudflare/puppeteer";
 import {
+  BANK_SYNC_MONTHS,
   parseTaishinCreditCardData,
   type TaishinConfig,
 } from "@taiwan-fin-hub/connectors";
@@ -160,10 +161,7 @@ export function createTaishinConnector(
 
         let payloads;
         try {
-          payloads = await fetchCreditCardPayloads(
-            pageContext,
-            config.lookbackMonths,
-          );
+          payloads = await fetchCreditCardPayloads(pageContext);
         } catch (error) {
           if (
             !(error instanceof TaishinVerificationRequiredError) ||
@@ -173,14 +171,11 @@ export function createTaishinConnector(
           }
           pageContext = await loginWithOcr(page, config, recognizeCaptcha);
           authenticated = true;
-          payloads = await fetchCreditCardPayloads(
-            pageContext,
-            config.lookbackMonths,
-          );
+          payloads = await fetchCreditCardPayloads(pageContext);
         }
         let data;
         try {
-          data = parseTaishinCreditCardData(payloads, config.lookbackMonths);
+          data = parseTaishinCreditCardData(payloads);
         } catch (error) {
           if (
             error instanceof Error &&
@@ -288,19 +283,13 @@ async function loginWithOcr(
   );
 }
 
-async function fetchCreditCardPayloads(
-  page: BrowserPage,
-  lookbackMonths: number,
-) {
+async function fetchCreditCardPayloads(page: BrowserPage) {
   const realtime = await fetchRealtimeTransactions(page);
   let summary: unknown = { value: {}, error: null };
   try {
     summary = await postJson(page, SUMMARY_PATH, {}, OPTIONAL_API_TIMEOUT_MS);
     const billingContext = taishinBillingContext(summary);
-    const months = recentMonths(
-      Math.max(1, Math.min(6, lookbackMonths)),
-      billingContext.anchor,
-    );
+    const months = recentMonths(BANK_SYNC_MONTHS, billingContext.anchor);
     const fetchBill = ({ year, month }: (typeof months)[number]) =>
       postJson(
         page,
