@@ -8,12 +8,14 @@
     "packages/*"
   ],
   "scripts": {
+    "prebuild": "node scripts/prepare-cloudflare-build.mjs",
     "build": "npm run build --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces",
     "test:unit": "npm run test:unit -w @taiwan-fin-hub/web",
-    "test:backend": "npm test -w @taiwan-fin-hub/worker && npm test -w @taiwan-fin-hub/db && npm run test:selfcheck -w @taiwan-fin-hub/connectors",
+    "test:backend": "npm test -w @taiwan-fin-hub/worker && npm test -w @taiwan-fin-hub/db && npm run test:selfcheck -w @taiwan-fin-hub/connectors && npm run test:deploy",
+    "test:deploy": "node --test scripts/deploy-with-vapid.test.mjs",
     "test:e2e": "npm run test:e2e -w @taiwan-fin-hub/web",
     "verify:web": "npm run typecheck -w @taiwan-fin-hub/web && npm run test:unit -w @taiwan-fin-hub/web && npm run test:e2e -w @taiwan-fin-hub/web && npm run build -w @taiwan-fin-hub/web",
     "dev": "npm run dev -w @taiwan-fin-hub/worker",
@@ -47,6 +49,9 @@
       },
       "AI": {
         "description": "Cloudflare Workers AI binding，供 Gemma 4 辨識銀行登入驗證碼。"
+      },
+      "SYNC_QUEUE": {
+        "description": "串接排程同步工作；每個 connector 由獨立的 Queue consumer invocation 執行。"
       }
     }
   },

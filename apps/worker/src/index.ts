@@ -13,10 +13,13 @@ import { notificationRoutes } from "./features/notifications/route";
 import { ocrRoutes } from "./features/ocr/route";
 import { syncRoutes } from "./features/sync/route";
 import { syncScheduleRoutes } from "./features/sync/schedule-route";
-import { runSchedulerTick } from "./features/sync/scheduler";
+import {
+  consumeScheduledSyncQueue,
+  enqueueScheduledSync,
+} from "./features/sync/scheduler-queue";
 import { accessMiddleware } from "./middleware/access";
 import { connectorContextMiddleware } from "./middleware/connector-context";
-import type { Env } from "./platform/env";
+import type { Env, ScheduledSyncQueueMessage } from "./platform/env";
 import { honoFactory } from "./platform/hono";
 import { apiErrorResponse, demoReadOnlyMiddleware } from "./platform/http";
 
@@ -49,7 +52,10 @@ app.get("*", async (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {
   fetch: app.fetch,
-  async scheduled(controller, env, ctx) {
-    ctx.waitUntil(runSchedulerTick(env, controller));
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(enqueueScheduledSync(env));
   },
-} satisfies ExportedHandler<Env>;
+  async queue(batch: MessageBatch<ScheduledSyncQueueMessage>, env) {
+    await consumeScheduledSyncQueue(batch, env);
+  },
+} satisfies ExportedHandler<Env, ScheduledSyncQueueMessage>;

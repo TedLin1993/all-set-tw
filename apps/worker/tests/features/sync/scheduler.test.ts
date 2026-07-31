@@ -200,4 +200,19 @@ describe("scheduled sync rounds", () => {
       {},
     );
   });
+
+  it("reports whether a job was processed so the queue can continue", async () => {
+    const job = syncJob();
+    mocks.findOpenDefaultScheduleBatchId.mockResolvedValue("default:round");
+    mocks.findNextDefaultScheduleBatchJob.mockResolvedValue(job);
+
+    await expect(runSchedulerTick(env(), scheduledController)).resolves.toBe(
+      true,
+    );
+
+    mocks.acquireSyncJobLock.mockResolvedValue(false);
+    await expect(runSchedulerTick(env(), scheduledController)).resolves.toBe(
+      false,
+    );
+  });
 });

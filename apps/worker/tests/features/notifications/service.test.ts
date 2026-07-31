@@ -39,6 +39,7 @@ function createDb(encryptedSubscription: string) {
 function env(DB: D1Database): Env {
   return {
     DB,
+    SYNC_QUEUE: {} as Queue,
     ASSETS: {} as Fetcher,
     BROWSER: {} as Fetcher,
     AI: {} as Ai,

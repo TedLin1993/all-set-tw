@@ -49,7 +49,7 @@
 
 ## 技術架構
 
-前端使用 Svelte 5、TypeScript 與 Tailwind CSS 4；後端執行於 Cloudflare Workers，以 Hono 提供 API，並整合 D1、Access、Browser Run、Workers AI 與 Cron Triggers。專案以 npm workspaces 管理 Web、Worker、共用型別、資料庫與連接器套件。
+前端使用 Svelte 5、TypeScript 與 Tailwind CSS 4；後端執行於 Cloudflare Workers，以 Hono 提供 API，並整合 D1、Access、Browser Run、Workers AI、Cron Triggers 與 Queues。Cron 負責啟動排程輪次，每個 connector 由獨立的 Queue consumer invocation 逐一執行。專案以 npm workspaces 管理 Web、Worker、共用型別、資料庫與連接器套件。
 
 詳細設計請參考[後端架構](docs/002-backend-architecture.md)、[前端架構](docs/003-frontend-architecture.md)與[連接器開發](docs/004-connector-development.md)。
 
@@ -66,6 +66,10 @@
 點擊下方按鈕。Cloudflare 會在你的 GitHub 帳號建立新的 repository、自動建立 D1 Database，並部署至 Cloudflare Workers：
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TedLin1993/taiwan-fin-hub)
+
+Cloudflare Builds 會在 build 階段自動檢查並建立排程同步所需的 Queue；正式部署腳本也會再次檢查。既有安裝更新到使用 Queue 的版本時不需要手動建立資源。
+
+若使用 Cloudflare Workers Builds 自動產生的 API token，請在 **My Profile → API Tokens** 為該 token 增加帳戶層級的 **Queues Read** 與 **Queues Edit** 權限；這是 Cloudflare API 建立或檢查 Queue 的必要權限。
 
 首次使用時，依畫面透過 **Git account → New Github Connection → Install & Authorize** 授權 Cloudflare 存取 GitHub。
 

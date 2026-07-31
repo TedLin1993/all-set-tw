@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "node ../../scripts/prepare-cloudflare-build.mjs",
     "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
     "format": "prettier --write . --ignore-path ../../.prettierignore",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",

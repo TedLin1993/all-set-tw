@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
-const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const scriptPath = fileURLToPath(import.meta.url);
+const scriptDirectory = dirname(scriptPath);
 const repositoryDirectory = resolve(scriptDirectory, "..");
 const invocationDirectory = process.cwd();
 const wranglerScript = join(
@@ -17,6 +18,7 @@ const wranglerScript = join(
 );
 
 const deployArguments = process.argv.slice(2);
+const requiredQueueNames = ["taiwan-fin-hub-sync"];
 
 function optionArguments(argumentsToInspect, optionNames) {
   const selected = [];
@@ -150,6 +152,76 @@ function isMissingWorkerResult(result) {
       output,
     )
   );
+}
+
+function queueContextArguments() {
+  return optionArguments(deployArguments, [
+    "--cwd",
+    "--config",
+    "-c",
+    "--env",
+    "-e",
+    "--env-file",
+  ]);
+}
+
+function isMissingQueueResult(result, queueName) {
+  const output = `${result.stdout}\n${result.stderr}`;
+  return (
+    result.exitCode !== 0 &&
+    output.includes(`Queue "${queueName}" does not exist`)
+  );
+}
+
+export async function ensureQueueExists(
+  queueName,
+  contextArguments,
+  run = runWrangler,
+) {
+  const inspect = () =>
+    run(["queues", "info", queueName, ...contextArguments], {
+      captureOutput: true,
+    });
+  const existing = await inspect();
+  if (existing.exitCode === 0) {
+    console.log(`[deploy] Queue '${queueName}' already exists.`);
+    return;
+  }
+  if (!isMissingQueueResult(existing, queueName)) {
+    throw new Error(
+      `Unable to inspect Queue '${queueName}' before deployment.\n${existing.stderr.trim()}`,
+    );
+  }
+
+  console.log(`[deploy] Queue '${queueName}' was not found; creating it.`);
+  const creation = await run(
+    ["queues", "create", queueName, ...contextArguments],
+    { captureOutput: true },
+  );
+  if (creation.exitCode === 0) {
+    console.log(`[deploy] Created Queue '${queueName}'.`);
+    return;
+  }
+
+  // Another concurrent build may have created the shared Queue after our
+  // initial check. Confirm the final state before treating creation as failed.
+  const afterCreation = await inspect();
+  if (afterCreation.exitCode === 0) {
+    console.log(`[deploy] Queue '${queueName}' is now available.`);
+    return;
+  }
+
+  throw new Error(
+    `Unable to create Queue '${queueName}' before deployment.\n${creation.stderr.trim()}`,
+  );
+}
+
+export async function ensureRequiredQueues(
+  contextArguments = queueContextArguments(),
+) {
+  for (const queueName of requiredQueueNames) {
+    await ensureQueueExists(queueName, contextArguments);
+  }
 }
 
 async function existingSecretNames() {
@@ -332,6 +404,8 @@ async function deploy() {
     return;
   }
 
+  await ensureRequiredQueues();
+
   const { remaining: deployArgumentsWithoutSecretsFile, value: sourceFile } =
     removeSingleOption(deployArguments, "--secrets-file");
   const effectiveDirectory = deploymentDirectory();
@@ -384,4 +458,6 @@ async function deploy() {
   }
 }
 
-await deploy();
+if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
+  await deploy();
+}
