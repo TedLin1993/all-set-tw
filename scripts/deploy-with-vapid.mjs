@@ -216,8 +216,9 @@ export async function ensureQueueExists(
   );
 }
 
-async function ensureRequiredQueues() {
-  const contextArguments = queueContextArguments();
+export async function ensureRequiredQueues(
+  contextArguments = queueContextArguments(),
+) {
   for (const queueName of requiredQueueNames) {
     await ensureQueueExists(queueName, contextArguments);
   }

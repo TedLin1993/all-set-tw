@@ -67,7 +67,9 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TedLin1993/taiwan-fin-hub)
 
-部署腳本會自動檢查並建立排程同步所需的 Cloudflare Queue；既有安裝更新到使用 Queue 的版本時不需要手動建立資源。
+Cloudflare Builds 會在 build 階段自動檢查並建立排程同步所需的 Queue；正式部署腳本也會再次檢查。既有安裝更新到使用 Queue 的版本時不需要手動建立資源。
+
+若使用 Cloudflare Workers Builds 自動產生的 API token，請在 **My Profile → API Tokens** 為該 token 增加帳戶層級的 **Queues Read** 與 **Queues Edit** 權限；這是 Cloudflare API 建立或檢查 Queue 的必要權限。
 
 首次使用時，依畫面透過 **Git account → New Github Connection → Install & Authorize** 授權 Cloudflare 存取 GitHub。
 

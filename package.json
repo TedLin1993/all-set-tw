@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "prebuild": "node scripts/prepare-cloudflare-build.mjs",
     "build": "npm run build --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

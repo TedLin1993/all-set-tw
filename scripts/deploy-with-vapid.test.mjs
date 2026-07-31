@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ensureQueueExists } from "./deploy-with-vapid.mjs";
+import { isWorkersBuild } from "./prepare-cloudflare-build.mjs";
 
 const queueName = "taiwan-fin-hub-sync";
 const missingQueue = {
@@ -8,6 +9,11 @@ const missingQueue = {
   stdout: "",
   stderr: `Queue "${queueName}" does not exist.`,
 };
+
+test("only prepares resources inside Cloudflare Workers Builds", () => {
+  assert.equal(isWorkersBuild({ WORKERS_CI: "1" }), true);
+  assert.equal(isWorkersBuild({ WORKERS_CI: undefined }), false);
+});
 
 function runner(results, calls) {
   return async (argumentsToRun, options) => {
