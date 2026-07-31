@@ -4,6 +4,8 @@ POLICY_AUD=replace-with-cloudflare-access-application-audience-tag
 # Optional: comma- or whitespace-separated additional audience tags.
 POLICY_AUDS=
 DEMO_MODE=false
+# Only bypass Cloudflare Access for localhost/127.0.0.1 during development.
+LOCAL_DEV_MODE=true
 # Production deploys generate and persist the VAPID key pair automatically.
 # For local push testing, uncomment and provide a matching key pair.
 # VAPID_PUBLIC_KEY=replace-with-web-push-public-key
