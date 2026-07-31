@@ -47,6 +47,9 @@
       },
       "AI": {
         "description": "Cloudflare Workers AI binding，供 Gemma 4 辨識銀行登入驗證碼。"
+      },
+      "SYNC_QUEUE": {
+        "description": "串接排程同步工作；每個 connector 由獨立的 Queue consumer invocation 執行。"
       }
     }
   },

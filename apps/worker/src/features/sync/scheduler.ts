@@ -35,7 +35,7 @@ import {
 export async function runSchedulerTick(
   env: Env,
   controller: ScheduledController,
-) {
+): Promise<boolean> {
   const pendingSummary = await finalizeOpenDefaultScheduleBatch(env.DB);
   if (pendingSummary) {
     await safelySendScheduledSyncSummary(env, pendingSummary);
@@ -45,8 +45,7 @@ export async function runSchedulerTick(
   if (openBatchId) {
     const batchJob = await findNextDefaultScheduleBatchJob(env.DB, openBatchId);
     if (batchJob) {
-      await runDefaultScheduleBatchJob(env, controller, openBatchId, batchJob);
-      return;
+      return runDefaultScheduleBatchJob(env, controller, openBatchId, batchJob);
     }
 
     // A locked batch member should not prevent an unrelated custom schedule
@@ -56,23 +55,23 @@ export async function runSchedulerTick(
       new Date(),
       "custom",
     );
-    if (customDue) await runCustomScheduleJob(env, controller, customDue);
-    return;
+    if (customDue) return runCustomScheduleJob(env, controller, customDue);
+    return false;
   }
 
   const due = await findNextDueSyncJob<ConnectorId>(env.DB);
-  if (!due) return;
+  if (!due) return false;
   if (due.schedule_mode === "custom") {
-    await runCustomScheduleJob(env, controller, due);
-    return;
+    return runCustomScheduleJob(env, controller, due);
   }
 
   const batchId = await ensureDefaultScheduleBatch(env.DB);
-  if (!batchId) return;
+  if (!batchId) return false;
   const batchJob = await findNextDefaultScheduleBatchJob(env.DB, batchId);
   if (batchJob) {
-    await runDefaultScheduleBatchJob(env, controller, batchId, batchJob);
+    return runDefaultScheduleBatchJob(env, controller, batchId, batchJob);
   }
+  return false;
 }
 
 async function runCustomScheduleJob(
@@ -82,6 +81,7 @@ async function runCustomScheduleJob(
 ) {
   const notification = await runScheduledJob(env, controller, job);
   if (notification) await safelySendSyncNotification(env, notification);
+  return notification !== undefined;
 }
 
 async function runDefaultScheduleBatchJob(
@@ -107,10 +107,11 @@ async function runDefaultScheduleBatchJob(
       }
     },
   );
-  if (!notification) return;
+  if (!notification) return false;
 
   const summary = await claimCompletedDefaultScheduleBatch(env.DB, batchId);
   if (summary) await safelySendScheduledSyncSummary(env, summary);
+  return true;
 }
 
 async function runScheduledJob(

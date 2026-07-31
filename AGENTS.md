@@ -9,7 +9,8 @@
 - 身分驗證使用 Cloudflare Access，由 Worker 驗證 Access JWT。
 - 需要瀏覽器操作的銀行連接器使用 Cloudflare Browser Rendering 與 Puppeteer。
 - 驗證碼辨識使用 Cloudflare Workers AI。
-- 排程同步使用 Workers Cron Triggers 與 D1 sync jobs。
+- 排程同步使用 Workers Cron Triggers 啟動 Cloudflare Queue，並以 D1 sync jobs
+  逐一執行 connector；每個 connector 使用獨立的 Queue consumer invocation。
 
 ## 文字與 Review 規範
 

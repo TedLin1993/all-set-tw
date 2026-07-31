@@ -7,6 +7,16 @@ assets = { directory = "../web/dist", binding = "ASSETS" }
 browser = { binding = "BROWSER" }
 ai = { binding = "AI", remote = true }
 
+[[queues.producers]]
+binding = "SYNC_QUEUE"
+queue = "taiwan-fin-hub-sync"
+
+[[queues.consumers]]
+queue = "taiwan-fin-hub-sync"
+max_batch_size = 1
+max_batch_timeout = 1
+max_concurrency = 1
+
 [[d1_databases]]
 binding = "DB"
 database_name = "taiwan-fin-hub"

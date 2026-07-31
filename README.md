@@ -49,7 +49,7 @@
 
 ## 技術架構
 
-前端使用 Svelte 5、TypeScript 與 Tailwind CSS 4；後端執行於 Cloudflare Workers，以 Hono 提供 API，並整合 D1、Access、Browser Run、Workers AI 與 Cron Triggers。專案以 npm workspaces 管理 Web、Worker、共用型別、資料庫與連接器套件。
+前端使用 Svelte 5、TypeScript 與 Tailwind CSS 4；後端執行於 Cloudflare Workers，以 Hono 提供 API，並整合 D1、Access、Browser Run、Workers AI、Cron Triggers 與 Queues。Cron 負責啟動排程輪次，每個 connector 由獨立的 Queue consumer invocation 逐一執行。專案以 npm workspaces 管理 Web、Worker、共用型別、資料庫與連接器套件。
 
 詳細設計請參考[後端架構](docs/002-backend-architecture.md)、[前端架構](docs/003-frontend-architecture.md)與[連接器開發](docs/004-connector-development.md)。
 

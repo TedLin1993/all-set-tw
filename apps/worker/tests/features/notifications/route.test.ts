@@ -32,6 +32,7 @@ function createDb() {
 function env(): Env {
   return {
     DB: createDb(),
+    SYNC_QUEUE: {} as Queue,
     ASSETS: {} as Fetcher,
     BROWSER: {} as Fetcher,
     AI: {} as Ai,

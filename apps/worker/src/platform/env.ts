@@ -1,7 +1,12 @@
 import type { ConnectorId } from "@taiwan-fin-hub/core";
 
+export type ScheduledSyncQueueMessage = {
+  type: "run-next-scheduled-sync";
+};
+
 export interface Env {
   DB: D1Database;
+  SYNC_QUEUE: Queue<ScheduledSyncQueueMessage>;
   ASSETS: Fetcher;
   BROWSER: Fetcher;
   AI: Ai;

@@ -1,6 +1,6 @@
 # 後端架構與維護約定
 
-後端執行於 Cloudflare Workers，使用 Hono 提供 API，並透過 Cloudflare D1、Browser Rendering、Workers AI 與 Cron Triggers 完成資料儲存、銀行登入、驗證碼辨識及排程同步。
+後端執行於 Cloudflare Workers，使用 Hono 提供 API，並透過 Cloudflare D1、Browser Rendering、Workers AI、Cron Triggers 與 Queues 完成資料儲存、銀行登入、驗證碼辨識及排程同步。
 
 目前後端採用 **feature-oriented Vertical Slice Architecture**。程式依業務功能分組，而不是將所有 Controller、Service、Repository 分別集中在全域目錄。
 
@@ -414,7 +414,12 @@ sequenceDiagram
 - 工作完成或失敗後必須在 `finally` 釋放。
 - Lock acquisition 失敗時回傳或記錄「已有同步執行中」，不得平行執行同一 connector。
 
-Cron trigger 只負責喚醒 scheduler。是否到期由 D1 sync job 狀態判斷。
+Cron trigger 只負責向 `SYNC_QUEUE` 送出 scheduler 啟動訊息。Queue consumer
+每次 invocation 最多處理一個 connector，完成後若確實處理了工作便立即送出下一個訊息；
+下一次 consumer invocation 因此不必等待下一個 10 分鐘 Cron，且擁有獨立的 Worker
+CPU、subrequest 與執行時間額度。Queue consumer 使用 batch size 1 與 concurrency 1，
+維持 connector 逐一執行。是否到期仍由 D1 sync job 狀態判斷；沒有可執行工作時
+consumer 不再送出訊息，結束本次串接。
 
 ## 同步結果通知
 
@@ -427,9 +432,9 @@ Cron trigger 只負責喚醒 scheduler。是否到期由 D1 sync job 狀態判�
 
 排程同步更新 `sync_jobs` 後才呼叫通知 service。通知是 best-effort；發送失敗只記錄 log，不得將成功同步改成失敗。瀏覽器 subscription payload 使用既有設定加密金鑰保存。
 
-使用預設排程（`schedule_mode = inherit`）的工作採「一輪一批次」。沒有進行中的批次且至少一個繼承工作到期時，scheduler 會以單一 D1 batch transaction 建立 header，並固定快照當下所有啟用且不需使用者處理的繼承工作。批次進行期間，每次 Cron 只從尚未完成的固定成員中挑選一個目前未鎖定且不需使用者處理的工作；已完成的成員不會在同一輪再次執行，新啟用的工作則等下一輪。排程結果會在釋放 connector lock 前直接寫入成員，避免重疊 Cron 遺漏結果；停用、改為自訂排程或進入 `needs_user_action` 的非執行中成員會被略過。只有所有固定成員都有結果或被略過時，scheduler 才以條件式更新取得一次推播發送權並關閉批次，下一輪才能建立。建立新輪次時會清理超過 30 天的已結案批次。手動同步不完成或改寫批次成員，自訂排程維持逐工作推播。
+使用預設排程（`schedule_mode = inherit`）的工作採「一輪一批次」。沒有進行中的批次且至少一個繼承工作到期時，scheduler 會以單一 D1 batch transaction 建立 header，並固定快照當下所有啟用且不需使用者處理的繼承工作。批次進行期間，每次 Queue consumer invocation 只從尚未完成的固定成員中挑選一個目前未鎖定且不需使用者處理的工作；已完成的成員不會在同一輪再次執行，新啟用的工作則等下一輪。排程結果會在釋放 connector lock 前直接寫入成員，避免重複 Queue 訊息遺漏結果；停用、改為自訂排程或進入 `needs_user_action` 的非執行中成員會被略過。只有所有固定成員都有結果或被略過時，scheduler 才以條件式更新取得一次推播發送權並關閉批次，下一輪才能建立。建立新輪次時會清理超過 30 天的已結案批次。手動同步不完成或改寫批次成員，自訂排程維持逐工作推播。
 
-每次 scheduler tick：
+每次 Queue scheduler invocation：
 
 - 最多處理 1 個到期工作，讓每個 connector 使用獨立的 Worker invocation 與 subrequest 額度。
 - 每個工作使用獨立 run ID。
