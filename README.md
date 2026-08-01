@@ -131,18 +131,43 @@ Cloudflare Access 可能預設使用 Email OTP，登入狀態通常會在 24 小
 
 ## 自動更新
 
-一鍵部署後，repository 內建的 `Sync Latest Version` workflow 會每天自動同步本專案最新版，無需手動更新。
+Cloudflare 的 Deploy to Cloudflare 流程目前不會將 `.github/workflows` 複製到新 repository，因此首次部署可以正常使用，但需要完成下方的一次性設定才會啟用版本更新。
 
-每天台灣時間 **04:15**，workflow 會：
+### 一次性啟用更新功能
+
+不需要修改程式碼，可直接在 GitHub 網頁完成：
+
+1. 在你的部署 repository 開啟 [`deploy/github/sync-upstream.yml`](deploy/github/sync-upstream.yml)，點擊 **Raw** 並複製完整內容
+2. 回到 repository 首頁，選擇 **Add file → Create new file**
+3. 將檔名設為 `.github/workflows/sync-upstream.yml`，貼上剛才複製的內容並 commit 至 `main`
+4. 前往 **Settings → Actions → General → Workflow permissions**，確認已允許 GitHub Actions 讀寫 repository 內容
+
+若已將 repository clone 至本機，也可以執行：
+
+```bash
+mkdir -p .github/workflows
+cp deploy/github/sync-upstream.yml .github/workflows/sync-upstream.yml
+git add .github/workflows/sync-upstream.yml
+git commit -m "啟用版本自動更新"
+git push
+```
+
+完成一次性設定後，可以前往部署 repository 的 **Actions → Sync Latest Version → Run workflow**，點擊 **Run workflow** 立即更新。workflow 也會在每天台灣時間 **04:15** 自動執行。
+
+每次執行時，workflow 會：
 
 1. 取得 `TedLin1993/taiwan-fin-hub` 的最新 `main`
-2. 以一般 Git merge 合併至部署 repository 的 `main`
+2. 以前次同步版本為基準進行安全三方合併
 3. 有新版本時將更新推送至部署 repository
 4. 由 Cloudflare Workers Builds 自動重新部署
 
-若要立即更新，前往部署 repository 的 **Actions → Sync Latest Version → Run workflow** 手動執行即可。
+Cloudflare 建立的 repository 與本專案可能沒有共同 Git 歷史。首次同步遇到此情況時，workflow 只會在下列檢查都通過後接軌：初始檔案能對應本專案的某個上游版本，而且部署後除了 `.github/workflows` 以外沒有自行修改。同步前會先建立 `backup-before-first-upstream-sync` branch，且已存在時不會覆寫。
 
-自動更新不會使用 force push。若你修改過程式碼並與上游發生衝突，workflow 會停止且不會覆蓋目前版本；請從 Actions 執行紀錄查看衝突。若 workflow 無法推送，請至 **Settings → Actions → General → Workflow permissions** 確認已允許讀寫 repository 內容。
+每次同步會在 commit message 記錄對應的上游版本，後續以該版本、部署 repository 目前內容與最新版上游進行三方合併。同步 commit 只接在部署 repository 自己的歷史後方，不會將上游 commit history 當成 parent，也不會使用 force push。若你修改過程式碼並與上游發生衝突，workflow 會在修改 working tree 前停止且不會推送；請從 Actions 執行紀錄查看衝突並手動處理。
+
+版本同步會保留部署 repository 目前安裝的 `.github/workflows`，不會自動覆蓋 workflow 本身；更新流程有修正版時，請依照下方說明手動替換。
+
+若 Actions 顯示 `fatal: refusing to merge unrelated histories`，代表 repository 仍在使用舊版 workflow。請依照上方步驟，以最新的 [`deploy/github/sync-upstream.yml`](deploy/github/sync-upstream.yml) 內容取代 `.github/workflows/sync-upstream.yml` 後再執行。
 
 ---
 
