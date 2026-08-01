@@ -1,4 +1,4 @@
-import { render } from "@testing-library/svelte";
+import { fireEvent, render } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
 import { connectorDefinitions } from "@/data/connectors/definitions";
 import type { ApiClient } from "@/shared/api/client";
@@ -7,6 +7,7 @@ import MobileMore from "./MobileMore.svelte";
 describe("MobileMore", () => {
   it("shows unconfigured connectors without counting them as healthy or actionable", () => {
     const api = {} as ApiClient;
+    const openConnector = vi.fn();
     const { getAllByText, getByText } = render(MobileMore, {
       props: {
         api,
@@ -15,6 +16,7 @@ describe("MobileMore", () => {
         rules: [],
         bank: { accounts: [], transactions: [] },
         navigate: vi.fn(),
+        openConnector,
       },
     });
 
@@ -26,5 +28,24 @@ describe("MobileMore", () => {
     expect(getByText("同步與通知")).toBeInTheDocument();
     expect(getByText("中國信託銀行")).toBeInTheDocument();
     expect(getAllByText("未設定")).toHaveLength(connectorCount);
+  });
+
+  it("opens the selected connector from the source summary", async () => {
+    const openConnector = vi.fn();
+    const { getByRole } = render(MobileMore, {
+      props: {
+        api: {} as ApiClient,
+        demoMode: false,
+        jobs: [],
+        rules: [],
+        bank: { accounts: [], transactions: [] },
+        navigate: vi.fn(),
+        openConnector,
+      },
+    });
+
+    await fireEvent.click(getByRole("button", { name: "管理電子發票" }));
+
+    expect(openConnector).toHaveBeenCalledWith("einvoice");
   });
 });

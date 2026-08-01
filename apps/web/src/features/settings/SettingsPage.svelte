@@ -129,6 +129,11 @@
     selectedConnector = selectedConnector === id ? null : id;
   }
 
+  function openConnector(id: ConnectorId) {
+    selectedConnector = id;
+    navigate("data-sources");
+  }
+
   function isActiveTab(tabView: (typeof settingTabs)[number]["view"]) {
     return tabView === "settings"
       ? !mobileView || mobileView === "more"
@@ -158,6 +163,7 @@
       bank={$bank.data ?? { accounts: [], transactions: [] }}
       {navigate}
       {api}
+      {openConnector}
     />
   {:else if mobileView === "data-sources"}
     <div class="grid min-w-0 gap-4">
@@ -520,7 +526,7 @@
                 jobs={$jobs.data ?? []}
                 compact
                 selected={false}
-                onConfigure={() => navigate("data-sources")}
+                onConfigure={() => openConnector(source.id)}
               />
             {/each}
           </div>
