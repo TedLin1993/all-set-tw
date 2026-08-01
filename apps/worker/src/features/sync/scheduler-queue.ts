@@ -5,8 +5,15 @@ const queueController = {
   cron: "queue:scheduled-sync",
 } as ScheduledController;
 
-export async function enqueueScheduledSync(env: Env) {
-  await env.SYNC_QUEUE.send({ type: "run-next-scheduled-sync" });
+export const SCHEDULED_SYNC_CHAIN_DELAY_SECONDS = 20;
+
+export async function enqueueScheduledSync(env: Env, delaySeconds = 0) {
+  const message = { type: "run-next-scheduled-sync" } as const;
+  if (delaySeconds > 0) {
+    await env.SYNC_QUEUE.send(message, { delaySeconds });
+    return;
+  }
+  await env.SYNC_QUEUE.send(message);
 }
 
 export async function consumeScheduledSyncQueue(
@@ -26,7 +33,9 @@ export async function consumeScheduledSyncQueue(
     }
 
     const processed = await runSchedulerTick(env, queueController);
-    if (processed) await enqueueScheduledSync(env);
+    if (processed) {
+      await enqueueScheduledSync(env, SCHEDULED_SYNC_CHAIN_DELAY_SECONDS);
+    }
     message.ack();
   }
 }
