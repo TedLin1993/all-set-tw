@@ -63,6 +63,7 @@
     type ActivityFlowFilter,
     type ActivitySourceFilter,
   } from "./model/filter";
+  import { countPendingActivityItems } from "./model/pending";
   import {
     buildActivityCategorySlices,
     activityCashAmountTwd,
@@ -276,11 +277,7 @@
   const currentMonth = new Date().toISOString().slice(0, 7);
   const selectedMonthLabel = $derived(`${Number(selectedMonth.slice(5))} 月`);
   const pendingCount = $derived(
-    rawItems.filter(
-      (item) =>
-        (item.source === "bank" || item.source === "card") &&
-        (item.status === "pending" || item.categoryId === "other"),
-    ).length,
+    countPendingActivityItems(rawItems, selectedMonth),
   );
   const cashFlow = $derived(
     cashFlowMonths.map((month) => {
