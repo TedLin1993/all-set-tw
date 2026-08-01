@@ -54,6 +54,7 @@ export async function getSyncJobs(db: D1Database) {
   const now = new Date();
   return rows.map((row) => ({
     ...row,
+    configured: Boolean(row.configured),
     enabled: Boolean(row.enabled),
     running: Boolean(row.lockedUntil && new Date(row.lockedUntil) > now),
   }));

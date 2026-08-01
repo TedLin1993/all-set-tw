@@ -13,6 +13,7 @@ type BatchMemberRow = {
   last_status: SyncNotificationStatus | null;
   locked_until: string | null;
   lock_trigger: "manual" | "scheduled" | null;
+  configured_connector_id: string | null;
 };
 
 type BatchResultRow = {
@@ -33,6 +34,11 @@ export async function ensureDefaultScheduleBatch(db: D1Database) {
       `SELECT id, connector_id
        FROM sync_jobs
        WHERE enabled = 1
+         AND EXISTS (
+           SELECT 1
+           FROM connector_settings
+           WHERE connector_settings.connector_id = sync_jobs.connector_id
+         )
          AND schedule_mode = 'inherit'
          AND (last_status IS NULL OR last_status != 'needs_user_action')
        ORDER BY id ASC`,
@@ -95,6 +101,11 @@ export async function findNextDefaultScheduleBatchJob(
          WHERE r.batch_id = ?
            AND r.completed_at IS NULL
            AND j.enabled = 1
+           AND EXISTS (
+             SELECT 1
+             FROM connector_settings
+             WHERE connector_settings.connector_id = j.connector_id
+           )
            AND j.schedule_mode = 'inherit'
            AND (j.last_status IS NULL OR j.last_status != 'needs_user_action')
            AND (j.locked_until IS NULL OR j.locked_until < ?)
@@ -192,9 +203,12 @@ async function reconcileDefaultScheduleBatchMembers(
          j.schedule_mode,
          j.last_status,
          j.locked_until,
-         j.lock_trigger
+         j.lock_trigger,
+         connector_settings.connector_id AS configured_connector_id
        FROM scheduled_sync_batch_results r
        LEFT JOIN sync_jobs j ON j.id = r.job_id
+       LEFT JOIN connector_settings
+         ON connector_settings.connector_id = j.connector_id
        WHERE r.batch_id = ? AND r.completed_at IS NULL`,
     )
     .bind(batchId)
@@ -206,7 +220,8 @@ async function reconcileDefaultScheduleBatchMembers(
       row.enabled === null ||
       row.enabled !== 1 ||
       row.schedule_mode === null ||
-      row.schedule_mode !== "inherit";
+      row.schedule_mode !== "inherit" ||
+      row.configured_connector_id === null;
     const needsUserAction = row.last_status === "needs_user_action";
     const scheduledRunIsActive =
       row.lock_trigger === "scheduled" &&

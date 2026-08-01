@@ -94,6 +94,11 @@ export async function listSyncJobs(db: D1Database) {
       `SELECT
        id,
        connector_id AS connectorId,
+       EXISTS (
+         SELECT 1
+         FROM connector_settings
+         WHERE connector_settings.connector_id = sync_jobs.connector_id
+       ) AS configured,
        scope,
        enabled,
        interval_minutes AS intervalMinutes,
@@ -116,6 +121,7 @@ export async function listSyncJobs(db: D1Database) {
     .all<{
       id: string;
       connectorId: ConnectorId;
+      configured: number;
       scope: string;
       enabled: number;
       intervalMinutes: number;

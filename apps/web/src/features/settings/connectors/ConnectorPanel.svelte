@@ -130,6 +130,7 @@
       qc.invalidateQueries({
         queryKey: queryKeys.connectorSettings(connectorId),
       });
+      qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
     },
     onError: (e) => (error = e instanceof Error ? e.message : "儲存失敗"),
   });

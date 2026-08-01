@@ -20,6 +20,7 @@ describe("sync job user-action pause", () => {
 
     await findNextDueSyncJob(db, new Date("2026-07-15T00:00:00.000Z"));
     expect(sql).toContain("last_status != 'needs_user_action'");
+    expect(sql).toContain("FROM connector_settings");
   });
 
   it("records required user action without disabling the user's schedule", async () => {

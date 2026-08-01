@@ -19,6 +19,10 @@
   } from "@/data/assets/queries";
   import { bankQuery, bankRangeQuery } from "@/data/bank/queries";
   import { syncJobsQuery } from "@/data/connectors/queries";
+  import {
+    getActionableSyncJobs,
+    getConfiguredSyncJobs,
+  } from "@/data/connectors/sync-status";
   import { investmentsQuery } from "@/data/investments/queries";
   import {
     invoiceTransactionMappingsQuery,
@@ -139,14 +143,10 @@
   const monthlyIncome = $derived(monthlyTotals.income);
   const monthlyExpense = $derived(monthlyTotals.expense);
   const monthlyNet = $derived(monthlyIncome - monthlyExpense);
-  const unhealthy = $derived(
-    ($jobs.data ?? []).filter(
-      (job) =>
-        job.lastStatus === "failed" || job.lastStatus === "needs_user_action",
-    ),
-  );
+  const unhealthy = $derived(getActionableSyncJobs($jobs.data ?? []));
+  const configuredSyncJobs = $derived(getConfiguredSyncJobs($jobs.data ?? []));
   const staleJobs = $derived(
-    ($jobs.data ?? []).filter(
+    configuredSyncJobs.filter(
       (job) =>
         job.enabled &&
         !job.running &&
@@ -156,7 +156,7 @@
             48 * 60 * 60 * 1000),
     ),
   );
-  const sourceCount = $derived(Math.max(($jobs.data ?? []).length, 4));
+  const sourceCount = $derived(configuredSyncJobs.length);
   const healthyCount = $derived(Math.max(sourceCount - unhealthy.length, 0));
   const insights = $derived.by(() => {
     const items: OverviewInsight[] = [];

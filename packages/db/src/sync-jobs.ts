@@ -80,6 +80,11 @@ export async function findNextDueSyncJob<TConnectorId extends string>(
         `SELECT *
      FROM sync_jobs
      WHERE enabled = 1
+       AND EXISTS (
+         SELECT 1
+         FROM connector_settings
+         WHERE connector_settings.connector_id = sync_jobs.connector_id
+       )
        AND (last_status IS NULL OR last_status != 'needs_user_action')
        AND next_run_at <= ?
        AND (locked_until IS NULL OR locked_until < ?)
