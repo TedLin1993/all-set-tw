@@ -11,13 +11,14 @@
     getActionableSyncJobs,
     getSyncSourceStatus,
   } from "@/data/connectors/sync-status";
-  import type { SyncJobRow } from "@/data/connectors/types";
+  import type { ConnectorId, SyncJobRow } from "@/data/connectors/types";
   let {
     demoMode,
     jobs,
     rules,
     bank,
     navigate,
+    openConnector,
   }: {
     api: ApiClient;
     demoMode: boolean;
@@ -25,6 +26,7 @@
     rules: ClassificationRuleRow[];
     bank: BankData;
     navigate: (view: View) => void;
+    openConnector: (id: ConnectorId) => void;
   } = $props();
   const sources = connectorDefinitions;
   const configuredSources = $derived(
@@ -122,8 +124,11 @@
         {#each sources as source (source.id)}{@const job = jobs.find(
             (item) => item.connectorId === source.id,
           )}
-          <div
-            class="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+          <button
+            type="button"
+            class="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm transition hover:bg-paper focus-visible:outline-2 focus-visible:outline-steel"
+            aria-label={`管理${source.title}`}
+            onclick={() => openConnector(source.id)}
           >
             <span class="font-semibold">{source.title}</span><span
               class={getSyncSourceStatus(job) === "needs_action"
@@ -137,7 +142,7 @@
                     ? "尚未同步"
                     : "未設定"}</span
             >
-          </div>{/each}
+          </button>{/each}
       </div></Card
     >
   </section>
