@@ -16,6 +16,7 @@ export interface ConnectorSettings {
 export interface SyncJobRow {
   id: string;
   connectorId: ConnectorId;
+  configured: boolean;
   scope: string;
   enabled: boolean;
   intervalMinutes: number;

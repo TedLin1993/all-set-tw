@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import type { ConnectorId } from "@taiwan-fin-hub/core";
-import type { SyncJobRow } from "@taiwan-fin-hub/db";
+import { findNextDueSyncJob, type SyncJobRow } from "@taiwan-fin-hub/db";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   claimCompletedDefaultScheduleBatch,
@@ -11,6 +11,7 @@ import {
   findOpenDefaultScheduleBatchId,
   recordDefaultScheduleBatchResult,
 } from "../../../src/features/sync/notification-batch-repository";
+import { getSyncJobs } from "../../../src/features/sync/schedule-service";
 
 class SqliteStatement {
   private values: unknown[] = [];
@@ -54,7 +55,9 @@ class SqliteStatement {
   }
 }
 
-function createDb(options: { failBatchAt?: number } = {}) {
+function createDb(
+  options: { failBatchAt?: number; skipMigration?: string } = {},
+) {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON");
   const migrationsDirectory = fileURLToPath(
@@ -62,6 +65,7 @@ function createDb(options: { failBatchAt?: number } = {}) {
   );
   for (const file of readdirSync(migrationsDirectory)
     .filter((name) => name.endsWith(".sql"))
+    .filter((name) => name !== options.skipMigration)
     .sort()) {
     database.exec(readFileSync(`${migrationsDirectory}/${file}`, "utf8"));
   }
@@ -108,6 +112,22 @@ function enableInheritedJobs(
     .run(nextRunAt);
 }
 
+function configureJobs(
+  database: DatabaseSync,
+  jobs: SyncJobRow<ConnectorId>[],
+) {
+  const now = "2026-07-23T00:00:00.000Z";
+  for (const job of jobs) {
+    database
+      .prepare(
+        `INSERT INTO connector_settings (
+           id, connector_id, encrypted_config, created_at, updated_at
+         ) VALUES (?, ?, '{}', ?, ?)`,
+      )
+      .run(`${job.connector_id}:settings`, job.connector_id, now, now);
+  }
+}
+
 function listJobs(database: DatabaseSync) {
   return database
     .prepare("SELECT * FROM sync_jobs ORDER BY id")
@@ -140,10 +160,105 @@ afterEach(() => {
 });
 
 describe("default schedule notification rounds", () => {
+  it("leaves every fresh-install connector unconfigured, disabled, and on the default schedule", async () => {
+    const { database, db } = createDb();
+    databases.push(database);
+
+    expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM sync_jobs
+           WHERE enabled != 0
+              OR last_status IS NOT NULL
+              OR last_error IS NOT NULL`,
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM sync_jobs
+           WHERE schedule_mode != 'inherit'
+              OR preferred_time != '06:00'
+              OR preferred_weekday != 1
+              OR interval_minutes != 1440`,
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    expect((await getSyncJobs(db)).every((job) => !job.configured)).toBe(true);
+  });
+
+  it("restores unconfigured jobs to an existing user's default schedule", () => {
+    const { database } = createDb({
+      skipMigration: "0023_disable_unconfigured_sync_jobs.sql",
+    });
+    databases.push(database);
+    database
+      .prepare(
+        `UPDATE sync_schedule_settings
+         SET interval_minutes = 10080, preferred_time = '20:30', preferred_weekday = 5
+         WHERE id = 'default'`,
+      )
+      .run();
+    const migrationsDirectory = fileURLToPath(
+      new URL("../../../../../packages/db/migrations/", import.meta.url),
+    );
+    database.exec(
+      readFileSync(
+        `${migrationsDirectory}/0023_disable_unconfigured_sync_jobs.sql`,
+        "utf8",
+      ),
+    );
+
+    expect(
+      database
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM sync_jobs
+           WHERE schedule_mode != 'inherit'
+              OR interval_minutes != 10080
+              OR preferred_time != '20:30'
+              OR preferred_weekday != 5`,
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("does not select an enabled unconfigured job for a due run or default batch", async () => {
+    const { database, db } = createDb();
+    databases.push(database);
+    database
+      .prepare(
+        `UPDATE sync_jobs
+         SET enabled = 1, next_run_at = '2020-01-01T00:00:00.000Z'
+         WHERE id = 'esun:all'`,
+      )
+      .run();
+
+    await expect(
+      findNextDueSyncJob(db, new Date("2026-08-01T00:00:00.000Z")),
+    ).resolves.toBeNull();
+    await expect(ensureDefaultScheduleBatch(db)).resolves.toBeNull();
+
+    configureJobs(database, [
+      database
+        .prepare("SELECT * FROM sync_jobs WHERE id = 'esun:all'")
+        .get() as unknown as SyncJobRow<ConnectorId>,
+    ]);
+    const jobs = await getSyncJobs(db);
+    expect(jobs.find((job) => job.id === "esun:all")?.configured).toBe(true);
+    await expect(
+      findNextDueSyncJob(db, new Date("2026-08-01T00:00:00.000Z")),
+    ).resolves.toMatchObject({ id: "esun:all" });
+  });
+
   it("creates the round header and fixed membership atomically", async () => {
     const { database, db } = createDb({ failBatchAt: 1 });
     databases.push(database);
     enableInheritedJobs(database);
+    configureJobs(database, listJobs(database));
 
     await expect(ensureDefaultScheduleBatch(db)).rejects.toThrow(
       "simulated D1 batch failure",
@@ -164,6 +279,7 @@ describe("default schedule notification rounds", () => {
     const { database, db } = createDb();
     databases.push(database);
     enableInheritedJobs(database);
+    configureJobs(database, listJobs(database));
     const jobs = listJobs(database);
     const batchId = await createBatch(db);
 
@@ -193,6 +309,7 @@ describe("default schedule notification rounds", () => {
     const { database, db } = createDb();
     databases.push(database);
     enableInheritedJobs(database);
+    configureJobs(database, listJobs(database));
     const jobs = listJobs(database);
     const batchId = await createBatch(db);
     const first = await findNextDefaultScheduleBatchJob(db, batchId);
@@ -212,6 +329,7 @@ describe("default schedule notification rounds", () => {
     const { database, db } = createDb();
     databases.push(database);
     enableInheritedJobs(database);
+    configureJobs(database, listJobs(database));
     const jobs = listJobs(database);
     const addedLater = jobs.at(-1)!;
     database
@@ -241,6 +359,7 @@ describe("default schedule notification rounds", () => {
     const { database, db } = createDb();
     databases.push(database);
     enableInheritedJobs(database);
+    configureJobs(database, listJobs(database));
     const jobs = listJobs(database);
     const pending = jobs[0]!;
     const batchId = await createBatch(db);
@@ -270,6 +389,7 @@ describe("default schedule notification rounds", () => {
     const { database, db } = createDb();
     databases.push(database);
     enableInheritedJobs(database);
+    configureJobs(database, listJobs(database));
     const jobs = listJobs(database);
     const paused = jobs[0]!;
     const batchId = await createBatch(db);
@@ -294,6 +414,7 @@ describe("default schedule notification rounds", () => {
     const { database, db } = createDb();
     databases.push(database);
     enableInheritedJobs(database);
+    configureJobs(database, listJobs(database));
     const jobs = listJobs(database);
     const skipped = jobs[0]!;
     const batchId = await createBatch(db);
@@ -317,6 +438,7 @@ describe("default schedule notification rounds", () => {
     const { database, db } = createDb();
     databases.push(database);
     enableInheritedJobs(database);
+    configureJobs(database, listJobs(database));
     const jobs = listJobs(database);
     const running = jobs[0]!;
     const batchId = await createBatch(db);
@@ -350,6 +472,7 @@ describe("default schedule notification rounds", () => {
     const { database, db } = createDb();
     databases.push(database);
     enableInheritedJobs(database);
+    configureJobs(database, listJobs(database));
     const jobs = listJobs(database);
     const firstBatchId = await createBatch(db);
     await expect(ensureDefaultScheduleBatch(db)).resolves.toBe(firstBatchId);
@@ -368,6 +491,7 @@ describe("default schedule notification rounds", () => {
     const { database, db } = createDb();
     databases.push(database);
     enableInheritedJobs(database);
+    configureJobs(database, listJobs(database));
     const jobs = listJobs(database);
     const oldBatchId = await createBatch(db);
     for (const job of jobs) await completeMember(db, oldBatchId, job);

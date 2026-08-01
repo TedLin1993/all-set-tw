@@ -7,6 +7,10 @@
   import type { BankData } from "@/data/bank/types";
   import type { ClassificationRuleRow } from "@/data/classification/types";
   import { connectorDefinitions } from "@/data/connectors/definitions";
+  import {
+    getActionableSyncJobs,
+    getSyncSourceStatus,
+  } from "@/data/connectors/sync-status";
   import type { SyncJobRow } from "@/data/connectors/types";
   let {
     demoMode,
@@ -23,12 +27,10 @@
     navigate: (view: View) => void;
   } = $props();
   const sources = connectorDefinitions;
-  const unhealthy = $derived(
-    jobs.filter(
-      (job) =>
-        job.lastStatus === "failed" || job.lastStatus === "needs_user_action",
-    ),
+  const configuredSources = $derived(
+    jobs.filter((job) => job.configured && job.scope === "all"),
   );
+  const unhealthy = $derived(getActionableSyncJobs(jobs));
 </script>
 
 <div class="grid gap-4">
@@ -40,7 +42,8 @@
     ><CardContent class="pt-5"
       ><p class="text-sm font-semibold text-ink/45">資料健康度</p>
       <p class="mt-2 text-2xl font-bold">
-        {Math.max(sources.length - unhealthy.length, 0)} / {sources.length} 來源正常
+        {Math.max(configuredSources.length - unhealthy.length, 0)} / {configuredSources.length}
+        已設定來源正常
       </p>
       {#if unhealthy.length}<p class="mt-2 text-sm font-semibold text-coral">
           {unhealthy.length} 個來源需要處理
@@ -123,16 +126,16 @@
             class="flex items-center justify-between gap-3 px-4 py-3 text-sm"
           >
             <span class="font-semibold">{source.title}</span><span
-              class={job?.lastStatus === "failed" ||
-              job?.lastStatus === "needs_user_action"
+              class={getSyncSourceStatus(job) === "needs_action"
                 ? "text-coral"
                 : "text-moss"}
-              >{job?.lastStatus === "failed" ||
-              job?.lastStatus === "needs_user_action"
+              >{getSyncSourceStatus(job) === "needs_action"
                 ? "需要處理"
-                : job?.lastSuccessAt
+                : getSyncSourceStatus(job) === "healthy"
                   ? "正常"
-                  : "尚未同步"}</span
+                  : getSyncSourceStatus(job) === "not_synced"
+                    ? "尚未同步"
+                    : "未設定"}</span
             >
           </div>{/each}
       </div></Card

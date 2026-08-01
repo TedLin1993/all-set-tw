@@ -10,6 +10,10 @@
     connectorFields,
   } from "@/data/connectors/definitions";
   import { syncJobsQuery } from "@/data/connectors/queries";
+  import {
+    getActionableSyncJobs,
+    getConfiguredSyncJobs,
+  } from "@/data/connectors/sync-status";
   import { notificationConfigQuery } from "@/data/notifications/queries";
   import type { ConnectorId } from "@/data/connectors/types";
   import { formatDateTime } from "@/shared/format/financial";
@@ -54,18 +58,12 @@
   const rates = createQuery(exchangeRatesQuery(() => api));
   const notifications = createQuery(notificationConfigQuery(() => api));
   let selectedConnector = $state<ConnectorId | null>(null);
-  const needsAction = $derived(
-    ($jobs.data ?? []).filter(
-      (j) => j.lastStatus === "failed" || j.lastStatus === "needs_user_action",
-    ).length,
+  const needsAction = $derived(getActionableSyncJobs($jobs.data ?? []).length);
+  const configuredSources = $derived(getConfiguredSyncJobs($jobs.data ?? []));
+  const healthySources = $derived(
+    Math.max(configuredSources.length - needsAction, 0),
   );
-  const healthySources = $derived(Math.max(sources.length - needsAction, 0));
-  const actionJob = $derived(
-    ($jobs.data ?? []).find(
-      (job) =>
-        job.lastStatus === "failed" || job.lastStatus === "needs_user_action",
-    ),
-  );
+  const actionJob = $derived(getActionableSyncJobs($jobs.data ?? []).at(0));
   const actionSource = $derived(
     sources.find((source) => source.id === actionJob?.connectorId),
   );
@@ -76,12 +74,14 @@
     }, undefined),
   );
   const inheritedJob = $derived(
-    ($jobs.data ?? []).find(
-      (job) => job.scope === "all" && job.scheduleMode === "inherit",
+    configuredSources.find(
+      (job) => job.enabled && job.scheduleMode === "inherit",
     ),
   );
   const inheritedJobCount = $derived(
-    ($jobs.data ?? []).filter((job) => job.scheduleMode === "inherit").length,
+    configuredSources.filter(
+      (job) => job.enabled && job.scheduleMode === "inherit",
+    ).length,
   );
   const scheduleSummary = $derived(
     !inheritedJob
@@ -115,9 +115,7 @@
   const enabledRuleCount = $derived(
     ($rules.data ?? []).filter((rule) => rule.enabled).length,
   );
-  const recentJobs = $derived(
-    ($jobs.data ?? []).filter((job) => job.scope === "all"),
-  );
+  const recentJobs = $derived(getConfiguredSyncJobs($jobs.data ?? []));
   const recentSuccessCount = $derived(
     recentJobs.filter((job) => job.lastStatus === "success").length,
   );
@@ -453,13 +451,20 @@
             </span>
           </div>
           <h2 class="mt-2 text-xl font-bold">
-            {actionSource?.title ??
-              `${healthySources} / ${sources.length} 來源正常`}
+            {#if needsAction}
+              {actionSource?.title ?? "資料來源需要處理"}
+            {:else if configuredSources.length}
+              {healthySources} / {configuredSources.length} 已設定來源正常
+            {:else}
+              尚未設定資料來源
+            {/if}
           </h2>
           <p class="mt-1 text-sm text-muted-foreground">
             {needsAction
               ? "完成重新驗證後即可恢復自動同步。"
-              : "所有連接器都能正常同步。"}
+              : configuredSources.length
+                ? "所有已設定連接器都能正常同步。"
+                : "設定資料來源後即可開始同步。"}
           </p>
           <button
             class="mt-4 rounded-lg bg-steel px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-steel/90"
@@ -482,7 +487,7 @@
             >
           </div>
           <p class="mt-2 text-3xl font-bold">
-            {healthySources} / {sources.length}
+            {healthySources} / {configuredSources.length}
           </p>
           <p class="mt-1 text-sm text-muted-foreground">
             {inheritedJobCount} 個排程啟用 · {latestSuccessAt
