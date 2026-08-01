@@ -415,11 +415,12 @@ sequenceDiagram
 - Lock acquisition 失敗時回傳或記錄「已有同步執行中」，不得平行執行同一 connector。
 
 Cron trigger 只負責向 `SYNC_QUEUE` 送出 scheduler 啟動訊息。Queue consumer
-每次 invocation 最多處理一個 connector，完成後若確實處理了工作便立即送出下一個訊息；
-下一次 consumer invocation 因此不必等待下一個 10 分鐘 Cron，且擁有獨立的 Worker
-CPU、subrequest 與執行時間額度。Queue consumer 使用 batch size 1 與 concurrency 1，
-維持 connector 逐一執行。是否到期仍由 D1 sync job 狀態判斷；沒有可執行工作時
-consumer 不再送出訊息，結束本次串接。
+每次 invocation 最多處理一個 connector，完成後若確實處理了工作便以 20 秒延遲送出下一個訊息，
+避免連續啟動 Browser session 時撞上 Browser Run 的 acquisition rate limit；下一次 consumer
+invocation 因此不必等待下一個 10 分鐘 Cron，且擁有獨立的 Worker CPU、subrequest 與執行時間額度。
+初始 Cron kick 不延遲。Queue consumer 使用 batch size 1 與 concurrency 1，維持 connector
+逐一執行。是否到期仍由 D1 sync job 狀態判斷；沒有可執行工作時 consumer 不再送出訊息，
+結束本次串接。
 
 ## 同步結果通知
 

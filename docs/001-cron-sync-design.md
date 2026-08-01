@@ -1,7 +1,7 @@
 # Cron Job Design
 
 > 現況更新：Cron 目前只負責向 Cloudflare Queue 送出啟動訊息；每個 connector
-> 由獨立的 Queue consumer invocation 執行，完成後立即 enqueue 下一個工作。
+> 由獨立的 Queue consumer invocation 執行，完成後延遲 20 秒 enqueue 下一個工作。
 > 本文件後續內容保留最初 v1 設計背景；現行架構以
 > [`002-backend-architecture.md`](002-backend-architecture.md) 為準。
 

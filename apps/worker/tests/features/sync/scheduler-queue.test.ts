@@ -53,7 +53,7 @@ describe("scheduled sync queue", () => {
     expect(send).toHaveBeenCalledWith({ type: "run-next-scheduled-sync" });
   });
 
-  it("immediately enqueues the next invocation after processing a job", async () => {
+  it("delays the next invocation after processing a job", async () => {
     const send = vi.fn().mockResolvedValue(undefined);
     const message = queueMessage({ type: "run-next-scheduled-sync" });
     mocks.runSchedulerTick.mockResolvedValue(true);
@@ -61,7 +61,10 @@ describe("scheduled sync queue", () => {
     await consumeScheduledSyncQueue(queueBatch(message), env(send));
 
     expect(mocks.runSchedulerTick).toHaveBeenCalledOnce();
-    expect(send).toHaveBeenCalledWith({ type: "run-next-scheduled-sync" });
+    expect(send).toHaveBeenCalledWith(
+      { type: "run-next-scheduled-sync" },
+      { delaySeconds: 20 },
+    );
     expect(message.ack).toHaveBeenCalledOnce();
   });
 
