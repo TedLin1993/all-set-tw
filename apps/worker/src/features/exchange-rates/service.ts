@@ -1,8 +1,8 @@
 import { z } from "zod";
 import {
   listExchangeRates,
+  replaceExchangeRates,
   SUPPORTED_EXCHANGE_CURRENCIES,
-  upsertExchangeRates,
 } from "./repository";
 
 export const EXCHANGE_RATE_API_URL = "https://open.er-api.com/v6/latest/TWD";
@@ -47,7 +47,7 @@ export async function refreshExchangeRates(
     return { currency, rate: 1 / providerRate };
   });
 
-  await upsertExchangeRates(
+  await replaceExchangeRates(
     db,
     rates,
     new Date(provider.timeLastUpdateUnix * 1000).toISOString(),

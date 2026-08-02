@@ -8,8 +8,10 @@ import {
 function createDb(results: unknown[] = []) {
   const calls: Array<{ sql: string; values: unknown[] }> = [];
   const batches: unknown[][] = [];
+  const preparedSql: string[] = [];
   const db = {
     prepare(sql: string) {
+      preparedSql.push(sql);
       const statement = {
         bind(...values: unknown[]) {
           calls.push({ sql, values });
@@ -26,7 +28,7 @@ function createDb(results: unknown[] = []) {
       return [];
     },
   } as unknown as D1Database;
-  return { db, calls, batches };
+  return { db, calls, batches, preparedSql };
 }
 
 const providerPayload = {
@@ -42,7 +44,7 @@ const providerPayload = {
 
 describe("refreshExchangeRates", () => {
   it("converts the TWD-base response into the app's TWD rates", async () => {
-    const { db, calls, batches } = createDb([
+    const { db, calls, batches, preparedSql } = createDb([
       {
         currency: "USD",
         rateTwd: 32.3076,
@@ -76,6 +78,8 @@ describe("refreshExchangeRates", () => {
       }),
     );
     expect(batches).toHaveLength(1);
+    expect(preparedSql[0]).toBe("DELETE FROM exchange_rates");
+    expect(batches[0]).toHaveLength(4);
     expect(
       calls
         .filter(({ sql }) => sql.includes("INSERT INTO exchange_rates"))
@@ -89,7 +93,7 @@ describe("refreshExchangeRates", () => {
   });
 
   it("does not write partial data when a required currency is missing", async () => {
-    const { db, batches } = createDb();
+    const { db, batches, preparedSql } = createDb();
     const fetcher = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -107,6 +111,7 @@ describe("refreshExchangeRates", () => {
       ExchangeRateProviderError,
     );
     expect(batches).toHaveLength(0);
+    expect(preparedSql).not.toContain("DELETE FROM exchange_rates");
   });
 
   it("turns provider HTTP failures into a provider error", async () => {
