@@ -467,11 +467,14 @@
       selectedCategory?.flow === flow &&
       selectedCategory.category === category
     ) {
-      selectedCategory = null;
+      clearCategoryFilter();
       return;
     }
     selectedCategory = { flow, category };
     chooseFlow(flow, false);
+  }
+  function clearCategoryFilter() {
+    chooseFlow("all");
   }
   function chooseFlow(nextFlow: ActivityFlowFilter, clearCategory = true) {
     flow = nextFlow;
@@ -806,7 +809,7 @@
                 : "支出"}</span
             ><button
               class="min-h-8 px-2 text-xs font-semibold text-steel"
-              onclick={() => (selectedCategory = null)}>清除分類</button
+              onclick={clearCategoryFilter}>清除分類</button
             >
           </div>{/if}
         <div class="grid min-w-0 gap-1.5">
