@@ -90,7 +90,7 @@
             ><WalletCards class="size-5" /></span
           ><span class="flex-1"
             ><span class="block font-semibold">匯率</span><span
-              class="block text-sm text-ink/45">管理外幣換算</span
+              class="block text-sm text-ink/45">查看外幣換算</span
             ></span
           ><span class="text-sm font-semibold text-steel">›</span></button
         >

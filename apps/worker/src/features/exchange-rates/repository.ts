@@ -4,12 +4,20 @@ export type ExchangeRateRow = {
   updatedAt: string;
 };
 
+export const SUPPORTED_EXCHANGE_CURRENCIES = ["USD", "JPY", "EUR"] as const;
+
 export async function listExchangeRates(db: D1Database) {
   const rows = await db
     .prepare(
       `SELECT currency, rate_to_twd AS rateTwd, updated_at AS updatedAt
      FROM exchange_rates
-     ORDER BY currency ASC`,
+     WHERE currency IN ('USD', 'JPY', 'EUR')
+     ORDER BY CASE currency
+       WHEN 'USD' THEN 1
+       WHEN 'JPY' THEN 2
+       WHEN 'EUR' THEN 3
+       ELSE 4
+     END`,
     )
     .all<ExchangeRateRow>();
   return rows.results;
