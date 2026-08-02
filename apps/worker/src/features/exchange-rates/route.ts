@@ -1,14 +1,12 @@
 import type { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
-import { z } from "zod";
 import type { AppBindings } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
-import { validationHook } from "../../platform/validation";
-import { getExchangeRates, updateExchangeRates } from "./service";
-
-const updateSchema = z.object({
-  rates: z.record(z.string().min(3).max(3), z.number().finite().positive()),
-});
+import { jsonError } from "../../platform/http";
+import {
+  ExchangeRateProviderError,
+  getExchangeRates,
+  refreshExchangeRates,
+} from "./service";
 
 export const exchangeRateRoutes = honoFactory.createApp();
 registerExchangeRateRoutes(exchangeRateRoutes);
@@ -18,16 +16,18 @@ function registerExchangeRateRoutes(api: Hono<AppBindings>) {
     c.json(await getExchangeRates(c.env.DB)),
   );
 
-  api.put(
-    "/exchange-rates",
-    zValidator(
-      "json",
-      updateSchema,
-      validationHook("INVALID_REQUEST", "Exchange rates are invalid."),
-    ),
-    async (c) => {
-      await updateExchangeRates(c.env.DB, c.req.valid("json").rates);
-      return c.json({ success: true });
-    },
-  );
+  api.post("/exchange-rates/refresh", async (c) => {
+    try {
+      return c.json(await refreshExchangeRates(c.env.DB));
+    } catch (error) {
+      if (error instanceof ExchangeRateProviderError) {
+        return jsonError(
+          "EXCHANGE_RATE_PROVIDER_UNAVAILABLE",
+          "匯率資料來源暫時無法取得，請稍後再試。",
+          502,
+        );
+      }
+      throw error;
+    }
+  });
 }

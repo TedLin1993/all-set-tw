@@ -94,7 +94,7 @@
   );
   const ratesSummary = $derived(
     ($rates.data ?? [])
-      .map((rate) => `${rate.currency} ${rate.rateTwd.toFixed(3)}`)
+      .map((rate) => `${rate.currency} ${rate.rateTwd.toFixed(2)}`)
       .join(" · ") || "尚未設定",
   );
   const notificationSummary = $derived(
@@ -324,12 +324,9 @@
         <div>
           <h2 class="text-2xl font-bold tracking-tight">匯率</h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            管理資產與活動使用的換算基準。
+            查看資產與活動使用的換算基準，必要時手動更新。
           </p>
         </div>
-        <span class="rounded-lg bg-steel px-4 py-2 text-sm font-bold text-white"
-          >更新匯率</span
-        >
       </div>
 
       <section
@@ -343,18 +340,18 @@
         </div>
         <div class="rounded-xl border border-border bg-card p-4 shadow-xs">
           <p class="text-sm font-semibold text-muted-foreground">資料來源</p>
-          <p class="mt-2 text-lg font-bold">手動設定</p>
-          <p class="mt-1 text-sm text-muted-foreground">以設定值換算</p>
+          <p class="mt-2 text-lg font-bold">ExchangeRate-API</p>
+          <p class="mt-1 text-sm text-muted-foreground">手動點擊更新</p>
         </div>
         <div class="rounded-xl bg-muted p-4">
-          <p class="text-sm font-semibold text-muted-foreground">自訂匯率</p>
+          <p class="text-sm font-semibold text-muted-foreground">支援幣別</p>
           <p class="mt-2 text-lg font-bold">{$rates.data?.length ?? 0} 筆</p>
-          <p class="mt-1 text-sm font-semibold text-steel">可在下方編輯</p>
+          <p class="mt-1 text-sm font-semibold text-steel">USD · JPY · EUR</p>
         </div>
       </section>
 
       <div class="hidden md:block">
-        <ExchangeRatesPanel {api} variant="desktop" />
+        <ExchangeRatesPanel {api} {demoMode} variant="desktop" />
       </div>
       <aside
         class="hidden rounded-lg bg-muted p-3 text-sm text-muted-foreground md:block"
@@ -362,7 +359,7 @@
         匯率僅用於資產總覽與統計換算，不會變更原始交易幣別或金額。
       </aside>
       <div class="md:hidden">
-        <ExchangeRatesPanel {api} />
+        <ExchangeRatesPanel {api} {demoMode} />
       </div>
     </div>
   {:else if mobileView === "classification-rules"}
@@ -577,7 +574,7 @@
             {ratesSummary}
           </p>
           <span class="mt-4 block text-sm font-semibold text-steel"
-            >開啟設定 →</span
+            >查看匯率 →</span
           >
         </button>
         <button

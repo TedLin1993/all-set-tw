@@ -81,7 +81,7 @@ export const mobileSettingsLabels: Record<
   },
   "exchange-rates": {
     label: "匯率",
-    description: "管理資產換算使用的參考匯率。",
+    description: "查看資產換算使用的參考匯率。",
   },
   "classification-rules": {
     label: "分類規則",
