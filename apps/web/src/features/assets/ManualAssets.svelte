@@ -88,7 +88,9 @@
         name: form.name,
         category: form.category,
         currency: form.currency,
-        note: form.note || undefined,
+        note: form.note || null,
+        value: Number(form.value),
+        date: form.date,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.manualAssets });

@@ -81,7 +81,10 @@ export async function updateManualAsset(
     category?: string;
     note?: string | null;
     currency?: string;
+    value?: number;
+    date?: string;
   },
+  now: string,
 ) {
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -101,10 +104,20 @@ export async function updateManualAsset(
     sets.push("currency = ?");
     values.push(input.currency);
   }
-  await db
-    .prepare(`UPDATE manual_assets SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...values, id)
-    .run();
+  const statements: D1PreparedStatement[] = [];
+  if (sets.length > 0) {
+    statements.push(
+      db
+        .prepare(`UPDATE manual_assets SET ${sets.join(", ")} WHERE id = ?`)
+        .bind(...values, id),
+    );
+  }
+  if (input.value !== undefined && input.date !== undefined) {
+    statements.push(
+      manualAssetHistoryUpsertStatement(db, id, input.date, input.value, now),
+    );
+  }
+  if (statements.length > 0) await db.batch(statements);
 }
 
 export async function deleteManualAsset(db: D1Database, id: string) {

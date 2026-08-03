@@ -31,8 +31,16 @@ const updateSchema = z
     category: z.string().trim().min(1).max(64).optional(),
     note: z.string().max(1_000).nullable().optional(),
     currency: currencySchema.optional(),
+    value: z.number().finite().optional(),
+    date: isoDateSchema.optional(),
   })
-  .refine((body) => Object.keys(body).length > 0);
+  .refine((body) => Object.keys(body).length > 0)
+  .refine(
+    (body) =>
+      (body.value === undefined && body.date === undefined) ||
+      (body.value !== undefined && body.date !== undefined),
+    "value and date must be provided together.",
+  );
 const historySchema = z.object({
   value: z.number().finite(),
   date: isoDateSchema,

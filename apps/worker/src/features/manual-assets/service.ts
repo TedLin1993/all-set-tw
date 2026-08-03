@@ -49,9 +49,11 @@ export function editManualAsset(
     category?: string;
     note?: string | null;
     currency?: string;
+    value?: number;
+    date?: string;
   },
 ) {
-  return updateManualAssetRecord(db, id, input);
+  return updateManualAssetRecord(db, id, input, new Date().toISOString());
 }
 
 export function removeManualAsset(db: D1Database, id: string) {
