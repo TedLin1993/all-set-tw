@@ -11,7 +11,7 @@
 - Tables：24
 - Explicit indexes：31
 - Other objects：0
-- Migrations：19
+- Migrations：22
 
 ## Tables
 
@@ -32,7 +32,7 @@
 | [`invoice_line_items`](#invoice_line_items) | 電子發票底下的商品或服務明細。 | 13 | 1 | 2 |
 | [`invoice_transaction_preferences`](#invoice_transaction_preferences) | 使用者對電子發票與銀行交易是否關聯的決策。 | 5 | 0 | 1 |
 | [`invoices`](#invoices) | 電子發票的抬頭與總額主檔。 | 10 | 0 | 2 |
-| [`manual_assets`](#manual_assets) | 使用者手動登錄、無法由銀行或投資連接器同步的資產。 | 5 | 0 | 0 |
+| [`manual_assets`](#manual_assets) | 使用者手動登錄、無法由銀行或投資連接器同步的資產。 | 6 | 0 | 0 |
 | [`net_worth_history`](#net_worth_history) | 按日期保存的淨資產或資產類別歷史數值，用於圖表與歷史查詢。 | 6 | 0 | 2 |
 | [`notification_preferences`](#notification_preferences) | 此單一部署的同步推播偏好設定。 | 5 | 0 | 0 |
 | [`push_subscriptions`](#push_subscriptions) | 瀏覽器 Web Push 裝置訂閱資料。 | 6 | 0 | 0 |
@@ -820,6 +820,7 @@ CREATE TABLE invoices (
 | 3 | `category` | 資產分類，例如房產、現金或其他。 | TEXT | NO | — | — | — |
 | 4 | `note` | 使用者補充的備註。 | TEXT | YES | — | — | — |
 | 5 | `created_at` | 手動資產建立的時間。 | TEXT | NO | — | — | — |
+| 6 | `currency` | 資產估值使用的幣別，預設為 TWD。 | TEXT | NO | 'TWD' | — | — |
 
 #### Foreign keys
 
@@ -838,7 +839,7 @@ CREATE TABLE manual_assets (
   category TEXT NOT NULL,
   note TEXT,
   created_at TEXT NOT NULL
-)
+, currency TEXT NOT NULL DEFAULT 'TWD')
 ```
 
 ### `net_worth_history`
@@ -852,7 +853,7 @@ CREATE TABLE manual_assets (
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
 | 1 | `id` | 歷史點的系統識別碼。 | TEXT | YES | — | 1 | — |
 | 2 | `date` | 此數值所代表的日期。 | TEXT | NO | — | — | — |
-| 3 | `net_worth` | 該日期與資產類型的金額，通常以 TWD 表示。 | INTEGER | NO | — | — | — |
+| 3 | `net_worth` | 該日期與資產類型的金額；手動資產保留其設定幣別，其餘讀模型通常以 TWD 表示。 | INTEGER | NO | — | — | — |
 | 4 | `asset_type` | 資產類型，例如 total、deposit、stock、fund 或手動資產 id。 | TEXT | NO | 'total' | — | — |
 | 5 | `source` | 數值來源，例如 bank 或 manual。 | TEXT | NO | — | — | — |
 | 6 | `snapshotted_at` | 此歷史點實際建立或重算的時間。 | TEXT | NO | — | — | — |
@@ -1195,6 +1196,9 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0018_esun_credit_transaction_signs.sql`](../packages/db/migrations/0018_esun_credit_transaction_signs.sql)
 - [`0019_rename_other_classification.sql`](../packages/db/migrations/0019_rename_other_classification.sql)
 - [`0020_connector_cursor_secret_cleanup.sql`](../packages/db/migrations/0020_connector_cursor_secret_cleanup.sql)
+- [`0021_ctbc_sync_job.sql`](../packages/db/migrations/0021_ctbc_sync_job.sql)
+- [`0023_disable_unconfigured_sync_jobs.sql`](../packages/db/migrations/0023_disable_unconfigured_sync_jobs.sql)
+- [`0024_manual_asset_currency.sql`](../packages/db/migrations/0024_manual_asset_currency.sql)
 
 ## 程式碼導覽
 

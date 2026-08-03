@@ -101,7 +101,7 @@
   );
   const manualTotal = $derived(
     ($manualAssets.data ?? []).reduce(
-      (sum, item) => sum + (item.value ?? 0),
+      (sum, item) => sum + toTwd(item.value ?? 0, item.currency),
       0,
     ),
   );
@@ -218,9 +218,11 @@
   });
   const missingRates = $derived([
     ...new Set(
-      bankData.accounts
-        .map((account) => account.currency)
-        .filter((currency) => currency !== "TWD" && !rateValues[currency]),
+      [
+        ...bankData.accounts.map((account) => account.currency),
+        ...($investments.data ?? []).map((item) => item.currency),
+        ...($manualAssets.data ?? []).map((item) => item.currency),
+      ].filter((currency) => currency !== "TWD" && !rateValues[currency]),
     ),
   ]);
   const loading = $derived(
@@ -255,7 +257,7 @@
         class="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
       >
         <span
-          >帳戶含外幣（{missingRates.join("、")}）尚未設定匯率，TWD
+          >資產含外幣（{missingRates.join("、")}）尚未設定匯率，TWD
           總額可能不準確。</span
         >
         <button

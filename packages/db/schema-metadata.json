@@ -259,6 +259,7 @@
         "name": "前端顯示的資產名稱。",
         "category": "資產分類，例如房產、現金或其他。",
         "note": "使用者補充的備註。",
+        "currency": "資產估值使用的幣別，預設為 TWD。",
         "created_at": "手動資產建立的時間。"
       }
     },
@@ -268,7 +269,7 @@
       "columns": {
         "id": "歷史點的系統識別碼。",
         "date": "此數值所代表的日期。",
-        "net_worth": "該日期與資產類型的金額，通常以 TWD 表示。",
+        "net_worth": "該日期與資產類型的金額；手動資產保留其設定幣別，其餘讀模型通常以 TWD 表示。",
         "asset_type": "資產類型，例如 total、deposit、stock、fund 或手動資產 id。",
         "source": "數值來源，例如 bank 或 manual。",
         "snapshotted_at": "此歷史點實際建立或重算的時間。"

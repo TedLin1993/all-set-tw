@@ -3,6 +3,7 @@ export type ManualAssetRow = {
   name: string;
   category: string;
   note: string | null;
+  currency: string;
   createdAt: string;
 };
 
@@ -15,7 +16,7 @@ export type ManualAssetHistoryRow = {
 export async function listManualAssets(db: D1Database) {
   const assets = await db
     .prepare(
-      `SELECT id, name, category, note, created_at AS createdAt
+      `SELECT id, name, category, note, currency, created_at AS createdAt
      FROM manual_assets
      ORDER BY created_at ASC`,
     )
@@ -43,6 +44,7 @@ export async function createManualAsset(
     name: string;
     category: string;
     note: string | null;
+    currency: string;
     value: number;
     date: string;
     now: string;
@@ -51,9 +53,16 @@ export async function createManualAsset(
   await db.batch([
     db
       .prepare(
-        `INSERT INTO manual_assets (id, name, category, note, created_at) VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO manual_assets (id, name, category, note, currency, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .bind(input.id, input.name, input.category, input.note, input.now),
+      .bind(
+        input.id,
+        input.name,
+        input.category,
+        input.note,
+        input.currency,
+        input.now,
+      ),
     manualAssetHistoryUpsertStatement(
       db,
       input.id,
@@ -67,7 +76,12 @@ export async function createManualAsset(
 export async function updateManualAsset(
   db: D1Database,
   id: string,
-  input: { name?: string; category?: string; note?: string | null },
+  input: {
+    name?: string;
+    category?: string;
+    note?: string | null;
+    currency?: string;
+  },
 ) {
   const sets: string[] = [];
   const values: unknown[] = [];
@@ -82,6 +96,10 @@ export async function updateManualAsset(
   if ("note" in input) {
     sets.push("note = ?");
     values.push(input.note ?? null);
+  }
+  if (input.currency) {
+    sets.push("currency = ?");
+    values.push(input.currency);
   }
   await db
     .prepare(`UPDATE manual_assets SET ${sets.join(", ")} WHERE id = ?`)

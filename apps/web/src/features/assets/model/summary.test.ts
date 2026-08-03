@@ -42,8 +42,9 @@ describe("calculateAssetSummary", () => {
           name: "房屋",
           category: "real_estate",
           note: null,
+          currency: "USD",
           createdAt: "2026-07-22",
-          value: 20_000,
+          value: 200,
         },
       ],
       rates: [{ currency: "USD", rateTwd: 30, updatedAt: "2026-07-22" }],
@@ -51,7 +52,7 @@ describe("calculateAssetSummary", () => {
 
     expect(summary.bankTotal).toBe(3_000);
     expect(summary.cardDebt).toBe(2_000);
-    expect(summary.netWorth).toBe(31_000);
+    expect(summary.netWorth).toBe(17_000);
     expect(summary.groupedBanks[0]?.institution).toBe("玉山銀行");
   });
 });

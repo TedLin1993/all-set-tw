@@ -26,6 +26,7 @@ export async function addManualAsset(
     name: string;
     category: string;
     note?: string;
+    currency: string;
     value: number;
     date: string;
   },
@@ -43,7 +44,12 @@ export async function addManualAsset(
 export function editManualAsset(
   db: D1Database,
   id: string,
-  input: { name?: string; category?: string; note?: string | null },
+  input: {
+    name?: string;
+    category?: string;
+    note?: string | null;
+    currency?: string;
+  },
 ) {
   return updateManualAssetRecord(db, id, input);
 }
