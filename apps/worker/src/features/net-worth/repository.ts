@@ -8,12 +8,29 @@ export type NetWorthPageCursor = {
 export async function listNetWorthChartHistory(db: D1Database) {
   const result = await db
     .prepare(
-      `SELECT date, net_worth AS netWorth, asset_type AS assetType, source
-       FROM net_worth_history
-       WHERE source = 'manual'
-          OR (source = 'bank' AND asset_type = 'deposit')
-          OR asset_type IN ('stock', 'fund')
-       ORDER BY date ASC, source ASC, asset_type ASC, id ASC`,
+      `SELECT
+         history.date,
+         CASE
+           WHEN history.source != 'manual' OR asset.currency = 'TWD'
+             THEN history.net_worth
+           WHEN rate.rate_to_twd IS NOT NULL
+             THEN history.net_worth * rate.rate_to_twd
+           ELSE 0
+         END AS netWorth,
+         history.asset_type AS assetType,
+         history.source
+       FROM net_worth_history history
+       LEFT JOIN manual_assets asset
+         ON history.source = 'manual' AND asset.id = history.asset_type
+       LEFT JOIN exchange_rates rate ON rate.currency = asset.currency
+       WHERE history.source = 'manual'
+          OR (history.source = 'bank' AND history.asset_type = 'deposit')
+          OR history.asset_type IN ('stock', 'fund')
+       ORDER BY
+         history.date ASC,
+         history.source ASC,
+         history.asset_type ASC,
+         history.id ASC`,
     )
     .all<{
       date: string;

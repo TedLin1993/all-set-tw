@@ -502,7 +502,7 @@
                   </p>
                 </div>
                 <p class="shrink-0 font-bold tabular-nums text-moss">
-                  {formatCurrency(item.value ?? 0)}
+                  {formatCurrency(item.value ?? 0, item.currency)}
                 </p></button
               >{/each}
           </div></CardContent

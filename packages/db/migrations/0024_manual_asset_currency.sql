@@ -1,0 +1,1 @@
+ALTER TABLE manual_assets ADD COLUMN currency TEXT NOT NULL DEFAULT 'TWD';

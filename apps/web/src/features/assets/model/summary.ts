@@ -54,7 +54,7 @@ export function calculateAssetSummary({
     0,
   );
   const manualTotal = manualAssets.reduce(
-    (sum, item) => sum + (item.value ?? 0),
+    (sum, item) => sum + toTwd(item.value ?? 0, item.currency),
     0,
   );
   const cardDebt = cards.reduce(

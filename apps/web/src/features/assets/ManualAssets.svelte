@@ -17,6 +17,7 @@
   import type { ApiClient } from "@/shared/api/client";
   import { queryKeys } from "@/shared/api/query-keys";
   import {
+    exchangeRatesQuery,
     manualAssetHistoryQuery,
     manualAssetsQuery,
   } from "@/data/assets/queries";
@@ -30,6 +31,7 @@
   let { api }: { api: ApiClient } = $props();
   const qc = useQueryClient();
   const assets = createQuery(manualAssetsQuery(() => api));
+  const rates = createQuery(exchangeRatesQuery(() => api));
   let adding = $state(false);
   let editing = $state<ManualAssetRow | null>(null);
   let expandedAssetId = $state<string | null>(null);
@@ -37,9 +39,11 @@
   let historyDate = $state(todayStr());
   let editingHistoryDate = $state<string | null>(null);
   let editingHistoryValue = $state("");
+  let formError = $state("");
   let form = $state({
     name: "",
     category: "real_estate",
+    currency: "TWD",
     value: "",
     date: todayStr(),
     note: "",
@@ -50,8 +54,19 @@
     vehicle: "交通工具",
     other: "其他",
   };
+  const currencies = ["TWD", "USD", "JPY", "EUR"] as const;
+  const rateValues = $derived(
+    Object.fromEntries(
+      ($rates.data ?? []).map((rate) => [rate.currency, rate.rateTwd]),
+    ),
+  );
+  const toTwd = (value: number, currency: string) =>
+    currency === "TWD" ? value : value * (rateValues[currency] ?? 0);
   const total = $derived(
-    ($assets.data ?? []).reduce((s, a) => s + (a.value ?? 0), 0),
+    ($assets.data ?? []).reduce(
+      (sum, asset) => sum + toTwd(asset.value ?? 0, asset.currency),
+      0,
+    ),
   );
 
   const add = createMutation({
@@ -72,10 +87,12 @@
       api.put(`/api/manual-assets/${editing!.id}`, {
         name: form.name,
         category: form.category,
+        currency: form.currency,
         note: form.note || undefined,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.manualAssets });
+      qc.invalidateQueries({ queryKey: queryKeys.netWorthHistory });
       editing = null;
       reset();
     },
@@ -129,26 +146,34 @@
   });
 
   function reset() {
+    formError = "";
     form = {
       name: "",
       category: "real_estate",
+      currency: "TWD",
       value: "",
       date: todayStr(),
       note: "",
     };
   }
   function startEdit(asset: ManualAssetRow) {
+    formError = "";
     editing = asset;
     form = {
       name: asset.name,
       category: asset.category,
+      currency: asset.currency,
       value: String(asset.value ?? ""),
       date: asset.date ?? todayStr(),
       note: asset.note ?? "",
     };
   }
   function submit() {
-    if (!form.name.trim() || !form.value) return;
+    if (!form.name.trim() || !form.value) {
+      formError = "請輸入資產名稱與目前估值。";
+      return;
+    }
+    formError = "";
     editing ? $update.mutate() : $add.mutate();
   }
   function invalidateHistory() {
@@ -203,14 +228,14 @@
                     <p class="truncate font-semibold">{asset.name}</p>
                     <p class="mt-1 text-xs text-ink/45">
                       {categories[asset.category as keyof typeof categories] ??
-                        asset.category} · {asset.date
+                        asset.category} · {asset.currency} · {asset.date
                         ? formatDate(asset.date)
                         : "尚未估值"}{asset.note ? ` · ${asset.note}` : ""}
                     </p>
                   </button>
                   <div class="flex items-center gap-3">
                     <p class="font-bold tabular-nums">
-                      {formatCurrency(asset.value ?? 0)}
+                      {formatCurrency(asset.value ?? 0, asset.currency)}
                     </p>
                     <button
                       class="rounded-sm p-1 text-ink/40 hover:text-steel"
@@ -270,7 +295,10 @@
                                 >
                               </div>{:else}<div class="flex items-center gap-2">
                                 <span class="font-medium"
-                                  >{formatCurrency(entry.value)}</span
+                                  >{formatCurrency(
+                                    entry.value,
+                                    asset.currency,
+                                  )}</span
                                 ><Button
                                   size="sm"
                                   variant="ghost"
@@ -297,7 +325,7 @@
                       class="mt-3 flex flex-wrap items-end gap-2 border-t border-ink/8 pt-3"
                     >
                       <label class="grid gap-1 text-xs text-ink/55"
-                        >估值<Input
+                        >估值（{asset.currency}）<Input
                           class="w-32"
                           type="number"
                           bind:value={historyValue}
@@ -349,7 +377,7 @@
           </div>
           <div class="mt-5 grid gap-3">
             <label class="grid gap-1 text-sm"
-              >名稱<Input bind:value={form.name} /></label
+              >名稱<Input required bind:value={form.name} /></label
             ><label class="grid gap-1 text-sm"
               >類別<Select bind:value={form.category}
                 >{#each Object.entries(categories) as [key, label] (key)}<option
@@ -357,12 +385,28 @@
                   >{/each}</Select
               ></label
             ><label class="grid gap-1 text-sm"
-              >目前估值<Input type="number" bind:value={form.value} /></label
+              >幣別<Select bind:value={form.currency}
+                >{#each currencies as currency (currency)}<option
+                    value={currency}>{currency}</option
+                  >{/each}</Select
+              ></label
+            ><label class="grid gap-1 text-sm"
+              >目前估值<Input
+                required
+                type="number"
+                bind:value={form.value}
+              /></label
             ><label class="grid gap-1 text-sm"
               >估值日期<Input type="date" bind:value={form.date} /></label
             ><label class="grid gap-1 text-sm"
               >備註<Textarea rows="2" bind:value={form.note} /></label
             >
+            {#if formError}<p
+                class="text-sm font-medium text-coral"
+                role="alert"
+              >
+                {formError}
+              </p>{/if}
           </div>
           <div class="mt-5 grid grid-cols-2 gap-3">
             <Button
