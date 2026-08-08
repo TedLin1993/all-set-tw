@@ -4,11 +4,13 @@ import type { Env } from "../../platform/env";
 import {
   prepareSinopacCaptchaSession,
   prepareTaishinCaptchaSession,
+  prepareObankCaptchaSession,
   syncCathaybk,
   syncCtbc,
   syncEinvoice,
   syncEsun,
   syncSinopac,
+  syncObank,
   syncTaishin,
   syncTdcc,
   SYNC_SCOPE_ALL,
@@ -17,6 +19,7 @@ import {
   TDCC_SCOPE_TRADES,
   type EinvoiceSyncOverrides,
   type SinopacSyncOverrides,
+  type ObankSyncOverrides,
   type SyncOutcome,
   type SyncScope,
   type TaishinSyncOverrides,
@@ -68,6 +71,11 @@ export const connectorRuntimeRegistry: Record<
     run: (env, trigger, _scope, overrides) =>
       syncTaishin(env, trigger, overrides as TaishinSyncOverrides),
     prepareChallenge: prepareTaishinCaptchaSession,
+  },
+  obank: {
+    run: (env, trigger, _scope, overrides) =>
+      syncObank(env, trigger, overrides as ObankSyncOverrides),
+    prepareChallenge: prepareObankCaptchaSession,
   },
 };
 

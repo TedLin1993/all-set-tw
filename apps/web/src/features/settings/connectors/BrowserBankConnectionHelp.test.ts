@@ -33,4 +33,46 @@ describe("BrowserBankConnectionHelp", () => {
     await fireEvent.click(getByRole("button", { name: "驗證並同步" }));
     expect(onVerify).toHaveBeenCalledOnce();
   });
+
+  it("describes the O-Bank App API alphanumeric CAPTCHA flow", () => {
+    const { getByText } = render(BrowserBankConnectionHelp, {
+      props: {
+        bankName: "王道",
+        captchaImage: "",
+        captcha: "",
+        digitCount: 4,
+        captchaKind: "alphanumeric",
+        preparing: false,
+        verifying: false,
+        onVerify: vi.fn(),
+        onRefresh: vi.fn(),
+      },
+    });
+
+    expect(getByText(/透過王道 App API/)).toBeInTheDocument();
+    expect(getByText(/改用人工輸入/)).toBeInTheDocument();
+    expect(
+      getByText(/手動與排程同步.*接管其他登入中的裝置/),
+    ).toBeInTheDocument();
+  });
+
+  it("disables CAPTCHA actions while a sync is running", () => {
+    const { getByRole } = render(BrowserBankConnectionHelp, {
+      props: {
+        bankName: "王道",
+        captchaImage: "data:image/png;base64,AQID",
+        captcha: "",
+        digitCount: 4,
+        captchaKind: "alphanumeric",
+        preparing: false,
+        verifying: false,
+        syncing: true,
+        onVerify: vi.fn(),
+        onRefresh: vi.fn(),
+      },
+    });
+
+    expect(getByRole("button", { name: "驗證並同步" })).toBeDisabled();
+    expect(getByRole("button", { name: "換一張" })).toBeDisabled();
+  });
 });

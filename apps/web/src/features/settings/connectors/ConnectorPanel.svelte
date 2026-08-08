@@ -68,6 +68,7 @@
   let bankCaptchaImage = $state("");
   let bankCaptcha = $state("");
   let bankCaptchaDigitCount = $state(6);
+  let bankCaptchaKind = $state<"numeric" | "alphanumeric">("numeric");
   let pendingSyncTarget = $state<SyncTarget>("default");
   const job = $derived(
     ($jobs.data ?? []).find(
@@ -75,7 +76,9 @@
     ),
   );
   const browserBank = $derived(
-    connectorId === "sinopac" || connectorId === "taishin",
+    connectorId === "sinopac" ||
+      connectorId === "taishin" ||
+      connectorId === "obank",
   );
   const browserBankSessionAvailable = $derived(
     browserBank && Boolean($settings.data?.sessionAvailable),
@@ -228,24 +231,29 @@
         captchaImage: string;
         expiresAt: string;
         digitCount?: number;
+        captchaLength?: number;
+        captchaKind?: "numeric" | "alphanumeric";
       }>(`/api/connectors/${connectorId}/captcha`);
     },
     onSuccess: (data) => {
       error = "";
       bankCaptcha = "";
       bankCaptchaImage = data.captchaImage;
-      bankCaptchaDigitCount = data.digitCount ?? 6;
+      bankCaptchaDigitCount = data.captchaLength ?? data.digitCount ?? 6;
+      bankCaptchaKind = data.captchaKind ?? "numeric";
     },
     onError: (e) => (error = e instanceof Error ? e.message : "取得驗證碼失敗"),
   });
   const verifyBrowserBank = createMutation({
     mutationFn: () => {
       if (demoMode) throw new Error("Demo site 已停用連接器同步。");
-      if (
-        !new RegExp(`^\\d{${bankCaptchaDigitCount}}$`).test(bankCaptcha.trim())
-      )
+      const pattern =
+        bankCaptchaKind === "alphanumeric"
+          ? new RegExp(`^[A-Za-z0-9]{${bankCaptchaDigitCount}}$`)
+          : new RegExp(`^\\d{${bankCaptchaDigitCount}}$`);
+      if (!pattern.test(bankCaptcha.trim()))
         throw new Error(
-          `請輸入圖片中的 ${bankCaptchaDigitCount} 位數字驗證碼。`,
+          `請輸入圖片中的 ${bankCaptchaDigitCount} 位${bankCaptchaKind === "alphanumeric" ? "英數字" : "數字"}驗證碼。`,
         );
       return api.post(`/api/connectors/${connectorId}/sync`, {
         captcha: bankCaptcha.trim(),
@@ -262,7 +270,11 @@
       qc.invalidateQueries({ queryKey: queryKeys.summary });
       qc.invalidateQueries({ queryKey: queryKeys.bank });
       qc.invalidateQueries({ queryKey: queryKeys.bills });
-      if (connectorId === "sinopac" && job && !job.enabled)
+      if (
+        (connectorId === "sinopac" || connectorId === "obank") &&
+        job &&
+        !job.enabled
+      )
         $updateJob.mutate({ enabled: true });
     },
     onError: (e) => {
@@ -485,12 +497,18 @@
     />
   {:else if browserBank}
     <BrowserBankConnectionHelp
-      bankName={connectorId === "taishin" ? "台新" : "永豐"}
+      bankName={connectorId === "taishin"
+        ? "台新"
+        : connectorId === "obank"
+          ? "王道"
+          : "永豐"}
       bind:captcha={bankCaptcha}
       captchaImage={bankCaptchaImage}
       digitCount={bankCaptchaDigitCount}
+      captchaKind={bankCaptchaKind}
       preparing={$prepareBrowserBank.isPending}
       verifying={$verifyBrowserBank.isPending}
+      syncing={$sync.isPending}
       onVerify={() => {
         error = "";
         $verifyBrowserBank.mutate();
@@ -830,8 +848,10 @@
   <p class="mt-3 text-sm text-ink/50">
     {connectorId === "sinopac"
       ? "永豐 session 失效時會由 Gemma 4 自動辨識並登入，連續三次失敗後才需人工驗證。"
-      : connectorId === "tdcc"
-        ? "排程同步不會在背景寄送驗證碼；登入失效時會標記為需要重新驗證。"
-        : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
+      : connectorId === "obank"
+        ? "王道手動與排程同步都會在必要時接管其他登入中的裝置；同步會直接使用 App API，並由 Gemma 4 自動辨識四位英數驗證碼。"
+        : connectorId === "tdcc"
+          ? "排程同步不會在背景寄送驗證碼；登入失效時會標記為需要重新驗證。"
+          : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
   </p>
 </Card>

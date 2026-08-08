@@ -23,6 +23,7 @@ Connector 採三層 registry：
 | Mode                      | 適用情境                                                 | 現有範例    |
 | ------------------------- | -------------------------------------------------------- | ----------- |
 | `api_credentials`         | 帳密登入外部 API，可自行更新 token                       | 電子發票    |
+| `api_captcha_session`     | App API 登入含 CAPTCHA，challenge 僅短暫加密保存         | 王道銀行    |
 | `api_device_otp`          | API 登入，首次裝置需要 OTP                               | 集保 e 存摺 |
 | `browser_per_sync`        | 每次同步都必須以 Browser 登入與擷取                      | 國泰世華    |
 | `browser_session`         | Browser 只負責登入，後續使用可復用的 HTTP session        | 玉山        |
@@ -39,7 +40,7 @@ Connector 採三層 registry：
 | 公開偏好       | `public_config`                  | 是否抓電子發票品項明細等非敏感選項                           |
 | 機密設定       | `encrypted_config`               | 帳密、cookie、access token、device token、Browser session ID |
 | 同步 cursor    | `sync_cursor`                    | 日期、頁碼、watermark、已完成區間等非敏感增量位置            |
-| 暫時 challenge | `encrypted_config`，且必須有 TTL | CAPTCHA、OTP、待提交的 Browser session                       |
+| 暫時 challenge | `encrypted_config`，且必須有 TTL | CAPTCHA、OTP、待提交的 API／Browser session                  |
 
 強制規則：
 
@@ -97,6 +98,7 @@ Connector 不得依賴 Hono、D1、Worker `Env`，也不得直接寫入資料庫
 - 同一 connector 的所有 scope 共用 canonical lock。
 - 需要 CAPTCHA／OTP 時，runtime registry 提供 `prepareChallenge`，route 只處理輸入驗證與 HTTP error mapping。
 - 排程不得主動寄送 OTP；需要互動時標記 `needs_user_action`。
+- 若外部服務支援接管其他登入中的裝置，必須明確定義手動與排程的 `force` policy，並在介面與使用文件提示可能中斷使用者目前的工作階段。
 - 新 connector 必須透過 D1 migration 建立 `<connectorId>:all` sync job，預設停用。
 
 ## 測試最低要求

@@ -22,4 +22,19 @@ describe("browserCaptchaFailure", () => {
       },
     );
   });
+
+  it("clears a rejected O-Bank API CAPTCHA session", () => {
+    expect(
+      browserCaptchaFailure(
+        new ApiRequestError(
+          "OBANK_CONNECTION_FAILED",
+          "王道銀行服務回應格式已變更。",
+          502,
+        ),
+      ),
+    ).toEqual({
+      message: "王道銀行服務回應格式已變更。 請重新取得驗證碼。",
+      sessionInvalidated: true,
+    });
+  });
 });

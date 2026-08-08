@@ -4,6 +4,7 @@ const INVALIDATED_CAPTCHA_SESSION_CODES = new Set([
   "USER_ACTION_REQUIRED",
   "TAISHIN_BROWSER_BUSY",
   "TAISHIN_CONNECTION_FAILED",
+  "OBANK_CONNECTION_FAILED",
 ]);
 
 export function browserCaptchaFailure(error: unknown) {

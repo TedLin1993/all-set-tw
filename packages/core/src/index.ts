@@ -225,11 +225,13 @@ export const supportedConnectorIds = [
   "sinopac",
   "taishin",
   "ctbc",
+  "obank",
 ] as const;
 export type ConnectorId = (typeof supportedConnectorIds)[number];
 
 export type ConnectorConnectionMode =
   | "api_credentials"
+  | "api_captcha_session"
   | "api_device_otp"
   | "browser_per_sync"
   | "browser_session"
@@ -430,6 +432,22 @@ export const connectorCatalog = {
     credentialFields: ["userId", "account", "password"],
     secretStateFields: [],
     resetOnCredentialChangeFields: [],
+  },
+  obank: {
+    id: "obank",
+    title: "王道銀行",
+    description: "活存、定存、餘額與交易明細",
+    connectionMode: "api_captcha_session",
+    scopes: ["all"],
+    capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
+    publicFields: [],
+    credentialFields: ["userId", "account", "password"],
+    secretStateFields: ["pendingSession", "pendingSessionExpiresAt", "captcha"],
+    resetOnCredentialChangeFields: [
+      "pendingSession",
+      "pendingSessionExpiresAt",
+      "captcha",
+    ],
   },
 } as const satisfies Record<ConnectorId, ConnectorCatalogEntry>;
 

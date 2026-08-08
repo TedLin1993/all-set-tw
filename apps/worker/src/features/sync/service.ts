@@ -3,10 +3,14 @@ import {
   EInvoiceProtocolUnavailableError,
   createCtbcConnector,
   CtbcVerificationRequiredError,
+  createObankConnector,
+  ObankProtocolError,
+  ObankVerificationRequiredError,
   parseCathaybkConfig,
   parseCtbcConfig,
   parseEsunConfig,
   parseInvoiceConfig,
+  parseObankConfig,
   parseSinopacConfig,
   parseTaishinConfig,
   parseTdccConfig,
@@ -14,6 +18,7 @@ import {
   tdccConnector,
   TdccOtpExpiredError,
   TdccVerificationRequiredError,
+  prepareObankCaptcha,
 } from "@taiwan-fin-hub/connectors";
 import { createCathaybkConnector } from "../../connectors/cathaybk";
 import { createCtbcFetch } from "../../connectors/ctbc";
@@ -32,6 +37,7 @@ import {
   SinopacVerificationRequiredError,
 } from "../../connectors/sinopac";
 import {
+  recognizeAlphanumericCaptcha,
   recognizeNumericCaptcha,
   recognizeValidateNumber,
 } from "../ocr/service";
@@ -129,6 +135,10 @@ export type TaishinSyncOverrides = {
   captcha?: string;
 };
 
+export type ObankSyncOverrides = {
+  captcha?: string;
+};
+
 export type TdccSyncOverrides = {
   otp?: string;
   otpChannel?: "email" | "sms";
@@ -220,6 +230,53 @@ export async function prepareTaishinCaptchaSession(env: Env) {
       captchaImage: prepared.captchaImage,
       expiresAt: prepared.browserSessionExpiresAt,
       digitCount: prepared.captchaDigitCount,
+    };
+  } finally {
+    await releaseSyncJobLock(env.DB, lockRowId, runId);
+  }
+}
+
+export async function prepareObankCaptchaSession(env: Env) {
+  const connectorId = "obank";
+  const runId = crypto.randomUUID();
+  const lockRowId = canonicalSyncLockRowId(connectorId);
+  const locked = await acquireSyncJobLock(env.DB, {
+    lockRowId,
+    scope: SYNC_SCOPE_ALL,
+    trigger: "manual",
+    runId,
+    leaseMs: 3 * 60 * 1000,
+  });
+  if (!locked) throw new SyncAlreadyRunningError(connectorId);
+
+  try {
+    const settings = await requireConnectorSettings(env.DB, connectorId);
+    const stored = await decryptJson<Record<string, unknown>>(
+      settings.encrypted_config,
+      configEncryptionKey(env),
+    );
+    const config = parseObankConfig({
+      ...stored,
+      ...parsePublicConnectorConfig(connectorId, settings.public_config),
+    });
+    const prepared = await prepareObankCaptcha(config);
+    await updateConnectorEncryptedConfig(
+      env.DB,
+      connectorId,
+      await encryptJson(
+        {
+          ...stored,
+          pendingSession: prepared.pendingSession,
+          pendingSessionExpiresAt: prepared.pendingSessionExpiresAt,
+        },
+        configEncryptionKey(env),
+      ),
+    );
+    return {
+      captchaImage: prepared.captchaImage,
+      expiresAt: prepared.pendingSessionExpiresAt,
+      captchaLength: 4,
+      captchaKind: "alphanumeric" as const,
     };
   } finally {
     await releaseSyncJobLock(env.DB, lockRowId, runId);
@@ -767,6 +824,145 @@ export async function syncSinopac(
       persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
   };
+}
+
+export async function syncObank(
+  env: Env,
+  trigger: SyncTrigger,
+  overrides: ObankSyncOverrides = {},
+): Promise<SyncOutcome> {
+  const connectorId = "obank";
+  const scope = "all";
+  const settings = await requireConnectorSettings(env.DB, connectorId);
+  const stored = await decryptJson<Record<string, unknown>>(
+    settings.encrypted_config,
+    configEncryptionKey(env),
+  );
+  const config = parseObankConfig({
+    ...stored,
+    ...parsePublicConnectorConfig(connectorId, settings.public_config),
+    ...overrides,
+  });
+
+  console.log(
+    `[sync] ${connectorId}/${scope}: starting trigger=${trigger} (cursor=${settings.sync_cursor ? "set" : "none"})`,
+  );
+
+  let result: Awaited<
+    ReturnType<ReturnType<typeof createObankConnector>["sync"]>
+  >;
+  try {
+    const connector = createObankConnector(
+      globalThis.fetch.bind(globalThis),
+      overrides.captcha
+        ? undefined
+        : async (imageBytes, contentType) => {
+            try {
+              return (
+                await recognizeAlphanumericCaptcha(
+                  env.AI,
+                  imageBytes,
+                  contentType,
+                  4,
+                )
+              ).code;
+            } catch {
+              throw new ObankVerificationRequiredError(
+                "王道銀行驗證碼無法自動辨識，請改用人工輸入。",
+              );
+            }
+          },
+    );
+    result = await connector.sync(config, settings.sync_cursor ?? undefined, {
+      forceLogin: true,
+    });
+  } catch (error) {
+    const cleaned = obankStoredConfigAfterSync(stored);
+    await updateConnectorEncryptedConfig(
+      env.DB,
+      connectorId,
+      await encryptJson(cleaned, configEncryptionKey(env)),
+    );
+    if (error instanceof ObankVerificationRequiredError) {
+      throw new NeedsUserActionError(error.message);
+    }
+    if (error instanceof ObankProtocolError) throw error;
+    throw error;
+  }
+
+  const bankAccounts = result.bankAccounts ?? [];
+  const bankBalanceSnapshots = result.bankBalanceSnapshots ?? [];
+  const bankTransactions = result.bankTransactions ?? [];
+  console.log(
+    `[sync] ${connectorId}/${scope}: accounts=${bankAccounts.length} snapshots=${bankBalanceSnapshots.length} transactions=${bankTransactions.length}`,
+  );
+
+  const now = new Date().toISOString();
+  const records: SyncWriteRecord[] = [
+    ...bankAccounts.map((account) =>
+      bankAccountRecord(connectorId, account, now),
+    ),
+    ...bankBalanceSnapshots.map((snapshot) =>
+      bankBalanceSnapshotRecord(connectorId, snapshot, now),
+    ),
+    ...bankTransactions.map((transaction) =>
+      bankTransactionRecord(connectorId, transaction, now),
+    ),
+  ];
+  const cleanedConfig = parseObankConfig({
+    ...config,
+    pendingSession: undefined,
+    pendingSessionExpiresAt: undefined,
+    captcha: undefined,
+  });
+  let persistedCursor: string | undefined;
+  const finalizeStatements: D1PreparedStatement[] = [];
+  if (result.cursor) {
+    const cursorState = splitConnectorCursorState(connectorId, result.cursor);
+    persistedCursor = cursorState.safeCursor;
+    finalizeStatements.push(
+      connectorStateStatement(
+        env.DB,
+        connectorId,
+        await encryptConnectorConfig(env, connectorId, cleanedConfig),
+        serializePublicConfig(connectorId, cleanedConfig),
+        persistedCursor,
+        now,
+      ),
+    );
+  }
+
+  await persistStagedSyncWrite(env.DB, {
+    records,
+    afterPromoteStatements:
+      bankAccounts.length > 0
+        ? [linkCanonicalBankAccountsStatement(env.DB)]
+        : [],
+    finalizeStatements,
+  });
+  if (bankBalanceSnapshots.length > 0) {
+    await rebuildBankDepositHistory(env.DB, [dateFromIso(now)]);
+  }
+  return {
+    success: true,
+    connectorId,
+    scope,
+    records:
+      bankAccounts.length +
+      bankBalanceSnapshots.length +
+      bankTransactions.length,
+    cursorUpdated: Boolean(
+      persistedCursor && persistedCursor !== settings.sync_cursor,
+    ),
+  };
+}
+
+export function obankStoredConfigAfterSync(stored: Record<string, unknown>) {
+  const cleaned = { ...stored };
+  delete cleaned.pendingSession;
+  delete cleaned.pendingSessionExpiresAt;
+  delete cleaned.captcha;
+  return cleaned;
 }
 
 export async function syncTaishin(

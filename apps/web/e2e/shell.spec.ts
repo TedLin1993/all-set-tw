@@ -145,7 +145,10 @@ test("shows a loading state while a connector sync is pending", async ({
   });
 
   await page.goto("/#/data-sources");
-  await page.getByRole("button", { name: "管理設定" }).last().click();
+  const ctbcCard = page.locator("div.rounded-xl").filter({
+    has: page.getByRole("heading", { name: "中國信託銀行", exact: true }),
+  });
+  await ctbcCard.getByRole("button", { name: "管理設定" }).click();
   const syncButton = page.getByRole("button", {
     name: "同步",
     exact: true,

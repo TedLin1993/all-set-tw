@@ -76,6 +76,27 @@ export {
 export type { CtbcFetch } from "./ctbc-mobile-api";
 import { ctbcConfigSchema } from "./ctbc";
 
+export { obankConfigSchema, parseObankConfig, parseObankData } from "./obank";
+export type { ObankConfig, ObankData, ObankPayloads } from "./obank";
+export {
+  classifyObankError,
+  createObankConnector,
+  ObankCaptchaRejectedError,
+  ObankConnectionError,
+  ObankCredentialRejectedError,
+  ObankMultipleLoginError,
+  ObankProtocolError,
+  ObankVerificationRequiredError,
+  prepareObankCaptcha,
+  requireObankCredentials,
+} from "./obank-mobile-api";
+export type {
+  ObankCaptchaChallenge,
+  ObankFetch,
+  ObankSyncOptions,
+} from "./obank-mobile-api";
+import { obankConfigSchema } from "./obank";
+
 const invoiceRecordSchema = z.object({
   sourceId: z.string().min(1),
   invoiceNumber: z.string().optional(),
@@ -492,6 +513,7 @@ export const connectorConfigSchemas = {
   sinopac: sinopacConfigSchema,
   taishin: taishinConfigSchema,
   ctbc: ctbcConfigSchema,
+  obank: obankConfigSchema,
 } satisfies Record<ConnectorId, z.ZodTypeAny>;
 
 export function parseConnectorConfig(
