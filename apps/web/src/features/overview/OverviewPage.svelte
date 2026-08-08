@@ -210,7 +210,7 @@
             : "信用卡負債相對可動用存款偏高",
         tone: "coral",
         icon: "card",
-        view: "cards",
+        view: "assets",
       });
     }
 

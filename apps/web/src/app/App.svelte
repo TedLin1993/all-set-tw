@@ -4,8 +4,6 @@
   import { QueryClientProvider } from "@tanstack/svelte-query";
   import Activity from "@/features/activity/ActivityPage.svelte";
   import Assets from "@/features/assets/AssetsPage.svelte";
-  import Bank from "@/features/assets/Bank.svelte";
-  import Cards from "@/features/assets/Cards.svelte";
   import Investments from "@/features/assets/Investments.svelte";
   import ManualAssets from "@/features/assets/ManualAssets.svelte";
   import Invoices from "@/features/invoices/InvoicesPage.svelte";
@@ -240,8 +238,6 @@
         {:else if view === "activity"}<Activity {api} {navigate} />
         {:else if view === "invoices"}<Invoices {api} />
         {:else if view === "investments"}<Investments {api} />
-        {:else if view === "cards"}<Cards {api} />
-        {:else if view === "bank"}<Bank {api} {navigate} />
         {:else if view === "manual-assets"}<ManualAssets {api} />
         {:else}<SettingsView
             {api}

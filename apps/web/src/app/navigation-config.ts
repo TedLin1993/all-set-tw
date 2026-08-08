@@ -58,8 +58,6 @@ export const detailLabels: Record<
   DetailView,
   { label: string; description: string }
 > = {
-  bank: { label: "銀行帳戶", description: "帳戶餘額、現金流與交易分類。" },
-  cards: { label: "信用卡", description: "信用卡帳戶、帳單與刷卡紀錄。" },
   investments: { label: "投資", description: "投資持倉與交易紀錄。" },
   "manual-assets": {
     label: "其他資產",

@@ -1,16 +1,18 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query";
-  import { Building2, CreditCard } from "@lucide/svelte";
+  import { Building2, CreditCard, Search } from "@lucide/svelte";
   import Button from "@/shared/ui/Button.svelte";
   import Card from "@/shared/ui/Card.svelte";
   import CardHeader from "@/shared/ui/CardHeader.svelte";
   import CardContent from "@/shared/ui/CardContent.svelte";
   import EmptyState from "@/shared/ui/EmptyState.svelte";
+  import Input from "@/shared/ui/Input.svelte";
   import TabsList from "@/shared/ui/TabsList.svelte";
   import TabsTrigger from "@/shared/ui/TabsTrigger.svelte";
   import type { ApiClient } from "@/shared/api/client";
   import { exchangeRatesQuery, manualAssetsQuery } from "@/data/assets/queries";
-  import { bankQuery } from "@/data/bank/queries";
+  import { bankQuery, creditCardBillsQuery } from "@/data/bank/queries";
+  import type { CreditCardBillRow } from "@/data/bank/types";
   import { investmentsQuery } from "@/data/investments/queries";
   import type { View } from "@/app/types";
   import { calculateAssetSummary } from "./model/summary";
@@ -25,11 +27,13 @@
   let { api, navigate }: { api: ApiClient; navigate: (view: View) => void } =
     $props();
   const bank = createQuery(bankQuery(() => api));
+  const bills = createQuery(creditCardBillsQuery(() => api));
   const investments = createQuery(investmentsQuery(() => api));
   const manual = createQuery(manualAssetsQuery(() => api));
   const rates = createQuery(exchangeRatesQuery(() => api));
 
   let section = $state<AssetSection>("all");
+  let billSearch = $state("");
   const summary = $derived(
     calculateAssetSummary({
       bank: $bank.data ?? { accounts: [], transactions: [] },
@@ -40,6 +44,14 @@
   );
   const deposits = $derived(summary.deposits);
   const cards = $derived(summary.cards);
+  const cardsById = $derived(new Map(cards.map((card) => [card.id, card])));
+  const filteredBills = $derived(
+    ($bills.data ?? []).filter((bill) =>
+      `${bill.accountSourceId ?? ""} ${bill.billingPeriod}`
+        .toLowerCase()
+        .includes(billSearch.toLowerCase()),
+    ),
+  );
   const bankTotal = $derived(summary.bankTotal);
   const investmentTotal = $derived(summary.investmentTotal);
   const manualTotal = $derived(summary.manualTotal);
@@ -91,6 +103,10 @@
                 detail: "淨資產 · 已扣除信用卡負債",
               },
   );
+  function billAccountName(bill: CreditCardBillRow) {
+    const card = cardsById.get(bill.accountId);
+    return card?.accountName ?? card?.institutionName ?? "信用卡帳戶";
+  }
 </script>
 
 {#if loading}
@@ -152,9 +168,13 @@
               <p class="mt-1 text-xs text-ink/45">各銀行彙整，外幣換算為 TWD</p>
             </div>
             <button
-              class="text-xs font-semibold text-steel"
+              class="shrink-0 text-right text-steel"
               onclick={() => (section = "bank")}
-              >總額 {formatCurrency(bankTotal)}</button
+              ><span class="block text-xs font-medium text-ink/45">總額</span
+              ><span
+                class="mt-0.5 block text-xl font-bold tabular-nums sm:text-2xl"
+                >{formatCurrency(bankTotal)}</span
+              ></button
             ></CardHeader
           >
           <CardContent class="pt-0">
@@ -181,7 +201,7 @@
                       </p>
                     </div>
                   </div>
-                  <p class="shrink-0 font-bold tabular-nums text-steel">
+                  <p class="shrink-0 text-lg font-bold tabular-nums text-steel">
                     {formatCurrency(group.totalTwd)}
                   </p>
                 </button>
@@ -236,10 +256,7 @@
               ><div>
                 <h2 class="text-lg font-semibold">銀行帳戶</h2>
                 <p class="text-xs text-ink/45">{deposits.length} 個帳戶</p>
-              </div>
-              <Button size="sm" variant="ghost" onclick={() => navigate("bank")}
-                >查看交易 →</Button
-              ></CardHeader
+              </div></CardHeader
             >
             <div class="divide-y divide-ink/8">
               {#each groupedBanks as group (group.institution)}
@@ -247,9 +264,9 @@
                   <div class="mb-2 flex items-center justify-between gap-3">
                     <h3 class="font-semibold">{group.institution}</h3>
                     <div class="flex items-center gap-3">
-                      <span class="text-xs font-bold tabular-nums text-steel"
-                        >{formatCurrency(group.totalTwd)}</span
-                      ><span class="text-xs font-medium text-moss">已同步</span>
+                      <span class="text-lg font-bold tabular-nums text-steel">
+                        {formatCurrency(group.totalTwd)}
+                      </span>
                     </div>
                   </div>
                   <div class="grid gap-2">
@@ -309,13 +326,8 @@
         </div>
         <div class="grid content-start gap-5">
           <Card
-            ><CardHeader class="flex-row items-center justify-between"
-              ><h2 class="text-lg font-semibold">信用卡</h2>
-              <Button
-                size="sm"
-                variant="ghost"
-                onclick={() => navigate("cards")}>查看交易 →</Button
-              ></CardHeader
+            ><CardHeader
+              ><h2 class="text-lg font-semibold">信用卡</h2></CardHeader
             ><CardContent
               ><div class="rounded-xl bg-ink p-4 text-white">
                 <p class="text-xs text-white/60">目前負債</p>
@@ -347,16 +359,13 @@
       </div>
     {:else if section === "bank"}
       <Card>
-        <CardHeader class="flex-row items-center justify-between"
+        <CardHeader
           ><div>
             <h2 class="flex items-center gap-2 text-lg font-semibold">
               <Building2 class="size-5 text-steel" />銀行帳戶
             </h2>
             <p class="mt-1 text-xs text-ink/45">依銀行分組，總額由大到小排列</p>
-          </div>
-          <Button size="sm" variant="ghost" onclick={() => navigate("bank")}
-            >查看所有交易 →</Button
-          ></CardHeader
+          </div></CardHeader
         >
         <div class="divide-y divide-ink/8">
           {#each groupedBanks as group (group.institution)}
@@ -368,7 +377,7 @@
                     {group.accounts.length} 個帳戶
                   </p>
                 </div>
-                <p class="font-bold tabular-nums text-steel">
+                <p class="text-lg font-bold tabular-nums text-steel sm:text-xl">
                   {formatCurrency(group.totalTwd)}
                 </p>
               </div>
@@ -376,19 +385,20 @@
                 {#each group.accounts as account (account.id)}<div
                     class="rounded-xl border border-ink/8 p-3"
                   >
-                    <div class="flex items-start justify-between gap-3">
-                      <div class="min-w-0">
-                        <p class="truncate text-sm font-semibold">
-                          {account.accountName ??
-                            formatBankAccountName(account)}
-                        </p>
-                        <p class="mt-1 text-xs text-ink/45">
-                          {account.currency} · {account.asOfAt
-                            ? `更新 ${formatDate(account.asOfAt)}`
-                            : "尚未同步"}
-                        </p>
-                      </div>
-                      <p class="shrink-0 font-bold tabular-nums">
+                    <div
+                      class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-x-3 gap-y-1"
+                    >
+                      <p
+                        class="col-span-2 min-w-0 break-words text-sm font-semibold"
+                      >
+                        {account.accountName ?? formatBankAccountName(account)}
+                      </p>
+                      <p class="min-w-0 text-xs text-ink/45">
+                        {account.currency} · {account.asOfAt
+                          ? `更新 ${formatDate(account.asOfAt)}`
+                          : "尚未同步"}
+                      </p>
+                      <p class="shrink-0 text-right font-bold tabular-nums">
                         {formatCurrency(account.balance ?? 0, account.currency)}
                       </p>
                     </div>
@@ -400,26 +410,23 @@
       </Card>
     {:else if section === "cards"}
       <Card
-        ><CardHeader class="flex-row items-center justify-between"
+        ><CardHeader
           ><div>
             <h2 class="text-lg font-semibold">信用卡帳戶</h2>
             <p class="mt-1 text-xs text-ink/45">
               目前負債 {formatCurrency(cardDebt)}
             </p>
-          </div>
-          <Button size="sm" variant="ghost" onclick={() => navigate("cards")}
-            >查看刷卡紀錄 →</Button
-          ></CardHeader
+          </div></CardHeader
         ><CardContent
           >{#if cards.length === 0}<p
               class="py-8 text-center text-sm text-ink/45"
             >
               尚無信用卡資料。
             </p>{:else}<div class="grid gap-3 md:grid-cols-2">
-              {#each cards as card, index (card.id)}<button
+              {#each cards as card, index (card.id)}<div
                   class={`w-full rounded-2xl p-4 text-left text-white ${index % 2 === 0 ? "bg-ink" : "bg-steel"}`}
-                  onclick={() => navigate("cards")}
-                  ><div class="flex items-start justify-between">
+                >
+                  <div class="flex items-start justify-between">
                     <div>
                       <p class="font-semibold">
                         {card.institutionName ?? card.connectorId}
@@ -432,9 +439,59 @@
                   </div>
                   <p class="mt-5 text-2xl font-bold tabular-nums">
                     {formatCurrency(Math.abs(card.balance ?? 0), card.currency)}
-                  </p></button
-                >{/each}
+                  </p>
+                </div>{/each}
             </div>{/if}</CardContent
+        ></Card
+      ><Card class="min-w-0 max-w-full overflow-hidden"
+        ><CardHeader class="flex-wrap items-center justify-between gap-3"
+          ><div>
+            <h2 class="text-lg font-semibold">信用卡帳單</h2>
+            <p class="mt-1 text-xs text-ink/45">
+              共 {filteredBills.length} 筆帳單
+            </p>
+          </div>
+          <div class="relative w-full sm:w-44">
+            <Search
+              class="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground"
+            /><Input
+              class="pl-9"
+              placeholder="搜尋帳單"
+              bind:value={billSearch}
+            />
+          </div></CardHeader
+        ><CardContent class="min-w-0 p-0"
+          ><div class="max-w-full overflow-x-auto">
+            <table class="w-full min-w-[680px] text-left text-sm">
+              <thead class="border-y border-ink/8 bg-paper text-xs text-ink/50"
+                ><tr
+                  ><th class="px-5 py-3">帳戶</th><th class="px-5 py-3">帳期</th
+                  ><th class="px-5 py-3 text-right">帳單金額</th><th
+                    class="px-5 py-3">繳款期限</th
+                  ><th class="px-5 py-3">狀態</th></tr
+                ></thead
+              ><tbody class="divide-y divide-ink/8"
+                >{#each filteredBills as bill (bill.id)}<tr
+                    ><td class="px-5 py-3 font-medium"
+                      >{billAccountName(bill)}</td
+                    ><td class="px-5 py-3">{bill.billingPeriod}</td><td
+                      class="px-5 py-3 text-right font-semibold"
+                      >{bill.statementAmount == null
+                        ? "-"
+                        : formatCurrency(
+                            bill.statementAmount,
+                            bill.currency,
+                          )}</td
+                    ><td class="px-5 py-3"
+                      >{bill.paymentDueDate
+                        ? formatDate(bill.paymentDueDate)
+                        : "—"}</td
+                    ><td class="px-5 py-3">{bill.isPaid ? "已繳" : "待繳"}</td
+                    ></tr
+                  >{/each}</tbody
+              >
+            </table>
+          </div></CardContent
         ></Card
       >
     {:else if section === "investments"}
