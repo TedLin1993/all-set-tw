@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  recognizeAlphanumericCaptcha,
   recognizeNumericCaptcha,
   recognizeValidateNumber,
   VALIDATE_NUMBER_MODEL,
@@ -129,6 +130,25 @@ describe("Gemma 4 validation number OCR", () => {
 
     expect(JSON.stringify(run.mock.calls[0]?.[1])).toContain(
       "exactly 4 digits",
+    );
+  });
+
+  it("accepts an exact case-sensitive alphanumeric CAPTCHA", async () => {
+    const run = vi.fn().mockResolvedValue({
+      choices: [{ message: { content: "A1b2" } }],
+    });
+
+    await expect(
+      recognizeAlphanumericCaptcha(
+        { run } as unknown as Ai,
+        image,
+        "image/png",
+        4,
+      ),
+    ).resolves.toMatchObject({ code: "A1b2" });
+
+    expect(JSON.stringify(run.mock.calls[0]?.[1])).toContain(
+      "case-sensitive ASCII letters or digits",
     );
   });
 });

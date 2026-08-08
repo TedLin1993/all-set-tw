@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CtbcConnectionError } from "@taiwan-fin-hub/connectors";
+import {
+  CtbcConnectionError,
+  ObankConnectionError,
+} from "@taiwan-fin-hub/connectors";
 import {
   TaishinBrowserCapacityError,
   TaishinConnectionError,
@@ -8,7 +11,9 @@ import type { Env } from "../../../src/platform/env";
 
 const mocks = vi.hoisted(() => ({
   prepareTaishinCaptchaSession: vi.fn(),
+  prepareObankCaptchaSession: vi.fn(),
   syncCtbc: vi.fn(),
+  syncObank: vi.fn(),
   syncTaishin: vi.fn(),
 }));
 
@@ -16,6 +21,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   NeedsUserActionError: class NeedsUserActionError extends Error {},
   prepareSinopacCaptchaSession: vi.fn(),
   prepareTaishinCaptchaSession: mocks.prepareTaishinCaptchaSession,
+  prepareObankCaptchaSession: mocks.prepareObankCaptchaSession,
   safeErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
   syncCathaybk: vi.fn(),
@@ -23,6 +29,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncEinvoice: vi.fn(),
   syncEsun: vi.fn(),
   syncSinopac: vi.fn(),
+  syncObank: mocks.syncObank,
   syncTaishin: mocks.syncTaishin,
   syncTdcc: vi.fn(),
   SyncAlreadyRunningError: class SyncAlreadyRunningError extends Error {},
@@ -61,6 +68,19 @@ beforeEach(() => {
     connectorId: "ctbc",
     scope: "all",
     records: 4,
+    cursorUpdated: true,
+  });
+  mocks.prepareObankCaptchaSession.mockResolvedValue({
+    captchaImage: "data:image/png;base64,AQID",
+    expiresAt: "2026-08-08T12:02:00.000Z",
+    captchaLength: 4,
+    captchaKind: "alphanumeric",
+  });
+  mocks.syncObank.mockResolvedValue({
+    success: true,
+    connectorId: "obank",
+    scope: "all",
+    records: 3,
     cursorUpdated: true,
   });
 });
@@ -163,6 +183,66 @@ describe("Taishin sync routes", () => {
     expect(failed.status).toBe(502);
     await expect(failed.json()).resolves.toMatchObject({
       error: { code: "TAISHIN_CONNECTION_FAILED" },
+    });
+  });
+});
+
+describe("O-Bank sync routes", () => {
+  it("returns the App API CAPTCHA metadata", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/obank/captcha",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      captchaLength: 4,
+      captchaKind: "alphanumeric",
+      captchaImage: "data:image/png;base64,AQID",
+    });
+  });
+
+  it("accepts four alphanumeric characters and rejects malformed input", async () => {
+    const valid = await syncRoutes.request(
+      "/connectors/obank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "A1b2" }),
+      },
+      env,
+    );
+    expect(valid.status).toBe(200);
+    expect(mocks.syncObank).toHaveBeenCalledWith(env, "manual", {
+      captcha: "A1b2",
+    });
+
+    const invalid = await syncRoutes.request(
+      "/connectors/obank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "12345" }),
+      },
+      env,
+    );
+    expect(invalid.status).toBe(400);
+  });
+
+  it("maps App API connection failures", async () => {
+    mocks.syncObank.mockRejectedValueOnce(
+      new ObankConnectionError("schema drift"),
+    );
+    const response = await syncRoutes.request(
+      "/connectors/obank/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "OBANK_CONNECTION_FAILED" },
     });
   });
 });

@@ -1,6 +1,8 @@
 import {
   CtbcConnectionError,
   EInvoiceProtocolUnavailableError,
+  ObankConnectionError,
+  ObankProtocolError,
   TdccConnectionError,
   TdccVerificationRequiredError,
 } from "@taiwan-fin-hub/connectors";
@@ -49,6 +51,13 @@ const taishinSyncBodySchema = z.object({
   captcha: z
     .string()
     .regex(/^\d{4,8}$/)
+    .optional(),
+});
+
+const obankSyncBodySchema = z.object({
+  captcha: z
+    .string()
+    .regex(/^[A-Za-z0-9]{4}$/)
     .optional(),
 });
 
@@ -288,6 +297,48 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       );
     },
   );
+
+  api.post("/connectors/obank/captcha", async (c) => {
+    try {
+      return c.json(await prepareConnectorChallenge(c.env, "obank"));
+    } catch (error) {
+      if (error instanceof SyncAlreadyRunningError) {
+        return jsonError(
+          "SYNC_ALREADY_RUNNING",
+          "王道銀行已有驗證或同步作業正在進行。",
+          409,
+        );
+      }
+      if (error instanceof NeedsUserActionError) {
+        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      }
+      if (
+        error instanceof ObankConnectionError ||
+        error instanceof ObankProtocolError
+      ) {
+        return jsonError("OBANK_CONNECTION_FAILED", error.message, 502);
+      }
+      return jsonError("OBANK_CAPTCHA_FAILED", safeErrorMessage(error), 502);
+    }
+  });
+
+  api.post(
+    "/connectors/obank/sync",
+    zValidator(
+      "json",
+      obankSyncBodySchema,
+      validationHook("INVALID_REQUEST", "O-Bank sync options are invalid."),
+    ),
+    async (c) => {
+      const overrides = c.req.valid("json");
+      return syncRouteResponse(
+        c,
+        withManualSyncLock(c.env, "obank", SYNC_SCOPE_ALL, () =>
+          runConnectorSync(c.env, "obank", "manual", SYNC_SCOPE_ALL, overrides),
+        ),
+      );
+    },
+  );
 }
 
 async function syncRouteResponse(
@@ -333,6 +384,12 @@ async function syncRouteResponse(
     }
     if (error instanceof TaishinConnectionError) {
       return jsonError("TAISHIN_CONNECTION_FAILED", error.message, 502);
+    }
+    if (
+      error instanceof ObankConnectionError ||
+      error instanceof ObankProtocolError
+    ) {
+      return jsonError("OBANK_CONNECTION_FAILED", error.message, 502);
     }
     throw error;
   }

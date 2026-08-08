@@ -21,12 +21,57 @@ export async function recognizeNumericCaptcha(
   contentType: string | undefined,
   digitCount: number,
 ) {
+  const result = await recognizeCaptcha(
+    ai,
+    imageBytes,
+    contentType,
+    digitCount,
+    `digits in this CAPTCHA`,
+    new RegExp(`^\\d{${digitCount}}$`),
+  );
+  return { number: result.value, model: result.model };
+}
+
+export async function recognizeAlphanumericCaptcha(
+  ai: Ai,
+  imageBytes: ArrayBuffer,
+  contentType: string | undefined,
+  characterCount: number,
+) {
+  const result = await recognizeCaptcha(
+    ai,
+    imageBytes,
+    contentType,
+    characterCount,
+    `case-sensitive ASCII letters or digits in this CAPTCHA`,
+    new RegExp(`^[A-Za-z0-9]{${characterCount}}$`),
+  );
+  return { code: result.value, model: result.model };
+}
+
+async function recognizeCaptcha(
+  ai: Ai,
+  imageBytes: ArrayBuffer,
+  contentType: string | undefined,
+  characterCount: number,
+  characterDescription: string,
+  expectedPattern: RegExp,
+) {
   if (imageBytes.byteLength === 0) throw new ValidateNumberEmptyImageError();
   if (imageBytes.byteLength > 256_000)
     throw new ValidateNumberImageTooLargeError();
-  if (!contentType || !["image/jpeg", "image/jpg"].includes(contentType))
+  if (
+    !contentType ||
+    !["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(
+      contentType,
+    )
+  )
     throw new ValidateNumberOcrError();
-  if (!Number.isInteger(digitCount) || digitCount < 4 || digitCount > 8)
+  if (
+    !Number.isInteger(characterCount) ||
+    characterCount < 4 ||
+    characterCount > 8
+  )
     throw new ValidateNumberOcrError();
 
   const model: string = VALIDATE_NUMBER_MODEL;
@@ -37,7 +82,7 @@ export async function recognizeNumericCaptcha(
         content: [
           {
             type: "text" as const,
-            text: `Read the ${digitCount} digits in this CAPTCHA. Return exactly ${digitCount} digits and nothing else.`,
+            text: `Read the ${characterCount} ${characterDescription}. Return exactly ${characterCount} ${characterDescription.startsWith("digits") ? "digits" : "characters"} and nothing else.`,
           },
           {
             type: "image_url" as const,
@@ -85,11 +130,10 @@ export async function recognizeNumericCaptcha(
       "驗證碼辨識服務暫時無法使用，請稍後重試。",
     );
 
-  const number = readMessageContent(response).trim();
-  if (!new RegExp(`^\\d{${digitCount}}$`).test(number))
-    throw new ValidateNumberOcrError();
+  const value = readMessageContent(response).trim();
+  if (!expectedPattern.test(value)) throw new ValidateNumberOcrError();
   return {
-    number,
+    value,
     model: VALIDATE_NUMBER_MODEL,
   };
 }
