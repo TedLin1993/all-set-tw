@@ -19,7 +19,7 @@
 | 永豐行動銀行 | —                                                                              | 信用卡總覽、近期帳單與未出帳消費         | —                             | —                  | Browser Run 搭配 Gemma 4 辨識驗證碼；失敗可人工輸入     |
 | 台新銀行     | —                                                                              | 信用卡額度、帳單、已入帳與即時授權消費   | —                             | —                  | Browser Run 搭配 Gemma 4 辨識驗證碼；失敗可人工輸入     |
 | 中國信託銀行 | 存款帳戶、餘額與交易                                                           | 信用卡帳單、已入帳、未出帳與即時消費明細 | —                             | —                  | 行動銀行 API 自動登入                                   |
-| 王道銀行     | 活存、定存、餘額與近三個月交易                                                 | —                                        | —                             | —                  | App API 搭配 Gemma 4 辨識四位英數驗證碼；失敗可人工輸入 |
+| 王道銀行     | 活存、定存、餘額與交易                                                         | —                                        | —                             | —                  | App API 搭配 Gemma 4 辨識四位英數驗證碼；失敗可人工輸入 |
 
 ## 已知限制
 
@@ -50,7 +50,11 @@
 
 ## 技術架構
 
-前端使用 Svelte 5、TypeScript 與 Tailwind CSS 4；後端執行於 Cloudflare Workers，以 Hono 提供 API，並整合 D1、Access、Browser Run、Workers AI、Cron Triggers 與 Queues。Cron 負責啟動排程輪次，每個 connector 由獨立的 Queue consumer invocation 逐一執行。專案以 npm workspaces 管理 Web、Worker、共用型別、資料庫與連接器套件。
+前端使用 Svelte 5、TypeScript、Tailwind CSS 4 與 shadcn-svelte。
+
+後端執行於 Cloudflare Workers，以 Hono 提供 API，並整合 D1、Access、Browser Run、Workers AI、Cron Triggers 與 Queues。Cron 負責啟動排程輪次，每個 connector 由獨立的 Queue consumer invocation 逐一執行。
+
+專案以 npm workspaces 管理 Web、Worker、共用型別、資料庫與連接器套件。
 
 詳細設計請參考[後端架構](docs/002-backend-architecture.md)、[前端架構](docs/003-frontend-architecture.md)與[連接器開發](docs/004-connector-development.md)。
 
