@@ -152,9 +152,13 @@
               <p class="mt-1 text-xs text-ink/45">各銀行彙整，外幣換算為 TWD</p>
             </div>
             <button
-              class="text-xs font-semibold text-steel"
+              class="shrink-0 text-right text-steel"
               onclick={() => (section = "bank")}
-              >總額 {formatCurrency(bankTotal)}</button
+              ><span class="block text-xs font-medium text-ink/45">總額</span
+              ><span
+                class="mt-0.5 block text-xl font-bold tabular-nums sm:text-2xl"
+                >{formatCurrency(bankTotal)}</span
+              ></button
             ></CardHeader
           >
           <CardContent class="pt-0">
@@ -181,7 +185,9 @@
                       </p>
                     </div>
                   </div>
-                  <p class="shrink-0 font-bold tabular-nums text-steel">
+                  <p
+                    class="shrink-0 text-lg font-bold tabular-nums text-steel"
+                  >
                     {formatCurrency(group.totalTwd)}
                   </p>
                 </button>
@@ -236,10 +242,7 @@
               ><div>
                 <h2 class="text-lg font-semibold">銀行帳戶</h2>
                 <p class="text-xs text-ink/45">{deposits.length} 個帳戶</p>
-              </div>
-              <Button size="sm" variant="ghost" onclick={() => navigate("bank")}
-                >查看交易 →</Button
-              ></CardHeader
+              </div></CardHeader
             >
             <div class="divide-y divide-ink/8">
               {#each groupedBanks as group (group.institution)}
@@ -247,7 +250,7 @@
                   <div class="mb-2 flex items-center justify-between gap-3">
                     <h3 class="font-semibold">{group.institution}</h3>
                     <div class="flex items-center gap-3">
-                      <span class="text-xs font-bold tabular-nums text-steel"
+                      <span class="text-lg font-bold tabular-nums text-steel"
                         >{formatCurrency(group.totalTwd)}</span
                       ><span class="text-xs font-medium text-moss">已同步</span>
                     </div>
@@ -347,16 +350,13 @@
       </div>
     {:else if section === "bank"}
       <Card>
-        <CardHeader class="flex-row items-center justify-between"
+        <CardHeader
           ><div>
             <h2 class="flex items-center gap-2 text-lg font-semibold">
               <Building2 class="size-5 text-steel" />銀行帳戶
             </h2>
             <p class="mt-1 text-xs text-ink/45">依銀行分組，總額由大到小排列</p>
-          </div>
-          <Button size="sm" variant="ghost" onclick={() => navigate("bank")}
-            >查看所有交易 →</Button
-          ></CardHeader
+          </div></CardHeader
         >
         <div class="divide-y divide-ink/8">
           {#each groupedBanks as group (group.institution)}
@@ -368,7 +368,9 @@
                     {group.accounts.length} 個帳戶
                   </p>
                 </div>
-                <p class="font-bold tabular-nums text-steel">
+                <p
+                  class="text-lg font-bold tabular-nums text-steel sm:text-xl"
+                >
                   {formatCurrency(group.totalTwd)}
                 </p>
               </div>
@@ -376,19 +378,20 @@
                 {#each group.accounts as account (account.id)}<div
                     class="rounded-xl border border-ink/8 p-3"
                   >
-                    <div class="flex items-start justify-between gap-3">
-                      <div class="min-w-0">
-                        <p class="truncate text-sm font-semibold">
-                          {account.accountName ??
-                            formatBankAccountName(account)}
-                        </p>
-                        <p class="mt-1 text-xs text-ink/45">
-                          {account.currency} · {account.asOfAt
-                            ? `更新 ${formatDate(account.asOfAt)}`
-                            : "尚未同步"}
-                        </p>
-                      </div>
-                      <p class="shrink-0 font-bold tabular-nums">
+                    <div
+                      class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-x-3 gap-y-1"
+                    >
+                      <p
+                        class="col-span-2 min-w-0 break-words text-sm font-semibold"
+                      >
+                        {account.accountName ?? formatBankAccountName(account)}
+                      </p>
+                      <p class="min-w-0 text-xs text-ink/45">
+                        {account.currency} · {account.asOfAt
+                          ? `更新 ${formatDate(account.asOfAt)}`
+                          : "尚未同步"}
+                      </p>
+                      <p class="shrink-0 text-right font-bold tabular-nums">
                         {formatCurrency(account.balance ?? 0, account.currency)}
                       </p>
                     </div>

@@ -109,12 +109,17 @@ function normalizeDepositDisplay<T extends BankDisplayRow>(row: T): T {
           : row.connectorId === "obank"
             ? OBANK_BANK_CODE
             : undefined);
-  const accountLast5 = accountLast5FromSourceId(sourceId);
+  const accountSuffix = accountSuffixFromSourceId(sourceId);
   return {
     ...row,
     institutionName:
       (bankCode && TAIWAN_BANK_NAMES[bankCode]) || row.institutionName,
-    accountName: accountLast5 ? `末五碼 ${accountLast5}` : row.accountName,
+    accountName:
+      row.accountType === "time_deposit" && row.accountName
+        ? accountSuffix
+          ? `${row.accountName} · ${accountSuffix}`
+          : row.accountName
+        : accountSuffix || row.accountName,
   };
 }
 
@@ -137,8 +142,10 @@ function parseBankAccountSource(sourceId: string): {
   return {};
 }
 
-function accountLast5FromSourceId(sourceId: string) {
+function accountSuffixFromSourceId(sourceId: string) {
   const account = parseBankAccountSource(sourceId).account;
   const digits = account?.replace(/\D/g, "") ?? "";
-  return digits ? digits.slice(-5) : undefined;
+  if (!digits) return undefined;
+  const suffix = digits.slice(-5);
+  return `末${suffix.length <= 4 ? "四" : "五"}碼 ${suffix}`;
 }

@@ -23,7 +23,7 @@ describe("CTBC bank display", () => {
       }),
     ).toMatchObject({
       institutionName: "中國信託銀行",
-      accountName: "末五碼 2345",
+      accountName: "末四碼 2345",
     });
   });
 });
@@ -46,7 +46,23 @@ describe("O-Bank bank display", () => {
       }),
     ).toMatchObject({
       institutionName: "王道銀行",
-      accountName: "末五碼 1234",
+      accountName: "末四碼 1234",
+    });
+  });
+
+  it("preserves the time-deposit product name and appends only the account suffix", () => {
+    expect(
+      normalizeBankAccountDisplay({
+        connectorId: "obank",
+        sourceId:
+          "bank:obank:time-deposit:0500:0123456789abcdef:TWD",
+        institutionName: "王道銀行",
+        accountName: "一年期定期存款",
+        accountType: "time_deposit",
+      }),
+    ).toMatchObject({
+      institutionName: "王道銀行",
+      accountName: "一年期定期存款 · 末四碼 0500",
     });
   });
 });
