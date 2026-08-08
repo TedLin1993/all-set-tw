@@ -54,8 +54,7 @@ describe("O-Bank bank display", () => {
     expect(
       normalizeBankAccountDisplay({
         connectorId: "obank",
-        sourceId:
-          "bank:obank:time-deposit:0500:0123456789abcdef:TWD",
+        sourceId: "bank:obank:time-deposit:0500:0123456789abcdef:TWD",
         institutionName: "王道銀行",
         accountName: "一年期定期存款",
         accountType: "time_deposit",

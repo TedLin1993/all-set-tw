@@ -11,10 +11,7 @@
   import TabsTrigger from "@/shared/ui/TabsTrigger.svelte";
   import type { ApiClient } from "@/shared/api/client";
   import { exchangeRatesQuery, manualAssetsQuery } from "@/data/assets/queries";
-  import {
-    bankQuery,
-    creditCardBillsQuery,
-  } from "@/data/bank/queries";
+  import { bankQuery, creditCardBillsQuery } from "@/data/bank/queries";
   import type { CreditCardBillRow } from "@/data/bank/types";
   import { investmentsQuery } from "@/data/investments/queries";
   import type { View } from "@/app/types";
@@ -204,9 +201,7 @@
                       </p>
                     </div>
                   </div>
-                  <p
-                    class="shrink-0 text-lg font-bold tabular-nums text-steel"
-                  >
+                  <p class="shrink-0 text-lg font-bold tabular-nums text-steel">
                     {formatCurrency(group.totalTwd)}
                   </p>
                 </button>
@@ -331,7 +326,8 @@
         </div>
         <div class="grid content-start gap-5">
           <Card
-            ><CardHeader><h2 class="text-lg font-semibold">信用卡</h2></CardHeader
+            ><CardHeader
+              ><h2 class="text-lg font-semibold">信用卡</h2></CardHeader
             ><CardContent
               ><div class="rounded-xl bg-ink p-4 text-white">
                 <p class="text-xs text-white/60">目前負債</p>
@@ -381,9 +377,7 @@
                     {group.accounts.length} 個帳戶
                   </p>
                 </div>
-                <p
-                  class="text-lg font-bold tabular-nums text-steel sm:text-xl"
-                >
+                <p class="text-lg font-bold tabular-nums text-steel sm:text-xl">
                   {formatCurrency(group.totalTwd)}
                 </p>
               </div>
@@ -431,7 +425,8 @@
             </p>{:else}<div class="grid gap-3 md:grid-cols-2">
               {#each cards as card, index (card.id)}<div
                   class={`w-full rounded-2xl p-4 text-left text-white ${index % 2 === 0 ? "bg-ink" : "bg-steel"}`}
-                  ><div class="flex items-start justify-between">
+                >
+                  <div class="flex items-start justify-between">
                     <div>
                       <p class="font-semibold">
                         {card.institutionName ?? card.connectorId}
@@ -444,13 +439,12 @@
                   </div>
                   <p class="mt-5 text-2xl font-bold tabular-nums">
                     {formatCurrency(Math.abs(card.balance ?? 0), card.currency)}
-                  </p></div
-                >{/each}
+                  </p>
+                </div>{/each}
             </div>{/if}</CardContent
         ></Card
       ><Card class="min-w-0 max-w-full overflow-hidden"
-        ><CardHeader
-          class="flex-wrap items-center justify-between gap-3"
+        ><CardHeader class="flex-wrap items-center justify-between gap-3"
           ><div>
             <h2 class="text-lg font-semibold">信用卡帳單</h2>
             <p class="mt-1 text-xs text-ink/45">
@@ -469,35 +463,36 @@
         ><CardContent class="min-w-0 p-0"
           ><div class="max-w-full overflow-x-auto">
             <table class="w-full min-w-[680px] text-left text-sm">
-              <thead
-                class="border-y border-ink/8 bg-paper text-xs text-ink/50"
-              ><tr
-                  ><th class="px-5 py-3">帳戶</th
-                  ><th class="px-5 py-3">帳期</th
-                  ><th class="px-5 py-3 text-right">帳單金額</th
-                  ><th class="px-5 py-3">繳款期限</th
+              <thead class="border-y border-ink/8 bg-paper text-xs text-ink/50"
+                ><tr
+                  ><th class="px-5 py-3">帳戶</th><th class="px-5 py-3">帳期</th
+                  ><th class="px-5 py-3 text-right">帳單金額</th><th
+                    class="px-5 py-3">繳款期限</th
                   ><th class="px-5 py-3">狀態</th></tr
                 ></thead
               ><tbody class="divide-y divide-ink/8"
                 >{#each filteredBills as bill (bill.id)}<tr
                     ><td class="px-5 py-3 font-medium"
                       >{billAccountName(bill)}</td
-                    ><td class="px-5 py-3">{bill.billingPeriod}</td
-                    ><td class="px-5 py-3 text-right font-semibold"
+                    ><td class="px-5 py-3">{bill.billingPeriod}</td><td
+                      class="px-5 py-3 text-right font-semibold"
                       >{bill.statementAmount == null
                         ? "-"
-                        : formatCurrency(bill.statementAmount, bill.currency)}</td
+                        : formatCurrency(
+                            bill.statementAmount,
+                            bill.currency,
+                          )}</td
                     ><td class="px-5 py-3"
                       >{bill.paymentDueDate
                         ? formatDate(bill.paymentDueDate)
                         : "—"}</td
-                    ><td class="px-5 py-3"
-                      >{bill.isPaid ? "已繳" : "待繳"}</td
-                  ></tr
-                >{/each}</tbody
-            ></table>
+                    ><td class="px-5 py-3">{bill.isPaid ? "已繳" : "待繳"}</td
+                    ></tr
+                  >{/each}</tbody
+              >
+            </table>
           </div></CardContent
-      ></Card
+        ></Card
       >
     {:else if section === "investments"}
       <Card
