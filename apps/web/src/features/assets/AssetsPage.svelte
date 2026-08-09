@@ -81,7 +81,7 @@
   ]);
 
   let selectedKey = $state<string>();
-  let expandedKey = $state<string | null>();
+  let expandedKey = $state<string | null>(null);
   const activeKey = $derived(
     selectedKey && ledgerItems.some((item) => item.key === selectedKey)
       ? selectedKey
@@ -90,9 +90,7 @@
   const activeItem = $derived(
     ledgerItems.find((item) => item.key === activeKey),
   );
-  const mobileExpandedKey = $derived(
-    expandedKey === undefined ? (ledgerItems[0]?.key ?? null) : expandedKey,
-  );
+  const mobileExpandedKey = $derived(expandedKey);
 
   function toggleMobile(key: string) {
     expandedKey = mobileExpandedKey === key ? null : key;
@@ -411,7 +409,7 @@
               onclick={() => toggleMobile("investments")}
             >
               <span>
-                <strong class="block text-sm">投資工作區</strong>
+                <strong class="block text-sm">投資組合</strong>
                 <small class="mt-1 block text-xs text-ink/45">
                   {$investments.data?.length ?? 0} 個持倉 · 交易紀錄
                 </small>

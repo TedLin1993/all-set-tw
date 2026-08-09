@@ -39,7 +39,7 @@
   {#if !compact}
     <header class="border-b border-border px-5 py-4">
       <p class="text-xs font-semibold text-muted-foreground">投資</p>
-      <h2 class="mt-1 text-xl font-semibold tracking-tight">投資工作區</h2>
+      <h2 class="mt-1 text-xl font-semibold tracking-tight">投資組合</h2>
       <p class="mt-1 text-xs text-muted-foreground">持倉與交易紀錄集中查看</p>
     </header>
     <div class="grid grid-cols-2 gap-2 border-b border-border p-4">
@@ -59,7 +59,7 @@
   <div
     class="flex gap-1 border-b border-border px-4 pt-2"
     role="tablist"
-    aria-label="投資工作區"
+    aria-label="投資組合"
   >
     <button
       class={`min-h-10 border-b-2 px-3 text-sm font-semibold ${tab === "holdings" ? "border-steel text-ink" : "border-transparent text-muted-foreground"}`}
