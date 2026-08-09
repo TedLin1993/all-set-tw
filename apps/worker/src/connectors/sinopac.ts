@@ -870,6 +870,19 @@ export function parseSinopacCardData(
     summary.paymentDueDate ?? latestTwdBill?.paymentDueDate;
   const statementClosingDate =
     summary.statementClosingDate ?? latestTwdBill?.statementClosingDate;
+  const latestBillMatchesStatement =
+    latestTwdBill?.statementAmount != null &&
+    statementAmount != null &&
+    Math.abs(latestTwdBill.statementAmount) === Math.abs(statementAmount) &&
+    (!latestTwdBill.paymentDueDate ||
+      !paymentDueDate ||
+      latestTwdBill.paymentDueDate === paymentDueDate) &&
+    (!latestTwdBill.statementClosingDate ||
+      !statementClosingDate ||
+      latestTwdBill.statementClosingDate === statementClosingDate);
+  const noOutstandingStatement =
+    summary.noPaymentNeeded ||
+    (latestBillMatchesStatement && latestTwdBill?.isPaid === true);
   const bankBalanceSnapshots: Scraped["bankBalanceSnapshots"] = [];
   if (
     statementAmount != null ||
@@ -881,7 +894,7 @@ export function parseSinopacCardData(
     bankBalanceSnapshots.push({
       accountId,
       sourceId: `${accountId}:${now.toISOString().slice(0, 10)}`,
-      balance: summary.noPaymentNeeded
+      balance: noOutstandingStatement
         ? 0
         : statementAmount == null
           ? 0
@@ -891,7 +904,7 @@ export function parseSinopacCardData(
         statementAmount == null ? undefined : Math.abs(statementAmount),
       paymentDueDate,
       statementClosingDate,
-      noPaymentNeeded: summary.noPaymentNeeded,
+      noPaymentNeeded: noOutstandingStatement,
       currency: "TWD",
       asOfAt: now.toISOString(),
       raw: {

@@ -385,6 +385,15 @@ function promotionStatement(
     .join(", ");
   const updates = config.updateColumns
     .map((column) => {
+      if (entityType === "credit_card_bill") {
+        if (column === "paid_amount")
+          return "paid_amount = COALESCE(excluded.paid_amount, credit_card_bills.paid_amount)";
+        if (column === "is_paid")
+          return `is_paid = CASE
+            WHEN credit_card_bills.is_paid = 1 OR excluded.is_paid = 1 THEN 1
+            ELSE COALESCE(excluded.is_paid, credit_card_bills.is_paid)
+          END`;
+      }
       if (entityType !== "bank_transaction")
         return `${column} = excluded.${column}`;
       if (column === "status")

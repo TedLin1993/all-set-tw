@@ -5,6 +5,7 @@ import type { DetailView, MobileSettingsView, PrimaryView } from "./types";
 export interface NavigationItem {
   view: PrimaryView;
   label: string;
+  pageTitle?: string;
   shortLabel: string;
   description: string;
   icon: Component;
@@ -21,6 +22,7 @@ export const navItems: NavigationItem[] = [
   {
     view: "assets",
     label: "資產",
+    pageTitle: "資產清冊",
     shortLabel: "資產",
     description: "銀行、信用卡、投資與其他資產集中管理。",
     icon: Wallet,

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount, tick } from "svelte";
   import { toStore } from "svelte/store";
   import {
     createMutation,
@@ -28,7 +29,13 @@
     todayStr,
   } from "@/shared/format/financial";
 
-  let { api }: { api: ApiClient } = $props();
+  let {
+    api,
+    variant = "page",
+  }: {
+    api: ApiClient;
+    variant?: "page" | "embedded";
+  } = $props();
   const qc = useQueryClient();
   const assets = createQuery(manualAssetsQuery(() => api));
   const rates = createQuery(exchangeRatesQuery(() => api));
@@ -46,6 +53,9 @@
     date: string;
   } | null>(null);
   let formError = $state("");
+  let editorDialog = $state<HTMLDivElement>();
+  let deleteDialog = $state<HTMLDivElement>();
+  let returnFocus: HTMLElement | null = null;
   let form = $state({
     name: "",
     category: "real_estate",
@@ -84,8 +94,7 @@
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.manualAssets });
       qc.invalidateQueries({ queryKey: queryKeys.netWorthHistory });
-      adding = false;
-      reset();
+      closeEditor();
     },
   });
   const update = createMutation({
@@ -101,8 +110,7 @@
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.manualAssets });
       qc.invalidateQueries({ queryKey: queryKeys.netWorthHistory });
-      editing = null;
-      reset();
+      closeEditor();
     },
   });
   const remove = createMutation({
@@ -110,7 +118,7 @@
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.manualAssets });
       qc.invalidateQueries({ queryKey: queryKeys.netWorthHistory });
-      deletingAsset = null;
+      closeDeleteConfirmation();
     },
   });
   const history = createQuery(
@@ -153,7 +161,7 @@
       api.delete(`/api/manual-assets/${assetId}/history/${date}`),
     onSuccess: () => {
       invalidateHistory();
-      deletingHistory = null;
+      closeDeleteConfirmation();
     },
   });
 
@@ -168,7 +176,43 @@
       note: "",
     };
   }
+  function rememberFocus() {
+    returnFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+  }
+  async function focusFirstControl(dialog: "editor" | "delete") {
+    await tick();
+    const element = dialog === "editor" ? editorDialog : deleteDialog;
+    element
+      ?.querySelector<HTMLElement>(
+        dialog === "editor"
+          ? "input:not([type='hidden']), select, textarea"
+          : "button",
+      )
+      ?.focus();
+  }
+  function restoreFocus() {
+    const target = returnFocus;
+    returnFocus = null;
+    void tick().then(() => target?.focus());
+  }
+  function openAdd() {
+    rememberFocus();
+    adding = true;
+    editing = null;
+    reset();
+    void focusFirstControl("editor");
+  }
+  function closeEditor() {
+    adding = false;
+    editing = null;
+    reset();
+    restoreFocus();
+  }
   function startEdit(asset: ManualAssetRow) {
+    rememberFocus();
     formError = "";
     editing = asset;
     form = {
@@ -179,6 +223,26 @@
       date: asset.date ?? todayStr(),
       note: asset.note ?? "",
     };
+    void focusFirstControl("editor");
+  }
+  function requestDeleteAsset(asset: ManualAssetRow) {
+    rememberFocus();
+    deletingAsset = asset;
+    void focusFirstControl("delete");
+  }
+  function requestDeleteHistory(
+    assetId: string,
+    assetName: string,
+    date: string,
+  ) {
+    rememberFocus();
+    deletingHistory = { assetId, assetName, date };
+    void focusFirstControl("delete");
+  }
+  function closeDeleteConfirmation() {
+    deletingAsset = null;
+    deletingHistory = null;
+    restoreFocus();
   }
   function submit() {
     if (!form.name.trim() || !form.value) {
@@ -202,28 +266,72 @@
     historyDate = todayStr();
     editingHistoryDate = null;
   }
+  function toggleHistoryManagement() {
+    if (expandedAssetId) {
+      expandedAssetId = null;
+      return;
+    }
+    const firstAsset = $assets.data?.[0];
+    if (firstAsset) toggleHistory(firstAsset.id);
+  }
+
+  onMount(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (deletingAsset || deletingHistory) closeDeleteConfirmation();
+      else if (adding || editing) closeEditor();
+    };
+    window.addEventListener("keydown", handleKeydown);
+    return () => window.removeEventListener("keydown", handleKeydown);
+  });
+
+  $effect(() => {
+    if (!adding && !editing && !deletingAsset && !deletingHistory) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  });
 </script>
 
 {#if $assets.isPending}
   <EmptyState title="載入其他資產中" body="正在讀取估值紀錄。" />
 {:else}
-  <div class="grid gap-5">
-    <div class="flex items-end justify-between">
+  <div class={variant === "embedded" ? "grid gap-3" : "grid gap-5"}>
+    <div
+      class={`flex flex-wrap items-end justify-between gap-3 ${variant === "embedded" ? "px-4 pt-4" : ""}`}
+    >
       <div>
         <p class="text-sm text-ink/50">其他資產總額</p>
-        <p class="mt-1 text-3xl font-bold">{formatCurrency(total)}</p>
+        <p
+          class={`mt-1 font-bold tabular-nums ${variant === "embedded" ? "text-xl" : "text-3xl"}`}
+        >
+          {formatCurrency(total)}
+        </p>
       </div>
-      <Button
-        variant="primary"
-        onclick={() => {
-          adding = true;
-          editing = null;
-          reset();
-        }}><Plus class="size-4" />新增資產</Button
-      >
+      <div class="flex flex-wrap gap-2">
+        {#if variant === "embedded"}
+          <Button
+            class="hidden md:inline-flex"
+            variant="secondary"
+            disabled={($assets.data ?? []).length === 0}
+            onclick={toggleHistoryManagement}
+          >
+            {expandedAssetId ? "收起估值歷史" : "管理估值歷史"}
+          </Button>
+        {/if}
+        <Button variant="primary" onclick={openAdd}
+          ><Plus class="size-4" />新增資產</Button
+        >
+      </div>
     </div>
-    <Card>
-      <CardHeader><h2 class="text-lg font-semibold">資產清單</h2></CardHeader>
+    <Card class={variant === "embedded" ? "border-0 shadow-none" : ""}>
+      <CardHeader class={variant === "embedded" ? "px-4" : ""}
+        ><h2 class="text-lg font-semibold">
+          {variant === "embedded" ? "資產與估值" : "資產清單"}
+        </h2></CardHeader
+      >
       <CardContent class="p-0">
         <div class="divide-y divide-ink/8">
           {#if ($assets.data ?? []).length === 0}
@@ -257,7 +365,7 @@
                     ><button
                       class="rounded-sm p-1 text-ink/40 hover:text-coral"
                       aria-label="刪除資產"
-                      onclick={() => (deletingAsset = asset)}
+                      onclick={() => requestDeleteAsset(asset)}
                       ><Trash2 class="size-4" /></button
                     >
                   </div>
@@ -323,11 +431,11 @@
                                   size="sm"
                                   variant="ghost"
                                   onclick={() =>
-                                    (deletingHistory = {
-                                      assetId: asset.id,
-                                      assetName: asset.name,
-                                      date: entry.date,
-                                    })}>刪除</Button
+                                    requestDeleteHistory(
+                                      asset.id,
+                                      asset.name,
+                                      entry.date,
+                                    )}>刪除</Button
                                 >
                               </div>{/if}
                           </div>
@@ -371,10 +479,15 @@
         class="fixed inset-0 z-[70] flex items-end bg-ink/45 md:items-center md:justify-center md:p-6"
       >
         <div
+          aria-labelledby="manual-asset-editor-title"
+          aria-modal="true"
+          bind:this={editorDialog}
           class="w-full rounded-t-2xl bg-white p-5 shadow-2xl md:max-w-lg md:rounded-2xl"
+          role="dialog"
+          tabindex="-1"
         >
           <div class="flex items-center justify-between">
-            <h2 class="text-xl font-semibold">
+            <h2 id="manual-asset-editor-title" class="text-xl font-semibold">
               {editing ? "編輯資產" : "新增資產"}
             </h2>
             <Button
@@ -382,10 +495,7 @@
               class="rounded-full text-xl"
               size="icon"
               variant="ghost"
-              onclick={() => {
-                adding = false;
-                editing = null;
-              }}>×</Button
+              onclick={closeEditor}>×</Button
             >
           </div>
           <div class="mt-5 grid gap-3">
@@ -422,12 +532,7 @@
               </p>{/if}
           </div>
           <div class="mt-5 grid grid-cols-2 gap-3">
-            <Button
-              variant="secondary"
-              onclick={() => {
-                adding = false;
-                editing = null;
-              }}>取消</Button
+            <Button variant="secondary" onclick={closeEditor}>取消</Button
             ><Button
               disabled={$add.isPending || $update.isPending}
               onclick={submit}
@@ -444,8 +549,10 @@
         <div
           aria-labelledby="delete-confirmation-title"
           aria-modal="true"
+          bind:this={deleteDialog}
           class="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
           role="dialog"
+          tabindex="-1"
         >
           <h2 id="delete-confirmation-title" class="text-lg font-semibold">
             {deletingAsset ? "確定刪除資產？" : "確定刪除估值？"}
@@ -463,10 +570,7 @@
             <Button
               variant="secondary"
               disabled={$remove.isPending || $deleteHistory.isPending}
-              onclick={() => {
-                deletingAsset = null;
-                deletingHistory = null;
-              }}>取消</Button
+              onclick={closeDeleteConfirmation}>取消</Button
             ><Button
               class="bg-coral text-white hover:bg-coral/90"
               disabled={$remove.isPending || $deleteHistory.isPending}

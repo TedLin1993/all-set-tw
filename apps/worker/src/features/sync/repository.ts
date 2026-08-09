@@ -132,6 +132,60 @@ export function reconcileEsunLifecycleShadowStatements(db: D1Database) {
   ];
 }
 
+export function reconcileEsunSingleCardSummaryAccountStatements(
+  db: D1Database,
+) {
+  const mainAccountId = `(SELECT id FROM bank_accounts
+    WHERE connector_id = 'esun' AND source_id = 'credit:esun:main')`;
+  const physicalAccountFilter = `connector_id = 'esun'
+    AND account_type = 'credit'
+    AND source_id LIKE 'credit:esun:%'
+    AND source_id <> 'credit:esun:main'
+    AND canonical_account_id IS NULL`;
+  const physicalAccountId = `(SELECT id FROM bank_accounts
+    WHERE ${physicalAccountFilter}
+    ORDER BY id
+    LIMIT 1)`;
+  const hasSinglePhysicalCard = `(SELECT COUNT(*) FROM bank_accounts
+    WHERE ${physicalAccountFilter}) = 1`;
+
+  return [
+    db.prepare(
+      `DELETE FROM credit_card_bills
+       WHERE account_id = ${mainAccountId}
+         AND ${hasSinglePhysicalCard}
+         AND EXISTS (
+           SELECT 1 FROM credit_card_bills current
+           WHERE current.account_id = ${physicalAccountId}
+             AND current.billing_period = credit_card_bills.billing_period
+         )`,
+    ),
+    db.prepare(
+      `UPDATE credit_card_bills
+       SET account_id = ${physicalAccountId}
+       WHERE account_id = ${mainAccountId}
+         AND ${hasSinglePhysicalCard}`,
+    ),
+    db.prepare(
+      `UPDATE bank_balance_snapshots
+       SET account_id = ${physicalAccountId}
+       WHERE account_id = ${mainAccountId}
+         AND ${hasSinglePhysicalCard}`,
+    ),
+    db.prepare(
+      `UPDATE bank_transactions
+       SET account_id = ${physicalAccountId}
+       WHERE account_id = ${mainAccountId}
+         AND ${hasSinglePhysicalCard}`,
+    ),
+    db.prepare(
+      `DELETE FROM bank_accounts
+       WHERE id = ${mainAccountId}
+         AND ${hasSinglePhysicalCard}`,
+    ),
+  ];
+}
+
 export function reconcileSinopacLegacyTransactionStatements(db: D1Database) {
   const match = `canonical.connector_id = legacy.connector_id
       AND canonical.account_id = legacy.account_id

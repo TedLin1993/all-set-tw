@@ -199,9 +199,11 @@
                         ? "資產總覽"
                         : primaryView === "activity"
                           ? "所有活動"
-                          : currentView.label}</span
+                          : (currentView.pageTitle ?? currentView.label)}</span
                   ><span class="hidden md:inline"
-                    >{detail?.label ?? currentView.label}</span
+                    >{detail?.label ??
+                      currentView.pageTitle ??
+                      currentView.label}</span
                   >
                 </h1>
               {/if}
@@ -234,7 +236,7 @@
         class="mx-auto max-w-[1440px] px-4 pb-5 pt-0 sm:px-6 md:py-5 xl:px-8 xl:py-6"
       >
         {#if view === "overview"}<Overview {api} {navigate} />
-        {:else if view === "assets"}<Assets {api} {navigate} />
+        {:else if view === "assets"}<Assets {api} />
         {:else if view === "activity"}<Activity {api} {navigate} />
         {:else if view === "invoices"}<Invoices {api} />
         {:else if view === "investments"}<Investments {api} />

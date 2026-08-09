@@ -9,6 +9,7 @@ import {
 import {
   linkCanonicalBankAccountsStatement,
   reconcileEsunLifecycleShadowStatements,
+  reconcileEsunSingleCardSummaryAccountStatements,
   reconcileSinopacLegacyTransactionStatements,
 } from "../../../src/features/sync/repository";
 
@@ -153,6 +154,33 @@ function bankTransactionRecord(
   };
 }
 
+function creditCardBillRecord(
+  paidAmount: number | null,
+  isPaid: 0 | 1 | null,
+): SyncWriteRecord {
+  return {
+    entityType: "credit_card_bill",
+    recordKey: "tdcc:account-0:2026-07",
+    payload: {
+      id: "tdcc:account-0:2026-07",
+      connector_id: "tdcc",
+      account_id: "tdcc:account-0",
+      source_id: "statement-2026-07",
+      billing_period: "2026-07",
+      statement_amount: 1000,
+      minimum_payment: 100,
+      paid_amount: paidAmount,
+      is_paid: isPaid,
+      payment_due_date: "2026-08-08",
+      statement_closing_date: "2026-07-23",
+      currency: "TWD",
+      raw_payload: "{}",
+      created_at: "2026-07-23T00:00:00.000Z",
+      updated_at: "2026-08-08T00:00:00.000Z",
+    },
+  };
+}
+
 describe("staged sync persistence", () => {
   it("seeds a disabled CTBC all-scope sync job", () => {
     const db = createDb();
@@ -247,6 +275,127 @@ describe("staged sync persistence", () => {
         .prepare("SELECT target_id, category_id FROM classification_overrides")
         .get(),
     ).toEqual({ target_id: "canonical", category_id: "shopping" });
+  });
+
+  it("merges the E.SUN single-card summary account into the physical card", async () => {
+    const db = createDb();
+    db.database.exec(`
+      INSERT INTO bank_accounts
+        (id, connector_id, source_id, institution_name, account_name, account_type,
+         currency, raw_payload, created_at, updated_at)
+      VALUES
+        ('esun-main', 'esun', 'credit:esun:main', '玉山銀行', '玉山信用卡',
+         'credit', 'TWD', '{}', '2026-07-01', '2026-08-09'),
+        ('esun-1204', 'esun', 'credit:esun:1204', '玉山銀行', '玉山 Unicard',
+         'credit', 'TWD', '{}', '2026-07-01', '2026-08-09');
+
+      INSERT INTO bank_balance_snapshots
+        (id, connector_id, account_id, source_id, balance, currency, as_of_at,
+         raw_payload, created_at, updated_at)
+      VALUES
+        ('old-balance', 'esun', 'esun-main', 'credit:esun:main:2026-08-08',
+         -14510, 'TWD', '2026-08-08', '{}', '2026-08-08', '2026-08-08'),
+        ('new-balance', 'esun', 'esun-1204', 'credit:esun:1204:2026-08-09',
+         -14510, 'TWD', '2026-08-09', '{}', '2026-08-09', '2026-08-09');
+
+      INSERT INTO bank_transactions
+        (id, connector_id, account_id, source_id, posted_date, amount, currency,
+         description, status, raw_payload, created_at, updated_at)
+      VALUES
+        ('main-transaction', 'esun', 'esun-main', 'fallback-transaction',
+         '2026-07-20', -500, 'TWD', '測試交易', 'posted', '{}',
+         '2026-07-20', '2026-07-20');
+
+      INSERT INTO credit_card_bills
+        (id, connector_id, account_id, source_id, billing_period,
+         statement_amount, currency, raw_payload, created_at, updated_at)
+      VALUES
+        ('old-june', 'esun', 'esun-main', 'main:bill:2026-06', '2026-06',
+         5000, 'TWD', '{}', '2026-06-23', '2026-06-23'),
+        ('old-july', 'esun', 'esun-main', 'main:bill:2026-07', '2026-07',
+         14000, 'TWD', '{}', '2026-07-23', '2026-07-23'),
+        ('new-july', 'esun', 'esun-1204', '1204:bill:2026-07', '2026-07',
+         14510, 'TWD', '{}', '2026-08-09', '2026-08-09');
+    `);
+
+    await db.batch(
+      reconcileEsunSingleCardSummaryAccountStatements(
+        db as unknown as D1Database,
+      ),
+    );
+
+    expect(
+      db.database
+        .prepare(
+          "SELECT source_id AS sourceId FROM bank_accounts WHERE connector_id = 'esun'",
+        )
+        .all(),
+    ).toEqual([{ sourceId: "credit:esun:1204" }]);
+    expect(
+      db.database
+        .prepare(
+          "SELECT DISTINCT account_id AS accountId FROM bank_balance_snapshots WHERE connector_id = 'esun'",
+        )
+        .all(),
+    ).toEqual([{ accountId: "esun-1204" }]);
+    expect(
+      db.database
+        .prepare(
+          "SELECT account_id AS accountId FROM bank_transactions WHERE connector_id = 'esun'",
+        )
+        .get(),
+    ).toEqual({ accountId: "esun-1204" });
+    expect(
+      db.database
+        .prepare(
+          `SELECT billing_period AS billingPeriod, statement_amount AS statementAmount,
+                  account_id AS accountId
+           FROM credit_card_bills WHERE connector_id = 'esun'
+           ORDER BY billing_period`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        billingPeriod: "2026-06",
+        statementAmount: 5000,
+        accountId: "esun-1204",
+      },
+      {
+        billingPeriod: "2026-07",
+        statementAmount: 14510,
+        accountId: "esun-1204",
+      },
+    ]);
+  });
+
+  it("keeps the E.SUN summary account when multiple physical cards exist", async () => {
+    const db = createDb();
+    db.database.exec(`
+      INSERT INTO bank_accounts
+        (id, connector_id, source_id, account_type, currency, raw_payload,
+         created_at, updated_at)
+      VALUES
+        ('esun-main', 'esun', 'credit:esun:main', 'credit', 'TWD', '{}',
+         '2026-07-01', '2026-08-09'),
+        ('esun-1204', 'esun', 'credit:esun:1204', 'credit', 'TWD', '{}',
+         '2026-07-01', '2026-08-09'),
+        ('esun-9876', 'esun', 'credit:esun:9876', 'credit', 'TWD', '{}',
+         '2026-07-01', '2026-08-09');
+    `);
+
+    await db.batch(
+      reconcileEsunSingleCardSummaryAccountStatements(
+        db as unknown as D1Database,
+      ),
+    );
+
+    expect(
+      db.database
+        .prepare(
+          "SELECT COUNT(*) AS count FROM bank_accounts WHERE connector_id = 'esun'",
+        )
+        .get(),
+    ).toEqual({ count: 3 });
   });
 
   it("migrates preferences and removes matching legacy Sinopac transaction ids", async () => {
@@ -428,6 +577,26 @@ describe("staged sync persistence", () => {
         .prepare("SELECT COUNT(*) AS count FROM bank_transactions")
         .get(),
     ).toEqual({ count: 2 });
+  });
+
+  it("preserves confirmed credit card payment data when a later sync omits it", async () => {
+    const db = createDb();
+
+    await persistStagedSyncWrite(db as unknown as D1Database, {
+      records: [bankAccountRecord(0), creditCardBillRecord(1000, 1)],
+    });
+    await persistStagedSyncWrite(db as unknown as D1Database, {
+      records: [creditCardBillRecord(null, null)],
+    });
+
+    expect(
+      db.database
+        .prepare(
+          `SELECT paid_amount AS paidAmount, is_paid AS isPaid
+           FROM credit_card_bills WHERE billing_period = '2026-07'`,
+        )
+        .get(),
+    ).toEqual({ paidAmount: 1000, isPaid: 1 });
   });
 
   it("rolls back promotion and leaves the cursor unchanged when a staged record is invalid", async () => {

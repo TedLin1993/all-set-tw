@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { calculateAssetSummary } from "./summary";
 
 describe("calculateAssetSummary", () => {
-  it("converts balances, subtracts card debt, and groups deposit accounts", () => {
+  it("converts balances and groups accounts and cards by institution", () => {
     const summary = calculateAssetSummary({
       bank: {
         accounts: [
@@ -11,14 +11,17 @@ describe("calculateAssetSummary", () => {
             connectorId: "esun",
             sourceId: "deposit",
             institutionName: "玉山銀行",
+            bankCode: "808",
             accountType: "savings",
             balance: 100,
             currency: "USD",
           },
           {
             id: "card",
-            connectorId: "sinopac",
+            connectorId: "esun",
             sourceId: "card",
+            institutionName: "玉山銀行",
+            bankCode: "808",
             accountType: "credit",
             balance: -2_000,
             currency: "TWD",
@@ -53,6 +56,49 @@ describe("calculateAssetSummary", () => {
     expect(summary.bankTotal).toBe(3_000);
     expect(summary.cardDebt).toBe(2_000);
     expect(summary.netWorth).toBe(17_000);
-    expect(summary.groupedBanks[0]?.institution).toBe("玉山銀行");
+    expect(summary.institutionGroups).toHaveLength(1);
+    expect(summary.institutionGroups[0]).toMatchObject({
+      key: "bank:808",
+      institution: "玉山銀行",
+      assetTotalTwd: 3_000,
+      debtTotalTwd: 2_000,
+    });
+    expect(summary.institutionGroups[0]?.accounts).toHaveLength(1);
+    expect(summary.institutionGroups[0]?.cards).toHaveLength(1);
+    expect(summary.missingCurrencies).toEqual([]);
+  });
+
+  it("reports currencies omitted from TWD totals when exchange rates are missing", () => {
+    const summary = calculateAssetSummary({
+      bank: {
+        accounts: [
+          {
+            id: "foreign",
+            connectorId: "obank",
+            sourceId: "foreign",
+            accountType: "savings",
+            balance: 100,
+            currency: "USD",
+          },
+        ],
+        transactions: [],
+      },
+      investments: [],
+      manualAssets: [
+        {
+          id: "yen",
+          name: "日圓資產",
+          category: "other",
+          note: null,
+          currency: "JPY",
+          createdAt: "2026-08-09",
+          value: 10_000,
+        },
+      ],
+      rates: [],
+    });
+
+    expect(summary.grossAssets).toBe(0);
+    expect(summary.missingCurrencies).toEqual(["JPY", "USD"]);
   });
 });
