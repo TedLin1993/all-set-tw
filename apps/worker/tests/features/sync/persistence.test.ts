@@ -153,6 +153,33 @@ function bankTransactionRecord(
   };
 }
 
+function creditCardBillRecord(
+  paidAmount: number | null,
+  isPaid: 0 | 1 | null,
+): SyncWriteRecord {
+  return {
+    entityType: "credit_card_bill",
+    recordKey: "tdcc:account-0:2026-07",
+    payload: {
+      id: "tdcc:account-0:2026-07",
+      connector_id: "tdcc",
+      account_id: "tdcc:account-0",
+      source_id: "statement-2026-07",
+      billing_period: "2026-07",
+      statement_amount: 1000,
+      minimum_payment: 100,
+      paid_amount: paidAmount,
+      is_paid: isPaid,
+      payment_due_date: "2026-08-08",
+      statement_closing_date: "2026-07-23",
+      currency: "TWD",
+      raw_payload: "{}",
+      created_at: "2026-07-23T00:00:00.000Z",
+      updated_at: "2026-08-08T00:00:00.000Z",
+    },
+  };
+}
+
 describe("staged sync persistence", () => {
   it("seeds a disabled CTBC all-scope sync job", () => {
     const db = createDb();
@@ -428,6 +455,26 @@ describe("staged sync persistence", () => {
         .prepare("SELECT COUNT(*) AS count FROM bank_transactions")
         .get(),
     ).toEqual({ count: 2 });
+  });
+
+  it("preserves confirmed credit card payment data when a later sync omits it", async () => {
+    const db = createDb();
+
+    await persistStagedSyncWrite(db as unknown as D1Database, {
+      records: [bankAccountRecord(0), creditCardBillRecord(1000, 1)],
+    });
+    await persistStagedSyncWrite(db as unknown as D1Database, {
+      records: [creditCardBillRecord(null, null)],
+    });
+
+    expect(
+      db.database
+        .prepare(
+          `SELECT paid_amount AS paidAmount, is_paid AS isPaid
+           FROM credit_card_bills WHERE billing_period = '2026-07'`,
+        )
+        .get(),
+    ).toEqual({ paidAmount: 1000, isPaid: 1 });
   });
 
   it("rolls back promotion and leaves the cursor unchanged when a staged record is invalid", async () => {

@@ -78,7 +78,7 @@ test("loads the responsive shell and changes primary views", async ({
     .first()
     .click();
   await expect(
-    page.getByRole("heading", { name: "資產", exact: true }),
+    page.getByRole("heading", { name: "資產清冊", exact: true }),
   ).toBeVisible();
   await expect(page).toHaveURL(/#\/assets$/);
 
@@ -400,7 +400,7 @@ test("uses app-like scrolling and history only in standalone display mode", asyn
   await page.getByRole("button", { name: "資產", exact: true }).last().click();
   await expect(page).toHaveURL(/#\/assets$/);
   await expect(
-    page.getByRole("heading", { name: "資產", exact: true }),
+    page.getByRole("heading", { name: "資產清冊", exact: true }),
   ).toBeVisible();
   expect(await page.evaluate(() => window.history.length)).toBe(historyLength);
 });

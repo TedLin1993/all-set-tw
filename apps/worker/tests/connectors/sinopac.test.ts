@@ -328,6 +328,11 @@ describe("sinopac App JSON parser", () => {
       isPaid: true,
       currency: "TWD",
     });
+    expect(result.bankBalanceSnapshots[0]).toMatchObject({
+      balance: 0,
+      statementBalance: 5541,
+      noPaymentNeeded: true,
+    });
     expect(result.bankTransactions).toEqual([
       expect.objectContaining({
         postedDate: "2026-07-09",
@@ -342,6 +347,37 @@ describe("sinopac App JSON parser", () => {
         currency: "TWD",
       }),
     ]);
+  });
+
+  it("does not clear a newer statement when only the previous bill is paid", () => {
+    const newerSummaryPayload = structuredClone(mobileSummaryPayload);
+    newerSummaryPayload[0]!.SubInfo[0] = [
+      ...newerSummaryPayload[0]!.SubInfo[0]!.filter(
+        (item) => !["本期應繳", "繳款截止日", "結帳日"].includes(item.DataText),
+      ),
+      { DataText: "本期應繳", DataValue: "7,000" },
+      { DataText: "繳款截止日", DataValue: "2026/08/07" },
+      { DataText: "結帳日", DataValue: "2026/07/23" },
+    ];
+
+    const result = parseSinopacCardData(
+      {
+        summary: newerSummaryPayload,
+        bills: mobileBillPayload,
+        unbilled: mobileUnbilledPayload,
+      },
+      new Date("2026-07-24T12:00:00.000Z"),
+    );
+
+    expect(result.creditCardBills[0]).toMatchObject({
+      statementAmount: 5541,
+      isPaid: true,
+    });
+    expect(result.bankBalanceSnapshots[0]).toMatchObject({
+      balance: -7000,
+      statementBalance: 7000,
+      noPaymentNeeded: false,
+    });
   });
 
   it("maps latest authorizations to pending and upgrades matching card transactions to posted", () => {
