@@ -39,6 +39,12 @@
   let historyDate = $state(todayStr());
   let editingHistoryDate = $state<string | null>(null);
   let editingHistoryValue = $state("");
+  let deletingAsset = $state<ManualAssetRow | null>(null);
+  let deletingHistory = $state<{
+    assetId: string;
+    assetName: string;
+    date: string;
+  } | null>(null);
   let formError = $state("");
   let form = $state({
     name: "",
@@ -104,6 +110,7 @@
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.manualAssets });
       qc.invalidateQueries({ queryKey: queryKeys.netWorthHistory });
+      deletingAsset = null;
     },
   });
   const history = createQuery(
@@ -144,7 +151,10 @@
   const deleteHistory = createMutation({
     mutationFn: ({ assetId, date }: { assetId: string; date: string }) =>
       api.delete(`/api/manual-assets/${assetId}/history/${date}`),
-    onSuccess: invalidateHistory,
+    onSuccess: () => {
+      invalidateHistory();
+      deletingHistory = null;
+    },
   });
 
   function reset() {
@@ -247,7 +257,7 @@
                     ><button
                       class="rounded-sm p-1 text-ink/40 hover:text-coral"
                       aria-label="刪除資產"
-                      onclick={() => $remove.mutate(asset.id)}
+                      onclick={() => (deletingAsset = asset)}
                       ><Trash2 class="size-4" /></button
                     >
                   </div>
@@ -313,8 +323,9 @@
                                   size="sm"
                                   variant="ghost"
                                   onclick={() =>
-                                    $deleteHistory.mutate({
+                                    (deletingHistory = {
                                       assetId: asset.id,
+                                      assetName: asset.name,
                                       date: entry.date,
                                     })}>刪除</Button
                                 >
@@ -423,6 +434,53 @@
               >{$add.isPending || $update.isPending
                 ? "儲存中…"
                 : "儲存"}</Button
+            >
+          </div>
+        </div>
+      </div>{/if}
+    {#if deletingAsset || deletingHistory}<div
+        class="fixed inset-0 z-[80] flex items-center justify-center bg-ink/45 p-5"
+      >
+        <div
+          aria-labelledby="delete-confirmation-title"
+          aria-modal="true"
+          class="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+          role="dialog"
+        >
+          <h2 id="delete-confirmation-title" class="text-lg font-semibold">
+            {deletingAsset ? "確定刪除資產？" : "確定刪除估值？"}
+          </h2>
+          <p class="mt-2 text-sm leading-6 text-ink/60">
+            {#if deletingAsset}
+              「{deletingAsset.name}」與全部估值歷史將永久刪除，無法復原。
+            {:else if deletingHistory}
+              「{deletingHistory.assetName}」在 {formatDate(
+                deletingHistory.date,
+              )} 的估值將永久刪除，無法復原。
+            {/if}
+          </p>
+          <div class="mt-5 grid grid-cols-2 gap-3">
+            <Button
+              variant="secondary"
+              disabled={$remove.isPending || $deleteHistory.isPending}
+              onclick={() => {
+                deletingAsset = null;
+                deletingHistory = null;
+              }}>取消</Button
+            ><Button
+              class="bg-coral text-white hover:bg-coral/90"
+              disabled={$remove.isPending || $deleteHistory.isPending}
+              onclick={() => {
+                if (deletingAsset) $remove.mutate(deletingAsset.id);
+                else if (deletingHistory)
+                  $deleteHistory.mutate({
+                    assetId: deletingHistory.assetId,
+                    date: deletingHistory.date,
+                  });
+              }}
+              >{$remove.isPending || $deleteHistory.isPending
+                ? "刪除中…"
+                : "確認刪除"}</Button
             >
           </div>
         </div>
