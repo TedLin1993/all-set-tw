@@ -4,7 +4,6 @@ const views = new Set<View>([
   "overview",
   "assets",
   "activity",
-  "invoices",
   "settings",
   "investments",
   "manual-assets",
