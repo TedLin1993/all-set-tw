@@ -189,7 +189,7 @@ test("uses the desktop asset ledger without losing detail workflows", async ({
   ).toBeVisible();
   await ledger.getByRole("button", { name: /^投資/ }).click();
   await expect(
-    page.getByRole("heading", { name: "投資工作區", exact: true }),
+    page.getByRole("heading", { name: "投資組合", exact: true }),
   ).toBeVisible();
   await page.getByRole("tab", { name: "交易紀錄", exact: true }).click();
   await expect(page.getByText("買進 · 2026/8/1")).toBeVisible();
@@ -231,10 +231,13 @@ test("keeps the mobile ledger readable and expandable", async ({ page }) => {
   await page.goto("/#/assets");
 
   const taishin = page.getByRole("button", { name: /^台 台新銀行/ });
-  await expect(taishin).toHaveAttribute("aria-expanded", "true");
+  await expect(taishin).toHaveAttribute("aria-expanded", "false");
   const ledger = page
     .locator('section[aria-label="資產清冊"]')
     .filter({ visible: true });
+  await expect(ledger.getByText("薪轉戶", { exact: true })).toBeHidden();
+  await taishin.click();
+  await expect(taishin).toHaveAttribute("aria-expanded", "true");
   await expect(ledger.getByText("薪轉戶", { exact: true })).toBeVisible();
   await expect(
     page.getByText("信用卡負債", { exact: true }).first(),
