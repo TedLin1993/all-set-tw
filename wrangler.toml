@@ -29,3 +29,11 @@ database_name = "taiwan-fin-hub"
 # database_id is intentionally omitted from this public configuration.
 # Cloudflare automatically provisions or resolves the D1 binding on deploy.
 migrations_dir = "packages/db/migrations"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = true
