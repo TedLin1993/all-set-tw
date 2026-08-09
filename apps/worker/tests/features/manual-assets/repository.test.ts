@@ -1,6 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { updateManualAsset } from "../../../src/features/manual-assets/repository";
+import {
+  listManualAssetHistory,
+  updateManualAsset,
+} from "../../../src/features/manual-assets/repository";
 
 class SqliteQueryStatement {
   private values: unknown[] = [];
@@ -18,6 +21,14 @@ class SqliteQueryStatement {
   async run() {
     this.database.prepare(this.sql).run(...(this.values as never[]));
   }
+
+  async all<T>() {
+    return {
+      results: this.database
+        .prepare(this.sql)
+        .all(...(this.values as never[])) as T[],
+    };
+  }
 }
 
 const databases: DatabaseSync[] = [];
@@ -27,6 +38,36 @@ afterEach(() => {
 });
 
 describe("manual asset repository", () => {
+  it("lists valuation history from oldest to newest", async () => {
+    const database = new DatabaseSync(":memory:");
+    databases.push(database);
+    database.exec(`
+      CREATE TABLE net_worth_history (
+        id TEXT PRIMARY KEY,
+        date TEXT NOT NULL,
+        net_worth REAL NOT NULL,
+        asset_type TEXT NOT NULL,
+        source TEXT NOT NULL,
+        snapshotted_at TEXT NOT NULL
+      );
+      INSERT INTO net_worth_history
+        (id, date, net_worth, asset_type, source, snapshotted_at)
+      VALUES
+        ('new', '2026-08-03', 4790, 'manual:stock', 'manual', '2026-08-03T00:00:00.000Z'),
+        ('old', '2025-03-03', 3031, 'manual:stock', 'manual', '2025-03-03T00:00:00.000Z');
+    `);
+    const db = {
+      prepare(sql: string) {
+        return new SqliteQueryStatement(database, sql);
+      },
+    } as unknown as D1Database;
+
+    await expect(listManualAssetHistory(db, "manual:stock")).resolves.toEqual([
+      { date: "2025-03-03", value: 3031 },
+      { date: "2026-08-03", value: 4790 },
+    ]);
+  });
+
   it("updates asset metadata and its current valuation atomically", async () => {
     const database = new DatabaseSync(":memory:");
     databases.push(database);

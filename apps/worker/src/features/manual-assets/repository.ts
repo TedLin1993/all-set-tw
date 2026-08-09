@@ -137,7 +137,7 @@ export async function listManualAssetHistory(db: D1Database, id: string) {
       `SELECT date, net_worth AS value
      FROM net_worth_history
      WHERE source = 'manual' AND asset_type = ?
-     ORDER BY date DESC`,
+     ORDER BY date ASC`,
     )
     .bind(id)
     .all<{ date: string; value: number }>();
