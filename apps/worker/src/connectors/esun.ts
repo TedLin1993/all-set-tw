@@ -384,15 +384,26 @@ async function scrapeCreditCards(client: EsunHttpClient): Promise<Scraped> {
   const cards = getCreditCards(detail);
   const cutoffDate = new Date();
   cutoffDate.setMonth(cutoffDate.getMonth() - BANK_SYNC_MONTHS);
-  const bankTransactions = await scrapeTransactions(client, cutoffDate);
-  const accountIds = new Set<string>([
+  const scrapedTransactions = await scrapeTransactions(client, cutoffDate);
+  const mainSourceId = "credit:esun:main";
+  const physicalCardSourceIds = new Set([
     ...cards.map((card) => creditCardSourceId(card.cardNo)),
+    ...scrapedTransactions
+      .map((transaction) => transaction.accountId)
+      .filter((accountId) => accountId !== mainSourceId),
+  ]);
+  const balanceAccountId = esunCreditBalanceAccountId(physicalCardSourceIds);
+  const bankTransactions = scrapedTransactions.map((transaction) =>
+    transaction.accountId === mainSourceId && balanceAccountId !== mainSourceId
+      ? { ...transaction, accountId: balanceAccountId }
+      : transaction,
+  );
+  const accountIds = new Set<string>([
+    ...physicalCardSourceIds,
     ...bankTransactions.map((transaction) => transaction.accountId),
   ]);
   accountIds.delete("");
-
-  const mainSourceId = "credit:esun:main";
-  accountIds.add(mainSourceId);
+  accountIds.add(balanceAccountId);
 
   // overview fields:
   //   trsam = total credit limit (永久信用額度)
@@ -449,8 +460,8 @@ async function scrapeCreditCards(client: EsunHttpClient): Promise<Scraped> {
 
   const bankBalanceSnapshots: Scraped["bankBalanceSnapshots"] = [
     {
-      accountId: mainSourceId,
-      sourceId: `${mainSourceId}:${asOfAt}`,
+      accountId: balanceAccountId,
+      sourceId: `${balanceAccountId}:${asOfAt}`,
       balance: -outstanding,
       availableBalance: availableCredit,
       statementBalance,
@@ -475,8 +486,8 @@ async function scrapeCreditCards(client: EsunHttpClient): Promise<Scraped> {
       const payam = bill.payam ?? 0;
       const isCurrentPeriod = bym6 === (overview.lstym ?? 0);
       return {
-        accountId: mainSourceId,
-        sourceId: `${mainSourceId}:bill:${billingPeriod}`,
+        accountId: balanceAccountId,
+        sourceId: `${balanceAccountId}:bill:${billingPeriod}`,
         billingPeriod,
         statementAmount: tamt || undefined,
         minimumPayment: bill.mimpy ?? undefined,
@@ -1045,6 +1056,19 @@ function readOutstandingBalance(detail: EsunCardDetailData) {
 function creditCardSourceId(cardNo: string | null | undefined) {
   const last4 = cardNo?.match(/(\d{4})$/)?.[1];
   return last4 ? `credit:esun:${last4}` : "credit:esun:main";
+}
+
+export function esunCreditBalanceAccountId(
+  physicalCardSourceIds: Iterable<string>,
+) {
+  const accountIds = [
+    ...new Set(
+      [...physicalCardSourceIds].filter(
+        (accountId) => accountId !== "credit:esun:main",
+      ),
+    ),
+  ];
+  return accountIds.length === 1 ? accountIds[0]! : "credit:esun:main";
 }
 
 function normalizeEsunMonthDay(year: string, monthDay: string) {

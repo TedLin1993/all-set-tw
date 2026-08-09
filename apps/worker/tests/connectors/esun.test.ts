@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  esunCreditBalanceAccountId,
   normalizeEsunTimelineTransactions,
   type EsunTimelinePage,
   type EsunTimelineTransaction,
@@ -33,6 +34,16 @@ function transaction(
 }
 
 describe("E.SUN credit card timeline normalization", () => {
+  it("uses the physical card for a single card and keeps an aggregate for multiple cards", () => {
+    expect(esunCreditBalanceAccountId(["credit:esun:1204"])).toBe(
+      "credit:esun:1204",
+    );
+    expect(
+      esunCreditBalanceAccountId(["credit:esun:1204", "credit:esun:9876"]),
+    ).toBe("credit:esun:main");
+    expect(esunCreditBalanceAccountId([])).toBe("credit:esun:main");
+  });
+
   it("collapses pending and posted lifecycle copies into one stable transaction", () => {
     const rows = normalizeEsunTimelineTransactions([
       page([transaction("未入帳"), transaction("已入帳")]),
