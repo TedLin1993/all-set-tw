@@ -1,4 +1,4 @@
-import { BarChart3, FileText, History, Settings, Wallet } from "@lucide/svelte";
+import { BarChart3, History, Settings, Wallet } from "@lucide/svelte";
 import type { Component } from "svelte";
 import type { DetailView, MobileSettingsView, PrimaryView } from "./types";
 
@@ -33,13 +33,6 @@ export const navItems: NavigationItem[] = [
     shortLabel: "活動",
     description: "銀行、刷卡、投資與發票的統一時間軸。",
     icon: History,
-  },
-  {
-    view: "invoices",
-    label: "發票",
-    shortLabel: "發票",
-    description: "搜尋電子發票、商家與品項明細。",
-    icon: FileText,
   },
   {
     view: "settings",

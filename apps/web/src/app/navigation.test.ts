@@ -10,6 +10,7 @@ describe("view hash navigation", () => {
 
   it("rejects unknown routes and formats valid views", () => {
     expect(parseViewHash("#/unknown")).toBeNull();
+    expect(parseViewHash("#/invoices")).toBeNull();
     expect(viewHash("manual-assets")).toBe("#/manual-assets");
   });
 });

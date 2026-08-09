@@ -6,7 +6,6 @@
   import Assets from "@/features/assets/AssetsPage.svelte";
   import Investments from "@/features/assets/Investments.svelte";
   import ManualAssets from "@/features/assets/ManualAssets.svelte";
-  import Invoices from "@/features/invoices/InvoicesPage.svelte";
   import Overview from "@/features/overview/OverviewPage.svelte";
   import SettingsView from "@/features/settings/SettingsPage.svelte";
   import { createApiClient } from "@/shared/api/client";
@@ -237,8 +236,7 @@
       >
         {#if view === "overview"}<Overview {api} {navigate} />
         {:else if view === "assets"}<Assets {api} />
-        {:else if view === "activity"}<Activity {api} {navigate} />
-        {:else if view === "invoices"}<Invoices {api} />
+        {:else if view === "activity"}<Activity {api} />
         {:else if view === "investments"}<Investments {api} />
         {:else if view === "manual-assets"}<ManualAssets {api} />
         {:else}<SettingsView

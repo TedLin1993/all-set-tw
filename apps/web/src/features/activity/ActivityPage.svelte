@@ -31,7 +31,6 @@
   import CategoryUpdateDialog from "./components/CategoryUpdateDialog.svelte";
   import type { ApiClient } from "@/shared/api/client";
   import { queryKeys } from "@/shared/api/query-keys";
-  import type { View } from "@/app/types";
   import { exchangeRatesQuery } from "@/data/assets/queries";
   import { bankRangeQuery } from "@/data/bank/queries";
   import type { BankData, BankTransactionRow } from "@/data/bank/types";
@@ -84,8 +83,7 @@
   } from "@/shared/format/financial";
   import { recentMonthRange, recentMonthKeys } from "@/shared/date-range";
   import { swipeBack } from "@/shared/actions/swipe-back";
-  let { api, navigate }: { api: ApiClient; navigate: (view: View) => void } =
-    $props();
+  let { api }: { api: ApiClient } = $props();
   const initialSelectedMonth = new Date().toISOString().slice(0, 7);
   let selectedMonth = $state(initialSelectedMonth);
   const activityRange = recentMonthRange(6);
@@ -974,11 +972,6 @@
         </div>
       </CardContent>
     </Card>
-    <div class="flex justify-end">
-      <Button variant="ghost" onclick={() => navigate("invoices")}
-        >查看完整發票明細 →</Button
-      >
-    </div>
     {#if detailItem}
       {@const amount = activityDisplayAmount(detailItem)}
       {@const transaction = transactionForItem(detailItem)}
