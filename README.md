@@ -6,6 +6,8 @@
 
 自架個人理財整合工具，將銀行、投資、信用卡與電子發票集中在同一個介面查看。
 
+**可免費自架：** 可透過 [Cloudflare Workers Free Plan](https://developers.cloudflare.com/workers/platform/pricing/) 一鍵部署，不需要自行準備伺服器；一般個人低頻使用可從免費方案開始。
+
 > 本專案以 [kevchentw/taiwan-fin-hub](https://github.com/kevchentw/taiwan-fin-hub) 為基礎，持續擴充資料來源、同步流程與 UI/UX。感謝原作者與貢獻者奠定專案基礎。
 
 ## 支援資料來源
@@ -60,7 +62,9 @@
 
 ---
 
-## 部署
+## 免費部署
+
+本專案使用的 Workers、D1、Queues、Workers AI 與 Browser Run 均提供免費額度。各項免費額度並非無限；超過服務限制時，相關功能可能暫停至額度重置。
 
 **需要：** [Cloudflare 帳號](https://dash.cloudflare.com/signup)、[GitHub 帳號](https://github.com/signup)
 
