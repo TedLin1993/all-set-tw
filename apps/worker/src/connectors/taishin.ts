@@ -32,6 +32,32 @@ const USER_AGENT =
 
 type JsonRecord = Record<string, unknown>;
 type BrowserPage = Page | Frame;
+export type TaishinSyncStage =
+  | "acquire_browser"
+  | "initialize_browser_page"
+  | "configure_browser_page"
+  | "restore_session"
+  | "login"
+  | "fetch_realtime"
+  | "fetch_summary"
+  | "fetch_current_bill"
+  | "fetch_historical_bills"
+  | "parse_payload"
+  | "export_session";
+
+const TAISHIN_SYNC_STAGE_LABELS: Record<TaishinSyncStage, string> = {
+  acquire_browser: "啟動瀏覽器",
+  initialize_browser_page: "初始化瀏覽器頁面",
+  configure_browser_page: "設定瀏覽器頁面",
+  restore_session: "還原登入 session",
+  login: "登入台新網銀",
+  fetch_realtime: "取得即時消費",
+  fetch_summary: "取得信用卡摘要",
+  fetch_current_bill: "取得本期帳單",
+  fetch_historical_bills: "取得歷史帳單",
+  parse_payload: "解析信用卡資料",
+  export_session: "保存登入 session",
+};
 
 export class TaishinVerificationRequiredError extends Error {
   constructor(message: string) {
@@ -66,9 +92,29 @@ export class TaishinConnectionError extends Error {
     message: string,
     readonly sessionCookies?: string,
     readonly sessionCreatedAt?: string,
+    cause?: unknown,
   ) {
     super(message);
     this.name = "TaishinConnectionError";
+    if (cause !== undefined) this.cause = cause;
+  }
+}
+
+export class TaishinSyncStageError extends TaishinConnectionError {
+  constructor(
+    readonly stage: TaishinSyncStage,
+    cause: unknown,
+    sessionCookies?: string,
+    sessionCreatedAt?: string,
+  ) {
+    const detail = safeTaishinRuntimeMessage(cause);
+    super(
+      `台新同步在${TAISHIN_SYNC_STAGE_LABELS[stage]}階段失敗${detail ? `：${detail}` : "。"}`,
+      sessionCookies,
+      sessionCreatedAt,
+      cause,
+    );
+    this.name = "TaishinSyncStageError";
   }
 }
 
@@ -114,19 +160,25 @@ export function createTaishinConnector(
       requireCredentials(config);
       if (!browser) throw new Error("台新銀行同步需要 BROWSER binding。");
 
-      const browserInstance = await acquireBrowser(
-        browser,
-        config.browserSessionId,
-      );
-      const pages = await browserInstance.pages();
-      const page = pages[0] ?? (await browserInstance.newPage());
+      let stage: TaishinSyncStage = "acquire_browser";
+      let browserInstance: Browser | undefined;
+      let page: Page | undefined;
       let authenticated = false;
       try {
+        browserInstance = await acquireBrowser(
+          browser,
+          config.browserSessionId,
+        );
+        stage = "initialize_browser_page";
+        const pages = await browserInstance.pages();
+        page = pages[0] ?? (await browserInstance.newPage());
+        stage = "configure_browser_page";
         await configurePage(page);
         let loggedIn = false;
 
         let pageContext: BrowserPage = page;
         if (config.browserSessionId && config.captcha) {
+          stage = "login";
           if (
             !config.browserSessionExpiresAt ||
             new Date(config.browserSessionExpiresAt) <= new Date()
@@ -140,6 +192,7 @@ export function createTaishinConnector(
           await submitLogin(pageContext, config.captcha);
           loggedIn = true;
         } else if (config.sessionCookies) {
+          stage = "restore_session";
           await importCookies(page, config.sessionCookies);
           await page.goto(RWD_URL, {
             waitUntil: "domcontentloaded",
@@ -150,6 +203,7 @@ export function createTaishinConnector(
         }
 
         if (!loggedIn) {
+          stage = "login";
           if (!recognizeCaptcha) {
             throw new TaishinVerificationRequiredError(
               "台新銀行 session 已失效，需要重新登入。",
@@ -161,7 +215,10 @@ export function createTaishinConnector(
 
         let payloads;
         try {
-          payloads = await fetchCreditCardPayloads(pageContext);
+          payloads = await fetchCreditCardPayloads(
+            pageContext,
+            (nextStage) => (stage = nextStage),
+          );
         } catch (error) {
           if (
             !(error instanceof TaishinVerificationRequiredError) ||
@@ -169,11 +226,16 @@ export function createTaishinConnector(
           ) {
             throw error;
           }
+          stage = "login";
           pageContext = await loginWithOcr(page, config, recognizeCaptcha);
           authenticated = true;
-          payloads = await fetchCreditCardPayloads(pageContext);
+          payloads = await fetchCreditCardPayloads(
+            pageContext,
+            (nextStage) => (stage = nextStage),
+          );
         }
         let data;
+        stage = "parse_payload";
         try {
           data = parseTaishinCreditCardData(payloads);
         } catch (error) {
@@ -186,6 +248,7 @@ export function createTaishinConnector(
           throw error;
         }
         const now = new Date();
+        stage = "export_session";
         return {
           records: [],
           ...data,
@@ -196,22 +259,36 @@ export function createTaishinConnector(
           }),
         };
       } catch (error) {
-        if (authenticated && error instanceof TaishinConnectionError) {
+        const normalized = normalizeTaishinSyncError(error, stage);
+        if (
+          authenticated &&
+          normalized instanceof TaishinConnectionError &&
+          page
+        ) {
           const sessionCookies = await page
             .cookies()
             .then((cookies) => JSON.stringify(cookies))
             .catch(() => undefined);
           if (sessionCookies) {
+            if (normalized instanceof TaishinSyncStageError) {
+              throw new TaishinSyncStageError(
+                normalized.stage,
+                normalized.cause,
+                sessionCookies,
+                new Date().toISOString(),
+              );
+            }
             throw new TaishinConnectionError(
-              error.message,
+              normalized.message,
               sessionCookies,
               new Date().toISOString(),
+              normalized.cause,
             );
           }
         }
-        throw error;
+        throw normalized;
       } finally {
-        await browserInstance.close();
+        if (browserInstance) await closeTaishinBrowser(browserInstance);
       }
     },
   };
@@ -246,7 +323,7 @@ export async function prepareTaishinCaptcha(
       captchaImage: `data:image/jpeg;base64,${bytesToBase64(captcha.bytes)}`,
     };
   } finally {
-    if (!preserved) await browserInstance.close();
+    if (!preserved) await closeTaishinBrowser(browserInstance);
   }
 }
 
@@ -283,10 +360,15 @@ async function loginWithOcr(
   );
 }
 
-async function fetchCreditCardPayloads(page: BrowserPage) {
+async function fetchCreditCardPayloads(
+  page: BrowserPage,
+  setStage: (stage: TaishinSyncStage) => void,
+) {
+  setStage("fetch_realtime");
   const realtime = await fetchRealtimeTransactions(page);
   let summary: unknown = { value: {}, error: null };
   try {
+    setStage("fetch_summary");
     summary = await postJson(page, SUMMARY_PATH, {}, OPTIONAL_API_TIMEOUT_MS);
     const billingContext = taishinBillingContext(summary);
     const months = recentMonths(BANK_SYNC_MONTHS, billingContext.anchor);
@@ -303,10 +385,12 @@ async function fetchCreditCardPayloads(page: BrowserPage) {
         },
         OPTIONAL_API_TIMEOUT_MS,
       );
+    setStage("fetch_current_bill");
     const currentBill = await fetchBill(months[0]!);
     if (!hasBillPayload(currentBill)) {
       return { summary, bills: [], realtime };
     }
+    setStage("fetch_historical_bills");
     const historicalBills = (
       await Promise.all(
         months.slice(1).map((month) => fetchBill(month).catch(() => undefined)),
@@ -961,6 +1045,49 @@ async function launchBrowser(
     }
     throw error;
   }
+}
+
+function normalizeTaishinSyncError(error: unknown, stage: TaishinSyncStage) {
+  if (
+    error instanceof TaishinConnectionError ||
+    error instanceof TaishinVerificationRequiredError ||
+    error instanceof TaishinBrowserCapacityError
+  ) {
+    return error;
+  }
+  return new TaishinSyncStageError(stage, error);
+}
+
+async function closeTaishinBrowser(browser: Browser) {
+  try {
+    await browser.close();
+  } catch (error) {
+    const message = safeTaishinRuntimeMessage(error);
+    console.warn(
+      JSON.stringify({
+        event: "taishin_browser_cleanup_failed",
+        connectorId: "taishin",
+        stage: "close_browser",
+        errorName: error instanceof Error ? error.name : typeof error,
+        message: message || "瀏覽器關閉失敗，但未取得錯誤原因。",
+      }),
+    );
+  }
+}
+
+function safeTaishinRuntimeMessage(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : error === null || error === undefined
+        ? ""
+        : String(error);
+  return sanitizeBrowserErrorPart(message, 240)
+    .replace(
+      /\b(authorization|cookie|password|passwd|token|secret|session(?:cookies?)?)\s*[:=]\s*([^\s,;]+)/gi,
+      "$1=[redacted]",
+    )
+    .replace(/\b(?:Bearer\s+)?[A-Za-z0-9+/_=-]{24,}\b/g, "[redacted]");
 }
 
 async function configurePage(page: Page) {

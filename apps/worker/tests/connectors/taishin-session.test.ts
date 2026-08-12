@@ -15,6 +15,7 @@ import {
   TaishinBrowserCapacityError,
   TaishinConnectionError,
   TaishinCredentialRejectedError,
+  TaishinSyncStageError,
 } from "../../src/connectors/taishin";
 
 const credentials = {
@@ -90,6 +91,108 @@ beforeEach(() => {
 });
 
 describe("Taishin browser session lifecycle", () => {
+  it("labels an empty browser acquisition error", async () => {
+    puppeteerMock.launch.mockRejectedValueOnce(new Error(""));
+
+    await expect(
+      createTaishinConnector({} as Fetcher).sync(credentials),
+    ).rejects.toMatchObject({
+      name: "TaishinSyncStageError",
+      stage: "acquire_browser",
+      message: "台新同步在啟動瀏覽器階段失敗。",
+      cause: expect.any(Error),
+    });
+  });
+
+  it("labels an empty runtime error with its sync stage", async () => {
+    const browserPage = page();
+    browserPage.setViewport.mockRejectedValueOnce(new Error(""));
+    const browserInstance = browser(browserPage);
+    puppeteerMock.launch.mockResolvedValue(browserInstance);
+
+    const error = await createTaishinConnector({} as Fetcher)
+      .sync(credentials)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(TaishinSyncStageError);
+    expect(error).toMatchObject({
+      stage: "configure_browser_page",
+      message: "台新同步在設定瀏覽器頁面階段失敗。",
+      cause: expect.any(Error),
+    });
+    expect(browserInstance.close).toHaveBeenCalledOnce();
+  });
+
+  it("does not turn a successful sync into failure when browser cleanup fails", async () => {
+    const browserPage = page();
+    const response = (value: unknown) => ({
+      ok: true,
+      status: 200,
+      contentType: "application/json",
+      text: JSON.stringify({ value, error: null }),
+    });
+    browserPage.evaluate
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        contentType: "application/json",
+        text: JSON.stringify({
+          RESULT: "SUCCESS",
+          DBSESSIONID: "database-session",
+        }),
+      })
+      .mockResolvedValueOnce(response({ fmtRealTxListMap: [] }))
+      .mockResolvedValueOnce(
+        response({ "001": { "OUT-DTE-LST-STMT": "20260720" } }),
+      )
+      .mockResolvedValueOnce(response({}));
+    const browserInstance = browser(browserPage);
+    browserInstance.close.mockRejectedValueOnce(new Error(""));
+    puppeteerMock.launch.mockResolvedValue(browserInstance);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const result = await createTaishinConnector({} as Fetcher).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "valid",
+          domain: "my.taishinbank.com.tw",
+        },
+      ]),
+    });
+
+    expect(result.bankTransactions).toEqual([]);
+    expect(JSON.parse(String(warn.mock.calls.at(-1)?.[0]))).toMatchObject({
+      event: "taishin_browser_cleanup_failed",
+      connectorId: "taishin",
+      stage: "close_browser",
+      errorName: "Error",
+      message: "瀏覽器關閉失敗，但未取得錯誤原因。",
+    });
+    warn.mockRestore();
+  });
+
+  it("preserves the primary failure when browser cleanup also fails", async () => {
+    const browserPage = page();
+    browserPage.setViewport.mockRejectedValueOnce(new Error("primary failure"));
+    const browserInstance = browser(browserPage);
+    browserInstance.close.mockRejectedValueOnce(new Error("cleanup failure"));
+    puppeteerMock.launch.mockResolvedValue(browserInstance);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(
+      createTaishinConnector({} as Fetcher).sync(credentials),
+    ).rejects.toMatchObject({
+      stage: "configure_browser_page",
+      message: "台新同步在設定瀏覽器頁面階段失敗：primary failure",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("taishin_browser_cleanup_failed"),
+    );
+    warn.mockRestore();
+  });
+
   it("reuses valid encrypted cookies without running OCR", async () => {
     const browserPage = page();
     const response = (value: unknown, error: unknown = null) => ({
