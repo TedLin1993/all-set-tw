@@ -1,5 +1,4 @@
 import {
-  einvoiceConnector,
   EInvoiceProtocolUnavailableError,
   createCtbcConnector,
   CtbcVerificationRequiredError,
@@ -9,7 +8,6 @@ import {
   parseCathaybkConfig,
   parseCtbcConfig,
   parseEsunConfig,
-  parseInvoiceConfig,
   parseObankConfig,
   parseSinopacConfig,
   parseTaishinConfig,
@@ -128,10 +126,6 @@ export class NeedsUserActionError extends Error {
     super(message);
   }
 }
-
-export type EinvoiceSyncOverrides = {
-  fetchDetails?: boolean;
-};
 
 export type SinopacSyncOverrides = {
   captcha?: string;
@@ -287,94 +281,6 @@ export async function prepareObankCaptchaSession(env: Env) {
   } finally {
     await releaseSyncJobLock(env.DB, lockRowId, runId);
   }
-}
-
-export async function syncEinvoice(
-  env: Env,
-  trigger: SyncTrigger,
-  overrides: EinvoiceSyncOverrides = {},
-): Promise<SyncOutcome> {
-  const connectorId = "einvoice";
-  const scope = "all";
-  const settings = await requireConnectorSettings(env.DB, connectorId);
-  const stored = await decryptJson<Record<string, unknown>>(
-    settings.encrypted_config,
-    configEncryptionKey(env),
-  );
-  const config = {
-    ...stored,
-    ...parsePublicConnectorConfig(connectorId, settings.public_config),
-  };
-  const configuredConfig = parseInvoiceConfig(config);
-  const effectiveConfig = parseInvoiceConfig({
-    ...configuredConfig,
-    ...overrides,
-  });
-  console.log(
-    `[sync] ${connectorId}/${scope}: starting trigger=${trigger} (cursor=${settings.sync_cursor ? "set" : "none"})`,
-  );
-  const result = await einvoiceConnector.sync(
-    effectiveConfig,
-    settings.sync_cursor ?? undefined,
-  );
-  const invoiceLineItems = result.invoiceLineItems ?? [];
-  const detailErrorCount =
-    "detailErrorCount" in result && typeof result.detailErrorCount === "number"
-      ? result.detailErrorCount
-      : 0;
-  console.log(
-    `[sync] ${connectorId}/${scope}: fetched ${result.records.length} invoices, ${invoiceLineItems.length} detail rows` +
-      (detailErrorCount > 0 ? `, ${detailErrorCount} detail errors` : ""),
-  );
-  const now = new Date().toISOString();
-
-  const records: SyncWriteRecord[] = [
-    ...result.records.map((invoice) =>
-      invoiceRecord(connectorId, invoice, now),
-    ),
-    ...invoiceLineItems.map((item) =>
-      invoiceLineItemRecord(connectorId, item, now),
-    ),
-  ];
-  const finalizeStatements: D1PreparedStatement[] = [];
-
-  if (result.cursor) {
-    finalizeStatements.push(
-      connectorCursorStatement(env.DB, connectorId, result.cursor, now),
-    );
-  }
-
-  const persistedConfig = restoreConfiguredPublicFields(
-    connectorId,
-    effectiveConfig,
-    configuredConfig,
-  );
-  finalizeStatements.push(
-    connectorEncryptedConfigStatement(
-      env.DB,
-      connectorId,
-      await encryptConnectorConfig(env, connectorId, persistedConfig),
-      serializePublicConfig(connectorId, persistedConfig),
-      now,
-    ),
-  );
-
-  const newRecords = await persistStagedSyncWrite(env.DB, {
-    records,
-    finalizeStatements,
-  });
-
-  return {
-    success: true,
-    connectorId,
-    scope,
-    records: result.records.length,
-    newRecords,
-    detailRecords: invoiceLineItems.length,
-    cursorUpdated: Boolean(
-      result.cursor && result.cursor !== settings.sync_cursor,
-    ),
-  };
 }
 
 export async function syncEsun(

@@ -24,6 +24,10 @@ import {
 } from "../notifications/service";
 import type { SyncNotificationEvent } from "../notifications/payload";
 import {
+  cancelQueuedEinvoiceSyncRun,
+  startEinvoiceSyncRun,
+} from "./einvoice-sync-service";
+import {
   claimCompletedDefaultScheduleBatch,
   ensureDefaultScheduleBatch,
   finalizeOpenDefaultScheduleBatch,
@@ -79,6 +83,23 @@ async function runCustomScheduleJob(
   controller: ScheduledController,
   job: SyncJobRow<ConnectorId>,
 ) {
+  if (job.connector_id === "einvoice") {
+    const { run, created } = await startEinvoiceSyncRun(env, {
+      trigger: "scheduled",
+    });
+    if (created) {
+      try {
+        await env.SYNC_QUEUE.send({
+          type: "run-einvoice-chunk",
+          runId: run.id,
+        });
+      } catch (error) {
+        await cancelQueuedEinvoiceSyncRun(env, run.id, error);
+        throw error;
+      }
+    }
+    return true;
+  }
   const notification = await runScheduledJob(env, controller, job);
   if (notification) await safelySendSyncNotification(env, notification);
   return notification !== undefined;
@@ -90,6 +111,24 @@ async function runDefaultScheduleBatchJob(
   batchId: string,
   job: SyncJobRow<ConnectorId>,
 ) {
+  if (job.connector_id === "einvoice") {
+    const { run, created } = await startEinvoiceSyncRun(env, {
+      trigger: "scheduled",
+      scheduledBatchId: batchId,
+    });
+    if (created) {
+      try {
+        await env.SYNC_QUEUE.send({
+          type: "run-einvoice-chunk",
+          runId: run.id,
+        });
+      } catch (error) {
+        await cancelQueuedEinvoiceSyncRun(env, run.id, error);
+        throw error;
+      }
+    }
+    return true;
+  }
   let outcomeNewRecords = {
     invoices: 0,
     bankTransactions: 0,
@@ -209,6 +248,6 @@ async function runDueSyncJob(env: Env, job: SyncJobRow<ConnectorId>) {
     job.connector_id,
     "scheduled",
     job.scope as SyncScope,
-    job.connector_id === "einvoice" ? { fetchDetails: true } : {},
+    {},
   );
 }

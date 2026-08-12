@@ -28,7 +28,6 @@ export const connectorFields = {
   einvoice: [
     { key: "mobile", label: "手機號碼（電子發票帳號）", type: "text" },
     { key: "password", label: "電子發票 App 登入密碼", type: "password" },
-    { key: "fetchDetails", label: "同步品項明細", type: "checkbox" },
   ],
   tdcc: [
     { key: "userId", label: "身分證字號", type: "text" },

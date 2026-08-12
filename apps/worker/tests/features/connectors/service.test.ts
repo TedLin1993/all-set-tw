@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 
 describe("connector settings state boundaries", () => {
-  it("stores the remaining invoice preference separately from credentials", async () => {
+  it("ignores the retired invoice detail preference", async () => {
     await updateConnectorSettings(env, "einvoice", {
       mobile: "0912345678",
       password: "password",
@@ -56,7 +56,7 @@ describe("connector settings state boundaries", () => {
     expect(JSON.parse(saved.encryptedConfig)).not.toHaveProperty(
       "fetchDetails",
     );
-    expect(JSON.parse(saved.publicConfig)).toEqual({ fetchDetails: false });
+    expect(saved.publicConfig).toBeNull();
   });
 
   it("removes retired lookback settings while preserving credentials", async () => {

@@ -127,6 +127,29 @@ describe("scheduled sync financial reports", () => {
     });
   });
 
+  it("warns only for positive assets or nonzero credit-card debt", async () => {
+    const { database, db } = createDb();
+    databases.push(database);
+    database.exec(`
+      INSERT INTO bank_accounts
+        (id, connector_id, source_id, account_type, currency, raw_payload, created_at, updated_at)
+      VALUES
+        ('zero-hkd', 'esun', 'zero-hkd', 'savings', 'HKD', '{}', '2026-08-12', '2026-08-12'),
+        ('negative-usd', 'esun', 'negative-usd', 'savings', 'USD', '{}', '2026-08-12', '2026-08-12'),
+        ('card-jpy', 'esun', 'card-jpy', 'credit', 'JPY', '{}', '2026-08-12', '2026-08-12');
+      INSERT INTO bank_balance_snapshots
+        (id, connector_id, account_id, source_id, balance, currency, as_of_at, raw_payload, created_at, updated_at)
+      VALUES
+        ('zero-hkd', 'esun', 'zero-hkd', 'zero-hkd', 0, 'HKD', '2026-08-12', '{}', '2026-08-12', '2026-08-12'),
+        ('negative-usd', 'esun', 'negative-usd', 'negative-usd', -100, 'USD', '2026-08-12', '{}', '2026-08-12', '2026-08-12'),
+        ('card-jpy', 'esun', 'card-jpy', 'card-jpy', -5000, 'JPY', '2026-08-12', '{}', '2026-08-12', '2026-08-12');
+    `);
+
+    await expect(calculateCurrentFinancialSnapshot(db)).resolves.toMatchObject({
+      missingCurrencies: ["JPY"],
+    });
+  });
+
   it("returns no financial delta for a partial round but keeps new record counts", async () => {
     const { database, db } = createDb();
     databases.push(database);

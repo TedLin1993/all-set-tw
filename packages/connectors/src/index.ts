@@ -131,13 +131,66 @@ export const invoiceConfigSchema = z.object({
   ltoken: z.string().optional(),
   hkey: z.string().optional(),
   serverTimeOffset: z.number().int().optional(),
-  fetchDetails: z.boolean().default(true),
 });
 
 export type InvoiceConfig = z.infer<typeof invoiceConfigSchema>;
 export function parseInvoiceConfig(config: unknown) {
   return invoiceConfigSchema.parse(config);
 }
+
+type NormalizedInvoice = Omit<Invoice, "id" | "connectorId">;
+type NormalizedInvoiceLineItem = Omit<
+  InvoiceLineItem,
+  "id" | "connectorId" | "invoiceId"
+>;
+
+/** JSON-serializable protocol state which is safe to persist between Queue invocations. */
+export type EInvoiceSessionConfigUpdates = Pick<
+  EInvoiceV2Session,
+  | "sid"
+  | "token"
+  | "iv"
+  | "svrCode"
+  | "loginAppId"
+  | "loginLiat"
+  | "loginSsMe"
+  | "ltoken"
+  | "hkey"
+  | "serverTimeOffset"
+> & {
+  loginClientCode?: string;
+  mobileBarcode?: string;
+};
+
+export type EInvoiceInvoiceHeader = {
+  sourceId: string;
+  invNum: string;
+  detailInvDate: string;
+  invoice: NormalizedInvoice;
+  period: ReturnType<typeof periodFromIndex>;
+};
+
+/** A fully serializable work item for one detail request. */
+export type EInvoiceDetailTask = EInvoiceInvoiceHeader;
+
+export type EInvoiceSyncInitialization = {
+  session: EInvoiceV2Session;
+  configUpdates: EInvoiceSessionConfigUpdates;
+  headers: EInvoiceInvoiceHeader[];
+  detailTasks: EInvoiceDetailTask[];
+};
+
+export type EInvoiceDetailResult = {
+  invoice: NormalizedInvoice;
+  invoiceLineItems: NormalizedInvoiceLineItem[];
+  detail: unknown;
+  detailItems: ReturnType<typeof getV2DetailItems>;
+};
+
+export type EInvoicePrimitiveOptions = {
+  client?: EInvoiceV2Client;
+  now?: Date;
+};
 
 export const einvoiceConnector: Connector<
   InvoiceConfig,
@@ -169,16 +222,147 @@ async function syncTaiwanEInvoices(config: InvoiceConfig, cursor?: string) {
 }
 
 async function syncTaiwanEInvoicesV2(config: InvoiceConfig, cursor?: string) {
+  const initialized = await initializeEInvoiceSync(config);
+  Object.assign(config, initialized.configUpdates);
+  const details: EInvoiceDetailResult[] = [];
+  for (const task of initialized.detailTasks) {
+    details.push(await fetchEInvoiceInvoiceDetail(initialized.session, task));
+  }
+  const detailsBySourceId = new Map(
+    details.map((detail) => [detail.invoice.sourceId, detail]),
+  );
+  const records = initialized.headers.map((header) => {
+    const detail = detailsBySourceId.get(header.sourceId);
+    return {
+      ...header.invoice,
+      raw: {
+        ...(header.invoice.raw as Record<string, unknown>),
+        detail: detail?.detail,
+        detailItems: detail?.detailItems ?? [],
+      },
+    };
+  });
+  const invoiceLineItems = details.flatMap((detail) => detail.invoiceLineItems);
+  const now = new Date();
+  const currentIndex = currentPeriodIndex(now);
+
+  return {
+    records: dedupeInvoices(records),
+    invoiceLineItems: dedupeInvoiceLineItems(invoiceLineItems),
+    detailErrorCount: 0,
+    cursor: JSON.stringify({
+      syncedAt: now.toISOString(),
+      previousSyncedAt: cursor ? readPreviousSyncedAt(cursor) : undefined,
+      latestPeriodIndex: currentIndex,
+      syncedPeriods: EINVOICE_SYNC_PERIODS,
+    }),
+  };
+}
+
+/**
+ * Login (or restore a persisted session) and retrieve headers for exactly the
+ * fixed two invoice periods. No detail request is made here.
+ */
+export async function initializeEInvoiceSync(
+  config: InvoiceConfig,
+  options: EInvoicePrimitiveOptions = {},
+): Promise<EInvoiceSyncInitialization> {
   if (!config.mobile || !config.password) {
     throw new Error("新版電子發票需要手機號碼與密碼。");
   }
 
-  const client = new EInvoiceV2Client({
-    androidId: config.androidId,
-    loginClientCode: config.loginClientCode,
-    ptoken: config.ptoken,
-  });
-  let session: EInvoiceV2Session;
+  const client =
+    options.client ??
+    new EInvoiceV2Client({
+      androidId: config.androidId,
+      loginClientCode: config.loginClientCode,
+      ptoken: config.ptoken,
+    });
+  const session = jsonEInvoiceSession(await getEInvoiceSession(config, client));
+  const carrierCode = config.mobileBarcode ?? session.carrierCode;
+  if (!carrierCode) throw new Error("新版電子發票登入未回傳手機條碼。");
+  session.carrierCode = carrierCode;
+
+  const now = options.now ?? new Date();
+  const currentIndex = currentPeriodIndex(now);
+  const headers: EInvoiceInvoiceHeader[] = [];
+  for (let offset = 0; offset < EINVOICE_SYNC_PERIODS; offset += 1) {
+    const period = periodFromIndex(currentIndex - offset, now);
+    const payload = await client.queryCarrierInvoices(
+      session,
+      period.startDate,
+      period.endDate,
+    );
+    for (const invoice of getV2Invoices(payload)) {
+      const sourceId = invoiceSourceId(
+        invoice.invNum,
+        invoice.invDate,
+        invoice.id,
+      );
+      headers.push({
+        sourceId,
+        invNum: invoice.invNum,
+        detailInvDate: invoice.detailInvDate,
+        invoice: {
+          sourceId,
+          invoiceNumber: invoice.invNum || undefined,
+          invoiceDate: normalizeInvoiceDate(invoice.invDate),
+          sellerName: invoice.sellerName,
+          amount: Math.max(0, Math.trunc(invoice.amount)),
+          raw: { invoice, period },
+        },
+        period,
+      });
+    }
+  }
+
+  return {
+    session,
+    configUpdates: sessionConfigUpdates(session),
+    headers,
+    detailTasks: headers.filter((header): header is EInvoiceDetailTask =>
+      Boolean(header.invNum && header.detailInvDate),
+    ),
+  };
+}
+
+/**
+ * Fetch and normalize one invoice's detail. Errors deliberately propagate so
+ * Queue chunks and the legacy full sync cannot report a partial success.
+ */
+export async function fetchEInvoiceInvoiceDetail(
+  session: EInvoiceV2Session,
+  task: EInvoiceDetailTask,
+  options: EInvoicePrimitiveOptions = {},
+): Promise<EInvoiceDetailResult> {
+  const client = options.client ?? new EInvoiceV2Client();
+  const detail = await client.queryCarrierInvoiceDetail(
+    session,
+    task.invNum,
+    task.detailInvDate,
+  );
+  const detailItems = getV2DetailItems(detail);
+  return {
+    invoice: task.invoice,
+    detail,
+    detailItems,
+    invoiceLineItems: detailItems.map((item, index) => ({
+      invoiceSourceId: task.sourceId,
+      sourceId: item.id || String(index + 1),
+      lineNumber: index + 1,
+      description: item.description || "未命名品項",
+      quantity: parseOptionalNumber(item.quantity),
+      unitPrice: parseOptionalInteger(item.unitPrice),
+      amount: parseRequiredInteger(item.amount),
+      raw: item,
+    })),
+  };
+}
+
+async function getEInvoiceSession(
+  config: InvoiceConfig,
+  client: EInvoiceV2Client,
+) {
   if (
     config.sid &&
     config.token &&
@@ -186,7 +370,7 @@ async function syncTaiwanEInvoicesV2(config: InvoiceConfig, cursor?: string) {
     config.loginLiat != null &&
     config.loginSsMe
   ) {
-    session = {
+    return {
       sid: config.sid,
       token: config.token,
       iv: config.iv,
@@ -199,111 +383,70 @@ async function syncTaiwanEInvoicesV2(config: InvoiceConfig, cursor?: string) {
       hkey: config.hkey,
       serverTimeOffset: config.serverTimeOffset,
       carrierCode: config.mobileBarcode,
-    };
-  } else {
-    try {
-      session = await client.login({
-        mobile: config.mobile,
-        password: config.password,
-        androidId: config.androidId,
-        loginClientCode: config.loginClientCode,
-        ptoken: config.ptoken,
-        loginType: config.loginType,
-        carrierCode: config.mobileBarcode,
-      });
-    } catch (error) {
-      throw new Error(
-        `電子發票登入失敗：${error instanceof Error ? error.message : "發生未知錯誤"}`,
-      );
-    }
-    Object.assign(config, session);
-    config.loginClientCode = session.clientCode ?? config.loginClientCode;
-    config.mobileBarcode = session.carrierCode ?? config.mobileBarcode;
+    } satisfies EInvoiceV2Session;
   }
-
-  const carrierCode = config.mobileBarcode ?? session.carrierCode;
-  if (!carrierCode) throw new Error("新版電子發票登入未回傳手機條碼。");
-  session.carrierCode = carrierCode;
-
-  const now = new Date();
-  const currentIndex = currentPeriodIndex(now);
-  const periodIndexes = Array.from(
-    { length: EINVOICE_SYNC_PERIODS },
-    (_, index) => currentIndex - index,
-  );
-  const records: Array<Omit<Invoice, "id" | "connectorId">> = [];
-  const invoiceLineItems: Array<
-    Omit<InvoiceLineItem, "id" | "connectorId" | "invoiceId">
-  > = [];
-  let detailErrorCount = 0;
-
-  for (const periodIndex of periodIndexes) {
-    const period = periodFromIndex(periodIndex, now);
-    const payload = await client.queryCarrierInvoices(
-      session,
-      period.startDate,
-      period.endDate,
+  try {
+    return await client.login({
+      mobile: config.mobile!,
+      password: config.password!,
+      androidId: config.androidId,
+      loginClientCode: config.loginClientCode,
+      ptoken: config.ptoken,
+      loginType: config.loginType,
+      carrierCode: config.mobileBarcode,
+    });
+  } catch (error) {
+    throw new Error(
+      `電子發票登入失敗：${error instanceof Error ? error.message : "發生未知錯誤"}`,
     );
-    const invoices = getV2Invoices(payload);
-    for (const invoice of invoices) {
-      const sourceId = invoiceSourceId(
-        invoice.invNum,
-        invoice.invDate,
-        invoice.id,
-      );
-      let detail: unknown;
-      let detailItems: ReturnType<typeof getV2DetailItems> = [];
-      if (config.fetchDetails && invoice.invNum && invoice.detailInvDate) {
-        try {
-          detail = await client.queryCarrierInvoiceDetail(
-            session,
-            invoice.invNum,
-            invoice.detailInvDate,
-          );
-          detailItems = getV2DetailItems(detail);
-          detailItems.forEach((item, index) => {
-            invoiceLineItems.push({
-              invoiceSourceId: sourceId,
-              sourceId: item.id || String(index + 1),
-              lineNumber: index + 1,
-              description: item.description || "未命名品項",
-              quantity: parseOptionalNumber(item.quantity),
-              unitPrice: parseOptionalInteger(item.unitPrice),
-              amount: parseRequiredInteger(item.amount),
-              raw: item,
-            });
-          });
-        } catch (error) {
-          detailErrorCount += 1;
-          detail = {
-            error:
-              error instanceof Error
-                ? error.message
-                : "Unable to fetch invoice detail.",
-          };
-        }
-      }
-      records.push({
-        sourceId,
-        invoiceNumber: invoice.invNum || undefined,
-        invoiceDate: normalizeInvoiceDate(invoice.invDate),
-        sellerName: invoice.sellerName,
-        amount: Math.max(0, Math.trunc(invoice.amount)),
-        raw: { invoice, period, detail, detailItems },
-      });
-    }
   }
+}
 
+function sessionConfigUpdates(
+  session: EInvoiceV2Session,
+): EInvoiceSessionConfigUpdates {
   return {
-    records: dedupeInvoices(records),
-    invoiceLineItems: dedupeInvoiceLineItems(invoiceLineItems),
-    detailErrorCount,
-    cursor: JSON.stringify({
-      syncedAt: now.toISOString(),
-      previousSyncedAt: cursor ? readPreviousSyncedAt(cursor) : undefined,
-      latestPeriodIndex: currentIndex,
-      syncedPeriods: EINVOICE_SYNC_PERIODS,
-    }),
+    sid: session.sid,
+    token: session.token,
+    loginAppId: session.loginAppId,
+    loginLiat: session.loginLiat,
+    loginSsMe: session.loginSsMe,
+    ...(session.iv === undefined ? {} : { iv: session.iv }),
+    ...(session.svrCode === undefined ? {} : { svrCode: session.svrCode }),
+    ...(session.ltoken === undefined ? {} : { ltoken: session.ltoken }),
+    ...(session.hkey === undefined ? {} : { hkey: session.hkey }),
+    ...(session.serverTimeOffset === undefined
+      ? {}
+      : { serverTimeOffset: session.serverTimeOffset }),
+    ...(session.clientCode === undefined
+      ? {}
+      : { loginClientCode: session.clientCode }),
+    ...(session.carrierCode === undefined
+      ? {}
+      : { mobileBarcode: session.carrierCode }),
+  };
+}
+
+function jsonEInvoiceSession(session: EInvoiceV2Session): EInvoiceV2Session {
+  return {
+    sid: session.sid,
+    token: session.token,
+    loginAppId: session.loginAppId,
+    loginLiat: session.loginLiat,
+    loginSsMe: session.loginSsMe,
+    ...(session.iv === undefined ? {} : { iv: session.iv }),
+    ...(session.svrCode === undefined ? {} : { svrCode: session.svrCode }),
+    ...(session.clientCode === undefined
+      ? {}
+      : { clientCode: session.clientCode }),
+    ...(session.ltoken === undefined ? {} : { ltoken: session.ltoken }),
+    ...(session.hkey === undefined ? {} : { hkey: session.hkey }),
+    ...(session.carrierCode === undefined
+      ? {}
+      : { carrierCode: session.carrierCode }),
+    ...(session.serverTimeOffset === undefined
+      ? {}
+      : { serverTimeOffset: session.serverTimeOffset }),
   };
 }
 

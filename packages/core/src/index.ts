@@ -186,6 +186,14 @@ export interface SyncResponse {
   cursorUpdated: boolean;
 }
 
+export interface QueuedSyncResponse {
+  success: true;
+  connectorId: ConnectorId;
+  scope: string;
+  status: "queued";
+  runId: string;
+}
+
 export type SyncNotificationStatus = "success" | "failed" | "needs_user_action";
 
 export interface SyncNewRecordCounts {
@@ -308,7 +316,7 @@ export const connectorCatalog = {
     connectionMode: "api_credentials",
     scopes: ["all"],
     capabilities: ["invoice", "invoice_line_item"],
-    publicFields: ["fetchDetails"],
+    publicFields: [],
     credentialFields: ["mobile", "password"],
     secretStateFields: [
       "userToken",

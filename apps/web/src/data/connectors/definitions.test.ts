@@ -32,12 +32,13 @@ describe("connector definitions", () => {
     }
   });
 
-  it("keeps invoice line-item sync as the only public preference", () => {
-    expect(connectorCatalog.einvoice.publicFields).toEqual(["fetchDetails"]);
-
+  it("does not expose retired sync preferences", () => {
     for (const connectorId of supportedConnectorIds) {
-      if (connectorId === "einvoice") continue;
       expect(connectorCatalog[connectorId].publicFields).toEqual([]);
     }
+
+    expect(connectorFields.einvoice.map(({ key }) => key)).not.toContain(
+      "fetchDetails",
+    );
   });
 });

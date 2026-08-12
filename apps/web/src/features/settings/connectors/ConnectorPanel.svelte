@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { toStore } from "svelte/store";
   import {
     createMutation,
@@ -18,7 +18,6 @@
   import TdccConnectionProgress from "./TdccConnectionProgress.svelte";
   import Card from "@/shared/ui/Card.svelte";
   import Button from "@/shared/ui/Button.svelte";
-  import Checkbox from "@/shared/ui/Checkbox.svelte";
   import Input from "@/shared/ui/Input.svelte";
   import Select from "@/shared/ui/Select.svelte";
   import TimePicker from "@/shared/ui/TimePicker.svelte";
@@ -33,6 +32,7 @@
   import type {
     ConnectorField,
     ConnectorId,
+    QueuedSyncResponse,
     SyncTarget,
   } from "@/data/connectors/types";
   import { formatDateTime } from "@/shared/format/financial";
@@ -59,7 +59,7 @@
   );
   const jobs = createQuery(syncJobsQuery(() => api));
   const defaultSchedule = createQuery(syncScheduleQuery(() => api));
-  let values = $state<Record<string, string | boolean>>({});
+  let values = $state<Record<string, string>>({});
   let error = $state("");
   let otp = $state("");
   let tdccSetupStep = $state<"credentials" | "email" | "sms" | "complete">(
@@ -70,6 +70,12 @@
   let bankCaptchaDigitCount = $state(6);
   let bankCaptchaKind = $state<"numeric" | "alphanumeric">("numeric");
   let pendingSyncTarget = $state<SyncTarget>("default");
+  let einvoiceSyncQueued = $state(false);
+  let einvoiceSyncQueuedTimer: ReturnType<typeof setTimeout> | undefined;
+  let einvoiceSyncPolling = $state<"awaiting-active" | "active" | null>(null);
+  let einvoiceSyncPreviousLastRunAt = $state<string | null>(null);
+  let einvoiceSyncPollingTimer: ReturnType<typeof setTimeout> | undefined;
+  let destroyed = false;
   const job = $derived(
     ($jobs.data ?? []).find(
       (j) => j.connectorId === connectorId && j.scope === "all",
@@ -111,13 +117,15 @@
       for (const [key, value] of Object.entries(
         result.data?.publicConfig ?? {},
       )) {
-        if (values[key] === undefined)
-          values[key] = typeof value === "boolean" ? value : String(value);
+        if (values[key] === undefined) values[key] = String(value);
       }
-      if (connectorId === "einvoice" && values.fetchDetails === undefined)
-        values.fetchDetails = true;
     }),
   );
+  onDestroy(() => {
+    destroyed = true;
+    clearTimeout(einvoiceSyncQueuedTimer);
+    stopEinvoiceSyncPolling();
+  });
 
   const save = createMutation({
     mutationFn: (config: Record<string, unknown>) => {
@@ -150,19 +158,21 @@
           ? `/api/connectors/${connectorId}/sync/${target}`
           : `/api/connectors/${connectorId}/sync`;
       pendingSyncTarget = target;
-      return api.post(
-        path,
-        connectorId === "einvoice" ? { fetchDetails: true } : undefined,
-      );
+      return connectorId === "einvoice"
+        ? api.post<QueuedSyncResponse>(path, {})
+        : api.post(path);
     },
     onSuccess: () => {
       error = "";
+      if (connectorId === "einvoice") {
+        showEinvoiceSyncQueued();
+        startEinvoiceSyncPolling();
+        return;
+      }
       if (connectorId === "tdcc") tdccSetupStep = "complete";
       qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
       qc.invalidateQueries({ queryKey: queryKeys.summary });
-      if (connectorId === "einvoice")
-        qc.invalidateQueries({ queryKey: queryKeys.invoices });
-      else if (
+      if (
         connectorId === "esun" ||
         connectorId === "cathaybk" ||
         connectorId === "ctbc"
@@ -350,7 +360,7 @@
   }
 
   function buildConfig() {
-    const entries: Array<[string, string | number | boolean]> = [];
+    const entries: Array<[string, string | number]> = [];
     for (const field of fields) {
       const raw = values[field.key];
       if (raw === undefined || raw === "") continue;
@@ -362,6 +372,51 @@
       if (Number.isFinite(number)) entries.push([field.key, number]);
     }
     return Object.fromEntries(entries);
+  }
+  function showEinvoiceSyncQueued() {
+    einvoiceSyncQueued = true;
+    clearTimeout(einvoiceSyncQueuedTimer);
+    einvoiceSyncQueuedTimer = setTimeout(() => {
+      einvoiceSyncQueued = false;
+    }, 5_000);
+  }
+  function startEinvoiceSyncPolling() {
+    einvoiceSyncPolling = "awaiting-active";
+    einvoiceSyncPreviousLastRunAt = job?.lastRunAt ?? null;
+    clearTimeout(einvoiceSyncPollingTimer);
+    void pollEinvoiceSyncJob();
+  }
+  function stopEinvoiceSyncPolling() {
+    einvoiceSyncPolling = null;
+    clearTimeout(einvoiceSyncPollingTimer);
+    einvoiceSyncPollingTimer = undefined;
+  }
+  async function pollEinvoiceSyncJob() {
+    const syncJobs = await qc
+      .fetchQuery({ ...syncJobsQuery(() => api), staleTime: 0 })
+      .catch(() => undefined);
+    if (!einvoiceSyncPolling || destroyed) return;
+    const einvoiceJob = syncJobs?.find(
+      (syncJob) =>
+        syncJob.connectorId === "einvoice" && syncJob.scope === "all",
+    );
+    if (einvoiceJob?.running) {
+      einvoiceSyncPolling = "active";
+    } else if (
+      einvoiceSyncPolling === "active" ||
+      einvoiceJob?.lastRunAt !== einvoiceSyncPreviousLastRunAt
+    ) {
+      const completedSuccessfully = einvoiceJob?.lastStatus === "success";
+      stopEinvoiceSyncPolling();
+      if (completedSuccessfully) {
+        qc.invalidateQueries({ queryKey: queryKeys.summary });
+        qc.invalidateQueries({ queryKey: queryKeys.invoices });
+      }
+      return;
+    }
+    einvoiceSyncPollingTimer = setTimeout(() => {
+      void pollEinvoiceSyncJob();
+    }, 2_000);
   }
   function intervalLabel(minutes: number) {
     return (
@@ -473,14 +528,22 @@
       {:else}
         <Button
           size="sm"
-          disabled={demoMode || $sync.isPending}
+          disabled={demoMode ||
+            $sync.isPending ||
+            (connectorId === "einvoice" && einvoiceSyncPolling !== null)}
           onclick={() => {
             error = "";
             $sync.mutate("default");
           }}
           ><RefreshCw
             class={$sync.isPending ? "size-4 animate-spin" : "size-4"}
-          />{$sync.isPending ? "同步中…" : "同步"}</Button
+          />{$sync.isPending
+            ? "同步中…"
+            : connectorId === "einvoice" && einvoiceSyncQueued
+              ? "已排入同步"
+              : connectorId === "einvoice" && einvoiceSyncPolling
+                ? "同步中…"
+                : "同步"}</Button
         >
       {/if}
     </div>
@@ -677,50 +740,36 @@
     </div>
     <div class="grid gap-3 p-4">
       {#each fields as field (field.key)}
-        {#if field.type === "checkbox"}
-          <label class="flex items-center gap-2 text-sm"
-            ><Checkbox
-              checked={Boolean(values[field.key])}
-              onchange={(e: Event) =>
-                (values[field.key] = (
-                  e.currentTarget as HTMLInputElement
-                ).checked)}
-            />{field.label}</label
-          >
-        {:else}
-          {@const storedCredential = Boolean(
-            $settings.data?.configured &&
-            (connectorId !== "tdcc" || tdccCredentialsComplete) &&
-            (field.type === "text" || field.type === "password"),
-          )}
-          {@const hasReplacement = Boolean(String(values[field.key] ?? ""))}
-          <label class="grid gap-1.5 text-sm font-medium">
-            <span class="flex flex-wrap items-center gap-2">
-              <span>{field.label}</span>
-              {#if storedCredential}
-                <span
-                  class={`rounded-full px-2 py-0.5 text-sm font-semibold ${hasReplacement ? "bg-steel/10 text-steel" : "bg-moss/10 text-moss"}`}
-                >
-                  {hasReplacement ? "將更新" : "已儲存"}
-                </span>
-              {/if}
-            </span>
-            <Input
-              class={storedCredential && !hasReplacement
-                ? "bg-moss/[0.035] placeholder:text-ink/55"
-                : ""}
-              type={field.type}
-              placeholder={storedCredential && !hasReplacement
-                ? "••••••••　已安全儲存"
-                : field.placeholder}
-              value={String(values[field.key] ?? "")}
-              oninput={(e: Event) =>
-                (values[field.key] = (
-                  e.currentTarget as HTMLInputElement
-                ).value)}
-            />
-          </label>
-        {/if}
+        {@const storedCredential = Boolean(
+          $settings.data?.configured &&
+          (connectorId !== "tdcc" || tdccCredentialsComplete) &&
+          (field.type === "text" || field.type === "password"),
+        )}
+        {@const hasReplacement = Boolean(String(values[field.key] ?? ""))}
+        <label class="grid gap-1.5 text-sm font-medium">
+          <span class="flex flex-wrap items-center gap-2">
+            <span>{field.label}</span>
+            {#if storedCredential}
+              <span
+                class={`rounded-full px-2 py-0.5 text-sm font-semibold ${hasReplacement ? "bg-steel/10 text-steel" : "bg-moss/10 text-moss"}`}
+              >
+                {hasReplacement ? "將更新" : "已儲存"}
+              </span>
+            {/if}
+          </span>
+          <Input
+            class={storedCredential && !hasReplacement
+              ? "bg-moss/[0.035] placeholder:text-ink/55"
+              : ""}
+            type={field.type}
+            placeholder={storedCredential && !hasReplacement
+              ? "••••••••　已安全儲存"
+              : field.placeholder}
+            value={String(values[field.key] ?? "")}
+            oninput={(e: Event) =>
+              (values[field.key] = (e.currentTarget as HTMLInputElement).value)}
+          />
+        </label>
       {/each}
     </div>
     <div

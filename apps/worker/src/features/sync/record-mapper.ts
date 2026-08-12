@@ -17,35 +17,6 @@ function stableId(...parts: string[]) {
   return parts.join(":");
 }
 
-export function invoiceConfigSnapshot(config: Record<string, unknown>) {
-  return Object.fromEntries(
-    [
-      "protocol",
-      "fetchDetails",
-      "mobileBarcode",
-      "userToken",
-      "loginClientCode",
-      "sid",
-      "token",
-      "iv",
-      "svrCode",
-      "loginAppId",
-      "loginLiat",
-      "loginSsMe",
-      "ltoken",
-      "hkey",
-      "serverTimeOffset",
-    ].map((key) => [key, config[key]]),
-  );
-}
-
-export function invoiceConfigChanged(
-  before: Record<string, unknown>,
-  after: Record<string, unknown>,
-) {
-  return Object.keys(before).some((key) => before[key] !== after[key]);
-}
-
 export function invoiceRecord(
   connectorId: ConnectorId,
   invoice: Omit<Invoice, "id" | "connectorId">,

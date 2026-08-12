@@ -1,5 +1,6 @@
 import type { ConnectorId } from "@taiwan-fin-hub/core";
 import { nextSyncRunAt, type SyncScheduleMode } from "@taiwan-fin-hub/db";
+import { getActiveEinvoiceRun } from "./einvoice-run-repository";
 import {
   findDefaultSyncSchedule,
   findSyncJob,
@@ -52,11 +53,14 @@ export async function setDefaultSyncSchedule(
 export async function getSyncJobs(db: D1Database) {
   const rows = await listSyncJobs(db);
   const now = new Date();
+  const activeEinvoiceRun = await getActiveEinvoiceRun(db);
   return rows.map((row) => ({
     ...row,
     configured: Boolean(row.configured),
     enabled: Boolean(row.enabled),
-    running: Boolean(row.lockedUntil && new Date(row.lockedUntil) > now),
+    running:
+      (row.connectorId === "einvoice" && Boolean(activeEinvoiceRun)) ||
+      Boolean(row.lockedUntil && new Date(row.lockedUntil) > now),
   }));
 }
 

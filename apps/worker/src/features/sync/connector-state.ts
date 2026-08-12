@@ -22,6 +22,8 @@ export function sensitiveConnectorConfig(
   config: Record<string, unknown>,
 ) {
   const sensitive = { ...config };
+  // Retired public preferences must not migrate into encrypted connector state.
+  if (connectorId === "einvoice") delete sensitive.fetchDetails;
   for (const key of connectorCatalog[connectorId].publicFields) {
     delete sensitive[key];
   }
