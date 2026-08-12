@@ -713,10 +713,14 @@
         {/if}
       </div>
     {/if}
-    {#if error || (job?.lastError && !bankCaptchaImage)}<p
+    {#if error || ((job?.lastStatus === "failed" || job?.lastStatus === "needs_user_action") && !bankCaptchaImage)}<p
         class="mt-2 text-sm text-coral"
       >
-        {error ? `本次同步：${error}` : `上次同步：${job?.lastError}`}
+        {error
+          ? `本次同步：${error}`
+          : job?.lastError?.trim()
+            ? `上次同步：${job.lastError}`
+            : "上次同步失敗，但未取得錯誤原因。"}
       </p>{/if}
   </div>
   <section class="mt-4 overflow-hidden rounded-xl border border-border">

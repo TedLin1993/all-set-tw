@@ -12,6 +12,7 @@ import type { Env } from "../../platform/env";
 import {
   canonicalSyncLockRowId,
   isUserActionError,
+  safeErrorLogDetails,
   safeErrorMessage,
   startSyncLockHeartbeat,
   SYNC_LOCK_LEASE_MS,
@@ -211,9 +212,10 @@ async function runScheduledJob(
       const status: SyncStatus = isUserActionError(error)
         ? "needs_user_action"
         : "failed";
+      const message = safeErrorMessage(error);
       await failSyncJob(env.DB, due, {
         status,
-        errorMessage: safeErrorMessage(error),
+        errorMessage: message,
       });
       console.error(
         JSON.stringify({
@@ -224,7 +226,8 @@ async function runScheduledJob(
           scope: due.scope,
           trigger: "scheduled",
           status,
-          message: safeErrorMessage(error),
+          message,
+          ...safeErrorLogDetails(error),
           durationMs: Date.now() - startedAt,
         }),
       );

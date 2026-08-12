@@ -1483,6 +1483,69 @@ export function isUserActionError(error: unknown) {
 }
 
 export function safeErrorMessage(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/\s+/g, " ").slice(0, 300);
+  const message = normalizeErrorText(
+    error instanceof Error
+      ? error.message
+      : error === null || error === undefined
+        ? ""
+        : String(error),
+    300,
+  );
+  return message || "同步失敗，但未取得錯誤原因。";
+}
+
+export function safeErrorLogDetails(error: unknown) {
+  const errorName = normalizeErrorText(
+    error instanceof Error ? error.name : typeof error,
+    80,
+  );
+  const stack =
+    error instanceof Error
+      ? sanitizeErrorDiagnostic(
+          (error.stack ?? "").split("\n").slice(1).join("\n"),
+          1_500,
+        )
+      : "";
+  const cause = error instanceof Error ? error.cause : undefined;
+  const causeName =
+    cause instanceof Error
+      ? normalizeErrorText(cause.name, 80) || "UnknownError"
+      : "";
+  const causeStack =
+    cause instanceof Error
+      ? sanitizeErrorDiagnostic(
+          (cause.stack ?? "").split("\n").slice(1).join("\n"),
+          500,
+        )
+      : "";
+  const stage =
+    error instanceof Error &&
+    "stage" in error &&
+    typeof error.stage === "string"
+      ? normalizeErrorText(error.stage, 80)
+      : "";
+
+  return {
+    errorName: errorName || "UnknownError",
+    ...(stage ? { stage } : {}),
+    ...(stack ? { stack } : {}),
+    ...(causeName ? { causeName } : {}),
+    ...(causeStack ? { causeStack } : {}),
+  };
+}
+
+function normalizeErrorText(value: string, maxLength: number) {
+  return value.replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function sanitizeErrorDiagnostic(value: string, maxLength: number) {
+  return value
+    .replace(/https?:\/\/\S+/gi, "[URL]")
+    .replace(
+      /\b(authorization|cookie|password|passwd|token|secret|session(?:cookies?)?)\s*[:=]\s*([^\s,;]+)/gi,
+      "$1=[redacted]",
+    )
+    .replace(/\b(?:Bearer\s+)?[A-Za-z0-9+/_=-]{24,}\b/g, "[redacted]")
+    .trim()
+    .slice(0, maxLength);
 }

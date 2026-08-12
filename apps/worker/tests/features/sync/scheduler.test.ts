@@ -44,7 +44,14 @@ vi.mock("../../../src/features/sync/service", () => ({
   prepareSinopacCaptchaSession: vi.fn(),
   prepareTaishinCaptchaSession: vi.fn(),
   prepareObankCaptchaSession: vi.fn(),
-  safeErrorMessage: (error: unknown) => String(error),
+  safeErrorLogDetails: (error: unknown) => ({
+    errorName: error instanceof Error ? error.name : typeof error,
+    ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+  }),
+  safeErrorMessage: (error: unknown) =>
+    error instanceof Error && error.message.trim()
+      ? error.message.trim()
+      : "同步失敗，但未取得錯誤原因。",
   startSyncLockHeartbeat: mocks.startSyncLockHeartbeat,
   syncCathaybk: vi.fn(),
   syncEinvoice: vi.fn(),
@@ -149,6 +156,29 @@ beforeEach(() => {
 });
 
 describe("scheduled sync rounds", () => {
+  it("persists a fallback and logs diagnostic details for an empty error", async () => {
+    const job = syncJob("custom");
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.findOpenDefaultScheduleBatchId.mockResolvedValue(null);
+    mocks.findNextDueSyncJob.mockResolvedValue(job);
+    mocks.syncEsun.mockRejectedValueOnce(new Error(""));
+
+    await runSchedulerTick(env(), scheduledController);
+
+    expect(mocks.failSyncJob).toHaveBeenCalledWith(expect.anything(), job, {
+      status: "failed",
+      errorMessage: "同步失敗，但未取得錯誤原因。",
+    });
+    expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({
+      event: "sync_run_failed",
+      connectorId: "esun",
+      status: "failed",
+      message: "同步失敗，但未取得錯誤原因。",
+      errorName: "Error",
+      stack: expect.stringContaining("Error"),
+    });
+  });
+
   it("records a default-round result before releasing the connector lock", async () => {
     const order: string[] = [];
     const job = syncJob();

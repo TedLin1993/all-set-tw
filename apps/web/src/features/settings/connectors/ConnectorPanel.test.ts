@@ -73,6 +73,16 @@ function renderEinvoicePanel(syncJobs: SyncJobRow[][]) {
 }
 
 describe("ConnectorPanel", () => {
+  it("shows a fallback when a failed sync has an empty stored error", async () => {
+    const { findByText } = renderEinvoicePanel([
+      [syncJob({ lastStatus: "failed", lastError: "" })],
+    ]);
+
+    expect(
+      await findByText("上次同步失敗，但未取得錯誤原因。"),
+    ).toBeInTheDocument();
+  });
+
   it("polls an e-invoice run and refreshes financial data only after success", async () => {
     vi.useFakeTimers();
     const running = syncJob({ running: true });
