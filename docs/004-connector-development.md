@@ -37,7 +37,7 @@ Connector 採三層 registry：
 
 | 狀態           | 儲存位置                         | 允許內容                                                     |
 | -------------- | -------------------------------- | ------------------------------------------------------------ |
-| 公開偏好       | `public_config`                  | 是否抓電子發票品項明細等非敏感選項                           |
+| 公開偏好       | `public_config`                  | 使用者可調整、且不影響敏感狀態的 connector 偏好              |
 | 機密設定       | `encrypted_config`               | 帳密、cookie、access token、device token、Browser session ID |
 | 同步 cursor    | `sync_cursor`                    | 日期、頁碼、watermark、已完成區間等非敏感增量位置            |
 | 暫時 challenge | `encrypted_config`，且必須有 TTL | CAPTCHA、OTP、待提交的 API／Browser session                  |
@@ -49,6 +49,7 @@ Connector 採三層 registry：
 - 舊版已存在於 cursor 的 session 不得直接由 D1 migration 刪除；應讓新版 connector 相容讀取一次，並在首次成功同步時搬入 `encrypted_config`，避免強迫使用者重新驗證。
 - 公開設定透過 `parsePublicConnectorConfig` 合併後再交給 config schema；不得把相同欄位複製到 encrypted config。
 - 同步回溯範圍是 connector 的 runtime policy，不得做成公開偏好：電子發票固定同步最近 2 期；銀行 connector 固定同步最近 3 個月或 3 期帳單。舊版 `periodsBack` 與 `lookbackMonths` 必須忽略並在後續設定儲存時移除。
+- 電子發票品項明細是固定同步 policy，不是公開偏好：不得新增 `fetchDetails` catalog field、前端 checkbox 或 sync request override。既有 `public_config.fetchDetails` 在 migration 與下一次設定儲存時必須移除。
 - 任一 credential 變更時，必須清除 catalog `resetOnCredentialChangeFields` 宣告的衍生狀態與既有 cursor。
 - Challenge 成功、失敗或逾時後都必須清除 CAPTCHA、OTP 與 Browser session reference。
 - Log、錯誤回應與 `raw` 不得包含帳密、完整帳號／卡號、cookie 或 token。
@@ -89,7 +90,9 @@ Connector 不得依賴 Hono、D1、Worker `Env`，也不得直接寫入資料庫
 - 日期使用 ISO 8601；帳單期間使用 `YYYY-MM`；幣別使用大寫代碼。
 - 支出與負債為負，退款與入帳為正。
 - `raw` 只能保留遮罩或白名單資料，主要功能不得依賴 raw shape。
-- 所有資料必須經 `record-mapper.ts` 與 staged persistence。資料 promotion、cursor 與 secret state 更新必須放在同一 finalize batch。
+- 一般 connector 的資料必須經 `record-mapper.ts` 與 staged persistence；durable-run
+  connector 可直接以其 run item table 作為 staging source。資料 promotion 與 cursor
+  必須放在同一 guarded D1 batch，secret state 需以設定版本 CAS 保護。
 
 ## 路由、排程與 challenge
 
@@ -100,6 +103,28 @@ Connector 不得依賴 Hono、D1、Worker `Env`，也不得直接寫入資料庫
 - 排程不得主動寄送 OTP；需要互動時標記 `needs_user_action`。
 - 若外部服務支援接管其他登入中的裝置，必須明確定義手動與排程的 `force` policy，並在介面與使用文件提示可能中斷使用者目前的工作階段。
 - 新 connector 必須透過 D1 migration 建立 `<connectorId>:all` sync job，預設停用。
+
+### 電子發票分段明細同步
+
+電子發票是例外的 durable-run connector，不能使用一般 `runConnectorSync` 的單次
+同步流程。`einvoice_sync_runs` 保存 run lifecycle，`einvoice_sync_run_items` 保存
+已發現的發票 header 與每張明細的處理狀態；run items 本身也是 promotion 的 durable
+staging source。設定儲存、登入 session 與資料 promotion 仍遵守本文件的敏感狀態與
+設定版本 CAS 規則。
+
+- 啟動手動或排程同步時只建立／取得 active run 並 enqueue `run-einvoice-chunk`；API
+  可以回傳已排入同步，前端必須依 sync job lifecycle 顯示完成結果。
+- 初始化只取得清單並 durable 地寫入 item；明細一律同步。每個 Queue invocation 最多
+  claim 並擷取 35 張發票，完成狀態以 set-based D1 寫入；若尚有工作便 enqueue continuation，不能在同一 invocation
+  繼續處理下一批。
+- item claim、run chunk 都必須使用 owner-scoped lease；明細處理期間每五張 rolling renew
+  run lease，item 完成／釋放則以 claim token CAS。Queue 重送時只可接管已過期的 run lease
+  與 item，且不得解除其他 invocation 的 lease。
+- 所有 item `done` 前不得 promotion。完成後由 run items 以固定五個 set-based statements
+  一次 promotion invoice 與 line item，並以設定版本 CAS 在同一 batch 更新 cursor；後續
+  finalize path 更新 sync job 和排程批次結果。`promoted_at` 必須使重送可冪等。
+- 暫時外部錯誤釋放 item claim 並使用 Queue retry；session 過期清除已保存 session 後回到
+  初始化；憑證或互動式登入需求則標記 `needs_user_action`，retry 上限後標記 `failed`。
 
 ## 測試最低要求
 

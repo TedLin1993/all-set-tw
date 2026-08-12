@@ -9,6 +9,8 @@ import {
 import {
   EINVOICE_SYNC_PERIODS,
   einvoiceConnector,
+  fetchEInvoiceInvoiceDetail,
+  initializeEInvoiceSync,
   parseInvoiceConfig,
 } from "../../src/index";
 
@@ -158,6 +160,119 @@ async function main() {
     "/einvoice/carriers/query-invoices-details",
   );
 
+  const primitiveConfig = parseInvoiceConfig({
+    protocol: "v2",
+    mobile: "0912345678",
+    password: "synthetic-password",
+    androidId: "synthetic-android-id",
+  });
+  const initialized = await initializeEInvoiceSync(primitiveConfig, { client });
+  assert.equal(initialized.headers.length, EINVOICE_SYNC_PERIODS);
+  assert.equal(initialized.detailTasks.length, EINVOICE_SYNC_PERIODS);
+  assert.equal(
+    initialized.detailTasks[0].sourceId,
+    "AA-12345678:2026-07-01T04:34:56.000Z",
+  );
+  assert.equal(initialized.detailTasks[0].invNum, "AA-12345678");
+  assert.equal(initialized.detailTasks[0].detailInvDate, "2026/07/01");
+  assert.equal(initialized.configUpdates.sid, syntheticSession.sid);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(initialized.session)),
+    initialized.session,
+  );
+  const detailResult = await fetchEInvoiceInvoiceDetail(
+    initialized.session,
+    initialized.detailTasks[0],
+    { client },
+  );
+  assert.equal(detailResult.invoiceLineItems.length, 1);
+  assert.equal(
+    detailResult.invoiceLineItems[0].invoiceSourceId,
+    initialized.detailTasks[0].sourceId,
+  );
+
+  const failedDetailClient = new EInvoiceV2Client({
+    bigHost: "https://detail-error.test",
+    fetchImpl: async () => new Response("detail failed", { status: 503 }),
+  });
+  await assert.rejects(
+    () =>
+      fetchEInvoiceInvoiceDetail(
+        initialized.session,
+        initialized.detailTasks[0],
+        { client: failedDetailClient },
+      ),
+    /HTTP 503/,
+  );
+
+  let timeoutSignal: AbortSignal | undefined;
+  const timeoutClient = new EInvoiceV2Client({
+    bigHost: "https://timeout.test",
+    timeoutMs: 10,
+    fetchImpl: async (_input, init) => {
+      timeoutSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        timeoutSignal?.addEventListener(
+          "abort",
+          () => reject(timeoutSignal?.reason),
+          { once: true },
+        );
+      });
+    },
+  });
+  await assert.rejects(
+    () =>
+      timeoutClient.queryCarrierInvoiceDetail(
+        initialized.session,
+        "AA-12345678",
+        "2026/07/01",
+      ),
+    /請求逾時（10ms）/,
+  );
+  assert.equal(timeoutSignal?.aborted, true);
+
+  const callerAbort = new AbortController();
+  const callerAbortClient = new EInvoiceV2Client({
+    bigHost: "https://caller-abort.test",
+    signal: callerAbort.signal,
+    fetchImpl: async (_input, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal?.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      }),
+  });
+  const callerAbortRequest = callerAbortClient.queryCarrierInvoiceDetail(
+    initialized.session,
+    "AA-12345678",
+    "2026/07/01",
+  );
+  callerAbort.abort(new Error("caller cancelled"));
+  await assert.rejects(callerAbortRequest, /caller cancelled/);
+
+  const connectorDetailFailureConfig = parseInvoiceConfig({
+    protocol: "v2",
+    mobile: "0912345678",
+    password: "synthetic-password",
+    androidId: "synthetic-android-id",
+  });
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = async (
+    input,
+    init,
+  ) =>
+    String(input).endsWith("/einvoice/carriers/query-invoices-details")
+      ? new Response("detail failed", { status: 503 })
+      : fakeFetch(input, init);
+  await assert.rejects(
+    () => einvoiceConnector.sync(connectorDetailFailureConfig),
+    /HTTP 503/,
+  );
+
   (globalThis as unknown as { fetch: typeof fetch }).fetch = fakeFetch;
   const requestsBeforeSync = requests.length;
   const connectorConfig = parseInvoiceConfig({
@@ -165,7 +280,6 @@ async function main() {
     mobile: "0912345678",
     password: "synthetic-password",
     androidId: "synthetic-android-id",
-    fetchDetails: true,
   });
   const syncResult = await einvoiceConnector.sync(connectorConfig);
   assert.equal(syncResult.records.length, 1);

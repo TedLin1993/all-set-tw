@@ -5,6 +5,10 @@
 > 本文件後續內容保留最初 v1 設計背景；現行架構以
 > [`002-backend-architecture.md`](002-backend-architecture.md) 為準。
 
+> 電子發票的同步明細現採 durable run：建立 run 後由 Queue 分段處理，每個
+> invocation 最多取得 35 張發票明細，再 enqueue 下一段。這不是使用者設定；
+> 前端不再提供「同步品項明細」選項，電子發票一律同步明細。
+
 ## Context
 
 Taiwan Fin Hub currently syncs data only through authenticated API requests from the web UI:
@@ -51,7 +55,7 @@ Default v1 intervals:
 
 | Job            | Default interval | Notes                                                                                                                                         |
 | -------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `einvoice/all` | 24 hours         | Fetch invoice list and details.                                                                                                               |
+| `einvoice/all` | 24 hours         | Fetch invoice list and details. Details are always enabled and are processed by durable Queue chunks.                                         |
 | `tdcc/all`     | 24 hours         | Sync positions, settlement bank data, and trade history together. Reuse trusted session only; disable the scheduled job when OTP is required. |
 | `esun/all`     | 24 hours         | Reuse valid session only in v1.                                                                                                               |
 
@@ -123,7 +127,7 @@ The scheduler framework treats `scope` as connector-local data. For example, TDC
 
 | Connector  | Scheduled behavior                                                                                                                                                                         | Reasoning                                                                                                                                                                                       |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `einvoice` | Run when `sync_jobs.next_run_at` is due, with `fetchDetails: true`.                                                                                                                        | Login token and mobile barcode can be refreshed and stored in encrypted config. Writes are idempotent by `connector_id + source_id`.                                                            |
+| `einvoice` | Run when `sync_jobs.next_run_at` is due. Header discovery and every invoice's line-item detail are always synchronized; detail work is continued in Queue chunks.                          | Login token and mobile barcode can be refreshed and stored in encrypted config. Writes are idempotent by `connector_id + source_id`.                                                            |
 | `tdcc`     | Run `tdcc/all` when due: positions, settlement bank data, and trade history are synced in one connector job. If OTP is required, mark `needs_user_action` and set `sync_jobs.enabled = 0`. | TDCC device verification is interactive. The TDCC scopes share cursor/session state, so scheduled sync treats them as one connector job.                                                        |
 | `esun`     | Run when due if stored session cookies are still valid; allow browser login only after an explicit config flag is added.                                                                   | Current implementation can perform browser login with credentials, but automated bank login may trigger duplicate-login or security checks. V1 should prefer session reuse and manual recovery. |
 
@@ -141,6 +145,35 @@ For v1, seeded `sync_jobs` rows should mean:
 - `einvoice`: enabled.
 - `tdcc`: enabled, but no OTP automation.
 - `esun`: enabled for valid-session reuse only.
+
+## 電子發票 Durable Run
+
+電子發票清單與品項明細可能超過單一 Worker invocation 的 external subrequest
+額度，因此不以一次 connector sync 完成所有明細。建立 `einvoice_sync_runs` 與
+`einvoice_sync_run_items` 保存 run、已發現的 header、每張明細的狀態與 retry
+資訊；同一時間只允許一個 active electronic-invoice run。
+
+1. 手動 API 或排程先建立／取得 active run，取得 connector lock 後只 enqueue
+   `run-einvoice-chunk`，HTTP 回應為已排入同步，並不等待明細完成。
+2. 第一個 chunk 初始化或更新可恢復的登入 session，取得最近兩期 header，並以
+   `connector_id + source_id` 將待抓明細寫入 run items。品項明細固定同步，沒有
+   `fetchDetails` public config 或 request override。
+3. 每個 Queue invocation 最多 claim 35 張 pending 明細。成功的整批 item 以一次
+   set-based D1 寫入標記 `done`；失敗的 claim 會釋放為可 retry。尚有 pending 或 processing item 時，
+   consumer enqueue 下一個 chunk，而非在同一 invocation 繼續呼叫外部 API。
+4. 只有所有 item 都完成後，才把 durable run items 當作 staging source，以固定五個
+   set-based D1 statements 一次寫入發票與品項，並更新完成 cursor。查詢數不隨品項數
+   成長；`settings_version` CAS 防止同步期間更新憑證後混入舊資料，`promoted_at` 讓
+   Queue 重送時可安全跳過重複 promotion。`sync_jobs` 與排程批次結果在後續終態 batch
+   一併完成。
+5. 可恢復的外部錯誤採 Queue retry；登入失效會清除可恢復 session 並回到初始化。
+   憑證／互動式登入問題終止為 `needs_user_action`，重試達上限的其他錯誤終止為
+   `failed`。終止前不 promotion 部分明細，避免資料與 cursor 不一致。
+
+Run 與每個 item 都有 lease。處理明細時每五張 rolling renew run lease，Queue 訊息重送或並行
+delivery 必須先取得 run chunk lease；沒有取得者不可平行處理或解除另一個 invocation 的 lease。item
+claim token 在完成／釋放時提供 CAS，只有 run lease 過期並被接管後才可 reclaim 過期 item。connector lock
+維持到 completed、failed 或 needs_user_action，確保手動與排程不會互相覆寫。
 
 ## Job State and Locking
 

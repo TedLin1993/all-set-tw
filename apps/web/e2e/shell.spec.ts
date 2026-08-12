@@ -29,6 +29,7 @@ test.beforeEach(async ({ page }) => {
     else if (path === "/api/exchange-rates") body = [];
     else if (path === "/api/history/net-worth/chart") body = [];
     else if (path === "/api/sync-jobs") body = [];
+    else if (path === "/api/sync-reports/latest") body = null;
     else if (path === "/api/classification/categories")
       body = [
         { id: "salary", label: "薪資", sortOrder: 1, isSystem: true },
@@ -98,6 +99,100 @@ test("renders the mobile bottom navigation", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "更多", exact: true }),
   ).toBeVisible();
+});
+
+test("warns about a missing exchange rate only when the foreign balance is positive", async ({
+  page,
+}) => {
+  let hkdBalance = 0;
+  await page.route("**/api/bank**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        accounts: [
+          {
+            id: "hkd-account",
+            connectorId: "esun",
+            sourceId: "hkd-account",
+            institutionName: "玉山銀行",
+            accountName: "港幣帳戶",
+            accountType: "savings",
+            balance: hkdBalance,
+            currency: "HKD",
+          },
+        ],
+        transactions: [],
+      }),
+    });
+  });
+
+  const warning = page.getByText(/資產含外幣（HKD）尚未設定匯率/);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/#/overview");
+  await expect(
+    page.getByRole("heading", { name: "總覽", exact: true }),
+  ).toBeVisible();
+  await expect(warning).toHaveCount(0);
+
+  hkdBalance = 100;
+  await page.reload();
+  await expect(warning).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(warning).toBeVisible();
+
+  hkdBalance = 0;
+  await page.reload();
+  await expect(warning).toHaveCount(0);
+});
+
+test("does not show a missing-rate warning while exchange rates are loading", async ({
+  page,
+}) => {
+  await page.route("**/api/bank**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        accounts: [
+          {
+            id: "hkd-account",
+            connectorId: "esun",
+            sourceId: "hkd-account",
+            accountType: "savings",
+            balance: 100,
+            currency: "HKD",
+          },
+        ],
+        transactions: [],
+      }),
+    });
+  });
+
+  let releaseRates!: () => void;
+  const pendingRates = new Promise<void>((resolve) => {
+    releaseRates = resolve;
+  });
+  await page.route("**/api/exchange-rates", async (route) => {
+    await pendingRates;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: "[]",
+    });
+  });
+
+  await page.goto("/#/overview");
+  const warning = page.getByText(/資產含外幣（HKD）尚未設定匯率/);
+  await expect(
+    page.getByRole("heading", { name: "總覽", exact: true }),
+  ).toBeVisible();
+  await expect(warning).toHaveCount(0);
+
+  releaseRates();
+  await expect(warning).toBeVisible();
 });
 
 test("shows a loading state while a connector sync is pending", async ({

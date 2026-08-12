@@ -7,7 +7,6 @@ import {
   prepareObankCaptchaSession,
   syncCathaybk,
   syncCtbc,
-  syncEinvoice,
   syncEsun,
   syncSinopac,
   syncObank,
@@ -17,7 +16,6 @@ import {
   TDCC_SCOPE_BANK,
   TDCC_SCOPE_INVESTMENTS,
   TDCC_SCOPE_TRADES,
-  type EinvoiceSyncOverrides,
   type SinopacSyncOverrides,
   type ObankSyncOverrides,
   type SyncOutcome,
@@ -41,8 +39,11 @@ export const connectorRuntimeRegistry: Record<
   ConnectorRuntimeDefinition
 > = {
   einvoice: {
-    run: (env, trigger, _scope, overrides) =>
-      syncEinvoice(env, trigger, overrides as EinvoiceSyncOverrides),
+    run: async () => {
+      throw new Error(
+        "Electronic invoice sync must be started through its durable Queue flow.",
+      );
+    },
   },
   tdcc: {
     run: (env, trigger, scope, overrides) =>

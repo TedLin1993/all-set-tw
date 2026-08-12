@@ -123,7 +123,11 @@ export async function calculateCurrentFinancialSnapshot(
          COALESCE(ROUND(SUM(CASE WHEN kind = 'debt' THEN ABS(amount_twd) ELSE 0 END)), 0) AS creditCardDebtTwd,
          COALESCE(
            json_group_array(DISTINCT currency) FILTER (
-             WHERE amount != 0 AND is_missing_rate = 1
+             WHERE (
+               (kind = 'debt' AND ABS(amount) > 0)
+               OR (kind = 'asset' AND amount > 0)
+             )
+               AND is_missing_rate = 1
            ),
            '[]'
          ) AS missingCurrencies

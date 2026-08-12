@@ -8,7 +8,7 @@ import {
 } from "../../../src/features/sync/connector-state";
 
 describe("connector state boundaries", () => {
-  it("keeps public preferences out of encrypted config", () => {
+  it("keeps retired public preferences out of encrypted config", () => {
     expect(
       sensitiveConnectorConfig("einvoice", {
         mobile: "0912345678",
@@ -21,20 +21,20 @@ describe("connector state boundaries", () => {
         mobile: "0912345678",
         fetchDetails: false,
       }),
-    ).toBe(JSON.stringify({ fetchDetails: false }));
+    ).toBeNull();
   });
 
-  it("does not persist one-time sync overrides as public preferences", () => {
+  it("does not persist retired invoice preferences", () => {
     expect(
-      restoreConfiguredPublicFields(
+      sensitiveConnectorConfig(
         "einvoice",
-        { fetchDetails: true, sid: "refreshed-session" },
-        { fetchDetails: false },
+        restoreConfiguredPublicFields(
+          "einvoice",
+          { fetchDetails: true, sid: "refreshed-session" },
+          { fetchDetails: false },
+        ),
       ),
-    ).toEqual({
-      fetchDetails: false,
-      sid: "refreshed-session",
-    });
+    ).toEqual({ sid: "refreshed-session" });
   });
 
   it("filters retired public fields before parsing runtime config", () => {
@@ -49,7 +49,7 @@ describe("connector state boundaries", () => {
         "einvoice",
         JSON.stringify({ periodsBack: 6, fetchDetails: false }),
       ),
-    ).toEqual({ fetchDetails: false });
+    ).toEqual({});
   });
 
   it("removes reusable browser sessions from bank cursors", () => {

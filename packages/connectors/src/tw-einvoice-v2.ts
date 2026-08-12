@@ -37,6 +37,10 @@ export type EInvoiceV2Options = {
   loginType?: number;
   osVersion?: string;
   userAgent?: string;
+  /** Cancels every request made by this client when the caller aborts it. */
+  signal?: AbortSignal;
+  /** Per-request deadline. Defaults to 30 seconds. */
+  timeoutMs?: number;
   fetchImpl?: typeof fetch;
 };
 
@@ -51,6 +55,7 @@ const PROD_BIG_HOST = "https://upi.einvoice.nat.gov.tw";
 const DEFAULT_APP_VERSION = "6.800.2";
 const DEFAULT_APP_BUILD = 66;
 const DEFAULT_USER_AGENT = "okhttp/5.3.0";
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const ALPHANUMERIC =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -426,9 +431,13 @@ export class EInvoiceV2Client {
       pdid: `a:${androidId}`,
     };
     const encrypted = await encryptLoginDataWithContext(inner);
-    const body = await this.middleRequest("/mid/v1/login", {
-      ldata: encrypted.value,
-    });
+    const body = await this.middleRequest(
+      "/mid/v1/login",
+      {
+        ldata: encrypted.value,
+      },
+      params.signal,
+    );
     const data = await decodeMiddleBody(body, encrypted.context);
     try {
       return sessionFromLoginData(data, {
@@ -473,9 +482,13 @@ export class EInvoiceV2Client {
       pdid: `a:${androidId}`,
     };
     const encrypted = await encryptLoginDataWithContext(inner);
-    const body = await this.middleRequest("/mid/v1/logintoken", {
-      ldata: encrypted.value,
-    });
+    const body = await this.middleRequest(
+      "/mid/v1/logintoken",
+      {
+        ldata: encrypted.value,
+      },
+      options.signal,
+    );
     return sessionFromLoginData(
       await decodeMiddleBody(body, encrypted.context),
       session,
@@ -564,23 +577,68 @@ export class EInvoiceV2Client {
     );
   }
 
-  private async middleRequest(path: string, body: Record<string, unknown>) {
-    const response = await this.fetcher(`${this.options.middleHost}${path}`, {
+  private async middleRequest(
+    path: string,
+    body: Record<string, unknown>,
+    signal?: AbortSignal,
+  ) {
+    const response = await this.request(`${this.options.middleHost}${path}`, {
       method: "POST",
       headers: jsonHeaders(this.options),
       body: JSON.stringify(body),
+      signal,
     });
     return readJsonResponse(response, path);
   }
 
   private async bigRequest(path: string, jwt: string) {
     const form = new URLSearchParams({ einvoiceJwt: jwt });
-    const response = await this.fetcher(`${this.options.bigHost}${path}`, {
+    const response = await this.request(`${this.options.bigHost}${path}`, {
       method: "POST",
       headers: formHeaders(this.options),
       body: form.toString(),
     });
     return readJsonResponse(response, path);
+  }
+
+  private async request(input: RequestInfo | URL, init: RequestInit) {
+    return fetchWithTimeout(this.fetcher, input, init, {
+      signal: init.signal ?? this.options.signal,
+      timeoutMs: this.options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    });
+  }
+}
+
+async function fetchWithTimeout(
+  fetcher: typeof fetch,
+  input: RequestInfo | URL,
+  init: RequestInit,
+  options: { signal?: AbortSignal; timeoutMs: number },
+) {
+  const controller = new AbortController();
+  const timeoutMs = Math.max(0, Math.floor(options.timeoutMs));
+  let timedOut = false;
+  const abortFromCaller = () => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) abortFromCaller();
+  else
+    options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new Error(`新版電子發票請求逾時（${timeoutMs}ms）。`));
+  }, timeoutMs);
+
+  try {
+    return await fetcher(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(`新版電子發票請求逾時（${timeoutMs}ms）。`, {
+        cause: error,
+      });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 

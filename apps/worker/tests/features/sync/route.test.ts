@@ -10,11 +10,23 @@ import {
 import type { Env } from "../../../src/platform/env";
 
 const mocks = vi.hoisted(() => ({
+  cancelQueuedEinvoiceSyncRun: vi.fn(),
+  enqueueEinvoiceSyncChunk: vi.fn(),
   prepareTaishinCaptchaSession: vi.fn(),
   prepareObankCaptchaSession: vi.fn(),
+  startEinvoiceSyncRun: vi.fn(),
   syncCtbc: vi.fn(),
   syncObank: vi.fn(),
   syncTaishin: vi.fn(),
+}));
+
+vi.mock("../../../src/features/sync/einvoice-sync-service", () => ({
+  cancelQueuedEinvoiceSyncRun: mocks.cancelQueuedEinvoiceSyncRun,
+  startEinvoiceSyncRun: mocks.startEinvoiceSyncRun,
+}));
+
+vi.mock("../../../src/features/sync/scheduler-queue", () => ({
+  enqueueEinvoiceSyncChunk: mocks.enqueueEinvoiceSyncChunk,
 }));
 
 vi.mock("../../../src/features/sync/service", () => ({
@@ -51,6 +63,12 @@ const env = {} as Env;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.startEinvoiceSyncRun.mockResolvedValue({
+    run: { id: "einvoice-run-1" },
+    created: true,
+  });
+  mocks.enqueueEinvoiceSyncChunk.mockResolvedValue(undefined);
+  mocks.cancelQueuedEinvoiceSyncRun.mockResolvedValue(undefined);
   mocks.prepareTaishinCaptchaSession.mockResolvedValue({
     captchaImage: "data:image/jpeg;base64,AQID",
     expiresAt: "2026-07-23T12:02:00.000Z",
@@ -97,6 +115,70 @@ beforeEach(() => {
       investmentTransactions: 0,
     },
     cursorUpdated: true,
+  });
+});
+
+describe("e-invoice sync route", () => {
+  it("queues a newly-created manual durable run and returns its run ID", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/einvoice/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      connectorId: "einvoice",
+      scope: "all",
+      status: "queued",
+      runId: "einvoice-run-1",
+    });
+    expect(mocks.startEinvoiceSyncRun).toHaveBeenCalledWith(env, {
+      trigger: "manual",
+    });
+    expect(mocks.enqueueEinvoiceSyncChunk).toHaveBeenCalledWith(
+      env,
+      "einvoice-run-1",
+    );
+  });
+
+  it("returns a reused run without enqueueing it again", async () => {
+    mocks.startEinvoiceSyncRun.mockResolvedValueOnce({
+      run: { id: "einvoice-running" },
+      created: false,
+    });
+
+    const response = await syncRoutes.request(
+      "/connectors/einvoice/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "queued",
+      runId: "einvoice-running",
+    });
+    expect(mocks.enqueueEinvoiceSyncChunk).not.toHaveBeenCalled();
+    expect(mocks.cancelQueuedEinvoiceSyncRun).not.toHaveBeenCalled();
+  });
+
+  it("cancels only its newly-created run when Queue enqueueing fails", async () => {
+    const error = new Error("Queue unavailable");
+    mocks.enqueueEinvoiceSyncChunk.mockRejectedValueOnce(error);
+
+    const response = await syncRoutes.request(
+      "/connectors/einvoice/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(500);
+    expect(mocks.cancelQueuedEinvoiceSyncRun).toHaveBeenCalledWith(
+      env,
+      "einvoice-run-1",
+      error,
+    );
   });
 });
 

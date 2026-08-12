@@ -1,6 +1,6 @@
-import type { ConnectorId } from "@taiwan-fin-hub/core";
+import type { ConnectorId, QueuedSyncResponse } from "@taiwan-fin-hub/core";
 
-export type { ConnectorId } from "@taiwan-fin-hub/core";
+export type { ConnectorId, QueuedSyncResponse } from "@taiwan-fin-hub/core";
 
 export type SyncTarget = "default" | "investments" | "bank" | "trades";
 
@@ -47,6 +47,6 @@ export interface SyncScheduleSettings {
 export interface ConnectorField<TKey extends string = string> {
   key: TKey;
   label: string;
-  type: "text" | "password" | "number" | "checkbox";
+  type: "text" | "password" | "number";
   placeholder?: string;
 }

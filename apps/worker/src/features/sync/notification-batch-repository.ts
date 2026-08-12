@@ -127,6 +127,11 @@ export async function findNextDefaultScheduleBatchJob(
            )
            AND j.schedule_mode = 'inherit'
            AND (j.last_status IS NULL OR j.last_status != 'needs_user_action')
+           AND NOT EXISTS (
+             SELECT 1 FROM einvoice_sync_runs einvoice_run
+             WHERE einvoice_run.sync_job_id = j.id
+               AND einvoice_run.status IN ('queued', 'initializing', 'processing')
+           )
            AND (j.locked_until IS NULL OR j.locked_until < ?)
          ORDER BY j.next_run_at ASC, j.id ASC
          LIMIT 1`,

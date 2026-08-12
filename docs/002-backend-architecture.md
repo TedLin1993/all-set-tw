@@ -422,6 +422,20 @@ invocation 因此不必等待下一個 10 分鐘 Cron，且擁有獨立的 Worke
 逐一執行。是否到期仍由 D1 sync job 狀態判斷；沒有可執行工作時 consumer 不再送出訊息，
 結束本次串接。
 
+電子發票不在單一 connector invocation 內擷取所有品項明細。它使用
+`einvoice_sync_runs` / `einvoice_sync_run_items` 作為 durable work queue：手動或排程
+建立 run 後 enqueue `run-einvoice-chunk`，每個 Queue invocation 最多 claim 並取得 35
+張發票明細，並以 set-based D1 寫入完成整批；仍有 pending work 時再 enqueue continuation。品項明細一律同步，並非
+`public_config`、HTTP request 或 catalog 可選的 `fetchDetails` 偏好。
+
+電子發票 run 與 item 都以 owner-scoped rolling lease 防止 Queue delivery 重送時平行處理。
+只有全部 item 成功後，service 才把 durable run items 當作 staging source，以固定五個
+set-based D1 statements promotion 至正式表並更新 cursor；這個 batch 以設定版本 CAS 防止
+憑證更新競態。後續 finalize path 更新 `sync_jobs`、排程批次結果與通知；`promoted_at` 讓
+promotion 前後的重送皆可冪等。
+暫時錯誤由 Queue retry，session 失效會清除 session 後重新初始化；需要使用者操作或重試
+耗盡才將 run 結案為 `needs_user_action` 或 `failed`，不寫入部分完成的明細。
+
 ## 同步結果通知
 
 同步結果通知位於 `apps/worker/src/features/notifications/`，不放入 sync repository。

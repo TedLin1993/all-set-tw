@@ -1,6 +1,7 @@
 import type { ExchangeRateRow, ManualAssetRow } from "@/data/assets/types";
 import type { BankAccountRow, BankData } from "@/data/bank/types";
 import type { InvestmentRow } from "@/data/investments/types";
+import { missingExchangeRateCurrencies } from "@/shared/format/financial";
 
 const CONNECTOR_BANK_CODES: Record<string, string> = {
   cathaybk: "013",
@@ -56,28 +57,32 @@ export function calculateAssetSummary({
   );
   const toTwd = (value: number, currency: string) =>
     currency === "TWD" ? value : value * (rateValues[currency] ?? 0);
-  const missingCurrencies = new Set<string>();
-  const recordMissingRate = (value: number, currency: string) => {
-    if (value !== 0 && currency !== "TWD" && rateValues[currency] == null)
-      missingCurrencies.add(currency);
-  };
-  bank.accounts.forEach((account) =>
-    recordMissingRate(account.balance ?? 0, account.currency),
-  );
-  investments.forEach((item) =>
-    recordMissingRate(
-      (item.marketValue ?? 0) + (item.cashBalance ?? 0),
-      item.currency,
-    ),
-  );
-  manualAssets.forEach((item) =>
-    recordMissingRate(item.value ?? 0, item.currency),
-  );
   const deposits = bank.accounts.filter(
     (account) => account.accountType !== "credit",
   );
   const cards = bank.accounts.filter(
     (account) => account.accountType === "credit",
+  );
+  const missingCurrencies = missingExchangeRateCurrencies(
+    [
+      ...deposits.map((account) => ({
+        currency: account.currency,
+        amount: account.balance ?? 0,
+      })),
+      ...cards.map((account) => ({
+        currency: account.currency,
+        amount: Math.abs(account.balance ?? 0),
+      })),
+      ...investments.map((item) => ({
+        currency: item.currency,
+        amount: (item.marketValue ?? 0) + (item.cashBalance ?? 0),
+      })),
+      ...manualAssets.map((item) => ({
+        currency: item.currency,
+        amount: item.value ?? 0,
+      })),
+    ],
+    rateValues,
   );
   const bankTotal = deposits.reduce(
     (sum, account) => sum + toTwd(account.balance ?? 0, account.currency),
@@ -167,6 +172,6 @@ export function calculateAssetSummary({
     grossAssets,
     netWorth: grossAssets - cardDebt,
     institutionGroups,
-    missingCurrencies: [...missingCurrencies].sort(),
+    missingCurrencies,
   };
 }

@@ -36,10 +36,6 @@ const tdccSyncBodySchema = z.object({
   otpChannel: z.enum(["email", "sms"]).optional(),
 });
 
-const einvoiceSyncBodySchema = z.object({
-  fetchDetails: z.boolean().optional(),
-});
-
 const sinopacSyncBodySchema = z.object({
   captcha: z
     .string()
@@ -65,29 +61,42 @@ export const syncRoutes = honoFactory.createApp();
 registerSyncRoutes(syncRoutes);
 
 function registerSyncRoutes(api: Hono<AppBindings>) {
-  api.post(
-    "/connectors/einvoice/sync",
-    zValidator(
-      "json",
-      einvoiceSyncBodySchema,
-      validationHook("INVALID_REQUEST", "E-Invoice sync options are invalid."),
-    ),
-    async (c) => {
-      const overrides = c.req.valid("json");
-      return syncRouteResponse(
-        c,
-        withManualSyncLock(c.env, "einvoice", SYNC_SCOPE_ALL, () =>
-          runConnectorSync(
-            c.env,
-            "einvoice",
-            "manual",
-            SYNC_SCOPE_ALL,
-            overrides,
-          ),
-        ),
+  api.post("/connectors/einvoice/sync", async (c) => {
+    try {
+      const { cancelQueuedEinvoiceSyncRun, startEinvoiceSyncRun } =
+        await import("./einvoice-sync-service");
+      const { enqueueEinvoiceSyncChunk } = await import("./scheduler-queue");
+      const { run, created } = await startEinvoiceSyncRun(c.env, {
+        trigger: "manual",
+      });
+      if (created) {
+        try {
+          await enqueueEinvoiceSyncChunk(c.env, run.id);
+        } catch (error) {
+          await cancelQueuedEinvoiceSyncRun(c.env, run.id, error);
+          throw error;
+        }
+      }
+      return c.json(
+        {
+          success: true as const,
+          connectorId: "einvoice" as const,
+          scope: SYNC_SCOPE_ALL,
+          status: "queued" as const,
+          runId: run.id,
+        },
+        202,
       );
-    },
-  );
+    } catch (error) {
+      if (error instanceof SyncAlreadyRunningError) {
+        return jsonError("SYNC_ALREADY_RUNNING", error.message, 409);
+      }
+      if (error instanceof NeedsUserActionError) {
+        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      }
+      throw error;
+    }
+  });
 
   api.post(
     "/connectors/tdcc/sync",
