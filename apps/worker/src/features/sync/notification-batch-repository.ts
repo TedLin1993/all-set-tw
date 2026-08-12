@@ -1,6 +1,14 @@
-import type { ConnectorId, SyncNotificationStatus } from "@taiwan-fin-hub/core";
+import type {
+  ConnectorId,
+  SyncNewRecordCounts,
+  SyncNotificationStatus,
+} from "@taiwan-fin-hub/core";
 import type { SyncJobRow } from "@taiwan-fin-hub/db";
 import type { SyncNotificationEvent } from "../notifications/payload";
+import {
+  calculateCurrentFinancialSnapshot,
+  hasCompletedFinancialBaseline,
+} from "./report-repository";
 
 type BatchRow = {
   id: string;
@@ -48,15 +56,26 @@ export async function ensureDefaultScheduleBatch(db: D1Database) {
 
   const batchId = `default:${crypto.randomUUID()}`;
   const now = new Date().toISOString();
+  const snapshot = await calculateCurrentFinancialSnapshot(db);
+  const isBaseline = !(await hasCompletedFinancialBaseline(db));
   try {
     await db.batch([
       db
         .prepare(
           `INSERT INTO scheduled_sync_batches (
-             id, schedule_key, notification_claimed_at, created_at
-           ) VALUES (?, 'default', NULL, ?)`,
+             id, schedule_key, notification_claimed_at, created_at,
+             is_baseline, assets_before_twd, credit_card_debt_before_twd,
+             missing_currencies_before
+           ) VALUES (?, 'default', NULL, ?, ?, ?, ?, ?)`,
         )
-        .bind(batchId, now),
+        .bind(
+          batchId,
+          now,
+          isBaseline ? 1 : 0,
+          snapshot.assetsTwd,
+          snapshot.creditCardDebtTwd,
+          JSON.stringify(snapshot.missingCurrencies),
+        ),
       ...jobs.results.map((job) =>
         db
           .prepare(
@@ -123,18 +142,25 @@ export async function recordDefaultScheduleBatchResult(
     batchId: string;
     jobId: string;
     notification: SyncNotificationEvent;
+    newRecords: SyncNewRecordCounts;
   },
 ) {
   const result = await db
     .prepare(
       `UPDATE scheduled_sync_batch_results
-       SET connector_id = ?, status = ?, completed_at = ?
+       SET connector_id = ?, status = ?, completed_at = ?,
+           new_invoices = ?,
+           new_bank_transactions = ?,
+           new_investment_transactions = ?
        WHERE batch_id = ? AND job_id = ? AND completed_at IS NULL`,
     )
     .bind(
       input.notification.connectorId,
       input.notification.status,
       new Date().toISOString(),
+      input.newRecords.invoices,
+      input.newRecords.bankTransactions,
+      input.newRecords.investmentTransactions,
       input.batchId,
       input.jobId,
     )
@@ -155,12 +181,18 @@ export async function claimCompletedDefaultScheduleBatch(
   await reconcileDefaultScheduleBatchMembers(db, batchId);
 
   const now = new Date().toISOString();
+  const snapshot = await calculateCurrentFinancialSnapshot(db);
   const claim = await db
     .prepare(
       `UPDATE scheduled_sync_batches
-       SET notification_claimed_at = ?
+       SET notification_claimed_at = ?,
+           completed_at = ?,
+           assets_after_twd = ?,
+           credit_card_debt_after_twd = ?,
+           missing_currencies_after = ?
        WHERE id = ?
          AND notification_claimed_at IS NULL
+         AND completed_at IS NULL
          AND EXISTS (
            SELECT 1
            FROM scheduled_sync_batch_results
@@ -172,7 +204,16 @@ export async function claimCompletedDefaultScheduleBatch(
            WHERE batch_id = ? AND completed_at IS NULL
          )`,
     )
-    .bind(now, batchId, batchId, batchId)
+    .bind(
+      now,
+      now,
+      snapshot.assetsTwd,
+      snapshot.creditCardDebtTwd,
+      JSON.stringify(snapshot.missingCurrencies),
+      batchId,
+      batchId,
+      batchId,
+    )
     .run();
   if (claim.meta.changes !== 1) return null;
 

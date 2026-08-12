@@ -17,7 +17,7 @@ describe("sync notification payload", () => {
 
     expect(payload).toEqual({
       title: "同步完成",
-      body: "玉山銀行已完成排程同步。",
+      body: "玉山銀行已完成排程同步，開啟 App 查看結果。",
       url: "/#/overview",
       tag: "sync-esun-success",
     });
@@ -39,7 +39,7 @@ describe("sync notification payload", () => {
         connectorId: "taishin",
         status: "success",
       }).body,
-    ).toBe("台新銀行已完成排程同步。");
+    ).toBe("台新銀行已完成排程同步，開啟 App 查看結果。");
   });
 
   it("labels CTBC scheduled sync notifications", () => {
@@ -48,7 +48,7 @@ describe("sync notification payload", () => {
         connectorId: "ctbc",
         status: "success",
       }).body,
-    ).toBe("中國信託銀行已完成排程同步。");
+    ).toBe("中國信託銀行已完成排程同步，開啟 App 查看結果。");
   });
 
   it("maps statuses to their preference switches", () => {
@@ -88,7 +88,7 @@ describe("scheduled sync summary payload", () => {
 
     expect(payload).toEqual({
       title: "同步完成",
-      body: "已完成 3 個資料來源的預設排程同步。",
+      body: "每日同步已完成，開啟 App 查看結果。",
       url: "/#/overview",
       tag: "sync-default-schedule-success",
     });

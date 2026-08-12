@@ -306,7 +306,10 @@
         "job_id": "批次成員的同步工作識別碼。",
         "connector_id": "此次結果所屬的連接器。",
         "status": "排程執行結果；等待執行或被略過的成員為 NULL。",
-        "completed_at": "排程結果或略過決定寫入批次的時間；NULL 表示仍在等待。"
+        "completed_at": "排程結果或略過決定寫入批次的時間；NULL 表示仍在等待。",
+        "new_invoices": "此次工作真正新增的電子發票筆數，不包含更新既有發票。",
+        "new_bank_transactions": "此次工作真正新增的銀行或信用卡交易筆數，不包含更新既有交易。",
+        "new_investment_transactions": "此次工作真正新增的投資交易筆數，不包含更新既有交易。"
       }
     },
     "scheduled_sync_batches": {
@@ -316,7 +319,15 @@
         "id": "批次識別碼，由 default 與 UUID 組成。",
         "schedule_key": "排程類型識別碼，目前固定為 default。",
         "notification_claimed_at": "彙總推播被 scheduler 取得發送權的時間。",
-        "created_at": "批次建立時間。"
+        "created_at": "批次建立時間。",
+        "completed_at": "批次所有有效成員結束並完成財務快照的時間。",
+        "is_baseline": "是否為第一份同步報告；第一份只建立比較基準，不顯示增減。",
+        "assets_before_twd": "批次開始前以新臺幣換算的資產總額。",
+        "credit_card_debt_before_twd": "批次開始前以新臺幣換算的信用卡負債總額。",
+        "missing_currencies_before": "批次開始前缺少匯率、以新台幣 0 元計值的幣別 JSON 陣列。",
+        "assets_after_twd": "批次完成後以新臺幣換算的資產總額。",
+        "credit_card_debt_after_twd": "批次完成後以新臺幣換算的信用卡負債總額。",
+        "missing_currencies_after": "批次完成後缺少匯率、以新台幣 0 元計值的幣別 JSON 陣列。"
       }
     },
     "sync_jobs": {

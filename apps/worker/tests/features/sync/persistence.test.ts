@@ -30,8 +30,26 @@ class SqliteStatement {
     return this.execute();
   }
 
+  async first<T>() {
+    this.owner.executedSql.push(this.sql);
+    return (
+      (this.owner.database
+        .prepare(this.sql)
+        .get(...(this.values as never[])) as T) ?? null
+    );
+  }
+
   execute() {
     this.owner.executedSql.push(this.sql);
+    if (/^\s*(SELECT|WITH)\b/i.test(this.sql)) {
+      return {
+        success: true,
+        meta: { changes: 0 },
+        results: this.owner.database
+          .prepare(this.sql)
+          .all(...(this.values as never[])),
+      };
+    }
     const result = this.owner.database
       .prepare(this.sql)
       .run(...(this.values as never[]));
@@ -471,22 +489,64 @@ describe("staged sync persistence", () => {
       },
     });
 
-    await persistStagedSyncWrite(db as unknown as D1Database, {
-      records,
-      finalizeStatements: [
-        db
-          .prepare(
-            "UPDATE connector_settings SET sync_cursor = ? WHERE connector_id = ?",
-          )
-          .bind("new-cursor", "tdcc") as unknown as D1PreparedStatement,
-      ],
+    const firstWrite = await persistStagedSyncWrite(
+      db as unknown as D1Database,
+      {
+        records,
+        finalizeStatements: [
+          db
+            .prepare(
+              "UPDATE connector_settings SET sync_cursor = ? WHERE connector_id = ?",
+            )
+            .bind("new-cursor", "tdcc") as unknown as D1PreparedStatement,
+        ],
+      },
+    );
+
+    expect(firstWrite).toEqual({
+      invoices: 0,
+      bankTransactions: 1,
+      investmentTransactions: 0,
     });
+    expect(
+      db.database
+        .prepare(
+          "SELECT created_at AS createdAt FROM bank_transactions WHERE source_id = 'transaction-1'",
+        )
+        .get(),
+    ).toEqual({ createdAt: "2026-07-19T00:00:00.000Z" });
+
+    const repeatedWrite = await persistStagedSyncWrite(
+      db as unknown as D1Database,
+      {
+        records: records.map((record) => ({
+          ...record,
+          payload: {
+            ...record.payload,
+            created_at: "2026-07-20T00:00:00.000Z",
+            updated_at: "2026-07-20T00:00:00.000Z",
+          },
+        })),
+      },
+    );
+    expect(repeatedWrite).toEqual({
+      invoices: 0,
+      bankTransactions: 0,
+      investmentTransactions: 0,
+    });
+    expect(
+      db.database
+        .prepare(
+          "SELECT created_at AS createdAt FROM bank_transactions WHERE source_id = 'transaction-1'",
+        )
+        .get(),
+    ).toEqual({ createdAt: "2026-07-19T00:00:00.000Z" });
 
     expect(
       db.executedSql.filter((sql) =>
         sql.includes("INSERT INTO sync_write_staging"),
       ),
-    ).toHaveLength(3);
+    ).toHaveLength(6);
     expect(
       db.database.prepare("SELECT COUNT(*) AS count FROM bank_accounts").get(),
     ).toMatchObject({ count: 205 });

@@ -111,11 +111,21 @@ beforeEach(() => {
     connectorId: "esun",
     scope: "all",
     records: 1,
+    newRecords: {
+      invoices: 0,
+      bankTransactions: 1,
+      investmentTransactions: 0,
+    },
   });
   mocks.syncTaishin.mockResolvedValue({
     connectorId: "taishin",
     scope: "all",
     records: 2,
+    newRecords: {
+      invoices: 0,
+      bankTransactions: 2,
+      investmentTransactions: 0,
+    },
   });
   mocks.recordDefaultScheduleBatchResult.mockResolvedValue(true);
   mocks.claimCompletedDefaultScheduleBatch.mockResolvedValue([
@@ -165,6 +175,11 @@ describe("scheduled sync rounds", () => {
         batchId: "default:new-round",
         jobId: job.id,
         notification: { connectorId: "esun", status: "success" },
+        newRecords: {
+          invoices: 0,
+          bankTransactions: 1,
+          investmentTransactions: 0,
+        },
       },
     );
   });
