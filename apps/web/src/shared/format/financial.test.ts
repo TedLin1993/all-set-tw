@@ -3,6 +3,7 @@ import {
   bankAccountLast5,
   formatBankAccountName,
   formatNumber,
+  missingExchangeRateCurrencies,
   normalizeFinancialDate,
   parseValidDate,
   rateMap,
@@ -51,5 +52,21 @@ describe("financial formatting helpers", () => {
     expect(
       transactionValueTwd({ currency: "USD", amount: 10 } as never, rates),
     ).toBe(320);
+  });
+
+  it("reports missing rates only for positive foreign-currency amounts", () => {
+    expect(
+      missingExchangeRateCurrencies(
+        [
+          { currency: "HKD", amount: 0 },
+          { currency: "HKD", amount: 100 },
+          { currency: "HKD", amount: 200 },
+          { currency: "CNY", amount: -100 },
+          { currency: "USD", amount: 100 },
+          { currency: "TWD", amount: 100 },
+        ],
+        { USD: 32 },
+      ),
+    ).toEqual(["HKD"]);
   });
 });

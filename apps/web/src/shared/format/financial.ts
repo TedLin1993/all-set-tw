@@ -130,6 +130,22 @@ export function rateMap(rates: ExchangeRate[] | undefined) {
   return Object.fromEntries((rates ?? []).map((r) => [r.currency, r.rateTwd]));
 }
 
+export function missingExchangeRateCurrencies(
+  amounts: ReadonlyArray<CurrencyAmount>,
+  rates: Readonly<Record<string, number>>,
+) {
+  return [
+    ...new Set(
+      amounts
+        .filter(
+          ({ currency, amount }) =>
+            amount > 0 && currency !== "TWD" && rates[currency] == null,
+        )
+        .map(({ currency }) => currency),
+    ),
+  ].sort();
+}
+
 export function transactionValueTwd(
   transaction: CurrencyAmount,
   rates: Record<string, number>,

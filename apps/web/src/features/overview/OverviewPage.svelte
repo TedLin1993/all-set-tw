@@ -34,6 +34,7 @@
   import {
     formatCompactTwd,
     formatCurrency,
+    missingExchangeRateCurrencies,
     rateMap,
   } from "@/shared/format/financial";
   import NetWorthHistoryChart from "./components/NetWorthHistoryChart.svelte";
@@ -219,15 +220,31 @@
 
     return items.slice(0, 2);
   });
-  const missingRates = $derived([
-    ...new Set(
-      [
-        ...bankData.accounts.map((account) => account.currency),
-        ...($investments.data ?? []).map((item) => item.currency),
-        ...($manualAssets.data ?? []).map((item) => item.currency),
-      ].filter((currency) => currency !== "TWD" && !rateValues[currency]),
-    ),
-  ]);
+  const missingRates = $derived(
+    $rates.isSuccess
+      ? missingExchangeRateCurrencies(
+          [
+            ...deposits.map((account) => ({
+              currency: account.currency,
+              amount: account.balance ?? 0,
+            })),
+            ...cards.map((account) => ({
+              currency: account.currency,
+              amount: Math.abs(account.balance ?? 0),
+            })),
+            ...($investments.data ?? []).map((item) => ({
+              currency: item.currency,
+              amount: (item.marketValue ?? 0) + (item.cashBalance ?? 0),
+            })),
+            ...($manualAssets.data ?? []).map((item) => ({
+              currency: item.currency,
+              amount: item.value ?? 0,
+            })),
+          ],
+          rateValues,
+        )
+      : [],
+  );
   const loading = $derived(
     $bank.isPending ||
       $monthlyBank.isPending ||
