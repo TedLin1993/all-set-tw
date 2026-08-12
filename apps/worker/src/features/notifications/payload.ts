@@ -34,7 +34,7 @@ export function syncNotificationPayload(
   if (event.status === "success") {
     return {
       title: "同步完成",
-      body: `${connector}已完成排程同步。`,
+      body: `${connector}已完成排程同步，開啟 App 查看結果。`,
       url: "/#/overview",
       tag: `sync-${event.connectorId}-success`,
     };
@@ -70,7 +70,7 @@ export function scheduledSyncSummaryPayload(
   if (status === "success") {
     return {
       title: "同步完成",
-      body: `已完成 ${success} 個資料來源的預設排程同步。`,
+      body: "每日同步已完成，開啟 App 查看結果。",
       url: "/#/overview",
       tag: "sync-default-schedule-success",
     };

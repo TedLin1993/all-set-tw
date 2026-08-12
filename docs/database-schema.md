@@ -9,9 +9,9 @@
 ## 目錄
 
 - Tables：24
-- Explicit indexes：31
+- Explicit indexes：32
 - Other objects：0
-- Migrations：22
+- Migrations：25
 
 ## Tables
 
@@ -36,8 +36,8 @@
 | [`net_worth_history`](#net_worth_history) | 按日期保存的淨資產或資產類別歷史數值，用於圖表與歷史查詢。 | 6 | 0 | 2 |
 | [`notification_preferences`](#notification_preferences) | 此單一部署的同步推播偏好設定。 | 5 | 0 | 0 |
 | [`push_subscriptions`](#push_subscriptions) | 瀏覽器 Web Push 裝置訂閱資料。 | 6 | 0 | 0 |
-| [`scheduled_sync_batch_results`](#scheduled_sync_batch_results) | 預設排程同步批次中各工作的完成結果。 | 5 | 1 | 0 |
-| [`scheduled_sync_batches`](#scheduled_sync_batches) | 追蹤預設排程中需彙總推播的一輪同步工作。 | 4 | 0 | 1 |
+| [`scheduled_sync_batch_results`](#scheduled_sync_batch_results) | 預設排程同步批次中各工作的完成結果。 | 8 | 1 | 0 |
+| [`scheduled_sync_batches`](#scheduled_sync_batches) | 追蹤預設排程中需彙總推播的一輪同步工作。 | 12 | 0 | 2 |
 | [`sync_jobs`](#sync_jobs) | 每個連接器與同步範圍的排程、鎖定狀態與最近執行結果。 | 19 | 0 | 1 |
 | [`sync_schedule_settings`](#sync_schedule_settings) | 所有使用 inherit 模式之同步工作的全域預設排程。 | 6 | 0 | 0 |
 | [`sync_write_staging`](#sync_write_staging) | 同步流程寫入正式資料表前的暫存資料。 | 5 | 0 | 1 |
@@ -81,7 +81,7 @@
 #### DDL
 
 ```sql
-CREATE TABLE bank_accounts (
+CREATE TABLE "bank_accounts" (
   id TEXT PRIMARY KEY,
   connector_id TEXT NOT NULL,
   source_id TEXT NOT NULL,
@@ -89,7 +89,7 @@ CREATE TABLE bank_accounts (
   account_name TEXT,
   account_type TEXT CHECK (
     account_type IS NULL
-    OR account_type IN ('checking', 'savings', 'credit', 'loan', 'settlement_cash', 'stored_value', 'unknown')
+    OR account_type IN ('checking', 'savings', 'credit', 'loan', 'settlement_cash', 'time_deposit', 'stored_value', 'unknown')
   ),
   currency TEXT NOT NULL DEFAULT 'TWD',
   raw_payload TEXT,
@@ -97,7 +97,8 @@ CREATE TABLE bank_accounts (
   updated_at TEXT NOT NULL,
   bank_code TEXT,
   account_last4 TEXT,
-  canonical_account_id TEXT REFERENCES bank_accounts (id), credit_limit INTEGER,
+  canonical_account_id TEXT REFERENCES "bank_accounts" (id),
+  credit_limit INTEGER,
   UNIQUE (connector_id, source_id)
 )
 ```
@@ -143,10 +144,10 @@ CREATE TABLE bank_accounts (
 #### DDL
 
 ```sql
-CREATE TABLE bank_balance_snapshots (
+CREATE TABLE "bank_balance_snapshots" (
   id TEXT PRIMARY KEY,
   connector_id TEXT NOT NULL,
-  account_id TEXT NOT NULL,
+  account_id TEXT NOT NULL REFERENCES "bank_accounts" (id),
   source_id TEXT NOT NULL,
   balance INTEGER NOT NULL,
   available_balance INTEGER,
@@ -154,9 +155,12 @@ CREATE TABLE bank_balance_snapshots (
   as_of_at TEXT NOT NULL,
   raw_payload TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL, statement_balance INTEGER, payment_due_date TEXT, no_payment_needed INTEGER, statement_closing_date TEXT,
-  UNIQUE (connector_id, account_id, source_id),
-  FOREIGN KEY (account_id) REFERENCES bank_accounts (id)
+  updated_at TEXT NOT NULL,
+  statement_balance INTEGER,
+  payment_due_date TEXT,
+  no_payment_needed INTEGER,
+  statement_closing_date TEXT,
+  UNIQUE (connector_id, account_id, source_id)
 )
 ```
 
@@ -238,10 +242,10 @@ CREATE TABLE bank_transaction_preferences (
 #### DDL
 
 ```sql
-CREATE TABLE bank_transactions (
+CREATE TABLE "bank_transactions" (
   id TEXT PRIMARY KEY,
   connector_id TEXT NOT NULL,
-  account_id TEXT NOT NULL,
+  account_id TEXT NOT NULL REFERENCES "bank_accounts" (id),
   source_id TEXT NOT NULL,
   posted_date TEXT,
   authorized_at TEXT,
@@ -251,10 +255,10 @@ CREATE TABLE bank_transactions (
   counterparty TEXT,
   raw_payload TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL, effective_date TEXT AS (COALESCE(posted_date, authorized_at, '')), status TEXT NOT NULL DEFAULT 'posted'
-  CHECK (status IN ('pending', 'posted')),
-  UNIQUE (connector_id, account_id, source_id),
-  FOREIGN KEY (account_id) REFERENCES bank_accounts (id)
+  updated_at TEXT NOT NULL,
+  effective_date TEXT AS (COALESCE(posted_date, authorized_at, '')),
+  status TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('pending', 'posted')),
+  UNIQUE (connector_id, account_id, source_id)
 )
 ```
 
@@ -476,10 +480,10 @@ CREATE TABLE connector_settings (
 #### DDL
 
 ```sql
-CREATE TABLE credit_card_bills (
+CREATE TABLE "credit_card_bills" (
   id TEXT PRIMARY KEY,
   connector_id TEXT NOT NULL,
-  account_id TEXT NOT NULL REFERENCES bank_accounts(id),
+  account_id TEXT NOT NULL REFERENCES "bank_accounts" (id),
   source_id TEXT NOT NULL,
   billing_period TEXT NOT NULL,
   statement_amount INTEGER,
@@ -492,7 +496,7 @@ CREATE TABLE credit_card_bills (
   raw_payload TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE(connector_id, account_id, billing_period)
+  UNIQUE (connector_id, account_id, billing_period)
 )
 ```
 
@@ -969,6 +973,9 @@ CREATE TABLE push_subscriptions (
 | 3 | `connector_id` | 此次結果所屬的連接器。 | TEXT | NO | — | — | — |
 | 4 | `status` | 排程執行結果；等待執行或被略過的成員為 NULL。 | TEXT | YES | — | — | — |
 | 5 | `completed_at` | 排程結果或略過決定寫入批次的時間；NULL 表示仍在等待。 | TEXT | YES | — | — | — |
+| 6 | `new_invoices` | 此次工作真正新增的電子發票筆數，不包含更新既有發票。 | INTEGER | NO | 0 | — | — |
+| 7 | `new_bank_transactions` | 此次工作真正新增的銀行或信用卡交易筆數，不包含更新既有交易。 | INTEGER | NO | 0 | — | — |
+| 8 | `new_investment_transactions` | 此次工作真正新增的投資交易筆數，不包含更新既有交易。 | INTEGER | NO | 0 | — | — |
 
 #### Foreign keys
 
@@ -988,7 +995,7 @@ CREATE TABLE scheduled_sync_batch_results (
   job_id TEXT NOT NULL,
   connector_id TEXT NOT NULL,
   status TEXT CHECK (status IN ('success', 'failed', 'needs_user_action')),
-  completed_at TEXT,
+  completed_at TEXT, new_invoices INTEGER NOT NULL DEFAULT 0, new_bank_transactions INTEGER NOT NULL DEFAULT 0, new_investment_transactions INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (batch_id, job_id),
   FOREIGN KEY (batch_id) REFERENCES scheduled_sync_batches(id) ON DELETE CASCADE
 )
@@ -1007,6 +1014,14 @@ CREATE TABLE scheduled_sync_batch_results (
 | 2 | `schedule_key` | 排程類型識別碼，目前固定為 default。 | TEXT | NO | 'default' | — | — |
 | 3 | `notification_claimed_at` | 彙總推播被 scheduler 取得發送權的時間。 | TEXT | YES | — | — | — |
 | 4 | `created_at` | 批次建立時間。 | TEXT | NO | — | — | — |
+| 5 | `completed_at` | 批次所有有效成員結束並完成財務快照的時間。 | TEXT | YES | — | — | — |
+| 6 | `is_baseline` | 是否為第一份同步報告；第一份只建立比較基準，不顯示增減。 | INTEGER | NO | 0 | — | — |
+| 7 | `assets_before_twd` | 批次開始前以新臺幣換算的資產總額。 | INTEGER | YES | — | — | — |
+| 8 | `credit_card_debt_before_twd` | 批次開始前以新臺幣換算的信用卡負債總額。 | INTEGER | YES | — | — | — |
+| 9 | `missing_currencies_before` | 批次開始前缺少匯率、以新台幣 0 元計值的幣別 JSON 陣列。 | TEXT | NO | '[]' | — | — |
+| 10 | `assets_after_twd` | 批次完成後以新臺幣換算的資產總額。 | INTEGER | YES | — | — | — |
+| 11 | `credit_card_debt_after_twd` | 批次完成後以新臺幣換算的信用卡負債總額。 | INTEGER | YES | — | — | — |
+| 12 | `missing_currencies_after` | 批次完成後缺少匯率、以新台幣 0 元計值的幣別 JSON 陣列。 | TEXT | NO | '[]' | — | — |
 
 #### Foreign keys
 
@@ -1016,6 +1031,7 @@ CREATE TABLE scheduled_sync_batch_results (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
+| `idx_scheduled_sync_batches_completed` | 否 | 否 | `completed_at` | `CREATE INDEX idx_scheduled_sync_batches_completed<br>  ON scheduled_sync_batches (completed_at DESC)` |
 | `idx_scheduled_sync_batches_open` | 是 | 是 | `schedule_key` | `CREATE UNIQUE INDEX idx_scheduled_sync_batches_open<br>  ON scheduled_sync_batches (schedule_key)<br>  WHERE notification_claimed_at IS NULL` |
 
 #### DDL
@@ -1026,7 +1042,7 @@ CREATE TABLE scheduled_sync_batches (
   schedule_key TEXT NOT NULL DEFAULT 'default' CHECK (schedule_key = 'default'),
   notification_claimed_at TEXT,
   created_at TEXT NOT NULL
-)
+, completed_at TEXT, is_baseline INTEGER NOT NULL DEFAULT 0, assets_before_twd INTEGER, credit_card_debt_before_twd INTEGER, missing_currencies_before TEXT NOT NULL DEFAULT '[]', assets_after_twd INTEGER, credit_card_debt_after_twd INTEGER, missing_currencies_after TEXT NOT NULL DEFAULT '[]')
 ```
 
 ### `sync_jobs`
@@ -1199,6 +1215,9 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0021_ctbc_sync_job.sql`](../packages/db/migrations/0021_ctbc_sync_job.sql)
 - [`0023_disable_unconfigured_sync_jobs.sql`](../packages/db/migrations/0023_disable_unconfigured_sync_jobs.sql)
 - [`0024_manual_asset_currency.sql`](../packages/db/migrations/0024_manual_asset_currency.sql)
+- [`0025_bank_time_deposit.sql`](../packages/db/migrations/0025_bank_time_deposit.sql)
+- [`0026_obank_sync_job.sql`](../packages/db/migrations/0026_obank_sync_job.sql)
+- [`0027_scheduled_sync_reports.sql`](../packages/db/migrations/0027_scheduled_sync_reports.sql)
 
 ## 程式碼導覽
 

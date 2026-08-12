@@ -41,7 +41,7 @@ import {
   recognizeNumericCaptcha,
   recognizeValidateNumber,
 } from "../ocr/service";
-import type { ConnectorId } from "@taiwan-fin-hub/core";
+import type { ConnectorId, SyncNewRecordCounts } from "@taiwan-fin-hub/core";
 import {
   acquireSyncJobLock,
   getConnectorSettings,
@@ -57,7 +57,11 @@ import { configEncryptionKey } from "../../platform/config";
 import { encryptJson, decryptJson } from "../../platform/crypto";
 import type { Env } from "../../platform/env";
 import { dateFromIso, rebuildBankDepositHistory } from "../net-worth/service";
-import { persistStagedSyncWrite, type SyncWriteRecord } from "./persistence";
+import {
+  emptySyncNewRecordCounts,
+  persistStagedSyncWrite,
+  type SyncWriteRecord,
+} from "./persistence";
 import {
   connectorCursorStatement,
   connectorEncryptedConfigStatement,
@@ -108,6 +112,7 @@ export type SyncOutcome = {
   connectorId: ConnectorId;
   scope: SyncScope;
   records: number;
+  newRecords: SyncNewRecordCounts;
   cursorUpdated: boolean;
   detailRecords?: number;
 };
@@ -354,13 +359,17 @@ export async function syncEinvoice(
     ),
   );
 
-  await persistStagedSyncWrite(env.DB, { records, finalizeStatements });
+  const newRecords = await persistStagedSyncWrite(env.DB, {
+    records,
+    finalizeStatements,
+  });
 
   return {
     success: true,
     connectorId,
     scope,
     records: result.records.length,
+    newRecords,
     detailRecords: invoiceLineItems.length,
     cursorUpdated: Boolean(
       result.cursor && result.cursor !== settings.sync_cursor,
@@ -436,7 +445,7 @@ export async function syncEsun(
     );
   }
 
-  await persistStagedSyncWrite(env.DB, {
+  const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
     afterPromoteStatements:
       bankAccounts.length > 0
@@ -464,6 +473,7 @@ export async function syncEsun(
       bankAccounts.length +
       bankBalanceSnapshots.length +
       bankTransactions.length,
+    newRecords,
     cursorUpdated: Boolean(
       persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
@@ -538,7 +548,7 @@ export async function syncCathaybk(
     );
   }
 
-  await persistStagedSyncWrite(env.DB, {
+  const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
     afterPromoteStatements:
       bankAccounts.length > 0
@@ -559,6 +569,7 @@ export async function syncCathaybk(
       bankAccounts.length +
       bankBalanceSnapshots.length +
       bankTransactions.length,
+    newRecords,
     cursorUpdated: Boolean(
       persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
@@ -642,7 +653,7 @@ export async function syncCtbc(
     );
   }
 
-  await persistStagedSyncWrite(env.DB, {
+  const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
     afterPromoteStatements:
       bankAccounts.length > 0
@@ -664,6 +675,7 @@ export async function syncCtbc(
       bankBalanceSnapshots.length +
       bankTransactions.length +
       creditCardBills.length,
+    newRecords,
     cursorUpdated: Boolean(
       persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
@@ -804,7 +816,7 @@ export async function syncSinopac(
       ),
     );
   }
-  await persistStagedSyncWrite(env.DB, {
+  const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
     afterPromoteStatements: [
       ...reconcileSinopacLegacyTransactionStatements(env.DB),
@@ -825,6 +837,7 @@ export async function syncSinopac(
       bankBalanceSnapshots.length +
       bankTransactions.length +
       creditCardBills.length,
+    newRecords,
     cursorUpdated: Boolean(
       persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
@@ -937,7 +950,7 @@ export async function syncObank(
     );
   }
 
-  await persistStagedSyncWrite(env.DB, {
+  const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
     afterPromoteStatements:
       bankAccounts.length > 0
@@ -956,6 +969,7 @@ export async function syncObank(
       bankAccounts.length +
       bankBalanceSnapshots.length +
       bankTransactions.length,
+    newRecords,
     cursorUpdated: Boolean(
       persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
@@ -1080,7 +1094,7 @@ export async function syncTaishin(
     );
   }
 
-  await persistStagedSyncWrite(env.DB, {
+  const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
     afterPromoteStatements:
       bankAccounts.length > 0
@@ -1100,6 +1114,7 @@ export async function syncTaishin(
       bankBalanceSnapshots.length +
       bankTransactions.length +
       creditCardBills.length,
+    newRecords,
     cursorUpdated: Boolean(
       persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
@@ -1119,6 +1134,7 @@ export async function syncTdcc(
   );
   const scope = tdccOutcomeScope(selected);
   let records = 0;
+  const newRecords = emptySyncNewRecordCounts();
   let cursorUpdated = false;
 
   if (selected.has(TDCC_SCOPE_INVESTMENTS) || selected.has(TDCC_SCOPE_BANK)) {
@@ -1128,12 +1144,14 @@ export async function syncTdcc(
       scope,
     });
     records += result.records;
+    mergeSyncNewRecordCounts(newRecords, result.newRecords);
     cursorUpdated = cursorUpdated || result.cursorUpdated;
   }
 
   if (selected.has(TDCC_SCOPE_TRADES)) {
     const result = await syncTdccTrades(env, trigger, overrides, scope);
     records += result.records;
+    mergeSyncNewRecordCounts(newRecords, result.newRecords);
     cursorUpdated = cursorUpdated || result.cursorUpdated;
   }
 
@@ -1142,6 +1160,7 @@ export async function syncTdcc(
     connectorId: "tdcc",
     scope,
     records,
+    newRecords,
     cursorUpdated,
   };
 }
@@ -1155,7 +1174,11 @@ async function syncTdccPositionsAndBank(
     writeBank: boolean;
     scope: SyncScope;
   },
-): Promise<{ records: number; cursorUpdated: boolean }> {
+): Promise<{
+  records: number;
+  newRecords: SyncNewRecordCounts;
+  cursorUpdated: boolean;
+}> {
   const connectorId = "tdcc";
   const settings = await requireConnectorSettings(env.DB, connectorId);
   const config = await decryptJson<unknown>(
@@ -1256,7 +1279,7 @@ async function syncTdccPositionsAndBank(
     );
   }
 
-  await persistStagedSyncWrite(env.DB, {
+  const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
     afterPromoteStatements:
       options.writeBank && bankAccounts.length > 0
@@ -1277,6 +1300,7 @@ async function syncTdccPositionsAndBank(
           bankBalanceSnapshots.length +
           bankTransactions.length
         : 0),
+    newRecords,
     cursorUpdated: Boolean(
       persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
@@ -1288,7 +1312,11 @@ async function syncTdccTrades(
   trigger: SyncTrigger,
   overrides: TdccSyncOverrides,
   scope: SyncScope,
-): Promise<{ records: number; cursorUpdated: boolean }> {
+): Promise<{
+  records: number;
+  newRecords: SyncNewRecordCounts;
+  cursorUpdated: boolean;
+}> {
   const connectorId = "tdcc";
   const settings = await requireConnectorSettings(env.DB, connectorId);
   const config = await decryptJson<unknown>(
@@ -1359,14 +1387,27 @@ async function syncTdccTrades(
     );
   }
 
-  await persistStagedSyncWrite(env.DB, { records, finalizeStatements });
+  const newRecords = await persistStagedSyncWrite(env.DB, {
+    records,
+    finalizeStatements,
+  });
 
   return {
     records: investmentTransactions.length,
+    newRecords,
     cursorUpdated: Boolean(
       persistedCursor && persistedCursor !== settings.sync_cursor,
     ),
   };
+}
+
+function mergeSyncNewRecordCounts(
+  target: SyncNewRecordCounts,
+  source: SyncNewRecordCounts,
+) {
+  target.invoices += source.invoices;
+  target.bankTransactions += source.bankTransactions;
+  target.investmentTransactions += source.investmentTransactions;
 }
 
 function tdccOutcomeScope(scopes: Set<string>): SyncScope {

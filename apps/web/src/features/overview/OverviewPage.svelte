@@ -19,6 +19,7 @@
   } from "@/data/assets/queries";
   import { bankQuery, bankRangeQuery } from "@/data/bank/queries";
   import { syncJobsQuery } from "@/data/connectors/queries";
+  import { latestSyncReportQuery } from "@/data/sync-reports/queries";
   import {
     getActionableSyncJobs,
     getConfiguredSyncJobs,
@@ -36,6 +37,7 @@
     rateMap,
   } from "@/shared/format/financial";
   import NetWorthHistoryChart from "./components/NetWorthHistoryChart.svelte";
+  import LatestSyncReportCard from "./components/LatestSyncReportCard.svelte";
 
   type InsightTone = "coral" | "amber" | "moss" | "steel";
   type InsightIcon = "sync" | "card" | "cashflow";
@@ -66,6 +68,7 @@
   const manualAssets = createQuery(manualAssetsQuery(() => api));
   const rates = createQuery(exchangeRatesQuery(() => api));
   const jobs = createQuery(syncJobsQuery(() => api));
+  const latestSyncReport = createQuery(latestSyncReportQuery(() => api));
   const history = createQuery(netWorthHistoryQuery(() => api));
 
   const bankData = $derived($bank.data ?? { accounts: [], transactions: [] });
@@ -379,6 +382,11 @@
         {/each}
       </CardContent>
     </Card>
+
+    <LatestSyncReportCard
+      report={$latestSyncReport.data}
+      loading={$latestSyncReport.isPending}
+    />
 
     <div class="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_340px]">
       <div class="min-w-0">

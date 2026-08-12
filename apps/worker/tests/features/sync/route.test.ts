@@ -61,6 +61,11 @@ beforeEach(() => {
     connectorId: "taishin",
     scope: "all",
     records: 3,
+    newRecords: {
+      invoices: 0,
+      bankTransactions: 3,
+      investmentTransactions: 0,
+    },
     cursorUpdated: true,
   });
   mocks.syncCtbc.mockResolvedValue({
@@ -68,6 +73,11 @@ beforeEach(() => {
     connectorId: "ctbc",
     scope: "all",
     records: 4,
+    newRecords: {
+      invoices: 0,
+      bankTransactions: 4,
+      investmentTransactions: 0,
+    },
     cursorUpdated: true,
   });
   mocks.prepareObankCaptchaSession.mockResolvedValue({
@@ -81,6 +91,11 @@ beforeEach(() => {
     connectorId: "obank",
     scope: "all",
     records: 3,
+    newRecords: {
+      invoices: 0,
+      bankTransactions: 3,
+      investmentTransactions: 0,
+    },
     cursorUpdated: true,
   });
 });

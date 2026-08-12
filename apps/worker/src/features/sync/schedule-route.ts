@@ -13,6 +13,7 @@ import {
   setDefaultSyncSchedule,
   SyncJobNotFoundError,
 } from "./schedule-service";
+import { getLatestScheduledSyncReport } from "./report-repository";
 
 const syncIntervalSchema = z
   .number()
@@ -70,6 +71,10 @@ function registerSyncScheduleRoutes(api: Hono<AppBindings>) {
   );
 
   api.get("/sync-jobs", async (c) => c.json(await getSyncJobs(c.env.DB)));
+
+  api.get("/sync-reports/latest", async (c) =>
+    c.json(await getLatestScheduledSyncReport(c.env.DB)),
+  );
 
   api.patch(
     "/sync-jobs/:connectorId/:scope",

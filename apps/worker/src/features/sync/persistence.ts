@@ -1,3 +1,5 @@
+import type { SyncNewRecordCounts } from "@taiwan-fin-hub/core";
+
 export type SyncEntityType =
   | "invoice"
   | "invoice_line_item"
@@ -309,6 +311,16 @@ const ENTITY_CONFIG: Record<SyncEntityType, EntityConfig> = {
 const STAGING_CHUNK_SIZE = 100;
 const STAGING_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
+const NEW_RECORD_ENTITIES = {
+  invoice: "invoices",
+  bank_transaction: "bankTransactions",
+  investment_transaction: "investmentTransactions",
+} as const satisfies Partial<Record<SyncEntityType, keyof SyncNewRecordCounts>>;
+
+export function emptySyncNewRecordCounts(): SyncNewRecordCounts {
+  return { invoices: 0, bankTransactions: 0, investmentTransactions: 0 };
+}
+
 export async function persistStagedSyncWrite(
   db: D1Database,
   input: {
@@ -354,15 +366,35 @@ export async function persistStagedSyncWrite(
     const entityTypes = new Set(
       input.records.map((record) => record.entityType),
     );
-    await db.batch([
+    const promotionStatements = ENTITY_ORDER.filter((entityType) =>
+      entityTypes.has(entityType),
+    ).map((entityType) => promotionStatement(db, runId, entityType));
+    const newRecordCountStatements = Object.entries(NEW_RECORD_ENTITIES)
+      .filter(([entityType]) => entityTypes.has(entityType as SyncEntityType))
+      .map(([entityType, resultKey]) => ({
+        resultKey,
+        statement: newRecordCountStatement(
+          db,
+          runId,
+          entityType as keyof typeof NEW_RECORD_ENTITIES,
+        ),
+      }));
+    const countResultOffset = input.beforePromoteStatements?.length ?? 0;
+    const batchResults = await db.batch([
       ...(input.beforePromoteStatements ?? []),
-      ...ENTITY_ORDER.filter((entityType) => entityTypes.has(entityType)).map(
-        (entityType) => promotionStatement(db, runId, entityType),
-      ),
+      ...newRecordCountStatements.map(({ statement }) => statement),
+      ...promotionStatements,
       ...(input.afterPromoteStatements ?? []),
       ...(input.finalizeStatements ?? []),
       db.prepare("DELETE FROM sync_write_staging WHERE run_id = ?").bind(runId),
     ]);
+    const newRecords = emptySyncNewRecordCounts();
+    for (const [index, { resultKey }] of newRecordCountStatements.entries()) {
+      const result = batchResults[countResultOffset + index] as
+        { results?: Array<{ count?: number }> } | undefined;
+      newRecords[resultKey] = result?.results?.[0]?.count ?? 0;
+    }
+    return newRecords;
   } catch (error) {
     await db
       .prepare("DELETE FROM sync_write_staging WHERE run_id = ?")
@@ -371,6 +403,33 @@ export async function persistStagedSyncWrite(
       .catch(() => undefined);
     throw error;
   }
+}
+
+function newRecordCountStatement(
+  db: D1Database,
+  runId: string,
+  entityType: keyof typeof NEW_RECORD_ENTITIES,
+) {
+  const config = ENTITY_CONFIG[entityType];
+  const conflictMatch = config.conflictColumns
+    .map(
+      (column) =>
+        `target.${column} = json_extract(staging.payload, '$.${column}')`,
+    )
+    .join(" AND ");
+  return db
+    .prepare(
+      `SELECT COUNT(*) AS count
+       FROM sync_write_staging staging
+       WHERE staging.run_id = ?
+         AND staging.entity_type = ?
+         AND NOT EXISTS (
+           SELECT 1
+           FROM ${config.table} target
+           WHERE ${conflictMatch}
+         )`,
+    )
+    .bind(runId, entityType);
 }
 
 function promotionStatement(

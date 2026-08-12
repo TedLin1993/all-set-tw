@@ -150,6 +150,11 @@ async function completeMember(
     batchId,
     jobId: job.id,
     notification: { connectorId: job.connector_id, status },
+    newRecords: {
+      invoices: job.connector_id === "einvoice" ? 1 : 0,
+      bankTransactions: job.connector_id === "esun" ? 2 : 0,
+      investmentTransactions: job.connector_id === "tdcc" ? 1 : 0,
+    },
   });
 }
 
@@ -299,6 +304,35 @@ describe("default schedule notification rounds", () => {
     expect(summary).toContainEqual({
       connectorId: jobs[0]!.connector_id,
       status: "failed",
+    });
+    expect(
+      database
+        .prepare(
+          `SELECT completed_at AS completedAt,
+                  assets_after_twd AS assetsAfterTwd,
+                  credit_card_debt_after_twd AS creditCardDebtAfterTwd
+           FROM scheduled_sync_batches WHERE id = ?`,
+        )
+        .get(batchId),
+    ).toMatchObject({
+      completedAt: expect.any(String),
+      assetsAfterTwd: 0,
+      creditCardDebtAfterTwd: 0,
+    });
+    expect(
+      database
+        .prepare(
+          `SELECT
+             SUM(new_invoices) AS newInvoices,
+             SUM(new_bank_transactions) AS newBankTransactions,
+             SUM(new_investment_transactions) AS newInvestmentTransactions
+           FROM scheduled_sync_batch_results WHERE batch_id = ?`,
+        )
+        .get(batchId),
+    ).toEqual({
+      newInvoices: 1,
+      newBankTransactions: 2,
+      newInvestmentTransactions: 1,
     });
     await expect(
       claimCompletedDefaultScheduleBatch(db, batchId),
