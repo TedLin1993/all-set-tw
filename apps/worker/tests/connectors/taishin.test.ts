@@ -12,6 +12,20 @@ const summary = {
   error: null,
 };
 
+const overview = {
+  value: {
+    carInfoList: {
+      "001": {
+        BillYear: "2026",
+        BillMon: "07",
+        StmtBalance: "$10,060",
+        LstPymtAmt: "$10,060",
+      },
+    },
+  },
+  error: null,
+};
+
 function transaction(
   description: string,
   amount: string,
@@ -68,6 +82,7 @@ describe("Taishin credit-card parser", () => {
     const result = parseTaishinCreditCardData(
       {
         summary,
+        overview,
         bills: Array.from({ length: 7 }, (_, index) =>
           bill(`2026/${String(7 - index).padStart(2, "0")}`, []),
         ),
@@ -87,7 +102,7 @@ describe("Taishin credit-card parser", () => {
     });
   });
 
-  it("uses the remaining amount as the current card liability", () => {
+  it("uses the current overview payment as the current card liability", () => {
     const partiallyPaidBill = bill();
     Object.assign(partiallyPaidBill.value, {
       showCbalance: "10,060",
@@ -96,6 +111,18 @@ describe("Taishin credit-card parser", () => {
     });
     const partial = parseTaishinCreditCardData({
       summary,
+      overview: {
+        value: {
+          carInfoList: {
+            "001": {
+              BillYear: "2026",
+              BillMon: "07",
+              StmtBalance: "$10,060",
+              LstPymtAmt: "$8,000",
+            },
+          },
+        },
+      },
       bills: [partiallyPaidBill],
     });
 
@@ -105,12 +132,9 @@ describe("Taishin credit-card parser", () => {
       noPaymentNeeded: false,
     });
 
-    Object.assign(partiallyPaidBill.value, {
-      showCdue: "0",
-      showPayment: "10,060",
-    });
     const paid = parseTaishinCreditCardData({
       summary,
+      overview,
       bills: [partiallyPaidBill],
     });
 
@@ -118,6 +142,26 @@ describe("Taishin credit-card parser", () => {
       balance: 0,
       statementBalance: 10060,
       noPaymentNeeded: true,
+    });
+  });
+
+  it("parses compact dates returned by the real bill API", () => {
+    const compactDateBill = bill();
+    Object.assign(compactDateBill.value, {
+      showStmtDate: "2026/7/20",
+      showDueDate: "20260805",
+    });
+    const result = parseTaishinCreditCardData({
+      summary,
+      overview,
+      bills: [compactDateBill],
+    });
+
+    expect(result.creditCardBills[0]).toMatchObject({
+      statementClosingDate: "2026-07-20",
+      paymentDueDate: "2026-08-05",
+      paidAmount: 10060,
+      isPaid: true,
     });
   });
 
@@ -133,6 +177,18 @@ describe("Taishin credit-card parser", () => {
 
     const result = parseTaishinCreditCardData({
       summary,
+      overview: {
+        value: {
+          carInfoList: {
+            "001": {
+              BillYear: "2026",
+              BillMon: "06",
+              StmtBalance: "$8,060",
+              LstPymtAmt: "$6,000",
+            },
+          },
+        },
+      },
       bills: [{ value: {}, error: null }, previousBill],
     });
 
@@ -161,10 +217,7 @@ describe("Taishin credit-card parser", () => {
     });
 
     expect(result.creditCardBills).toHaveLength(1);
-    expect(result.bankBalanceSnapshots[0]).toMatchObject({
-      balance: 0,
-      noPaymentNeeded: undefined,
-    });
+    expect(result.bankBalanceSnapshots).toEqual([]);
   });
 
   it("upgrades merchant-matched pending occurrences and keeps the rest pending", () => {

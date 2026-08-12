@@ -263,6 +263,11 @@ describe("Taishin browser session lifecycle", () => {
       timeoutMs: 4_000,
     });
     expect(browserPage.evaluate).toHaveBeenCalledWith(expect.any(Function), {
+      path: "/TIBNetBank/svc/web4/rb0760/getCardOverviewData",
+      body: {},
+      timeoutMs: 4_000,
+    });
+    expect(browserPage.evaluate).toHaveBeenCalledWith(expect.any(Function), {
       path: "/TIBNetBank/svc/web4/rb0708rwd/init",
       body: {
         org: "001",

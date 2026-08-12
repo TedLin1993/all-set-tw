@@ -14,6 +14,7 @@ const RWD_URL = "https://my.taishinbank.com.tw/TIBNetBank/svc/rwd/index.html";
 const API_ROOT = "/TIBNetBank/svc";
 const SESSION_CHECK_PATH = `${API_ROOT}/web/common/sessioncheck`;
 const SUMMARY_PATH = `${API_ROOT}/web4/rb0708rwd/doXTPA`;
+const OVERVIEW_PATH = `${API_ROOT}/web4/rb0760/getCardOverviewData`;
 const BILL_PATH = `${API_ROOT}/web4/rb0708rwd/init`;
 const REALTIME_PATH = `${API_ROOT}/web4/rb0708rwd/qryRealTime`;
 export const TAISHIN_AUTO_LOGIN_ATTEMPTS = 3;
@@ -387,8 +388,21 @@ async function fetchCreditCardPayloads(
       );
     setStage("fetch_current_bill");
     const currentBill = await fetchBill(months[0]!);
+    const overview = await postJson(
+      page,
+      OVERVIEW_PATH,
+      {},
+      OPTIONAL_API_TIMEOUT_MS,
+    ).catch((error) => {
+      console.warn(
+        `[taishin] current payment overview skipped: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return undefined;
+    });
     if (!hasBillPayload(currentBill)) {
-      return { summary, bills: [], realtime };
+      return { summary, overview, bills: [], realtime };
     }
     setStage("fetch_historical_bills");
     const historicalBills = (
@@ -398,6 +412,7 @@ async function fetchCreditCardPayloads(
     ).filter((bill) => bill !== undefined);
     return {
       summary,
+      overview,
       bills: [currentBill, ...historicalBills],
       realtime,
     };

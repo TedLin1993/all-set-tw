@@ -30,6 +30,7 @@ export function parseTaishinConfig(config: unknown): TaishinConfig {
 
 export type TaishinCreditCardPayloads = {
   summary: unknown;
+  overview?: unknown;
   bills: unknown[];
   realtime?: unknown;
 };
@@ -59,6 +60,7 @@ export function parseTaishinCreditCardData(
 ): TaishinCreditCardData {
   const summary = responseValue(payloads.summary);
   const summaryTwd = firstRecordValue(summary) ?? {};
+  const overview = currentPaymentOverview(responseValue(payloads.overview));
   const billValues = payloads.bills
     .map(responseValue)
     .filter((value): value is JsonRecord => Boolean(value));
@@ -70,9 +72,7 @@ export function parseTaishinCreditCardData(
     .sort((left, right) =>
       right.bill.billingPeriod.localeCompare(left.bill.billingPeriod),
     );
-  const currentBillEntry =
-    billEntries.find(({ value }) => optionalNumber(value.showCdue) != null) ??
-    billEntries[0];
+  const currentBillEntry = billEntries[0];
   const currentBill = currentBillEntry?.value;
   const postedCandidates = billValues.flatMap(postedTransactions);
   const pendingCandidates = realtimeTransactions(
@@ -97,11 +97,30 @@ export function parseTaishinCreditCardData(
   const creditLimit = optionalNumber(summaryTwd["OUT-CRLIMIT-PERM"]);
   const paymentDueDate = normalizeDate(currentBill?.showDueDate);
   const statementClosingDate = normalizeDate(currentBill?.showStmtDate);
-  const parsedRemainingDue = optionalAbsoluteNumber(currentBill?.showCdue);
-  const remainingDue = parsedRemainingDue ?? 0;
+  const overviewMatchesCurrentBill =
+    overview?.billingPeriod != null &&
+    overview.billingPeriod === currentBillEntry?.bill.billingPeriod;
+  const paidAmount = overviewMatchesCurrentBill
+    ? overview.paidAmount
+    : undefined;
+  const remainingDue =
+    overviewMatchesCurrentBill && overview.statementAmount != null
+      ? Math.max(overview.statementAmount - (paidAmount ?? 0), 0)
+      : undefined;
   const asOfAt = now.toISOString();
 
-  const bills = billEntries.map(({ bill }) => bill).slice(0, BANK_SYNC_MONTHS);
+  const bills = billEntries
+    .map(({ bill }) =>
+      overviewMatchesCurrentBill &&
+      bill.billingPeriod === overview.billingPeriod
+        ? {
+            ...bill,
+            paidAmount,
+            isPaid: remainingDue === 0,
+          }
+        : bill,
+    )
+    .slice(0, BANK_SYNC_MONTHS);
 
   return {
     bankAccounts: [
@@ -115,29 +134,29 @@ export function parseTaishinCreditCardData(
         raw: { cardLast4s },
       },
     ],
-    bankBalanceSnapshots: currentBill
-      ? [
-          {
-            accountId: ACCOUNT_SOURCE_ID,
-            sourceId: `${ACCOUNT_SOURCE_ID}:${asOfAt.slice(0, 10)}`,
-            balance: remainingDue > 0 ? -remainingDue : 0,
-            availableBalance: availableCredit,
-            statementBalance: statementAmount,
-            paymentDueDate,
-            statementClosingDate,
-            noPaymentNeeded:
-              parsedRemainingDue == null ? undefined : parsedRemainingDue === 0,
-            currency: "TWD",
-            asOfAt,
-            raw: {
-              statementAmount,
-              availableCredit,
+    bankBalanceSnapshots:
+      currentBill && remainingDue != null
+        ? [
+            {
+              accountId: ACCOUNT_SOURCE_ID,
+              sourceId: `${ACCOUNT_SOURCE_ID}:${asOfAt.slice(0, 10)}`,
+              balance: remainingDue > 0 ? -remainingDue : 0,
+              availableBalance: availableCredit,
+              statementBalance: statementAmount,
               paymentDueDate,
               statementClosingDate,
+              noPaymentNeeded: remainingDue === 0,
+              currency: "TWD",
+              asOfAt,
+              raw: {
+                statementAmount,
+                availableCredit,
+                paymentDueDate,
+                statementClosingDate,
+              },
             },
-          },
-        ]
-      : [],
+          ]
+        : [],
     bankTransactions: transactions.map((transaction) => ({
       ...transaction,
       accountId: ACCOUNT_SOURCE_ID,
@@ -155,8 +174,6 @@ function parseBill(
   const billingPeriod = normalizePeriod(value.showAccoutnYM);
   if (!billingPeriod) return undefined;
   const statementAmount = optionalAbsoluteNumber(value.showCbalance);
-  const paidAmount = optionalAbsoluteNumber(value.showPayment);
-  const remainingDue = optionalAbsoluteNumber(value.showCdue);
   const minimumPayment = optionalAbsoluteNumber(value.showMinPay);
   const paymentDueDate = normalizeDate(value.showDueDate);
   const statementClosingDate = normalizeDate(value.showStmtDate);
@@ -165,8 +182,6 @@ function parseBill(
     billingPeriod,
     statementAmount,
     minimumPayment,
-    paidAmount,
-    isPaid: remainingDue == null ? undefined : remainingDue === 0,
     paymentDueDate,
     statementClosingDate,
     currency: "TWD",
@@ -174,11 +189,24 @@ function parseBill(
       billingPeriod,
       statementAmount,
       minimumPayment,
-      paidAmount,
-      remainingDue,
       paymentDueDate,
       statementClosingDate,
     },
+  };
+}
+
+function currentPaymentOverview(value: JsonRecord | undefined) {
+  const cardInfoList = isRecord(value?.carInfoList)
+    ? value.carInfoList
+    : undefined;
+  const twd = isRecord(cardInfoList?.["001"]) ? cardInfoList["001"] : undefined;
+  const year = stringValue(twd?.BillYear).trim();
+  const month = Number(stringValue(twd?.BillMon).trim());
+  if (!/^\d{4}$/.test(year) || month < 1 || month > 12) return undefined;
+  return {
+    billingPeriod: `${year}-${String(month).padStart(2, "0")}`,
+    statementAmount: optionalAbsoluteNumber(twd?.StmtBalance),
+    paidAmount: optionalAbsoluteNumber(twd?.LstPymtAmt),
   };
 }
 
@@ -472,10 +500,12 @@ function normalizePeriod(value: unknown) {
 
 function normalizeDate(value: unknown) {
   const text = stringValue(value).trim();
-  const match = text.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  const match = text.match(
+    /(\d{4})(?:[/-](\d{1,2})[/-](\d{1,2})|(\d{2})(\d{2}))/,
+  );
   if (!match) return undefined;
-  const month = Number(match[2]);
-  const day = Number(match[3]);
+  const month = Number(match[2] ?? match[4]);
+  const day = Number(match[3] ?? match[5]);
   if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
   return `${match[1]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
