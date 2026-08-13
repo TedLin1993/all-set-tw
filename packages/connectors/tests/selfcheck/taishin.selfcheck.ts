@@ -47,6 +47,18 @@ function bill(period: string) {
 const result = parseTaishinCreditCardData(
   {
     summary,
+    overview: {
+      value: {
+        carInfoList: {
+          "001": {
+            BillYear: "2026",
+            BillMon: "07",
+            StmtBalance: "$10,060",
+            LstPymtAmt: "$10,060",
+          },
+        },
+      },
+    },
     bills: [
       bill("2026/07"),
       bill("2026/06"),
