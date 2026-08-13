@@ -9,8 +9,10 @@
   import { formatCurrency, formatDateTime } from "@/shared/format/financial";
   import {
     financialChangeUnavailableMessage,
+    financialChangeScopeMessage,
     signedFinancialChange,
     syncReportStatusPresentation,
+    syncReportRecoveryMessage,
     zeroRateCurrenciesMessage,
   } from "../model/sync-report";
 
@@ -29,6 +31,12 @@
           report.financialChangeUnavailableReason,
         )
       : null,
+  );
+  const financialChangeScope = $derived(
+    report ? financialChangeScopeMessage(report) : null,
+  );
+  const recoveryMessage = $derived(
+    report ? syncReportRecoveryMessage(report) : null,
   );
   const zeroRateMessage = $derived(
     report ? zeroRateCurrenciesMessage(report.missingCurrencies) : null,
@@ -126,6 +134,14 @@
             <p class="mt-1 text-xs text-ink/50">
               {presentation.description}
             </p>
+            {#if recoveryMessage}
+              <p class="mt-1 text-xs font-medium text-moss">
+                已於 {formatDateTime(recoveryMessage)} 手動{report.status ===
+                "success"
+                  ? "補齊"
+                  : "更新部分來源"}
+              </p>
+            {/if}
           </div>
         </div>
         <time
@@ -153,6 +169,11 @@
         {#if report.financialChange}
           <div class="rounded-xl border border-border/80 p-4">
             <p class="text-xs font-semibold text-ink/50">同步後變化</p>
+            {#if financialChangeScope}
+              <p class="mt-1 text-[11px] leading-relaxed text-amber-800">
+                {financialChangeScope}
+              </p>
+            {/if}
             <div class="mt-3 grid grid-cols-3 gap-2">
               {#each financialItems as item (item.label)}
                 {@const change = signedFinancialChange(

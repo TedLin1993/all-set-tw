@@ -348,6 +348,9 @@ Manual recovery:
 - After a manual sync succeeds for a disabled job, update `last_status = 'success'`, `last_error = NULL`, `last_run_at`, `last_success_at`, and `next_run_at = now + interval_minutes`.
 - Do not automatically set `enabled = 1` after manual success.
 - The UI should ask the user whether to re-enable automatic sync for that connector/scope. If the user agrees, the UI can update `sync_jobs.enabled = 1`.
+- A successful full-scope manual sync may repair the same connector in the latest completed default-schedule report. Preserve the scheduled `completed_at`, record the later repair in `recovered_at`, add the manual run's new-record counts once, and refresh the report's after-snapshot atomically.
+- Capture the recoverable batch before a synchronous manual run starts so a newly completed schedule round cannot be repaired by the wrong run. TDCC partial-scope runs must not repair the `tdcc/all` batch member.
+- A partial schedule report still calculates its financial delta when both snapshots are available. The UI must state how many sources updated and that the remaining sources use their previous values.
 
 Manual sync adapter rules:
 

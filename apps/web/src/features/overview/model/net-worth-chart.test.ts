@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildNetWorthChartData,
+  getNetWorthComparison,
   getAvailableNetWorthAssets,
 } from "./net-worth-chart";
 import type { NetWorthHistoryRow } from "@/data/assets/types";
@@ -120,5 +121,57 @@ describe("net worth chart data", () => {
 
     expect(points.map((point) => point.date)).toEqual(["2026-01-03"]);
     expect(points[0]?.stock).toBe(110);
+  });
+
+  it("compares with the latest snapshot on or before the target date", () => {
+    const points = [
+      { date: "2026-01-01", selectedTotal: 100 },
+      { date: "2026-01-03", selectedTotal: 125 },
+      { date: "2026-01-08", selectedTotal: 150 },
+      { date: "2026-01-10", selectedTotal: 140 },
+    ];
+    expect(getNetWorthComparison(points, "week")).toEqual({
+      currentDate: "2026-01-10",
+      currentValue: 140,
+      targetDate: "2026-01-03",
+      previousDate: "2026-01-03",
+      previousValue: 125,
+      changeValue: 15,
+      changePercent: 12,
+    });
+  });
+
+  it("returns no comparison when the history has no target snapshot", () => {
+    expect(
+      getNetWorthComparison(
+        [{ date: "2026-01-10", selectedTotal: 140 }],
+        "day",
+      ),
+    ).toBeNull();
+  });
+
+  it("uses the same day in the previous calendar month and clamps month end", () => {
+    const points = [
+      { date: "2026-01-31", selectedTotal: 90 },
+      { date: "2026-02-28", selectedTotal: 100 },
+      { date: "2026-03-31", selectedTotal: 120 },
+    ];
+    expect(getNetWorthComparison(points, "month")).toMatchObject({
+      targetDate: "2026-02-28",
+      previousDate: "2026-02-28",
+      changeValue: 20,
+    });
+  });
+
+  it("leaves the percentage unavailable when the baseline is zero", () => {
+    expect(
+      getNetWorthComparison(
+        [
+          { date: "2026-01-01", selectedTotal: 0 },
+          { date: "2026-01-02", selectedTotal: 30 },
+        ],
+        "day",
+      )?.changePercent,
+    ).toBeNull();
   });
 });

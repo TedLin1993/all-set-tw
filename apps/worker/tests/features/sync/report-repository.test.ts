@@ -4,8 +4,10 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   calculateCurrentFinancialSnapshot,
+  findLatestRecoverableScheduledBatchId,
   getLatestScheduledSyncReport,
   hasCompletedFinancialBaseline,
+  recoverLatestScheduledSyncSource,
 } from "../../../src/features/sync/report-repository";
 
 class SqliteStatement {
@@ -19,6 +21,17 @@ class SqliteStatement {
   bind(...values: unknown[]) {
     this.values = values;
     return this;
+  }
+
+  async run() {
+    const result = this.database
+      .prepare(this.sql)
+      .run(...(this.values as never[]));
+    return {
+      success: true,
+      meta: { changes: Number(result.changes) },
+      results: [],
+    };
   }
 
   async first<T>() {
@@ -37,7 +50,7 @@ class SqliteStatement {
   }
 }
 
-function createDb() {
+function createDb(options: { failBatchAt?: number } = {}) {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON");
   const migrationsDirectory = fileURLToPath(
@@ -51,6 +64,23 @@ function createDb() {
   const db = {
     prepare(sql: string) {
       return new SqliteStatement(database, sql);
+    },
+    async batch(statements: D1PreparedStatement[]) {
+      database.exec("BEGIN");
+      try {
+        const results = [];
+        for (const [index, statement] of statements.entries()) {
+          if (options.failBatchAt === index) {
+            throw new Error("simulated D1 batch failure");
+          }
+          results.push(await (statement as unknown as SqliteStatement).run());
+        }
+        database.exec("COMMIT");
+        return results;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
     },
   } as unknown as D1Database;
   return { database, db };
@@ -150,7 +180,7 @@ describe("scheduled sync financial reports", () => {
     });
   });
 
-  it("returns no financial delta for a partial round but keeps new record counts", async () => {
+  it("keeps the financial delta for a partial round and preserves new record counts", async () => {
     const { database, db } = createDb();
     databases.push(database);
     database.exec(`
@@ -179,8 +209,8 @@ describe("scheduled sync financial reports", () => {
         bankTransactions: 2,
         investmentTransactions: 0,
       },
-      financialChange: null,
-      financialChangeUnavailableReason: "partial_sync",
+      financialChange: { assets: 1000, creditCardDebt: -200, netWorth: 1200 },
+      financialChangeUnavailableReason: null,
     });
   });
 
@@ -232,6 +262,131 @@ describe("scheduled sync financial reports", () => {
     });
   });
 
+  it("repairs only a failed source in the latest completed report", async () => {
+    const { database, db } = createDb();
+    databases.push(database);
+    database.exec(`
+      INSERT INTO scheduled_sync_batches
+        (id, schedule_key, notification_claimed_at, created_at, completed_at,
+         is_baseline, assets_before_twd, credit_card_debt_before_twd,
+         missing_currencies_before, assets_after_twd,
+         credit_card_debt_after_twd, missing_currencies_after)
+      VALUES
+        ('old', 'default', '2026-08-12T22:05:00Z', '2026-08-12T22:00:00Z',
+         '2026-08-12T22:05:00Z', 0, 100, 0, '[]', 100, 0, '[]'),
+        ('latest', 'default', '2026-08-13T22:05:00Z', '2026-08-13T22:00:00Z',
+         '2026-08-13T22:05:00Z', 0, 100, 0, '[]', 100, 0, '[]');
+      INSERT INTO scheduled_sync_batch_results
+        (batch_id, job_id, connector_id, status, completed_at,
+         new_invoices, new_bank_transactions, new_investment_transactions)
+      VALUES
+        ('old', 'esun:all', 'esun', 'failed', '2026-08-12T22:05:00Z', 1, 2, 3),
+        ('latest', 'esun:all', 'esun', 'failed', '2026-08-13T22:05:00Z', 4, 5, 6);
+    `);
+
+    await expect(
+      recoverLatestScheduledSyncSource(db, {
+        connectorId: "esun",
+        newRecords: {
+          invoices: 2,
+          bankTransactions: 3,
+          investmentTransactions: 4,
+        },
+      }),
+    ).resolves.toBe(true);
+
+    expect(
+      database
+        .prepare(
+          `SELECT status, completed_at AS completedAt,
+                  recovered_at AS recoveredAt, new_invoices AS invoices,
+                  new_bank_transactions AS bankTransactions,
+                  new_investment_transactions AS investmentTransactions
+           FROM scheduled_sync_batch_results
+           WHERE batch_id = 'latest'`,
+        )
+        .get(),
+    ).toMatchObject({
+      status: "success",
+      completedAt: "2026-08-13T22:05:00Z",
+      recoveredAt: expect.any(String),
+      invoices: 6,
+      bankTransactions: 8,
+      investmentTransactions: 10,
+    });
+    expect(
+      database
+        .prepare(
+          "SELECT status FROM scheduled_sync_batch_results WHERE batch_id = 'old'",
+        )
+        .get(),
+    ).toEqual({ status: "failed" });
+
+    const report = await getLatestScheduledSyncReport(db);
+    expect(report).toMatchObject({
+      status: "success",
+      recoveredAt: expect.any(String),
+      financialChange: { assets: -100, creditCardDebt: 0, netWorth: -100 },
+    });
+    expect(report?.sources[0]).toMatchObject({
+      completedAt: "2026-08-13T22:05:00Z",
+      recoveredAt: expect.any(String),
+    });
+    await expect(
+      recoverLatestScheduledSyncSource(db, {
+        connectorId: "esun",
+        newRecords: {
+          invoices: 1,
+          bankTransactions: 1,
+          investmentTransactions: 1,
+        },
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("does not repair an older failed report when the latest report is successful", async () => {
+    const { database, db } = createDb();
+    databases.push(database);
+    database.exec(`
+      INSERT INTO scheduled_sync_batches
+        (id, schedule_key, notification_claimed_at, created_at, completed_at,
+         is_baseline, assets_before_twd, credit_card_debt_before_twd,
+         missing_currencies_before, assets_after_twd,
+         credit_card_debt_after_twd, missing_currencies_after)
+      VALUES
+        ('old', 'default', '2026-08-12T22:05:00Z', '2026-08-12T22:00:00Z',
+         '2026-08-12T22:05:00Z', 0, 100, 0, '[]', 100, 0, '[]'),
+        ('latest', 'default', '2026-08-13T22:05:00Z', '2026-08-13T22:00:00Z',
+         '2026-08-13T22:05:00Z', 0, 100, 0, '[]', 100, 0, '[]');
+      INSERT INTO scheduled_sync_batch_results
+        (batch_id, job_id, connector_id, status, completed_at)
+      VALUES
+        ('old', 'esun:all', 'esun', 'failed', '2026-08-12T22:05:00Z'),
+        ('latest', 'esun:all', 'esun', 'success', '2026-08-13T22:05:00Z');
+    `);
+
+    await expect(
+      recoverLatestScheduledSyncSource(db, {
+        connectorId: "esun",
+        newRecords: {
+          invoices: 1,
+          bankTransactions: 1,
+          investmentTransactions: 1,
+        },
+      }),
+    ).resolves.toBe(false);
+    expect(
+      database
+        .prepare(
+          "SELECT status, recovered_at AS recoveredAt FROM scheduled_sync_batch_results WHERE batch_id = 'old'",
+        )
+        .get(),
+    ).toEqual({ status: "failed", recoveredAt: null });
+    await expect(
+      findLatestRecoverableScheduledBatchId(db, "esun"),
+    ).resolves.toBeNull();
+  });
+
   it("waits for a complete successful round before establishing the baseline", async () => {
     const { database, db } = createDb();
     databases.push(database);
@@ -253,5 +408,44 @@ describe("scheduled sync financial reports", () => {
     `);
 
     await expect(hasCompletedFinancialBaseline(db)).resolves.toBe(true);
+  });
+
+  it("rolls back the source repair when the report snapshot update fails", async () => {
+    const { database, db } = createDb({ failBatchAt: 1 });
+    databases.push(database);
+    database.exec(`
+      INSERT INTO scheduled_sync_batches
+        (id, schedule_key, notification_claimed_at, created_at, completed_at,
+         is_baseline, assets_before_twd, credit_card_debt_before_twd,
+         missing_currencies_before, assets_after_twd,
+         credit_card_debt_after_twd, missing_currencies_after)
+      VALUES
+        ('latest', 'default', '2026-08-13T22:05:00Z', '2026-08-13T22:00:00Z',
+         '2026-08-13T22:05:00Z', 0, 100, 0, '[]', 100, 0, '[]');
+      INSERT INTO scheduled_sync_batch_results
+        (batch_id, job_id, connector_id, status, completed_at)
+      VALUES ('latest', 'esun:all', 'esun', 'failed', '2026-08-13T22:05:00Z');
+    `);
+
+    await expect(
+      recoverLatestScheduledSyncSource(db, {
+        connectorId: "esun",
+        newRecords: {
+          invoices: 1,
+          bankTransactions: 2,
+          investmentTransactions: 3,
+        },
+      }),
+    ).rejects.toThrow("simulated D1 batch failure");
+    expect(
+      database
+        .prepare(
+          `SELECT status, recovered_at AS recoveredAt,
+                  new_invoices AS invoices
+           FROM scheduled_sync_batch_results
+           WHERE batch_id = 'latest'`,
+        )
+        .get(),
+    ).toEqual({ status: "failed", recoveredAt: null, invoices: 0 });
   });
 });

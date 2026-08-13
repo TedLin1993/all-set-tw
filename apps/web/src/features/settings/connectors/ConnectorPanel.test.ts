@@ -122,6 +122,9 @@ describe("ConnectorPanel", () => {
       queryKey: ["summary"],
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["sync-reports", "latest"],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["invoices"],
     });
     expect(getByRole("button", { name: "已排入同步" })).toBeEnabled();

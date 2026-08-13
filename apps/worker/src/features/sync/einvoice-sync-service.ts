@@ -36,6 +36,7 @@ import {
   type EinvoiceRunTrigger,
 } from "./einvoice-run-repository";
 import { findSyncJob } from "./schedule-repository";
+import { recoverLatestScheduledSyncSource } from "./report-repository";
 import {
   isUserActionError,
   safeErrorMessage,
@@ -398,6 +399,21 @@ async function finalizeEinvoiceRun(
       status: status === "success" ? "completed" : status,
       error,
     });
+    if (status === "success" && run.trigger === "manual") {
+      await recoverLatestScheduledSyncSource(env.DB, {
+        connectorId: "einvoice",
+        newRecords: {
+          invoices: run.new_invoice_count,
+          bankTransactions: 0,
+          investmentTransactions: 0,
+        },
+      }).catch((recoveryError) => {
+        console.error(
+          "[sync] failed to recover latest scheduled report from e-invoice sync",
+          recoveryError,
+        );
+      });
+    }
     return true;
   }
   const now = new Date();
@@ -480,6 +496,23 @@ async function finalizeEinvoiceRun(
   const results = await env.DB.batch(statements);
   const finalized = results.at(-1)?.meta.changes === 1;
   if (!finalized) return false;
+
+  if (success && run.trigger === "manual") {
+    await recoverLatestScheduledSyncSource(env.DB, {
+      connectorId: "einvoice",
+      newRecords: {
+        invoices: run.new_invoice_count,
+        bankTransactions: 0,
+        investmentTransactions: 0,
+      },
+    }).catch((recoveryError) => {
+      // Report recovery is best effort and must not change a completed run.
+      console.error(
+        "[sync] failed to recover latest scheduled report from e-invoice sync",
+        recoveryError,
+      );
+    });
+  }
 
   if (run.scheduled_batch_id) {
     const summary = await claimCompletedDefaultScheduleBatch(
