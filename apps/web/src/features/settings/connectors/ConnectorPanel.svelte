@@ -169,6 +169,7 @@
         startEinvoiceSyncPolling();
         return;
       }
+      invalidateLatestSyncReport();
       if (connectorId === "tdcc") tdccSetupStep = "complete";
       qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
       qc.invalidateQueries({ queryKey: queryKeys.summary });
@@ -278,6 +279,7 @@
       });
       qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
       qc.invalidateQueries({ queryKey: queryKeys.summary });
+      invalidateLatestSyncReport();
       qc.invalidateQueries({ queryKey: queryKeys.bank });
       qc.invalidateQueries({ queryKey: queryKeys.bills });
       if (
@@ -354,6 +356,7 @@
     });
     qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
     qc.invalidateQueries({ queryKey: queryKeys.summary });
+    invalidateLatestSyncReport();
     qc.invalidateQueries({ queryKey: queryKeys.investments });
     qc.invalidateQueries({ queryKey: queryKeys.investmentTransactions });
     qc.invalidateQueries({ queryKey: queryKeys.bank });
@@ -409,6 +412,7 @@
       const completedSuccessfully = einvoiceJob?.lastStatus === "success";
       stopEinvoiceSyncPolling();
       if (completedSuccessfully) {
+        invalidateLatestSyncReport();
         qc.invalidateQueries({ queryKey: queryKeys.summary });
         qc.invalidateQueries({ queryKey: queryKeys.invoices });
       }
@@ -417,6 +421,9 @@
     einvoiceSyncPollingTimer = setTimeout(() => {
       void pollEinvoiceSyncJob();
     }, 2_000);
+  }
+  function invalidateLatestSyncReport() {
+    qc.invalidateQueries({ queryKey: queryKeys.latestSyncReport });
   }
   function intervalLabel(minutes: number) {
     return (

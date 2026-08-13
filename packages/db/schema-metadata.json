@@ -309,7 +309,8 @@
         "completed_at": "排程結果或略過決定寫入批次的時間；NULL 表示仍在等待。",
         "new_invoices": "此次工作真正新增的電子發票筆數，不包含更新既有發票。",
         "new_bank_transactions": "此次工作真正新增的銀行或信用卡交易筆數，不包含更新既有交易。",
-        "new_investment_transactions": "此次工作真正新增的投資交易筆數，不包含更新既有交易。"
+        "new_investment_transactions": "此次工作真正新增的投資交易筆數，不包含更新既有交易。",
+        "recovered_at": "後續手動同步成功補救此排程來源的時間；NULL 表示尚未補救。"
       }
     },
     "scheduled_sync_batches": {

@@ -9,6 +9,18 @@ export type SyncReportStatusPresentation = {
   tone: "success" | "warning";
 };
 
+export function financialChangeScopeMessage(report: ScheduledSyncReport) {
+  const { success, total } = report.sourceSummary;
+  if (report.status === "success" || total === 0 || success >= total) {
+    return null;
+  }
+  return `依 ${success}/${total} 已更新來源計算，其餘沿用上次資料`;
+}
+
+export function syncReportRecoveryMessage(report: ScheduledSyncReport) {
+  return report.recoveredAt;
+}
+
 export function syncReportStatusPresentation(
   report: ScheduledSyncReport,
 ): SyncReportStatusPresentation {
@@ -33,7 +45,7 @@ export function financialChangeUnavailableMessage(
 ) {
   if (reason === "baseline") return "這是第一份同步報告，已建立資產基準。";
   if (reason === "partial_sync")
-    return "部分資料來源未更新，暫不計算資產變化。";
+    return "部分資料來源未更新，變化包含沿用的上次資料。";
   if (reason === "snapshot_unavailable") return "這次沒有完整的資產比較資料。";
   return null;
 }

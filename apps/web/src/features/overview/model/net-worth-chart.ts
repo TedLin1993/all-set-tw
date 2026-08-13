@@ -3,6 +3,17 @@ import type { NetWorthHistoryRow } from "@/data/assets/types";
 export type NetWorthAssetType = "stock" | "fund" | "deposit" | "manual";
 export type NetWorthDisplayMode = "sum" | "breakdown";
 export type NetWorthTimeframe = "1M" | "3M" | "6M" | "1Y" | "ALL";
+export type NetWorthComparisonPeriod = "day" | "week" | "month";
+
+export const NET_WORTH_COMPARISON_PERIODS: Array<{
+  key: NetWorthComparisonPeriod;
+  label: string;
+  days?: number;
+}> = [
+  { key: "day", label: "較昨日", days: 1 },
+  { key: "week", label: "較上週", days: 7 },
+  { key: "month", label: "較上月" },
+];
 
 export interface NetWorthChartPoint {
   date: string;
@@ -11,6 +22,16 @@ export interface NetWorthChartPoint {
   deposit?: number;
   manual?: number;
   selectedTotal: number;
+}
+
+export interface NetWorthComparison {
+  currentDate: string;
+  currentValue: number;
+  targetDate: string;
+  previousDate: string;
+  previousValue: number;
+  changeValue: number;
+  changePercent: number | null;
 }
 
 export const NET_WORTH_ASSET_SERIES: Array<{
@@ -72,6 +93,60 @@ function latestValue(rows: NetWorthHistoryRow[], date: string) {
     value = row.netWorth;
   }
   return value;
+}
+
+function subtractDays(date: string, days: number) {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - days);
+  return value.toISOString().slice(0, 10);
+}
+
+function subtractCalendarMonth(date: string) {
+  const value = new Date(`${date}T00:00:00Z`);
+  const originalDay = value.getUTCDate();
+  value.setUTCDate(1);
+  value.setUTCMonth(value.getUTCMonth() - 1);
+  const lastDay = new Date(
+    Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  value.setUTCDate(Math.min(originalDay, lastDay));
+  return value.toISOString().slice(0, 10);
+}
+
+/**
+ * Compares the latest valid snapshot with the latest snapshot on or before
+ * the requested target date. Missing dates are expected for this history.
+ */
+export function getNetWorthComparison(
+  points: NetWorthChartPoint[],
+  period: NetWorthComparisonPeriod,
+): NetWorthComparison | null {
+  const option = NET_WORTH_COMPARISON_PERIODS.find(
+    (option) => option.key === period,
+  );
+  if (!option || points.length === 0) return null;
+  const sorted = points.slice().sort((a, b) => a.date.localeCompare(b.date));
+  const current = sorted.at(-1);
+  if (!current) return null;
+  const targetDate =
+    option.days === undefined
+      ? subtractCalendarMonth(current.date)
+      : subtractDays(current.date, option.days);
+  const previous = sorted.filter((point) => point.date <= targetDate).at(-1);
+  if (!previous) return null;
+  const changeValue = current.selectedTotal - previous.selectedTotal;
+  return {
+    currentDate: current.date,
+    currentValue: current.selectedTotal,
+    targetDate,
+    previousDate: previous.date,
+    previousValue: previous.selectedTotal,
+    changeValue,
+    changePercent:
+      previous.selectedTotal === 0
+        ? null
+        : (changeValue / Math.abs(previous.selectedTotal)) * 100,
+  };
 }
 
 function buildAssetSeries(

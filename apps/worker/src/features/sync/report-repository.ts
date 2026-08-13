@@ -36,10 +36,143 @@ type CompletedBatchResultRow = {
   connectorId: ConnectorId;
   status: SyncNotificationStatus;
   completedAt: string;
+  recoveredAt: string | null;
   newInvoices: number;
   newBankTransactions: number;
   newInvestmentTransactions: number;
 };
+
+/**
+ * Apply a successful manual sync to the latest completed default schedule
+ * report when that report contains the same connector's failed source.
+ *
+ * The source's scheduled completion time remains unchanged. `recovered_at`
+ * records the later manual repair, while the batch's after-snapshot is
+ * refreshed against the now-current financial data.
+ */
+export async function recoverLatestScheduledSyncSource(
+  db: D1Database,
+  input: {
+    connectorId: ConnectorId;
+    newRecords: SyncNewRecordCounts;
+    batchId?: string | null;
+  },
+) {
+  // A caller that captured no failed report must not accidentally repair a
+  // newly-completed batch while its manual sync was running. Omitted input is
+  // reserved for asynchronous flows that resolve their target at completion.
+  if (input.batchId === null) return false;
+  const batchFilter = `batch.id = (
+       SELECT latest.id
+       FROM scheduled_sync_batches latest
+       WHERE latest.completed_at IS NOT NULL
+       ORDER BY latest.completed_at DESC, latest.created_at DESC
+       LIMIT 1
+     )${input.batchId === undefined ? "" : " AND batch.id = ?"}`;
+  const latest = await db
+    .prepare(
+      `SELECT batch.id AS batchId, result.job_id AS jobId
+       FROM scheduled_sync_batches batch
+       JOIN scheduled_sync_batch_results result
+         ON result.batch_id = batch.id
+       WHERE batch.completed_at IS NOT NULL
+         AND ${batchFilter}
+         AND result.connector_id = ?
+         AND result.status IN ('failed', 'needs_user_action')
+         AND result.recovered_at IS NULL
+       ORDER BY batch.completed_at DESC, batch.created_at DESC
+       LIMIT 1`,
+    )
+    .bind(
+      ...(input.batchId === undefined ? [] : [input.batchId]),
+      input.connectorId,
+    )
+    .first<{ batchId: string; jobId: string }>();
+  if (!latest) return false;
+
+  // Read the post-recovery snapshot before touching the report rows. The
+  // subsequent batch keeps the result transition and snapshot update in one
+  // D1 transaction.
+  const snapshot = await calculateCurrentFinancialSnapshot(db);
+  const recoveredAt = new Date().toISOString();
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE scheduled_sync_batch_results
+         SET status = 'success',
+             recovered_at = ?,
+             new_invoices = new_invoices + ?,
+             new_bank_transactions = new_bank_transactions + ?,
+             new_investment_transactions = new_investment_transactions + ?
+         WHERE batch_id = ?
+           AND job_id = ?
+           AND status IN ('failed', 'needs_user_action')
+           AND recovered_at IS NULL`,
+      )
+      .bind(
+        recoveredAt,
+        input.newRecords.invoices,
+        input.newRecords.bankTransactions,
+        input.newRecords.investmentTransactions,
+        latest.batchId,
+        latest.jobId,
+      ),
+    db
+      .prepare(
+        `UPDATE scheduled_sync_batches
+         SET assets_after_twd = ?,
+             credit_card_debt_after_twd = ?,
+             missing_currencies_after = ?
+         WHERE id = ?
+           AND completed_at IS NOT NULL
+           AND EXISTS (
+             SELECT 1
+             FROM scheduled_sync_batch_results
+             WHERE batch_id = ? AND job_id = ? AND recovered_at = ?
+           )`,
+      )
+      .bind(
+        snapshot.assetsTwd,
+        snapshot.creditCardDebtTwd,
+        JSON.stringify(snapshot.missingCurrencies),
+        latest.batchId,
+        latest.batchId,
+        latest.jobId,
+        recoveredAt,
+      ),
+  ]);
+  return results[0]?.meta.changes === 1;
+}
+
+/** Capture the latest failed source before a manual sync starts. */
+export async function findLatestRecoverableScheduledBatchId(
+  db: D1Database,
+  connectorId: ConnectorId,
+) {
+  const row = await db
+    .prepare(
+      `SELECT batch.id AS batchId
+       FROM scheduled_sync_batches batch
+       JOIN scheduled_sync_batch_results result
+         ON result.batch_id = batch.id
+       WHERE batch.completed_at IS NOT NULL
+         AND batch.id = (
+           SELECT latest.id
+           FROM scheduled_sync_batches latest
+           WHERE latest.completed_at IS NOT NULL
+           ORDER BY latest.completed_at DESC, latest.created_at DESC
+           LIMIT 1
+         )
+         AND result.connector_id = ?
+         AND result.status IN ('failed', 'needs_user_action')
+         AND result.recovered_at IS NULL
+       ORDER BY batch.completed_at DESC, batch.created_at DESC
+       LIMIT 1`,
+    )
+    .bind(connectorId)
+    .first<{ batchId: string }>();
+  return row?.batchId ?? null;
+}
 
 export async function calculateCurrentFinancialSnapshot(
   db: D1Database,
@@ -197,6 +330,7 @@ export async function getLatestScheduledSyncReport(
          connector_id AS connectorId,
          status,
          completed_at AS completedAt,
+         recovered_at AS recoveredAt,
          new_invoices AS newInvoices,
          new_bank_transactions AS newBankTransactions,
          new_investment_transactions AS newInvestmentTransactions
@@ -215,10 +349,7 @@ export async function getLatestScheduledSyncReport(
       ...parseStringArray(batch.missingCurrenciesAfter),
     ]),
   ].sort();
-  const financialChangeUnavailableReason = unavailableReason({
-    batch,
-    status,
-  });
+  const financialChangeUnavailableReason = unavailableReason(batch);
 
   return {
     id: batch.id,
@@ -249,6 +380,7 @@ export async function getLatestScheduledSyncReport(
         : null,
     financialChangeUnavailableReason,
     missingCurrencies,
+    recoveredAt: latestRecoveryAt(sources),
   };
 }
 
@@ -259,12 +391,23 @@ function mapSourceReport(
     connectorId: row.connectorId,
     status: row.status,
     completedAt: row.completedAt,
+    recoveredAt: row.recoveredAt,
     newRecords: {
       invoices: row.newInvoices,
       bankTransactions: row.newBankTransactions,
       investmentTransactions: row.newInvestmentTransactions,
     },
   };
+}
+
+function latestRecoveryAt(sources: ScheduledSyncSourceReport[]) {
+  return (
+    sources
+      .map((source) => source.recoveredAt)
+      .filter((value): value is string => value !== null)
+      .sort()
+      .at(-1) ?? null
+  );
 }
 
 function sumNewRecords(sources: ScheduledSyncSourceReport[]) {
@@ -290,17 +433,15 @@ function summaryStatus(sources: ScheduledSyncSourceReport[]) {
   return "success" as const;
 }
 
-function unavailableReason(input: {
-  batch: CompletedBatchRow;
-  status: SyncNotificationStatus;
-}): SyncFinancialChangeUnavailableReason | null {
-  if (input.status !== "success") return "partial_sync";
-  if (input.batch.isBaseline) return "baseline";
+function unavailableReason(
+  batch: CompletedBatchRow,
+): SyncFinancialChangeUnavailableReason | null {
+  if (batch.isBaseline) return "baseline";
   if (
-    input.batch.assetsBeforeTwd === null ||
-    input.batch.creditCardDebtBeforeTwd === null ||
-    input.batch.assetsAfterTwd === null ||
-    input.batch.creditCardDebtAfterTwd === null
+    batch.assetsBeforeTwd === null ||
+    batch.creditCardDebtBeforeTwd === null ||
+    batch.assetsAfterTwd === null ||
+    batch.creditCardDebtAfterTwd === null
   ) {
     return "snapshot_unavailable";
   }

@@ -206,6 +206,8 @@ export interface ScheduledSyncSourceReport {
   connectorId: ConnectorId;
   status: SyncNotificationStatus;
   completedAt: string;
+  /** Time when a later manual sync repaired this source in the latest report. */
+  recoveredAt: string | null;
   newRecords: SyncNewRecordCounts;
 }
 
@@ -232,6 +234,8 @@ export interface ScheduledSyncReport {
   } | null;
   financialChangeUnavailableReason: SyncFinancialChangeUnavailableReason | null;
   missingCurrencies: string[];
+  /** Time when a later manual sync repaired one or more sources in this report. */
+  recoveredAt: string | null;
 }
 
 export interface NotificationPreferences {

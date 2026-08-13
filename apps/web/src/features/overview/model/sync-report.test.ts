@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { ScheduledSyncReport } from "@taiwan-fin-hub/core";
 import {
   financialChangeUnavailableMessage,
+  financialChangeScopeMessage,
   signedFinancialChange,
   syncReportStatusPresentation,
+  syncReportRecoveryMessage,
   zeroRateCurrenciesMessage,
 } from "./sync-report";
 
@@ -27,6 +29,7 @@ function report(input: Partial<ScheduledSyncReport> = {}): ScheduledSyncReport {
     },
     financialChangeUnavailableReason: null,
     missingCurrencies: [],
+    recoveredAt: null,
     ...input,
   };
 }
@@ -52,7 +55,28 @@ describe("sync report presentation", () => {
     );
     expect(
       financialChangeUnavailableMessage(value.financialChangeUnavailableReason),
-    ).toBe("部分資料來源未更新，暫不計算資產變化。");
+    ).toBe("部分資料來源未更新，變化包含沿用的上次資料。");
+  });
+
+  it("explains the source scope when a partial round has a financial change", () => {
+    const value = report({
+      status: "failed",
+      sourceSummary: { total: 3, success: 2, failed: 1, needsUserAction: 0 },
+    });
+    expect(financialChangeScopeMessage(value)).toBe(
+      "依 2/3 已更新來源計算，其餘沿用上次資料",
+    );
+  });
+
+  it("does not add a partial scope note to a complete round", () => {
+    expect(financialChangeScopeMessage(report())).toBeNull();
+  });
+
+  it("shows the optional recovery completion timestamp when provided", () => {
+    const value = report({
+      recoveredAt: "2026-08-13T01:02:03.000Z",
+    });
+    expect(syncReportRecoveryMessage(value)).toBe("2026-08-13T01:02:03.000Z");
   });
 
   it("explains baseline reports and currencies valued at zero", () => {

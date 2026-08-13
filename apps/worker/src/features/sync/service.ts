@@ -56,6 +56,10 @@ import { encryptJson, decryptJson } from "../../platform/crypto";
 import type { Env } from "../../platform/env";
 import { dateFromIso, rebuildBankDepositHistory } from "../net-worth/service";
 import {
+  findLatestRecoverableScheduledBatchId,
+  recoverLatestScheduledSyncSource,
+} from "./report-repository";
+import {
   emptySyncNewRecordCounts,
   persistStagedSyncWrite,
   type SyncWriteRecord,
@@ -1407,9 +1411,28 @@ export async function withManualSyncLock(
   }
 
   const stopHeartbeat = startSyncLockHeartbeat(env.DB, lockRowId, runId);
+  let recoveryBatchId: string | null = null;
   try {
+    recoveryBatchId =
+      connectorId !== "tdcc" || scope === SYNC_SCOPE_ALL
+        ? await findLatestRecoverableScheduledBatchId(env.DB, connectorId)
+        : null;
     const outcome = await task();
     await markManualSyncSuccess(env.DB, connectorId, scope);
+    if (connectorId !== "tdcc" || scope === SYNC_SCOPE_ALL) {
+      await recoverLatestScheduledSyncSource(env.DB, {
+        connectorId,
+        newRecords: outcome.newRecords,
+        batchId: recoveryBatchId,
+      }).catch((error) => {
+        // A report repair must never turn an otherwise successful manual sync
+        // into a failed sync response.
+        console.error(
+          "[sync] failed to recover latest scheduled report",
+          error,
+        );
+      });
+    }
     return outcome;
   } catch (error) {
     const status: SyncStatus = isUserActionError(error)
