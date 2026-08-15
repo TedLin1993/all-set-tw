@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/**", async (route) => {
@@ -64,6 +64,61 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+async function expectSelectedConnectorInView(
+  page: Page,
+  connectorId: string,
+  title: string,
+) {
+  await expect(page).toHaveURL(/#\/data-sources$/);
+  const connectorSettings = page.locator(
+    `[data-connector-settings="${connectorId}"]`,
+  );
+  await expect(connectorSettings).toBeVisible();
+  await expect(
+    connectorSettings.getByRole("heading", { name: title, exact: true }),
+  ).toBeVisible();
+  await expect(
+    connectorSettings.getByRole("button", { name: "收合", exact: true }),
+  ).toBeVisible();
+  await expect(
+    connectorSettings.getByRole("heading", {
+      name: "連線與同步",
+      exact: true,
+    }),
+  ).toBeVisible();
+
+  const scrollPosition = () =>
+    page.evaluate(() =>
+      document.documentElement.classList.contains("is-standalone")
+        ? (document.getElementById("root")?.scrollTop ?? 0)
+        : window.scrollY,
+    );
+  await expect
+    .poll(async () => {
+      const before = await scrollPosition();
+      await page.waitForTimeout(120);
+      const after = await scrollPosition();
+      return after > 0 && Math.abs(after - before) <= 1;
+    })
+    .toBe(true);
+
+  const position = await connectorSettings.evaluate((element) => {
+    const header = document.querySelector("header");
+    return {
+      targetTop: element.getBoundingClientRect().top,
+      headerBottom: header?.getBoundingClientRect().bottom ?? 0,
+    };
+  });
+  expect(position.targetTop).toBeGreaterThanOrEqual(position.headerBottom - 1);
+  expect(position.targetTop).toBeLessThanOrEqual(position.headerBottom + 96);
+
+  const pageWidth = await page.evaluate(() => ({
+    client: document.documentElement.clientWidth,
+    scroll: document.documentElement.scrollWidth,
+  }));
+  expect(pageWidth.scroll).toBe(pageWidth.client);
+}
+
 test("loads the responsive shell and changes primary views", async ({
   page,
 }) => {
@@ -99,6 +154,71 @@ test("renders the mobile bottom navigation", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "更多", exact: true }),
   ).toBeVisible();
+});
+
+test("opens and scrolls to the selected connector from mobile more", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/more");
+
+  await page.getByRole("button", { name: "管理台新銀行", exact: true }).click();
+
+  await expectSelectedConnectorInView(page, "taishin", "台新銀行");
+});
+
+test("opens and scrolls to the actionable connector from mobile overview", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/sync-jobs", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          id: "taishin:all",
+          connectorId: "taishin",
+          configured: true,
+          scope: "all",
+          enabled: true,
+          intervalMinutes: 1440,
+          nextRunAt: "2026-08-16T01:00:00.000Z",
+          scheduleMode: "inherit",
+          preferredTime: "09:00",
+          preferredWeekday: 1,
+          lockedUntil: null,
+          lockedBy: null,
+          lockTrigger: null,
+          lockScope: null,
+          lastRunAt: "2026-08-15T01:00:00.000Z",
+          lastSuccessAt: "2026-08-14T01:00:00.000Z",
+          lastStatus: "needs_user_action",
+          lastError: "需要重新驗證",
+          updatedAt: "2026-08-15T01:00:00.000Z",
+          running: false,
+        },
+      ]),
+    });
+  });
+  await page.route("**/api/sync-schedule", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        intervalMinutes: 1440,
+        preferredTime: "09:00",
+        preferredWeekday: 1,
+        timezone: "Asia/Taipei",
+        updatedAt: "2026-08-15T01:00:00.000Z",
+      }),
+    });
+  });
+  await page.goto("/#/overview");
+
+  await page.getByRole("button", { name: /1 個資料來源需要處理/ }).click();
+
+  await expectSelectedConnectorInView(page, "taishin", "台新銀行");
 });
 
 test("warns about a missing exchange rate only when the foreign balance is positive", async ({

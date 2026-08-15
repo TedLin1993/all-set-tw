@@ -19,6 +19,7 @@
   } from "@/data/assets/queries";
   import { bankQuery, bankRangeQuery } from "@/data/bank/queries";
   import { syncJobsQuery } from "@/data/connectors/queries";
+  import type { ConnectorId } from "@/data/connectors/types";
   import { latestSyncReportQuery } from "@/data/sync-reports/queries";
   import {
     getActionableSyncJobs,
@@ -50,10 +51,16 @@
     tone: InsightTone;
     icon: InsightIcon;
     view: View;
+    connectorId?: ConnectorId;
   }
 
-  let { api, navigate }: { api: ApiClient; navigate: (view: View) => void } =
-    $props();
+  let {
+    api,
+    navigate,
+  }: {
+    api: ApiClient;
+    navigate: (view: View, connectorId?: ConnectorId) => void;
+  } = $props();
 
   const bank = createQuery(bankQuery(() => api));
   const monthKey = new Date().toISOString().slice(0, 7);
@@ -173,6 +180,7 @@
         tone: "amber",
         icon: "sync",
         view: "data-sources",
+        connectorId: unhealthy[0]?.connectorId,
       });
     }
 
@@ -184,6 +192,7 @@
         tone: "amber",
         icon: "sync",
         view: "data-sources",
+        connectorId: staleJobs[0]?.connectorId,
       });
     }
 
@@ -446,7 +455,7 @@
                           ? "border-emerald-200 bg-emerald-50/70"
                           : "border-sky-200 bg-sky-50/70"
                   }`}
-                  onclick={() => navigate(insight.view)}
+                  onclick={() => navigate(insight.view, insight.connectorId)}
                 >
                   {#if insight.icon === "sync"}
                     <RefreshCw class="size-5 shrink-0 text-amber-600" />
@@ -569,7 +578,7 @@
                         ? "border-emerald-200 bg-emerald-50/70"
                         : "border-sky-200 bg-sky-50/70"
                 }`}
-                onclick={() => navigate(insight.view)}
+                onclick={() => navigate(insight.view, insight.connectorId)}
               >
                 {#if insight.icon === "sync"}
                   <RefreshCw class="size-5 shrink-0 text-amber-600" />

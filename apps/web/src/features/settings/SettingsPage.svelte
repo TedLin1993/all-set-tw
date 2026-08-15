@@ -27,11 +27,13 @@
   let {
     api,
     demoMode,
+    connectorTarget,
     mobileView,
     navigate,
   }: {
     api: ApiClient;
     demoMode: boolean;
+    connectorTarget?: ConnectorId | null;
     mobileView?: MobileSettingsView | "more";
     navigate: (view: View) => void;
   } = $props();
@@ -57,7 +59,12 @@
   const bank = createQuery(bankQuery(() => api));
   const rates = createQuery(exchangeRatesQuery(() => api));
   const notifications = createQuery(notificationConfigQuery(() => api));
-  let selectedConnector = $state<ConnectorId | null>(null);
+  let selectedConnector = $state<ConnectorId | null | undefined>(undefined);
+  const activeConnector = $derived(
+    selectedConnector === undefined
+      ? (connectorTarget ?? null)
+      : selectedConnector,
+  );
   const needsAction = $derived(getActionableSyncJobs($jobs.data ?? []).length);
   const configuredSources = $derived(getConfiguredSyncJobs($jobs.data ?? []));
   const healthySources = $derived(
@@ -126,12 +133,40 @@
     }, undefined),
   );
   function selectConnector(id: ConnectorId) {
-    selectedConnector = selectedConnector === id ? null : id;
+    selectedConnector = activeConnector === id ? null : id;
   }
 
   function openConnector(id: ConnectorId) {
     selectedConnector = id;
     navigate("data-sources");
+  }
+
+  function scrollSelectedConnector(node: HTMLElement, selected: boolean) {
+    let firstFrame: number | undefined;
+    let secondFrame: number | undefined;
+
+    function cancelScheduledScroll() {
+      if (firstFrame !== undefined) cancelAnimationFrame(firstFrame);
+      if (secondFrame !== undefined) cancelAnimationFrame(secondFrame);
+      firstFrame = undefined;
+      secondFrame = undefined;
+    }
+
+    function scheduleScroll(active: boolean) {
+      cancelScheduledScroll();
+      if (!active) return;
+      firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(() => {
+          node.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      });
+    }
+
+    scheduleScroll(selected);
+    return {
+      update: scheduleScroll,
+      destroy: cancelScheduledScroll,
+    };
   }
 
   function isActiveTab(tabView: (typeof settingTabs)[number]["view"]) {
@@ -191,7 +226,7 @@
               jobs={$jobs.data ?? []}
               compact
               compactCard
-              selected={selectedConnector === source.id}
+              selected={activeConnector === source.id}
               onConfigure={() => selectConnector(source.id)}
             />
           {/each}
@@ -201,9 +236,9 @@
           aria-label="連接器詳情"
           class="min-h-[520px] min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs"
         >
-          {#if selectedConnector}
+          {#if activeConnector}
             {@const selectedSource = sources.find(
-              (source) => source.id === selectedConnector,
+              (source) => source.id === activeConnector,
             )}
             <div class="mb-4 flex items-start justify-between gap-3">
               <div>
@@ -217,12 +252,12 @@
                 onclick={() => (selectedConnector = null)}>關閉</button
               >
             </div>
-            {#key selectedConnector}<ConnectorPanel
+            {#key activeConnector}<ConnectorPanel
                 {api}
-                connectorId={selectedConnector}
+                connectorId={activeConnector}
                 {demoMode}
                 title={selectedSource?.title ?? "連接器"}
-                fields={connectorFields[selectedConnector]}
+                fields={connectorFields[activeConnector]}
                 embedded
               />{/key}
           {:else}
@@ -243,25 +278,31 @@
         class="grid min-w-0 gap-3 sm:grid-cols-2 md:hidden"
       >
         {#each sources as source (source.id)}
-          <SourceCard
-            {api}
-            {...source}
-            id={source.id}
-            jobs={$jobs.data ?? []}
-            selected={selectedConnector === source.id}
-            onConfigure={() => selectConnector(source.id)}
+          <div
+            class={`min-w-0 scroll-mt-24 ${activeConnector === source.id ? "sm:col-span-2" : ""}`}
+            data-connector-settings={source.id}
+            use:scrollSelectedConnector={activeConnector === source.id}
           >
-            {#if selectedConnector === source.id}
-              {#key source.id}<ConnectorPanel
-                  {api}
-                  connectorId={source.id}
-                  {demoMode}
-                  title={source.title}
-                  fields={connectorFields[source.id]}
-                  embedded
-                />{/key}
-            {/if}
-          </SourceCard>
+            <SourceCard
+              {api}
+              {...source}
+              id={source.id}
+              jobs={$jobs.data ?? []}
+              selected={activeConnector === source.id}
+              onConfigure={() => selectConnector(source.id)}
+            >
+              {#if activeConnector === source.id}
+                {#key source.id}<ConnectorPanel
+                    {api}
+                    connectorId={source.id}
+                    {demoMode}
+                    title={source.title}
+                    fields={connectorFields[source.id]}
+                    embedded
+                  />{/key}
+              {/if}
+            </SourceCard>
+          </div>
         {/each}
       </section>
     </div>
