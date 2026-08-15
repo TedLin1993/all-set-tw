@@ -299,6 +299,107 @@ test("keeps the desktop overview within the viewport with long data", async ({
   expect(pageWidth.scroll).toBe(pageWidth.client);
 });
 
+test("keeps partial sync financial changes readable on mobile", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/sync-reports/latest", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "scheduled:mobile-partial-report",
+        startedAt: "2026-08-15T00:00:00.000Z",
+        completedAt: "2026-08-15T00:05:00.000Z",
+        status: "failed",
+        sources: [
+          {
+            connectorId: "esun",
+            status: "success",
+            completedAt: "2026-08-15T00:03:00.000Z",
+            recoveredAt: null,
+            newRecords: {
+              invoices: 0,
+              bankTransactions: 3,
+              investmentTransactions: 0,
+            },
+          },
+          {
+            connectorId: "taishin",
+            status: "failed",
+            completedAt: "2026-08-15T00:04:00.000Z",
+            recoveredAt: null,
+            newRecords: {
+              invoices: 0,
+              bankTransactions: 0,
+              investmentTransactions: 0,
+            },
+          },
+          {
+            connectorId: "einvoice",
+            status: "success",
+            completedAt: "2026-08-15T00:05:00.000Z",
+            recoveredAt: null,
+            newRecords: {
+              invoices: 2,
+              bankTransactions: 0,
+              investmentTransactions: 0,
+            },
+          },
+        ],
+        sourceSummary: {
+          total: 3,
+          success: 2,
+          failed: 1,
+          needsUserAction: 0,
+        },
+        newRecords: {
+          invoices: 2,
+          bankTransactions: 3,
+          investmentTransactions: 0,
+        },
+        financialChange: {
+          assets: -1_234_567,
+          creditCardDebt: 7_654_321,
+          netWorth: -8_888_888,
+        },
+        financialChangeUnavailableReason: null,
+        missingCurrencies: [],
+        recoveredAt: null,
+      }),
+    });
+  });
+
+  await page.goto("/#/overview");
+  await expect(
+    page.getByText("依 2/3 已更新來源計算，其餘沿用上次資料"),
+  ).toBeVisible();
+
+  for (const value of ["−NT$1,234,567", "+NT$7,654,321", "−NT$8,888,888"]) {
+    const amount = page.getByText(value, { exact: true });
+    await expect(amount).toBeVisible();
+    expect(
+      await amount.evaluate((element) => element.scrollWidth),
+      `${value} should not be truncated`,
+    ).toBeLessThanOrEqual(
+      await amount.evaluate((element) => element.clientWidth),
+    );
+  }
+
+  const pageWidth = () =>
+    page.evaluate(() => ({
+      client: document.documentElement.clientWidth,
+      scroll: document.documentElement.scrollWidth,
+    }));
+  expect((await pageWidth()).scroll).toBe((await pageWidth()).client);
+
+  await page.getByText("查看各資料來源", { exact: true }).click();
+  await expect(page.getByText("收合各資料來源", { exact: true })).toBeVisible();
+  await expect(page.getByText("玉山銀行", { exact: true })).toBeVisible();
+  await expect(page.getByText("台新銀行", { exact: true })).toBeVisible();
+  expect((await pageWidth()).scroll).toBe((await pageWidth()).client);
+});
+
 test("shows this month's cash flow on the overview and opens activity", async ({
   page,
 }) => {
