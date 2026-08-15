@@ -277,8 +277,7 @@
       >
         <Smartphone class="mt-0.5 size-5 shrink-0 text-steel" />
         <p class="text-sm leading-relaxed text-muted-foreground">
-          請先將 Taiwan Fin Hub 加入 iPhone／iPad
-          主畫面，再從主畫面開啟並啟用推播。
+          請先將「不用記帳」加入 iPhone／iPad 主畫面，再從主畫面開啟並啟用推播。
         </p>
       </div>
     {:else if !support.supported}

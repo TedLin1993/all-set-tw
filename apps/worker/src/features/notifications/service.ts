@@ -128,7 +128,7 @@ export async function sendTestNotification(env: Env) {
   requirePushConfiguration(env);
   return deliverPushPayload(env, {
     title: "推播測試成功",
-    body: "Taiwan Fin Hub 已經可以通知你同步狀態。",
+    body: "「不用記帳」已經可以通知你同步狀態。",
     url: "/#/settings",
     tag: "notification-test",
   });

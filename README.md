@@ -1,14 +1,18 @@
 <p align="center">
-  <img src="apps/web/public/icon-512x512.png" alt="Taiwan Fin Hub Logo" width="160">
+  <img src="apps/web/public/icon-512x512.png" alt="不用記帳 Logo" width="160">
 </p>
 
-# Taiwan Fin Hub
+# 不用記帳
 
-自架個人理財整合工具，將銀行、投資、信用卡與電子發票集中在同一個介面查看。
+**WEALTH OS**
+
+自動同步銀行、信用卡、投資與電子發票的自架個人財務整合工具。
 
 **可免費自架：** 可透過 [Cloudflare Workers Free Plan](https://developers.cloudflare.com/workers/platform/pricing/) 一鍵部署，不需要自行準備伺服器；一般個人低頻使用可從免費方案開始。
 
 > 本專案以 [kevchentw/taiwan-fin-hub](https://github.com/kevchentw/taiwan-fin-hub) 為基礎，持續擴充資料來源、同步流程與 UI/UX。感謝原作者與貢獻者奠定專案基礎。
+>
+> Repository 技術名稱沿用 `taiwan-fin-hub`，以維持既有部署連結與上游同步相容。
 
 ## 支援資料來源
 
