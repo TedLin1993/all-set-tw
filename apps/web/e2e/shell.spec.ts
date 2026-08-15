@@ -299,6 +299,82 @@ test("keeps the desktop overview within the viewport with long data", async ({
   expect(pageWidth.scroll).toBe(pageWidth.client);
 });
 
+test("keeps net worth comparison details readable across viewports", async ({
+  page,
+}) => {
+  await page.route("**/api/history/net-worth/chart", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          date: "2026-08-13",
+          netWorth: 2_254_854,
+          assetType: "deposit",
+          source: "bank",
+        },
+        {
+          date: "2026-08-14",
+          netWorth: 2_249_504,
+          assetType: "deposit",
+          source: "bank",
+        },
+      ]),
+    });
+  });
+
+  const comparisonRows = [
+    { label: "目前", date: undefined, value: "NT$2,249,504" },
+    { label: "較昨日", date: "2026/8/13", value: "NT$2,254,854" },
+    { label: "變化", date: undefined, value: "−NT$5,350 （−0.2%）" },
+  ] as const;
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 1280, height: 900 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/#/overview");
+
+    await expect(page.getByRole("heading", { name: "資產走勢" })).toBeVisible();
+    const comparisonCard = page
+      .getByText("目前", { exact: true })
+      .locator("xpath=ancestor::div[contains(@class, 'rounded-lg')][1]");
+
+    for (const { label, date, value } of comparisonRows) {
+      const labelElement = comparisonCard.getByText(label, { exact: true });
+      const row = labelElement.locator(
+        "xpath=ancestor::div[contains(@class, 'grid')][1]",
+      );
+      const amount = row.getByText(value, { exact: true });
+      const visibleElements = [labelElement, amount];
+
+      if (date) {
+        const dateElement = row.getByText(date, { exact: true });
+        await expect(dateElement).toBeVisible();
+        visibleElements.push(dateElement);
+      }
+
+      await expect(labelElement).toBeVisible();
+      await expect(amount).toBeVisible();
+      for (const element of visibleElements) {
+        expect(
+          await element.evaluate((node) => node.scrollWidth),
+          `${label} should not be truncated at ${viewport.width}px`,
+        ).toBeLessThanOrEqual(
+          await element.evaluate((node) => node.clientWidth),
+        );
+      }
+    }
+
+    const pageWidth = await page.evaluate(() => ({
+      client: document.documentElement.clientWidth,
+      scroll: document.documentElement.scrollWidth,
+    }));
+    expect(pageWidth.scroll).toBe(pageWidth.client);
+  }
+});
+
 test("keeps partial sync financial changes readable on mobile", async ({
   page,
 }) => {
