@@ -1,7 +1,7 @@
-/* Taiwan Fin Hub notification worker. Keep this file root-scoped for the PWA. */
+/* 不用記帳 notification worker. Keep this file root-scoped for the PWA. */
 self.addEventListener("push", (event) => {
   const fallback = {
-    title: "Taiwan Fin Hub",
+    title: "不用記帳",
     body: "同步狀態已更新。",
     url: "/#/overview",
     tag: "sync-status",

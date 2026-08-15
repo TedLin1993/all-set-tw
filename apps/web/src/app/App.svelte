@@ -131,11 +131,11 @@
       class="hidden border-r border-white/10 bg-ink px-6 py-7 text-white xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col"
     >
       <div class="px-2">
-        <h1 class="text-xl font-semibold tracking-normal">Taiwan Fin Hub</h1>
+        <h1 class="text-xl font-semibold tracking-normal">不用記帳</h1>
         <p
           class="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-steel/90"
         >
-          Wealth OS
+          WEALTH OS
         </p>
       </div>
       <nav class="mt-6 grid gap-1">
