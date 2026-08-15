@@ -280,7 +280,7 @@
         {/if}
       </div>
       <div
-        class="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-3 border-t border-ink/8 pt-3"
+        class="mt-3 grid min-w-0 gap-3 border-t border-ink/8 pt-3 md:grid-cols-[auto_minmax(18rem,28rem)] md:items-start md:justify-between"
       >
         <div class="flex min-w-0 flex-wrap items-center gap-2">
           <span class="shrink-0 text-xs font-semibold text-ink/50">比較</span>
@@ -299,27 +299,51 @@
         </div>
         {#if comparison && comparisonOption}
           {@const comparisonSign = comparison.changeValue > 0 ? "+" : ""}
-          <div class="min-w-0 text-right text-xs leading-relaxed text-ink/55">
-            <p class="truncate">
-              目前 {formatCurrency(comparison.currentValue)} · {comparisonOption.label}（{formatDate(
-                comparison.previousDate,
-              )}）
-              {formatCurrency(comparison.previousValue)}
-            </p>
-            <p
-              class={`font-semibold ${comparison.changeValue > 0 ? "text-moss" : comparison.changeValue < 0 ? "text-coral" : "text-ink/55"}`}
+          <div class="grid min-w-0 gap-2 rounded-lg bg-paper px-3 py-3 text-sm">
+            <div
+              class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3"
             >
-              變化 {comparison.changeValue < 0
-                ? ""
-                : comparisonSign}{formatCurrency(comparison.changeValue)}
-              {#if comparison.changePercent !== null}
-                （{comparison.changePercent > 0
-                  ? "+"
-                  : comparison.changePercent < 0
-                    ? "−"
-                    : ""}{Math.abs(comparison.changePercent).toFixed(1)}%）
-              {/if}
-            </p>
+              <span class="text-ink/45">目前</span>
+              <span
+                class="whitespace-nowrap text-right font-semibold text-ink/70 tabular-nums sm:text-base"
+                >{formatCurrency(comparison.currentValue)}</span
+              >
+            </div>
+            <div
+              class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3"
+            >
+              <span class="min-w-0">
+                <span class="block font-medium text-ink/50"
+                  >{comparisonOption.label}</span
+                >
+                <span class="mt-0.5 block text-xs text-ink/40">
+                  {formatDate(comparison.previousDate)}
+                </span>
+              </span>
+              <span
+                class="whitespace-nowrap text-right font-semibold text-ink/70 tabular-nums sm:text-base"
+                >{formatCurrency(comparison.previousValue)}</span
+              >
+            </div>
+            <div
+              class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3 border-t border-ink/8 pt-1.5"
+            >
+              <span class="font-semibold text-ink/50">變化</span>
+              <span
+                class={`whitespace-nowrap text-right font-semibold tabular-nums sm:text-base ${comparison.changeValue > 0 ? "text-moss" : comparison.changeValue < 0 ? "text-coral" : "text-ink/55"}`}
+              >
+                {comparison.changeValue < 0
+                  ? ""
+                  : comparisonSign}{formatCurrency(comparison.changeValue)}
+                {#if comparison.changePercent !== null}
+                  （{comparison.changePercent > 0
+                    ? "+"
+                    : comparison.changePercent < 0
+                      ? "−"
+                      : ""}{Math.abs(comparison.changePercent).toFixed(1)}%）
+                {/if}
+              </span>
+            </div>
           </div>
         {:else}
           <p class="text-xs text-ink/40">
