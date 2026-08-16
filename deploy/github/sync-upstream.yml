@@ -16,7 +16,7 @@ concurrency:
 jobs:
   sync:
     # 官方 repository 不需要同步自己；Deploy to Cloudflare 建立的副本才會執行。
-    if: github.repository != 'TedLin1993/taiwan-fin-hub'
+    if: github.repository != 'TedLin1993/taiwan-fin-hub' && github.repository != 'TedLin1993/all-set-tw'
     runs-on: ubuntu-latest
 
     steps:
