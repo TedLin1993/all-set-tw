@@ -11,8 +11,6 @@
 **可免費自架：** 可透過 [Cloudflare Workers Free Plan](https://developers.cloudflare.com/workers/platform/pricing/) 一鍵部署，不需要自行準備伺服器；一般個人低頻使用可從免費方案開始。
 
 > 本專案以 [kevchentw/taiwan-fin-hub](https://github.com/kevchentw/taiwan-fin-hub) 為基礎，持續擴充資料來源、同步流程與 UI/UX。感謝原作者與貢獻者奠定專案基礎。
->
-> GitHub repository 使用 `all-set-tw`；npm scope 與 Cloudflare 資源仍沿用 `taiwan-fin-hub`，以維持既有部署相容。
 
 ## 支援資料來源
 
