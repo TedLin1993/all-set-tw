@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   prepareObankCaptchaSession: vi.fn(),
   startEinvoiceSyncRun: vi.fn(),
   syncCtbc: vi.fn(),
+  syncEsun: vi.fn(),
   syncObank: vi.fn(),
   syncTaishin: vi.fn(),
 }));
@@ -39,7 +40,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncCathaybk: vi.fn(),
   syncCtbc: mocks.syncCtbc,
   syncEinvoice: vi.fn(),
-  syncEsun: vi.fn(),
+  syncEsun: mocks.syncEsun,
   syncSinopac: vi.fn(),
   syncObank: mocks.syncObank,
   syncTaishin: mocks.syncTaishin,
@@ -89,6 +90,18 @@ beforeEach(() => {
   mocks.syncCtbc.mockResolvedValue({
     success: true,
     connectorId: "ctbc",
+    scope: "all",
+    records: 4,
+    newRecords: {
+      invoices: 0,
+      bankTransactions: 4,
+      investmentTransactions: 0,
+    },
+    cursorUpdated: true,
+  });
+  mocks.syncEsun.mockResolvedValue({
+    success: true,
+    connectorId: "esun",
     scope: "all",
     records: 4,
     newRecords: {
@@ -206,6 +219,31 @@ describe("CTBC sync route", () => {
     expect(failed.status).toBe(502);
     await expect(failed.json()).resolves.toMatchObject({
       error: { code: "CTBC_CONNECTION_FAILED" },
+    });
+  });
+});
+
+describe("E.SUN sync route", () => {
+  it("returns the same safe error message persisted by the sync service", async () => {
+    mocks.syncEsun.mockRejectedValueOnce(
+      new Error(
+        "E.SUN browser login: duplicate-login dialog kept reappearing.",
+      ),
+    );
+
+    const response = await syncRoutes.request(
+      "/connectors/esun/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "SYNC_FAILED",
+        message:
+          "E.SUN browser login: duplicate-login dialog kept reappearing.",
+      },
     });
   });
 });
