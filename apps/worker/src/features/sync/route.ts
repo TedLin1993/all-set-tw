@@ -358,48 +358,64 @@ async function syncRouteResponse(
     return c.json(await result);
   } catch (error) {
     if (error instanceof SyncAlreadyRunningError) {
-      return jsonError("SYNC_ALREADY_RUNNING", error.message, 409);
+      return jsonError("SYNC_ALREADY_RUNNING", safeErrorMessage(error), 409);
     }
     if (error instanceof TdccVerificationRequiredError) {
       return jsonError(
         error.channel === "sms"
           ? "TDCC_SMS_OTP_REQUIRED"
           : "TDCC_EMAIL_OTP_REQUIRED",
-        error.message,
+        safeErrorMessage(error),
         400,
       );
     }
     if (error instanceof TdccConnectionError) {
-      return jsonError("TDCC_CONNECTION_FAILED", error.message, 400);
+      return jsonError("TDCC_CONNECTION_FAILED", safeErrorMessage(error), 400);
     }
     if (error instanceof NeedsUserActionError) {
-      return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      return jsonError("USER_ACTION_REQUIRED", safeErrorMessage(error), 400);
     }
     if (error instanceof EInvoiceProtocolUnavailableError) {
-      return jsonError("CONNECTOR_PROTOCOL_UNAVAILABLE", error.message, 503);
+      return jsonError(
+        "CONNECTOR_PROTOCOL_UNAVAILABLE",
+        safeErrorMessage(error),
+        503,
+      );
     }
     if (error instanceof SinopacBrowserCapacityError) {
-      const response = jsonError("SINOPAC_BROWSER_BUSY", error.message, 429);
+      const response = jsonError(
+        "SINOPAC_BROWSER_BUSY",
+        safeErrorMessage(error),
+        429,
+      );
       response.headers.set("Retry-After", String(error.retryAfterSeconds));
       return response;
     }
     if (error instanceof TaishinBrowserCapacityError) {
-      const response = jsonError("TAISHIN_BROWSER_BUSY", error.message, 429);
+      const response = jsonError(
+        "TAISHIN_BROWSER_BUSY",
+        safeErrorMessage(error),
+        429,
+      );
       response.headers.set("Retry-After", String(error.retryAfterSeconds));
       return response;
     }
     if (error instanceof CtbcConnectionError) {
-      return jsonError("CTBC_CONNECTION_FAILED", error.message, 502);
+      return jsonError("CTBC_CONNECTION_FAILED", safeErrorMessage(error), 502);
     }
     if (error instanceof TaishinConnectionError) {
-      return jsonError("TAISHIN_CONNECTION_FAILED", error.message, 502);
+      return jsonError(
+        "TAISHIN_CONNECTION_FAILED",
+        safeErrorMessage(error),
+        502,
+      );
     }
     if (
       error instanceof ObankConnectionError ||
       error instanceof ObankProtocolError
     ) {
-      return jsonError("OBANK_CONNECTION_FAILED", error.message, 502);
+      return jsonError("OBANK_CONNECTION_FAILED", safeErrorMessage(error), 502);
     }
-    throw error;
+    return jsonError("SYNC_FAILED", safeErrorMessage(error), 500);
   }
 }
