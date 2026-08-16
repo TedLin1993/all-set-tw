@@ -30,13 +30,13 @@
         "description": "用於加密儲存在 D1 的連接器憑證。**請務必修改預設值**，可使用 `openssl rand -hex 32` 產生隨機字串；部署後若更換此金鑰，現有連接器設定將無法解密。"
       },
       "TEAM_DOMAIN": {
-        "description": "Cloudflare Access 的 Team Domain，例如 `https://your-team.cloudflareaccess.com`。**部署時可先留空**，待將存取模式切換為「Restricted」後再填入。"
+        "description": "Cloudflare Access 的 Team Domain。部署時先保留 `https://placeholder.invalid`；待將存取模式切換為「Restricted」後，**務必**改成實際 Team Domain。"
       },
       "POLICY_AUD": {
-        "description": "Cloudflare Access 自架應用程式的 AUD Tag。**部署時可先留空**，待將存取模式切換為「Restricted」並建立 Access 應用程式後再填入。"
+        "description": "Cloudflare Access 自架應用程式的 AUD Tag。部署時先保留 `temporary-placeholder`；待將存取模式切換為「Restricted」並建立 Access 應用程式後，**務必**改成實際 AUD Tag。"
       },
       "POLICY_AUDS": {
-        "description": "(開發用) 多個 Cloudflare Access AUD Tag，使用逗號或空白分隔；可用來讓同一個 Worker 接受 production/private 等多個 Access Application 的 JWT。"
+        "description": "多個 Cloudflare Access AUD Tag，使用逗號或空白分隔。部署時先保留 `temporary-placeholder`；只有單一 Access Application 時，部署後請刪除此變數；需要接受多個 Application 時，請改成實際 AUD Tag 清單。"
       },
       "DEMO_MODE": {
         "description": "設為 `true`、`1`、`yes` 或 `on` 可啟用公開唯讀 Demo 模式；Demo 模式不需要 `TEAM_DOMAIN`、`POLICY_AUD` 或 `CONFIG_ENCRYPTION_KEY`。"
