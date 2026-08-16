@@ -135,7 +135,7 @@
         <p
           class="mt-2 text-xs font-semibold uppercase tracking-[0.16em] text-steel/90"
         >
-          WEALTH OS
+          ALL SET
         </p>
       </div>
       <nav class="mt-6 grid gap-1">

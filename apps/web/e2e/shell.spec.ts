@@ -124,7 +124,7 @@ test("loads the responsive shell and changes primary views", async ({
 }) => {
   await page.goto("/");
   await expect(page.getByText("不用記帳").first()).toBeVisible();
-  await expect(page.getByText("WEALTH OS").first()).toBeVisible();
+  await expect(page.getByText("ALL SET").first()).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "總覽", exact: true }),
   ).toBeVisible();

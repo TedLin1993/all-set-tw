@@ -39,7 +39,7 @@ jobs:
             # 舊版 Cloudflare 部署 repo 尚未包含 updater script；只下載至 runner 暫存目錄。
             updater="$RUNNER_TEMP/sync-upstream.mjs"
             curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-              "https://raw.githubusercontent.com/TedLin1993/taiwan-fin-hub/main/scripts/sync-upstream.mjs" \
+              "https://raw.githubusercontent.com/TedLin1993/all-set-tw/main/scripts/sync-upstream.mjs" \
               --output "$updater"
           fi
 

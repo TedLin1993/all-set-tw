@@ -6,7 +6,7 @@ import path from "node:path";
 
 const WORKFLOW_PREFIX = ".github/workflows/";
 const WORKFLOW_PATHSPEC = ".github/workflows";
-const DEFAULT_UPSTREAM_URL = "https://github.com/TedLin1993/taiwan-fin-hub.git";
+const DEFAULT_UPSTREAM_URL = "https://github.com/TedLin1993/all-set-tw.git";
 const UPSTREAM_TRAILER = "Taiwan-Fin-Hub-Upstream";
 
 class SyncError extends Error {}
