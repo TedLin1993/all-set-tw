@@ -4,7 +4,7 @@
 
 # 不用記帳
 
-**WEALTH OS**
+**ALL SET**
 
 自動同步銀行、信用卡、投資與電子發票的自架個人財務整合工具。
 
@@ -12,7 +12,7 @@
 
 > 本專案以 [kevchentw/taiwan-fin-hub](https://github.com/kevchentw/taiwan-fin-hub) 為基礎，持續擴充資料來源、同步流程與 UI/UX。感謝原作者與貢獻者奠定專案基礎。
 >
-> Repository 技術名稱沿用 `taiwan-fin-hub`，以維持既有部署連結與上游同步相容。
+> GitHub repository 使用 `all-set-tw`；npm scope 與 Cloudflare 資源仍沿用 `taiwan-fin-hub`，以維持既有部署相容。
 
 ## 支援資料來源
 
@@ -78,7 +78,7 @@
 
 點擊下方按鈕。Cloudflare 會在你的 GitHub 帳號建立新的 repository、自動建立 D1 Database，並部署至 Cloudflare Workers：
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TedLin1993/taiwan-fin-hub)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/TedLin1993/all-set-tw)
 
 Cloudflare Builds 會在 build 階段自動檢查並建立排程同步所需的 Queue；正式部署腳本也會再次檢查。既有安裝更新到使用 Queue 的版本時不需要手動建立資源。
 
@@ -169,7 +169,7 @@ git push
 
 每次執行時，workflow 會：
 
-1. 取得 `TedLin1993/taiwan-fin-hub` 的最新 `main`
+1. 取得 `TedLin1993/all-set-tw` 的最新 `main`
 2. 以前次同步版本為基準進行安全三方合併
 3. 有新版本時將更新推送至部署 repository
 4. 由 Cloudflare Workers Builds 自動重新部署
