@@ -65,3 +65,16 @@ describe("O-Bank bank display", () => {
     });
   });
 });
+
+describe("HNCB bank display", () => {
+  it("derives bank code 008 from deposit accounts and ignores credit cards", () => {
+    expect(deriveBankMatchKey("hncb", "bank:hncb:777201604933:TWD")).toEqual({
+      bankCode: "008",
+      last4: "4933",
+    });
+    expect(deriveBankMatchKey("hncb", "credit:hncb:8103")).toEqual({
+      bankCode: null,
+      last4: null,
+    });
+  });
+});

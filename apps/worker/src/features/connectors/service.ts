@@ -36,7 +36,8 @@ export async function getConnectorSettingsView(
     } else if (
       connectorId === "esun" ||
       connectorId === "sinopac" ||
-      connectorId === "taishin"
+      connectorId === "taishin" ||
+      connectorId === "hncb"
     ) {
       sessionAvailable =
         typeof stored.sessionCookies === "string" &&

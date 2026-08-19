@@ -27,6 +27,7 @@ vi.mock("../../../src/platform/crypto", () => ({
 
 import {
   ConnectorConfigMissingError,
+  getConnectorSettingsView,
   updateConnectorSettings,
 } from "../../../src/features/connectors/service";
 
@@ -146,5 +147,62 @@ describe("connector settings state boundaries", () => {
     );
     expect(saved.publicConfig).toBeNull();
     expect(mocks.clearConnectorCursor).not.toHaveBeenCalled();
+  });
+
+  it("reports HNCB session availability from encrypted cookies", async () => {
+    mocks.findConnectorSettings.mockResolvedValue({
+      id: "hncb-settings",
+      connector_id: "hncb",
+      encrypted_config: JSON.stringify({
+        userId: "A123456789",
+        account: "user",
+        password: "password",
+        sessionCookies: "hncb-cookie",
+        sessionCreatedAt: "2026-08-19T08:00:00.000Z",
+      }),
+      public_config: null,
+      sync_cursor: JSON.stringify({ syncedAt: "2026-08-19T08:00:00.000Z" }),
+      created_at: "2026-08-19T07:00:00.000Z",
+      updated_at: "2026-08-19T08:00:00.000Z",
+    });
+
+    await expect(getConnectorSettingsView(env, "hncb")).resolves.toMatchObject({
+      connectorId: "hncb",
+      credentialsComplete: true,
+      sessionAvailable: true,
+    });
+  });
+
+  it("clears HNCB session state when credentials change", async () => {
+    mocks.findConnectorSettings.mockResolvedValue({
+      id: "hncb-settings",
+      connector_id: "hncb",
+      encrypted_config: JSON.stringify({
+        userId: "A123456789",
+        account: "old-user",
+        password: "old-password",
+        sessionCookies: "old-cookie",
+        sessionCreatedAt: "2026-08-19T08:00:00.000Z",
+        browserSessionId: "pending-session",
+      }),
+      public_config: null,
+      sync_cursor: JSON.stringify({ syncedAt: "2026-08-19T08:00:00.000Z" }),
+      created_at: "2026-08-19T07:00:00.000Z",
+      updated_at: "2026-08-19T08:00:00.000Z",
+    });
+
+    await updateConnectorSettings(env, "hncb", { account: "new-user" });
+
+    const saved = mocks.saveConnectorSettings.mock.calls[0]![1];
+    expect(JSON.parse(saved.encryptedConfig)).toEqual({
+      userId: "A123456789",
+      account: "new-user",
+      password: "old-password",
+    });
+    expect(mocks.clearConnectorCursor).toHaveBeenCalledWith(
+      env.DB,
+      "hncb",
+      expect.any(String),
+    );
   });
 });

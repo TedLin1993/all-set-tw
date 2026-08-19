@@ -9,6 +9,11 @@ import {
 import { zValidator } from "@hono/zod-validator";
 import { type Context, type Hono } from "hono";
 import { z } from "zod";
+import {
+  HncbBrowserCapacityError,
+  HncbConnectionError,
+  HncbVerificationRequiredError,
+} from "../../connectors/hncb";
 import { SinopacBrowserCapacityError } from "../../connectors/sinopac";
 import {
   TaishinBrowserCapacityError,
@@ -44,6 +49,13 @@ const sinopacSyncBodySchema = z.object({
 });
 
 const taishinSyncBodySchema = z.object({
+  captcha: z
+    .string()
+    .regex(/^\d{4,8}$/)
+    .optional(),
+});
+
+const hncbSyncBodySchema = z.object({
   captcha: z
     .string()
     .regex(/^\d{4,8}$/)
@@ -307,6 +319,53 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     },
   );
 
+  api.post("/connectors/hncb/captcha", async (c) => {
+    try {
+      return c.json(await prepareConnectorChallenge(c.env, "hncb"));
+    } catch (error) {
+      if (error instanceof SyncAlreadyRunningError) {
+        return jsonError(
+          "SYNC_ALREADY_RUNNING",
+          "華南銀行已有驗證或同步作業正在進行。",
+          409,
+        );
+      }
+      if (error instanceof HncbBrowserCapacityError) {
+        const response = jsonError("HNCB_BROWSER_BUSY", error.message, 429);
+        response.headers.set("Retry-After", String(error.retryAfterSeconds));
+        return response;
+      }
+      if (error instanceof HncbConnectionError) {
+        return jsonError("HNCB_CAPTCHA_FAILED", safeErrorMessage(error), 502);
+      }
+      if (
+        error instanceof NeedsUserActionError ||
+        error instanceof HncbVerificationRequiredError
+      ) {
+        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      }
+      return jsonError("HNCB_CAPTCHA_FAILED", safeErrorMessage(error), 502);
+    }
+  });
+
+  api.post(
+    "/connectors/hncb/sync",
+    zValidator(
+      "json",
+      hncbSyncBodySchema,
+      validationHook("INVALID_REQUEST", "HNCB sync options are invalid."),
+    ),
+    async (c) => {
+      const overrides = c.req.valid("json");
+      return syncRouteResponse(
+        c,
+        withManualSyncLock(c.env, "hncb", SYNC_SCOPE_ALL, () =>
+          runConnectorSync(c.env, "hncb", "manual", SYNC_SCOPE_ALL, overrides),
+        ),
+      );
+    },
+  );
+
   api.post("/connectors/obank/captcha", async (c) => {
     try {
       return c.json(await prepareConnectorChallenge(c.env, "obank"));
@@ -409,6 +468,18 @@ async function syncRouteResponse(
         safeErrorMessage(error),
         502,
       );
+    }
+    if (error instanceof HncbBrowserCapacityError) {
+      const response = jsonError(
+        "HNCB_BROWSER_BUSY",
+        safeErrorMessage(error),
+        429,
+      );
+      response.headers.set("Retry-After", String(error.retryAfterSeconds));
+      return response;
+    }
+    if (error instanceof HncbConnectionError) {
+      return jsonError("HNCB_CONNECTION_FAILED", safeErrorMessage(error), 502);
     }
     if (
       error instanceof ObankConnectionError ||

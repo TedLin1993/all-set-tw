@@ -10,6 +10,7 @@ import {
   linkCanonicalBankAccountsStatement,
   reconcileEsunLifecycleShadowStatements,
   reconcileEsunSingleCardSummaryAccountStatements,
+  reconcileHncbLegacyTransactionStatements,
   reconcileSinopacLegacyTransactionStatements,
 } from "../../../src/features/sync/repository";
 
@@ -247,6 +248,41 @@ describe("staged sync persistence", () => {
     ).toEqual({ canonicalAccountId: "ctbc:bank:ctbc:12345" });
   });
 
+  it("links TDCC bank 008 records to the direct HNCB account", async () => {
+    const db = createDb();
+    db.database.exec(`
+      INSERT INTO bank_accounts
+        (id, connector_id, source_id, institution_name, account_name, account_type,
+         currency, bank_code, account_last4, raw_payload, created_at, updated_at)
+      VALUES
+        ('hncb:bank:hncb:777201604933', 'hncb', 'bank:hncb:777201604933', '華南銀行',
+         '末五碼 04933', 'savings', 'TWD', '008', '4933', '{}', '2026-08-19', '2026-08-19'),
+        ('tdcc:settlement:008:777201604933', 'tdcc', 'settlement:008:777201604933', '華南銀行',
+         '交割帳戶', 'settlement_cash', 'TWD', '008', '4933', '{}', '2026-08-19', '2026-08-19');
+    `);
+
+    await db.batch([
+      linkCanonicalBankAccountsStatement(
+        db as unknown as D1Database,
+      ) as unknown as D1PreparedStatement,
+    ]);
+
+    expect(
+      db.database
+        .prepare(
+          `SELECT connector_id AS connectorId, canonical_account_id AS canonicalAccountId
+           FROM bank_accounts WHERE bank_code = '008' ORDER BY connector_id`,
+        )
+        .all(),
+    ).toEqual([
+      { connectorId: "hncb", canonicalAccountId: null },
+      {
+        connectorId: "tdcc",
+        canonicalAccountId: "hncb:bank:hncb:777201604933",
+      },
+    ]);
+  });
+
   it("migrates preferences and removes E.SUN lifecycle shadow transactions", async () => {
     const db = createDb();
     db.database.exec(`
@@ -461,6 +497,54 @@ describe("staged sync persistence", () => {
         .prepare("SELECT target_id AS targetId FROM classification_overrides")
         .get(),
     ).toEqual({ targetId: "sinopac-canonical" });
+  });
+
+  it("migrates preferences and removes garbled HNCB transaction ids", async () => {
+    const db = createDb();
+    db.database.exec(`
+      INSERT INTO bank_accounts
+        (id, connector_id, source_id, account_type, currency, raw_payload, created_at, updated_at)
+      VALUES
+        ('hncb:credit:hncb:8103', 'hncb', 'credit:hncb:8103', 'credit', 'TWD', '{}', '2026-07-01', '2026-07-01');
+
+      INSERT INTO bank_transactions
+        (id, connector_id, account_id, source_id, posted_date, authorized_at, amount, currency, description, status, raw_payload, created_at, updated_at)
+      VALUES
+        ('hncb-legacy', 'hncb', 'hncb:credit:hncb:8103', 'hncb:card:tx:8103:2026-07-22:230:abc123:1', '2026-07-27', '2026-07-22', -230, 'TWD', '????', 'posted', '{}', '2026-07-19', '2026-07-19'),
+        ('hncb-orphan', 'hncb', 'hncb:credit:hncb:8103', 'hncb:card:tx:8103:2026-06-01:80:def456:1', '2026-06-01', '2026-06-01', -80, 'TWD', '????', 'posted', '{}', '2026-06-01', '2026-06-01'),
+        ('hncb-canonical', 'hncb', 'hncb:credit:hncb:8103', 'hncb:card:tx:v2:8103:2026-07-22:230:1', '2026-07-27', '2026-07-22', -230, 'TWD', '連加＊餓肆', 'posted', '{}', '2026-07-22', '2026-07-22');
+
+      INSERT INTO bank_transaction_preferences
+        (transaction_id, excluded_from_calculation, created_at, updated_at)
+      VALUES ('hncb-legacy', 1, '2026-07-19', '2026-07-19');
+
+      INSERT INTO classification_overrides
+        (id, target_type, target_id, category_id, created_at, updated_at)
+      VALUES ('hncb-legacy-override', 'bank_transaction', 'hncb-legacy', 'shopping', '2026-07-19', '2026-07-19');
+    `);
+
+    await db.batch(
+      reconcileHncbLegacyTransactionStatements(db as unknown as D1Database),
+    );
+
+    expect(
+      db.database
+        .prepare("SELECT id FROM bank_transactions ORDER BY id")
+        .all()
+        .map((row) => row.id),
+    ).toEqual(["hncb-canonical"]);
+    expect(
+      db.database
+        .prepare(
+          "SELECT transaction_id AS transactionId FROM bank_transaction_preferences",
+        )
+        .get(),
+    ).toEqual({ transactionId: "hncb-canonical" });
+    expect(
+      db.database
+        .prepare("SELECT target_id AS targetId FROM classification_overrides")
+        .get(),
+    ).toEqual({ targetId: "hncb-canonical" });
   });
 
   it("stages records in bounded JSON chunks and advances the cursor only after promotion", async () => {

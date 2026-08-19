@@ -3,6 +3,7 @@ import type { SyncTrigger } from "@taiwan-fin-hub/db";
 import type { Env } from "../../platform/env";
 import {
   prepareSinopacCaptchaSession,
+  prepareHncbCaptchaSession,
   prepareTaishinCaptchaSession,
   prepareObankCaptchaSession,
   syncCathaybk,
@@ -10,6 +11,7 @@ import {
   syncEsun,
   syncSinopac,
   syncObank,
+  syncHncb,
   syncTaishin,
   syncTdcc,
   SYNC_SCOPE_ALL,
@@ -20,6 +22,7 @@ import {
   type ObankSyncOverrides,
   type SyncOutcome,
   type SyncScope,
+  type HncbSyncOverrides,
   type TaishinSyncOverrides,
   type TdccSyncOverrides,
 } from "./service";
@@ -72,6 +75,11 @@ export const connectorRuntimeRegistry: Record<
     run: (env, trigger, _scope, overrides) =>
       syncTaishin(env, trigger, overrides as TaishinSyncOverrides),
     prepareChallenge: prepareTaishinCaptchaSession,
+  },
+  hncb: {
+    run: (env, trigger, _scope, overrides) =>
+      syncHncb(env, trigger, overrides as HncbSyncOverrides),
+    prepareChallenge: prepareHncbCaptchaSession,
   },
   obank: {
     run: (env, trigger, _scope, overrides) =>

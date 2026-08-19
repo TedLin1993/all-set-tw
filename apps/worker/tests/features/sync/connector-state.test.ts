@@ -71,6 +71,29 @@ describe("connector state boundaries", () => {
     });
   });
 
+  it("removes reusable HNCB browser sessions from the cursor", () => {
+    expect(
+      splitConnectorCursorState(
+        "hncb",
+        JSON.stringify({
+          sessionCookies: "sensitive-cookie",
+          sessionCreatedAt: "2026-08-19T08:00:00.000Z",
+          browserSessionId: "pending-session",
+          captcha: "1234",
+          syncedAt: "2026-08-19T08:01:00.000Z",
+        }),
+      ),
+    ).toEqual({
+      safeCursor: JSON.stringify({ syncedAt: "2026-08-19T08:01:00.000Z" }),
+      secretState: {
+        sessionCookies: "sensitive-cookie",
+        sessionCreatedAt: "2026-08-19T08:00:00.000Z",
+        browserSessionId: "pending-session",
+        captcha: "1234",
+      },
+    });
+  });
+
   it("keeps TDCC trade watermarks while encrypting device session state", () => {
     expect(
       splitConnectorCursorState(

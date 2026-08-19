@@ -135,12 +135,27 @@ export function reconcileEsunLifecycleShadowStatements(db: D1Database) {
 export function reconcileEsunSingleCardSummaryAccountStatements(
   db: D1Database,
 ) {
+  return reconcileSingleCardSummaryAccountStatements(db, "esun");
+}
+
+export function reconcileHncbSingleCardSummaryAccountStatements(
+  db: D1Database,
+) {
+  return reconcileSingleCardSummaryAccountStatements(db, "hncb");
+}
+
+// 早期同步在讀不到卡號末四碼時會寫入 credit:<connector>:main 摘要帳戶；
+// 之後解析出實體卡就會多出一筆孤兒帳戶，只有單張卡時可以安全併回實體卡。
+function reconcileSingleCardSummaryAccountStatements(
+  db: D1Database,
+  connectorId: "esun" | "hncb",
+) {
   const mainAccountId = `(SELECT id FROM bank_accounts
-    WHERE connector_id = 'esun' AND source_id = 'credit:esun:main')`;
-  const physicalAccountFilter = `connector_id = 'esun'
+    WHERE connector_id = '${connectorId}' AND source_id = 'credit:${connectorId}:main')`;
+  const physicalAccountFilter = `connector_id = '${connectorId}'
     AND account_type = 'credit'
-    AND source_id LIKE 'credit:esun:%'
-    AND source_id <> 'credit:esun:main'
+    AND source_id LIKE 'credit:${connectorId}:%'
+    AND source_id <> 'credit:${connectorId}:main'
     AND canonical_account_id IS NULL`;
   const physicalAccountId = `(SELECT id FROM bank_accounts
     WHERE ${physicalAccountFilter}
@@ -261,19 +276,83 @@ export function reconcileSinopacLegacyTransactionStatements(db: D1Database) {
   ];
 }
 
+export function reconcileHncbLegacyTransactionStatements(db: D1Database) {
+  const match = `canonical.connector_id = legacy.connector_id
+      AND canonical.account_id = legacy.account_id
+      AND (
+        substr(canonical.authorized_at, 1, 10) = substr(legacy.authorized_at, 1, 10)
+        OR substr(canonical.authorized_at, 1, 10) = substr(legacy.posted_date, 1, 10)
+        OR substr(canonical.posted_date, 1, 10) = substr(legacy.posted_date, 1, 10)
+        OR substr(canonical.posted_date, 1, 10) = substr(legacy.authorized_at, 1, 10)
+      )
+      AND canonical.amount = legacy.amount
+      AND canonical.currency = legacy.currency`;
+  const isLegacy = `legacy.connector_id = 'hncb'
+      AND legacy.source_id LIKE 'hncb:card:tx:%'
+      AND legacy.source_id NOT LIKE 'hncb:card:tx:v2:%'`;
+  const isCanonical = `canonical.connector_id = 'hncb'
+      AND canonical.source_id LIKE 'hncb:card:tx:v2:%'`;
+  const leftoverLegacy = `connector_id = 'hncb'
+      AND source_id LIKE 'hncb:card:tx:%'
+      AND source_id NOT LIKE 'hncb:card:tx:v2:%'`;
+
+  return [
+    db.prepare(
+      `INSERT INTO bank_transaction_preferences
+        (transaction_id, excluded_from_calculation, created_at, updated_at)
+       SELECT canonical.id, preference.excluded_from_calculation,
+              preference.created_at, preference.updated_at
+       FROM bank_transactions legacy
+       JOIN bank_transactions canonical ON ${match}
+       JOIN bank_transaction_preferences preference
+         ON preference.transaction_id = legacy.id
+       WHERE ${isLegacy} AND ${isCanonical}
+       ON CONFLICT(transaction_id) DO NOTHING`,
+    ),
+    db.prepare(
+      `INSERT INTO classification_overrides
+        (id, target_type, target_id, category_id, created_at, updated_at)
+       SELECT 'override:bank_transaction:' || canonical.id,
+              'bank_transaction', canonical.id, override.category_id,
+              override.created_at, override.updated_at
+       FROM bank_transactions legacy
+       JOIN bank_transactions canonical ON ${match}
+       JOIN classification_overrides override
+         ON override.target_type = 'bank_transaction'
+        AND override.target_id = legacy.id
+       WHERE ${isLegacy} AND ${isCanonical}
+       ON CONFLICT(target_type, target_id) DO NOTHING`,
+    ),
+    db.prepare(
+      `DELETE FROM bank_transaction_preferences
+       WHERE transaction_id IN (
+         SELECT id FROM bank_transactions WHERE ${leftoverLegacy}
+       )`,
+    ),
+    db.prepare(
+      `DELETE FROM classification_overrides
+       WHERE target_type = 'bank_transaction'
+         AND target_id IN (
+           SELECT id FROM bank_transactions WHERE ${leftoverLegacy}
+         )`,
+    ),
+    db.prepare(`DELETE FROM bank_transactions WHERE ${leftoverLegacy}`),
+  ];
+}
+
 export function linkCanonicalBankAccountsStatement(db: D1Database) {
   return db.prepare(
     `UPDATE bank_accounts
     SET canonical_account_id = (
       SELECT direct.id FROM bank_accounts direct
-      WHERE direct.connector_id IN ('esun', 'cathaybk', 'ctbc', 'obank')
+      WHERE direct.connector_id IN ('esun', 'cathaybk', 'ctbc', 'obank', 'hncb')
         AND direct.bank_code = bank_accounts.bank_code
         AND direct.account_last4 = bank_accounts.account_last4
         AND direct.currency = bank_accounts.currency
       ORDER BY direct.connector_id
       LIMIT 1
     )
-    WHERE connector_id NOT IN ('esun', 'cathaybk', 'ctbc', 'obank')
+    WHERE connector_id NOT IN ('esun', 'cathaybk', 'ctbc', 'obank', 'hncb')
       AND bank_code IS NOT NULL
       AND account_last4 IS NOT NULL`,
   );

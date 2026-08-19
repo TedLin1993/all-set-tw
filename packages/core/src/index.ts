@@ -277,6 +277,7 @@ export const supportedConnectorIds = [
   "taishin",
   "ctbc",
   "obank",
+  "hncb",
 ] as const;
 export type ConnectorId = (typeof supportedConnectorIds)[number];
 
@@ -497,6 +498,35 @@ export const connectorCatalog = {
     resetOnCredentialChangeFields: [
       "pendingSession",
       "pendingSessionExpiresAt",
+      "captcha",
+    ],
+  },
+  hncb: {
+    id: "hncb",
+    title: "華南銀行",
+    description: "存款帳戶與餘額；信用卡帳單與刷卡明細",
+    connectionMode: "browser_captcha_session",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: [],
+    credentialFields: ["userId", "account", "password"],
+    secretStateFields: [
+      "sessionCookies",
+      "sessionCreatedAt",
+      "browserSessionId",
+      "captcha",
+    ],
+    resetOnCredentialChangeFields: [
+      "sessionCookies",
+      "sessionCreatedAt",
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captchaDigitCount",
       "captcha",
     ],
   },

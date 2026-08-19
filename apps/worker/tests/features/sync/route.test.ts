@@ -4,6 +4,10 @@ import {
   ObankConnectionError,
 } from "@taiwan-fin-hub/connectors";
 import {
+  HncbBrowserCapacityError,
+  HncbConnectionError,
+} from "../../../src/connectors/hncb";
+import {
   TaishinBrowserCapacityError,
   TaishinConnectionError,
 } from "../../../src/connectors/taishin";
@@ -13,11 +17,13 @@ const mocks = vi.hoisted(() => ({
   cancelQueuedEinvoiceSyncRun: vi.fn(),
   enqueueEinvoiceSyncChunk: vi.fn(),
   prepareTaishinCaptchaSession: vi.fn(),
+  prepareHncbCaptchaSession: vi.fn(),
   prepareObankCaptchaSession: vi.fn(),
   startEinvoiceSyncRun: vi.fn(),
   syncCtbc: vi.fn(),
   syncEsun: vi.fn(),
   syncObank: vi.fn(),
+  syncHncb: vi.fn(),
   syncTaishin: vi.fn(),
 }));
 
@@ -33,6 +39,7 @@ vi.mock("../../../src/features/sync/scheduler-queue", () => ({
 vi.mock("../../../src/features/sync/service", () => ({
   NeedsUserActionError: class NeedsUserActionError extends Error {},
   prepareSinopacCaptchaSession: vi.fn(),
+  prepareHncbCaptchaSession: mocks.prepareHncbCaptchaSession,
   prepareTaishinCaptchaSession: mocks.prepareTaishinCaptchaSession,
   prepareObankCaptchaSession: mocks.prepareObankCaptchaSession,
   safeErrorMessage: (error: unknown) =>
@@ -43,6 +50,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncEsun: mocks.syncEsun,
   syncSinopac: vi.fn(),
   syncObank: mocks.syncObank,
+  syncHncb: mocks.syncHncb,
   syncTaishin: mocks.syncTaishin,
   syncTdcc: vi.fn(),
   SyncAlreadyRunningError: class SyncAlreadyRunningError extends Error {},
@@ -74,6 +82,24 @@ beforeEach(() => {
     captchaImage: "data:image/jpeg;base64,AQID",
     expiresAt: "2026-07-23T12:02:00.000Z",
     digitCount: 6,
+  });
+  mocks.prepareHncbCaptchaSession.mockResolvedValue({
+    captchaImage: "data:image/jpeg;base64,AQID",
+    expiresAt: "2026-08-19T08:02:00.000Z",
+    digitCount: 4,
+    captchaKind: "numeric",
+  });
+  mocks.syncHncb.mockResolvedValue({
+    success: true,
+    connectorId: "hncb",
+    scope: "all",
+    records: 3,
+    newRecords: {
+      invoices: 0,
+      bankTransactions: 3,
+      investmentTransactions: 0,
+    },
+    cursorUpdated: true,
   });
   mocks.syncTaishin.mockResolvedValue({
     success: true,
@@ -318,6 +344,80 @@ describe("Taishin sync routes", () => {
     expect(failed.status).toBe(502);
     await expect(failed.json()).resolves.toMatchObject({
       error: { code: "TAISHIN_CONNECTION_FAILED" },
+    });
+  });
+});
+
+describe("HNCB sync routes", () => {
+  it("returns the manual CAPTCHA metadata", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/hncb/captcha",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      digitCount: 4,
+      captchaKind: "numeric",
+      captchaImage: "data:image/jpeg;base64,AQID",
+    });
+  });
+
+  it("accepts four numeric digits and rejects malformed input", async () => {
+    const valid = await syncRoutes.request(
+      "/connectors/hncb/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "1234" }),
+      },
+      env,
+    );
+    expect(valid.status).toBe(200);
+    expect(mocks.syncHncb).toHaveBeenCalledWith(env, "manual", {
+      captcha: "1234",
+    });
+
+    const invalid = await syncRoutes.request(
+      "/connectors/hncb/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "12AB" }),
+      },
+      env,
+    );
+    expect(invalid.status).toBe(400);
+    expect(mocks.syncHncb).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps Browser Rendering capacity and connection failures", async () => {
+    mocks.prepareHncbCaptchaSession.mockRejectedValueOnce(
+      new HncbBrowserCapacityError("browser busy", 17),
+    );
+    const busy = await syncRoutes.request(
+      "/connectors/hncb/captcha",
+      { method: "POST" },
+      env,
+    );
+    expect(busy.status).toBe(429);
+    expect(busy.headers.get("Retry-After")).toBe("17");
+    await expect(busy.json()).resolves.toMatchObject({
+      error: { code: "HNCB_BROWSER_BUSY" },
+    });
+
+    mocks.syncHncb.mockRejectedValueOnce(
+      new HncbConnectionError("schema drift"),
+    );
+    const failed = await syncRoutes.request(
+      "/connectors/hncb/sync",
+      { method: "POST" },
+      env,
+    );
+    expect(failed.status).toBe(502);
+    await expect(failed.json()).resolves.toMatchObject({
+      error: { code: "HNCB_CONNECTION_FAILED" },
     });
   });
 });
