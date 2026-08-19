@@ -84,7 +84,8 @@
   const browserBank = $derived(
     connectorId === "sinopac" ||
       connectorId === "taishin" ||
-      connectorId === "obank",
+      connectorId === "obank" ||
+      connectorId === "hncb",
   );
   const browserBankSessionAvailable = $derived(
     browserBank && Boolean($settings.data?.sessionAvailable),
@@ -571,7 +572,9 @@
         ? "台新"
         : connectorId === "obank"
           ? "王道"
-          : "永豐"}
+          : connectorId === "hncb"
+            ? "華南"
+            : "永豐"}
       bind:captcha={bankCaptcha}
       captchaImage={bankCaptchaImage}
       digitCount={bankCaptchaDigitCount}

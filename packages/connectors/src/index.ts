@@ -97,6 +97,10 @@ export type {
 } from "./obank-mobile-api";
 import { obankConfigSchema } from "./obank";
 
+export { hncbConfigSchema, parseHncbConfig, parseHncbData } from "./hncb";
+export type { HncbConfig, HncbData, HncbPayloads } from "./hncb";
+import { hncbConfigSchema } from "./hncb";
+
 const invoiceRecordSchema = z.object({
   sourceId: z.string().min(1),
   invoiceNumber: z.string().optional(),
@@ -657,6 +661,7 @@ export const connectorConfigSchemas = {
   taishin: taishinConfigSchema,
   ctbc: ctbcConfigSchema,
   obank: obankConfigSchema,
+  hncb: hncbConfigSchema,
 } satisfies Record<ConnectorId, z.ZodTypeAny>;
 
 export function parseConnectorConfig(

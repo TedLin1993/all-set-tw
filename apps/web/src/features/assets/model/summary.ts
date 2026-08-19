@@ -4,6 +4,7 @@ import type { InvestmentRow } from "@/data/investments/types";
 import { missingExchangeRateCurrencies } from "@/shared/format/financial";
 
 const CONNECTOR_BANK_CODES: Record<string, string> = {
+  hncb: "008",
   cathaybk: "013",
   obank: "048",
   sinopac: "807",

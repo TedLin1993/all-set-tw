@@ -15,7 +15,7 @@
     onVerify,
     onRefresh,
   }: {
-    bankName: "永豐" | "台新" | "王道";
+    bankName: "永豐" | "台新" | "王道" | "華南";
     captchaImage: string;
     captcha?: string;
     digitCount: number;

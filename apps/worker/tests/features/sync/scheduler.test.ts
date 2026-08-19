@@ -42,6 +42,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   isUserActionError: () => false,
   NeedsUserActionError: class NeedsUserActionError extends Error {},
   prepareSinopacCaptchaSession: vi.fn(),
+  prepareHncbCaptchaSession: vi.fn(),
   prepareTaishinCaptchaSession: vi.fn(),
   prepareObankCaptchaSession: vi.fn(),
   safeErrorLogDetails: (error: unknown) => ({
@@ -58,6 +59,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncEsun: mocks.syncEsun,
   syncSinopac: vi.fn(),
   syncObank: vi.fn(),
+  syncHncb: vi.fn(),
   syncTaishin: mocks.syncTaishin,
   syncTdcc: vi.fn(),
   SYNC_LOCK_LEASE_MS: 30 * 60 * 1000,
