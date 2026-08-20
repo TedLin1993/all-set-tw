@@ -776,6 +776,7 @@ function assertSinopacApiSuccess(payload: unknown, label: string) {
       "永豐銀行 session 已失效，請重新完成圖形驗證。",
     );
   }
+  if (message === "查無消費紀錄") return;
   if (header !== "SUCCESS")
     throw new Error(`永豐${label} API 失敗：${message}`);
 }

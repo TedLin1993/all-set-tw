@@ -465,6 +465,33 @@ describe("sinopac App JSON parser", () => {
     });
   });
 
+  it("treats no purchase records from the summary as a successful response", async () => {
+    const noPurchaseRecordsPayload = [
+      { Header: "FAIL", Message: "查無消費紀錄" },
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload = url.includes("ws_cardsum")
+        ? noPurchaseRecordsPayload
+        : payloadForUrl(url);
+      return new Response(JSON.stringify(payload), { status: 200 });
+    });
+
+    const result = await createSinopacConnector(
+      undefined,
+      fetchMock as typeof fetch,
+    ).sync({
+      userId: "A123456789",
+      sessionCookies,
+      protocol: "sinopac-mobile-app-json-v1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(result.bankBalanceSnapshots).toHaveLength(1);
+    expect(result.creditCardBills).toHaveLength(1);
+    expect(result.bankTransactions).toHaveLength(2);
+  });
+
   it("isolates App cookies and follows SinoCard cookie rotation", async () => {
     const authCookies = JSON.stringify([
       ...JSON.parse(sessionCookies),
