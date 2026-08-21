@@ -85,10 +85,10 @@
         >{title}</span
       >
       <span class="block truncate text-sm text-muted-foreground">
-        {sourceStatus === "healthy" && job?.lastSuccessAt
-          ? `最近同步 ${formatDateTime(job.lastSuccessAt)}`
-          : sourceStatus === "unconfigured"
-            ? "尚未設定"
+        {sourceStatus === "unconfigured"
+          ? "尚未設定"
+          : job?.lastSuccessAt
+            ? `${sourceStatus === "healthy" ? "最近同步" : "上次成功"} ${formatDateTime(job.lastSuccessAt)}`
             : "尚未成功同步"}
       </span>
     </span>
