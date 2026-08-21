@@ -492,6 +492,50 @@ describe("sinopac App JSON parser", () => {
     expect(result.bankTransactions).toHaveLength(2);
   });
 
+  it("treats no valid card as a successful sync without requesting outstanding transactions", async () => {
+    const noPurchaseRecordsPayload = [
+      { Header: "FAIL", Message: "查無消費紀錄" },
+    ];
+    const noValidCardPayload = {
+      Result: {},
+      Header: {},
+      ResultCode: "01",
+      ResultMessage: "您沒有有效卡",
+      Error: null,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const payload = url.includes("/ws/card/cardqry/")
+        ? noPurchaseRecordsPayload
+        : url.endsWith("/Accounting/LatestTx")
+          ? noValidCardPayload
+          : payloadForUrl(url);
+      return new Response(JSON.stringify(payload), { status: 200 });
+    });
+
+    const result = await createSinopacConnector(
+      undefined,
+      fetchMock as typeof fetch,
+    ).sync({
+      userId: "A123456789",
+      sessionCookies,
+      protocol: "sinopac-mobile-app-json-v1",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).not.toContain(
+      "https://m.sinopac.com/m/SinoCard/api/Accounting/OutstandingDetail",
+    );
+    expect(result.bankBalanceSnapshots).toEqual([]);
+    expect(result.bankAccounts).toEqual([]);
+    expect(result.creditCardBills).toEqual([]);
+    expect(result.bankTransactions).toEqual([]);
+    expect(JSON.parse(result.cursor ?? "{}")).toMatchObject({
+      sessionCookies,
+      protocol: "sinopac-mobile-app-json-v1",
+    });
+  });
+
   it("isolates App cookies and follows SinoCard cookie rotation", async () => {
     const authCookies = JSON.stringify([
       ...JSON.parse(sessionCookies),

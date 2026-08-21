@@ -38,6 +38,7 @@ type FetchImpl = typeof fetch;
 type SinopacApiPayloads = {
   summary: unknown;
   bills: unknown;
+  hasValidCard?: boolean;
   latest?: unknown;
   outstanding?: unknown;
   unbilled?: unknown;
@@ -218,6 +219,13 @@ class SinopacAppClient {
       { ID: customerId },
       customerId,
     );
+    if (latest == null) {
+      return {
+        summary,
+        bills: [initialBills, ...olderBills],
+        hasValidCard: false,
+      };
+    }
     const outstanding = await this.postSinoCard(
       CARD_OUTSTANDING_DETAIL_PATH,
       "已請款消費明細",
@@ -314,6 +322,13 @@ class SinopacAppClient {
         );
       }
       throw new Error(`永豐${label} API 回應不是有效 JSON。`);
+    }
+    if (
+      path === CARD_LATEST_TX_PATH &&
+      isRecord(payload) &&
+      stringValue(payload.ResultMessage) === "您沒有有效卡"
+    ) {
+      return undefined;
     }
     assertSinoCardApiSuccess(payload, label);
     return payload;
@@ -809,6 +824,14 @@ export function parseSinopacCardData(
   payloads: SinopacApiPayloads,
   now = new Date(),
 ): Scraped {
+  if (payloads.hasValidCard === false) {
+    return {
+      bankAccounts: [],
+      bankBalanceSnapshots: [],
+      bankTransactions: [],
+      creditCardBills: [],
+    };
+  }
   const summary = parseSummary(payloads.summary);
   const bills = parseBills(payloads.bills, now);
   const transactions =
