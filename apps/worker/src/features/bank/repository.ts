@@ -130,6 +130,59 @@ export async function listBankTransactionsInRange(
   return rows.results;
 }
 
+export async function listBankTransactionsForTransferMatching(
+  db: D1Database,
+  transactions: Array<Pick<BankTransactionPageRow, "amount" | "currency">>,
+  days: string[] = [],
+) {
+  const amounts = [
+    ...new Set(
+      transactions
+        .filter(
+          (transaction) =>
+            Number.isFinite(transaction.amount) && transaction.amount !== 0,
+        )
+        .map((transaction) => Math.abs(transaction.amount)),
+    ),
+  ];
+  const currencies = [
+    ...new Set(
+      transactions
+        .map((transaction) => transaction.currency.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ];
+  if (amounts.length === 0 || currencies.length === 0) return [];
+
+  const matchDays = [...new Set(days.filter(Boolean))];
+  const dayClause =
+    matchDays.length > 0
+      ? `
+         AND substr(COALESCE(txn.authorized_at, txn.posted_date), 1, 10) IN (
+           SELECT value FROM json_each(?)
+         )`
+      : "";
+  const values = [JSON.stringify(amounts), JSON.stringify(currencies)];
+  if (matchDays.length > 0) values.push(JSON.stringify(matchDays));
+
+  const rows = await db
+    .prepare(
+      `${BANK_TRANSACTION_SELECT}
+       WHERE account.canonical_account_id IS NULL
+         AND txn.status = 'posted'
+         AND txn.amount <> 0
+         AND ABS(txn.amount) IN (
+           SELECT CAST(value AS INTEGER) FROM json_each(?)
+         )
+         AND UPPER(TRIM(txn.currency)) IN (
+           SELECT UPPER(TRIM(value)) FROM json_each(?)
+         )${dayClause}`,
+    )
+    .bind(...values)
+    .all<BankTransactionPageRow>();
+  return rows.results;
+}
+
 export async function listCreditCardBills(
   db: D1Database,
   limit: number,
