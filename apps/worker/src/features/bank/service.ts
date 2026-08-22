@@ -20,6 +20,7 @@ import {
   type ClassificationResult,
 } from "../classification/service";
 import {
+  findAutomaticCreditOffsetTransactionIds,
   findAutomaticTransferTransactionIds,
   getAutomaticTransferDay,
 } from "./transfer-matching";
@@ -81,18 +82,22 @@ async function presentBankTransactions(
     classificationsReady = false;
   }
 
+  const eligibleTransactions = transactionsForClassification.filter(
+    (transaction) => {
+      const classification = classificationMap.get(transaction.id);
+      return (
+        // An explicit include preference or user classification wins.
+        transaction.calculationPreference !== 0 &&
+        classification?.source !== "override" &&
+        classification?.source !== "user_rule"
+      );
+    },
+  );
   const automaticTransferIds = classificationsReady
-    ? findAutomaticTransferTransactionIds(
-        transactionsForClassification.filter((transaction) => {
-          const classification = classificationMap.get(transaction.id);
-          return (
-            // An explicit include preference or user classification wins.
-            transaction.calculationPreference !== 0 &&
-            classification?.source !== "override" &&
-            classification?.source !== "user_rule"
-          );
-        }),
-      )
+    ? findAutomaticTransferTransactionIds(eligibleTransactions)
+    : new Set<string>();
+  const automaticCreditOffsetIds = classificationsReady
+    ? findAutomaticCreditOffsetTransactionIds(eligibleTransactions)
     : new Set<string>();
 
   return transactions.map(
@@ -101,14 +106,21 @@ async function presentBankTransactions(
       updatedAt: _updatedAt,
       ...transaction
     }) => {
-      const classification = automaticTransferIds.has(transaction.id)
+      const classification = automaticCreditOffsetIds.has(transaction.id)
         ? {
-            categoryId: "transfer",
-            label: "轉帳",
-            source: "auto_transfer" as const,
+            categoryId: "fee",
+            label: "手續費",
+            source: "auto_offset" as const,
             excludedFromCalculation: true,
           }
-        : classificationMap.get(transaction.id);
+        : automaticTransferIds.has(transaction.id)
+          ? {
+              categoryId: "transfer",
+              label: "轉帳",
+              source: "auto_transfer" as const,
+              excludedFromCalculation: true,
+            }
+          : classificationMap.get(transaction.id);
       return {
         ...normalizeBankTransactionDisplay(transaction),
         excludedFromCalculation: resolveCalculationExclusion({

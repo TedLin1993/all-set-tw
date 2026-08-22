@@ -7,12 +7,16 @@ export type TransferMatchTransaction = {
   authorizedAt?: string | null;
   postedDate?: string | null;
   status?: string | null;
+  description?: string | null;
+  counterparty?: string | null;
 };
 
 type TransferCandidateGroup = {
   positive: TransferMatchTransaction[];
   negative: TransferMatchTransaction[];
 };
+
+const CREDIT_FEE_REDUCTION_PATTERN = /減免|折抵|回饋|退回|退費/u;
 
 /**
  * Finds deterministic pairs of posted transactions that may represent a
@@ -67,10 +71,62 @@ export function getAutomaticTransferDay(
 export function findAutomaticTransferTransactionIds(
   transactions: TransferMatchTransaction[],
 ): Set<string> {
+  const pairs = findAutomaticTransferPairs(transactions);
   return new Set(
-    findAutomaticTransferPairs(transactions).flatMap(
-      ([positiveId, negativeId]) => [positiveId, negativeId],
-    ),
+    pairs.flatMap(([positiveId, negativeId]) => [positiveId, negativeId]),
+  );
+}
+
+export function findAutomaticCreditOffsetTransactionIds(
+  transactions: TransferMatchTransaction[],
+): Set<string> {
+  const pairs = findAutomaticCreditOffsetPairs(transactions);
+  return new Set(
+    pairs.flatMap(([positiveId, negativeId]) => [positiveId, negativeId]),
+  );
+}
+
+/**
+ * Finds same-card annual-fee reversals. These are not account transfers, but
+ * they are a deliberate same-day, same-amount offset that should not affect
+ * cash-flow calculations.
+ */
+export function findAutomaticCreditOffsetPairs(
+  transactions: TransferMatchTransaction[],
+): Array<readonly [string, string]> {
+  const groups = new Map<string, TransferCandidateGroup>();
+
+  for (const transaction of transactions) {
+    if (
+      transaction.status !== "posted" ||
+      transaction.accountType !== "credit" ||
+      !Number.isFinite(transaction.amount) ||
+      transaction.amount === 0
+    )
+      continue;
+
+    const day = getAutomaticTransferDay(transaction);
+    if (!day) continue;
+
+    const text = creditTransactionText(transaction);
+    const isReduction = CREDIT_FEE_REDUCTION_PATTERN.test(text);
+    if (!text.includes("年費") || transaction.amount > 0 !== isReduction)
+      continue;
+
+    const key = [
+      transaction.accountId,
+      day,
+      transaction.currency.trim().toUpperCase(),
+      Math.abs(transaction.amount),
+    ].join("\u0000");
+    const group = groups.get(key) ?? { positive: [], negative: [] };
+    if (transaction.amount > 0) group.positive.push(transaction);
+    else group.negative.push(transaction);
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].flatMap(({ positive, negative }) =>
+    pairStableCandidates(positive, negative),
   );
 }
 
@@ -120,6 +176,20 @@ function pairCrossAccountCandidates(
     ]);
 }
 
+function pairStableCandidates(
+  positive: TransferMatchTransaction[],
+  negative: TransferMatchTransaction[],
+): Array<readonly [string, string]> {
+  const orderedPositive = [...positive].sort(compareTransferCandidates);
+  const orderedNegative = [...negative].sort(compareTransferCandidates);
+  const pairCount = Math.min(orderedPositive.length, orderedNegative.length);
+
+  return Array.from({ length: pairCount }, (_, index) => [
+    orderedPositive[index].id,
+    orderedNegative[index].id,
+  ]);
+}
+
 function matchPositive(
   positiveIndex: number,
   visitedNegative: Set<number>,
@@ -163,4 +233,10 @@ function compareTransferCandidates(
   right: TransferMatchTransaction,
 ) {
   return left.id.localeCompare(right.id);
+}
+
+function creditTransactionText(transaction: TransferMatchTransaction) {
+  return `${transaction.description ?? ""} ${transaction.counterparty ?? ""}`
+    .normalize("NFKC")
+    .replace(/\s+/gu, "");
 }

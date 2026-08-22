@@ -2,7 +2,12 @@ export type ClassificationResult = {
   categoryId: string;
   label: string;
   source:
-    "override" | "user_rule" | "system_rule" | "auto_transfer" | "fallback";
+    | "override"
+    | "user_rule"
+    | "system_rule"
+    | "auto_transfer"
+    | "auto_offset"
+    | "fallback";
   ruleId?: string;
   excludedFromCalculation?: boolean;
 };

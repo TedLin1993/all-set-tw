@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  findAutomaticCreditOffsetPairs,
+  findAutomaticCreditOffsetTransactionIds,
   findAutomaticTransferPairs,
   findAutomaticTransferTransactionIds,
   getAutomaticTransferDay,
@@ -48,6 +50,55 @@ describe("automatic bank transfer matching", () => {
     expect(findAutomaticTransferPairs(transactions)).toEqual([
       ["same-bank-in", "same-bank-out"],
     ]);
+  });
+
+  it("pairs an annual fee with its same-card reduction", () => {
+    const transactions = [
+      transaction({
+        id: "fee",
+        accountId: "taishin:credit:main",
+        accountType: "credit",
+        amount: -4_500,
+        description: "鈦金商務卡年費",
+      }),
+      transaction({
+        id: "reduction",
+        accountId: "taishin:credit:main",
+        accountType: "credit",
+        amount: 4_500,
+        description: "鈦金商務卡年費減免",
+      }),
+    ];
+
+    expect(findAutomaticCreditOffsetPairs(transactions)).toEqual([
+      ["reduction", "fee"],
+    ]);
+    expect(findAutomaticCreditOffsetTransactionIds(transactions)).toEqual(
+      new Set(["reduction", "fee"]),
+    );
+  });
+
+  it("does not treat an ordinary credit refund as an annual-fee offset", () => {
+    const transactions = [
+      transaction({
+        id: "charge",
+        accountId: "card",
+        accountType: "credit",
+        amount: -4_500,
+        description: "一般消費",
+      }),
+      transaction({
+        id: "refund",
+        accountId: "card",
+        accountType: "credit",
+        amount: 4_500,
+        description: "消費退款",
+      }),
+    ];
+
+    expect(findAutomaticCreditOffsetTransactionIds(transactions)).toEqual(
+      new Set(),
+    );
   });
 
   it("uses the stored date prefix for connector timestamps", () => {

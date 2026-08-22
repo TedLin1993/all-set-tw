@@ -96,6 +96,44 @@ describe("bank transaction presentation", () => {
     });
   });
 
+  it("auto-excludes a same-card annual-fee reduction", async () => {
+    const fee = transaction({
+      id: "fee",
+      accountId: "card-a",
+      accountType: "credit",
+      amount: -4_500,
+      description: "鈦金商務卡年費",
+    });
+    const reduction = transaction({
+      id: "reduction",
+      accountId: "card-a",
+      accountType: "credit",
+      amount: 4_500,
+      description: "鈦金商務卡年費減免",
+    });
+
+    const result = await getBankRange(
+      createDb([fee, reduction], [fee, reduction]),
+      {
+        from: "2026-08-01",
+        to: "2026-09-01",
+      },
+    );
+
+    expect(result.transactions).toHaveLength(2);
+    for (const transaction of result.transactions) {
+      expect(transaction).toMatchObject({
+        excludedFromCalculation: true,
+        classification: {
+          categoryId: "fee",
+          label: "手續費",
+          source: "auto_offset",
+          excludedFromCalculation: true,
+        },
+      });
+    }
+  });
+
   it("does not override an explicit classification override", async () => {
     const outgoing = transaction({
       id: "outgoing",

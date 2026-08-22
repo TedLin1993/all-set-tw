@@ -12,7 +12,12 @@ export interface ActivityItem {
   categoryId?: string;
   classificationPattern?: string;
   classificationSource?:
-    "override" | "user_rule" | "system_rule" | "auto_transfer" | "fallback";
+    | "override"
+    | "user_rule"
+    | "system_rule"
+    | "auto_transfer"
+    | "auto_offset"
+    | "fallback";
   classificationRuleId?: string;
   transactionId?: string;
   excludedFromCalculation?: boolean;
