@@ -182,42 +182,33 @@
 </script>
 
 <Card class="w-full min-w-0">
-  <CardHeader class="gap-4 sm:flex-row sm:items-start sm:justify-between">
+  <CardHeader class="gap-4">
     <div>
       <h2 class="text-lg font-semibold">分類規則</h2>
       <p class="text-sm text-muted-foreground">
         管理自訂分類規則；系統也會自動處理帳戶互轉、信用卡年費減免與電子發票配對
       </p>
     </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <Button
-        size="sm"
-        variant="outline"
-        aria-expanded={showCategoryForm}
-        onclick={() => (showCategoryForm = !showCategoryForm)}
-      >
-        <Plus class="size-4" />新增分類
-      </Button>
-      <Badge class="text-sm" variant="secondary"
-        >{editableRuleCount} 條自訂規則</Badge
-      >
-    </div>
   </CardHeader>
   <CardContent>
-    <section
-      aria-label="系統自動分類與配對"
-      class="mb-6 border-b border-border pb-6"
-    >
-      <div class="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h3 class="text-base font-semibold">系統自動分類與配對</h3>
+    <details class="group mb-6 border-b border-border pb-5">
+      <summary
+        class="flex cursor-pointer list-none items-start justify-between gap-3 rounded-lg py-1 outline-none focus-visible:ring-2 focus-visible:ring-steel"
+      >
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="text-base font-semibold">系統自動分類與配對</h3>
+            <Badge variant="secondary">內建 3 項</Badge>
+          </div>
           <p class="mt-1 text-sm text-muted-foreground">
-            以下為系統內建規則，不佔用自訂規則順序；符合條件時會自動套用。
+            查看帳戶互轉、信用卡年費減免與電子發票配對的判斷方式。
           </p>
         </div>
-        <Badge variant="secondary">內建</Badge>
-      </div>
-      <div class="grid gap-3 md:grid-cols-3">
+        <ChevronDown
+          class="mt-1 size-5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+        />
+      </summary>
+      <div class="mt-3 grid gap-3 md:grid-cols-3">
         {#each systemAutoRules as rule (rule.title)}
           <article class="rounded-lg border border-border bg-muted/30 p-4">
             <h4 class="text-sm font-semibold">{rule.title}</h4>
@@ -230,14 +221,27 @@
       <p class="mt-3 text-sm leading-relaxed text-muted-foreground">
         已手動分類或自行設定計算方式的交易，以你的設定為準；發票配對可在活動明細中管理或解除。
       </p>
-    </section>
+    </details>
 
-    <div class="mb-3 flex flex-wrap items-end justify-between gap-2">
+    <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
       <div>
         <h3 class="text-base font-semibold">自訂分類規則</h3>
         <p class="mt-1 text-sm text-muted-foreground">
           建立、排序與編輯自己的關鍵字分類規則。
         </p>
+      </div>
+      <div class="flex shrink-0 flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          aria-expanded={showCategoryForm}
+          onclick={() => (showCategoryForm = !showCategoryForm)}
+        >
+          <Plus class="size-4" />新增分類
+        </Button>
+        <Badge class="text-sm" variant="secondary"
+          >{editableRuleCount} 條自訂規則</Badge
+        >
       </div>
     </div>
 
