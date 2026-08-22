@@ -116,11 +116,16 @@
       ? "失敗與重新驗證時通知"
       : "前往同步與通知開啟",
   );
+  const customRuleCount = $derived(
+    ($rules.data ?? []).filter((rule) => !rule.isSystem).length,
+  );
   const rulesSummary = $derived(
-    $rules.isPending ? "載入中…" : `${$rules.data?.length ?? 0} 條銀行交易規則`,
+    $rules.isPending
+      ? "載入中…"
+      : `${customRuleCount} 條自訂規則 · 含自動分類與配對`,
   );
   const enabledRuleCount = $derived(
-    ($rules.data ?? []).filter((rule) => rule.enabled).length,
+    ($rules.data ?? []).filter((rule) => !rule.isSystem && rule.enabled).length,
   );
   const recentJobs = $derived(getConfiguredSyncJobs($jobs.data ?? []));
   const recentSuccessCount = $derived(
@@ -409,7 +414,7 @@
         <div>
           <h2 class="text-2xl font-bold tracking-tight">分類規則</h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            依照優先順序，自動為銀行交易套用分類與計算設定。
+            管理自訂分類，也會自動處理帳戶互轉、信用卡年費減免與發票配對。
           </p>
         </div>
         <span class="rounded-lg bg-steel px-4 py-2 text-sm font-bold text-white"
@@ -422,11 +427,11 @@
         class="hidden min-w-0 gap-3 md:grid md:grid-cols-2"
       >
         <div class="rounded-xl border border-border bg-card p-3.5 shadow-xs">
-          <p class="text-sm font-semibold text-muted-foreground">規則總數</p>
-          <p class="mt-1 text-lg font-bold">{$rules.data?.length ?? 0}</p>
+          <p class="text-sm font-semibold text-muted-foreground">自訂規則</p>
+          <p class="mt-1 text-lg font-bold">{customRuleCount}</p>
         </div>
         <div class="rounded-xl border border-border bg-card p-3.5 shadow-xs">
-          <p class="text-sm font-semibold text-muted-foreground">已啟用</p>
+          <p class="text-sm font-semibold text-muted-foreground">已啟用自訂</p>
           <p class="mt-1 text-lg font-bold text-moss">{enabledRuleCount}</p>
         </div>
       </section>
