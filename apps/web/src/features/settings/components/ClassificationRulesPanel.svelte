@@ -43,6 +43,23 @@
     starts_with: "開頭為",
     regex: "符合正規表示式",
   };
+  const systemAutoRules = [
+    {
+      title: "帳戶互轉",
+      description:
+        "同日、同幣別、同金額且方向相反的已入帳交易，會在不同帳戶間自動配對，分類為「轉帳」並排除收支計算；相同銀行的不同帳戶也適用。",
+    },
+    {
+      title: "信用卡年費減免",
+      description:
+        "同一張信用卡同日出現同幣別、同金額、方向相反的「年費」與減免相關交易時，會自動互相沖銷，分類為「手續費」並排除收支計算；一般退款不套用。",
+    },
+    {
+      title: "電子發票配對",
+      description:
+        "電子發票與同日、同金額的 TWD 銀行／信用卡支出會自動配對；一筆發票與交易只配對一次，已配對發票不會重複計入支出。手動連結或「解除並保持分開」優先。",
+    },
+  ] as const;
   const rules = createQuery(classificationRulesQuery(() => api));
   const categories = createQuery(classificationCategoriesQuery(() => api));
   const qc = useQueryClient();
@@ -165,28 +182,69 @@
 </script>
 
 <Card class="w-full min-w-0">
-  <CardHeader class="gap-4 sm:flex-row sm:items-start sm:justify-between">
+  <CardHeader class="gap-4">
     <div>
       <h2 class="text-lg font-semibold">分類規則</h2>
       <p class="text-sm text-muted-foreground">
-        讓銀行交易依條件自動分類，也可選擇不計入收支
+        管理自訂分類規則；系統也會自動處理帳戶互轉、信用卡年費減免與電子發票配對
       </p>
-    </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <Button
-        size="sm"
-        variant="outline"
-        aria-expanded={showCategoryForm}
-        onclick={() => (showCategoryForm = !showCategoryForm)}
-      >
-        <Plus class="size-4" />新增分類
-      </Button>
-      <Badge class="text-sm" variant="secondary"
-        >{$rules.data?.length ?? 0} 條</Badge
-      >
     </div>
   </CardHeader>
   <CardContent>
+    <details class="group mb-6 border-b border-border pb-5">
+      <summary
+        class="flex cursor-pointer list-none items-start justify-between gap-3 rounded-lg py-1 outline-none focus-visible:ring-2 focus-visible:ring-steel"
+      >
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="text-base font-semibold">系統自動分類與配對</h3>
+            <Badge variant="secondary">內建 3 項</Badge>
+          </div>
+          <p class="mt-1 text-sm text-muted-foreground">
+            查看帳戶互轉、信用卡年費減免與電子發票配對的判斷方式。
+          </p>
+        </div>
+        <ChevronDown
+          class="mt-1 size-5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+        />
+      </summary>
+      <div class="mt-3 grid gap-3 md:grid-cols-3">
+        {#each systemAutoRules as rule (rule.title)}
+          <article class="rounded-lg border border-border bg-muted/30 p-4">
+            <h4 class="text-sm font-semibold">{rule.title}</h4>
+            <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+              {rule.description}
+            </p>
+          </article>
+        {/each}
+      </div>
+      <p class="mt-3 text-sm leading-relaxed text-muted-foreground">
+        已手動分類或自行設定計算方式的交易，以你的設定為準；發票配對可在活動明細中管理或解除。
+      </p>
+    </details>
+
+    <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h3 class="text-base font-semibold">自訂分類規則</h3>
+        <p class="mt-1 text-sm text-muted-foreground">
+          建立、排序與編輯自己的關鍵字分類規則。
+        </p>
+      </div>
+      <div class="flex shrink-0 flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          aria-expanded={showCategoryForm}
+          onclick={() => (showCategoryForm = !showCategoryForm)}
+        >
+          <Plus class="size-4" />新增分類
+        </Button>
+        <Badge class="text-sm" variant="secondary"
+          >{editableRuleCount} 條自訂規則</Badge
+        >
+      </div>
+    </div>
+
     {#if showCategoryForm}
       <form
         class="mb-4 grid gap-3 rounded-lg border border-border bg-background p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end"

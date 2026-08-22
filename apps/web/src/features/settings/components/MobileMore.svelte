@@ -32,6 +32,9 @@
   const configuredSources = $derived(
     jobs.filter((job) => job.configured && job.scope === "all"),
   );
+  const customRuleCount = $derived(
+    rules.filter((rule) => !rule.isSystem).length,
+  );
   const unhealthy = $derived(getActionableSyncJobs(jobs));
 </script>
 
@@ -102,10 +105,10 @@
             ><Settings class="size-5" /></span
           ><span class="flex-1"
             ><span class="block font-semibold">分類規則</span><span
-              class="block text-sm text-ink/45">銀行交易自動分類</span
+              class="block text-sm text-ink/45">自訂分類與自動配對</span
             ></span
           ><span class="text-sm font-semibold text-steel"
-            >{rules.length} 條　›</span
+            >{customRuleCount} 條自訂　›</span
           ></button
         >
       </div></Card
