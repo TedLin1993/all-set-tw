@@ -11,7 +11,8 @@ export interface ActivityItem {
   category: string;
   categoryId?: string;
   classificationPattern?: string;
-  classificationSource?: "override" | "user_rule" | "system_rule" | "fallback";
+  classificationSource?:
+    "override" | "user_rule" | "system_rule" | "auto_transfer" | "fallback";
   classificationRuleId?: string;
   transactionId?: string;
   excludedFromCalculation?: boolean;

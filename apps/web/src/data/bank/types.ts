@@ -39,7 +39,8 @@ export interface BankTransactionRow {
   classification?: {
     categoryId: string;
     label: string;
-    source: "override" | "user_rule" | "system_rule" | "fallback";
+    source:
+      "override" | "user_rule" | "system_rule" | "auto_transfer" | "fallback";
     ruleId?: string;
     excludedFromCalculation?: boolean;
   };
