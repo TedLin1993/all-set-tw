@@ -409,8 +409,21 @@ export const connectorCatalog = {
     ],
     publicFields: [],
     credentialFields: ["userId", "account", "password"],
-    secretStateFields: ["sessionCookies", "sessionExpiresAt"],
-    resetOnCredentialChangeFields: ["sessionCookies", "sessionExpiresAt"],
+    secretStateFields: [
+      "sessionCookies",
+      "sessionExpiresAt",
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "otpChannel",
+    ],
+    resetOnCredentialChangeFields: [
+      "sessionCookies",
+      "sessionExpiresAt",
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "otp",
+      "otpChannel",
+    ],
   },
   sinopac: {
     id: "sinopac",

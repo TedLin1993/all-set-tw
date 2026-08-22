@@ -1,10 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
+  CathayOtpChannelRequiredError,
+  CathayOtpInvalidError,
+  CathayOtpRequiredError,
+  CathayOtpSessionExpiredError,
+} from "../../../src/connectors/cathaybk";
+import {
+  isUserActionError,
   safeErrorLogDetails,
   safeErrorMessage,
 } from "../../../src/features/sync/service";
 
 describe("sync error details", () => {
+  it("classifies Cathay OTP states as user actions", () => {
+    expect(
+      isUserActionError(
+        new CathayOtpChannelRequiredError(
+          "choose channel",
+          "pending-session",
+          "2026-08-22T12:00:00.000Z",
+        ),
+      ),
+    ).toBe(true);
+    expect(isUserActionError(new CathayOtpRequiredError("sent", "email"))).toBe(
+      true,
+    );
+    expect(isUserActionError(new CathayOtpSessionExpiredError())).toBe(true);
+    expect(isUserActionError(new CathayOtpInvalidError())).toBe(true);
+  });
+
   it("uses a non-empty fallback when Error.message is blank", () => {
     expect(safeErrorMessage(new Error("  \n  "))).toBe(
       "同步失敗，但未取得錯誤原因。",

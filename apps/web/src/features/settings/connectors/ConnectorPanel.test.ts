@@ -1,9 +1,9 @@
-import { fireEvent, render } from "@testing-library/svelte";
+import { fireEvent, render, waitFor, within } from "@testing-library/svelte";
 import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
 import { describe, expect, it, vi } from "vitest";
 import { connectorFields } from "@/data/connectors/definitions";
 import type { ConnectorField, SyncJobRow } from "@/data/connectors/types";
-import type { ApiClient } from "@/shared/api/client";
+import { ApiRequestError, type ApiClient } from "@/shared/api/client";
 import ConnectorPanel from "./ConnectorPanel.svelte";
 
 function syncJob(overrides: Partial<SyncJobRow> = {}): SyncJobRow {
@@ -62,6 +62,47 @@ function renderEinvoicePanel(syncJobs: SyncJobRow[][]) {
         demoMode: false,
         title: "電子發票",
         fields: connectorFields.einvoice as ConnectorField[],
+      },
+    },
+    {
+      wrapper: QueryClientProvider,
+      wrapperProps: { client: queryClient },
+    },
+  );
+  return { ...result, api, queryClient };
+}
+
+function renderCathayPanel(
+  post: ReturnType<typeof vi.fn>,
+  connectorSettings: Record<string, unknown> = {},
+) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+  });
+  const api = {
+    get: vi.fn((path: string) => {
+      if (path === "/api/sync-jobs")
+        return Promise.resolve([
+          syncJob({
+            id: "cathaybk:all",
+            connectorId: "cathaybk",
+          }),
+        ]);
+      if (path === "/api/connectors/cathaybk/settings")
+        return Promise.resolve(connectorSettings);
+      return Promise.resolve({});
+    }),
+    post,
+  } as unknown as ApiClient;
+  const result = render(
+    ConnectorPanel,
+    {
+      props: {
+        api,
+        connectorId: "cathaybk",
+        demoMode: false,
+        title: "國泰世華銀行",
+        fields: connectorFields.cathaybk as ConnectorField[],
       },
     },
     {
@@ -184,5 +225,162 @@ describe("ConnectorPanel", () => {
       ),
     ).toHaveLength(syncJobRequestsBeforeUnmount);
     vi.useRealTimers();
+  });
+
+  it("guides Cathay through channel selection and OTP verification", async () => {
+    const post = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiRequestError(
+          "CATHAY_OTP_CHANNEL_REQUIRED",
+          "需要選擇驗證方式。",
+          400,
+        ),
+      )
+      .mockRejectedValueOnce(
+        new ApiRequestError(
+          "CATHAY_EMAIL_OTP_REQUIRED",
+          "Email 驗證碼已寄出。",
+          400,
+        ),
+      )
+      .mockResolvedValueOnce({ success: true });
+    const { getByLabelText, getByRole, findByText, getByPlaceholderText } =
+      renderCathayPanel(post);
+    const progress = getByLabelText("國泰世華連線進度");
+
+    expect(
+      within(progress).getByText("確認網銀帳密").parentElement,
+    ).toHaveClass("bg-steel/[0.07]");
+
+    await fireEvent.click(getByRole("button", { name: "同步" }));
+    expect(await findByText("需要額外驗證")).toBeInTheDocument();
+    expect(
+      within(progress).getByText("驗證這台裝置").parentElement,
+    ).toHaveClass("bg-steel/[0.07]");
+    expect(getByRole("button", { name: "使用 Email" })).toBeInTheDocument();
+    expect(getByRole("button", { name: "使用簡訊" })).toBeInTheDocument();
+
+    await fireEvent.click(getByRole("button", { name: "使用 Email" }));
+    expect(await findByText("Email 驗證碼已寄出")).toBeInTheDocument();
+    expect(post).toHaveBeenNthCalledWith(2, "/api/connectors/cathaybk/sync", {
+      otpChannel: "email",
+    });
+
+    await fireEvent.input(getByPlaceholderText("例如 310307（不含英文前綴）"), {
+      target: { value: "123456" },
+    });
+    await fireEvent.click(getByRole("button", { name: "驗證並完成首次同步" }));
+    expect(post).toHaveBeenNthCalledWith(3, "/api/connectors/cathaybk/sync", {
+      otp: "123456",
+      otpChannel: "email",
+    });
+    await waitFor(() =>
+      expect(
+        within(progress).getByText("完成首次同步").parentElement,
+      ).toHaveClass("bg-moss/[0.07]"),
+    );
+  });
+
+  it("restores a pending Cathay Email verification after remount", async () => {
+    const { findByText, getByPlaceholderText } = renderCathayPanel(vi.fn(), {
+      connectorId: "cathaybk",
+      configured: true,
+      credentialsComplete: true,
+      sessionAvailable: false,
+      verificationPending: true,
+      verificationChannel: "email",
+      verificationExpiresAt: "2099-08-22T08:08:00.000Z",
+    });
+
+    expect(await findByText("Email 驗證碼已寄出")).toBeInTheDocument();
+    expect(
+      getByPlaceholderText("例如 310307（不含英文前綴）"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the Cathay Email step open after an incorrect OTP", async () => {
+    const post = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiRequestError(
+          "CATHAY_OTP_INVALID",
+          "國泰世華驗證碼錯誤或已逾時，請重新輸入或取得驗證碼。",
+          400,
+        ),
+      );
+    const {
+      findByPlaceholderText,
+      findByText,
+      getByPlaceholderText,
+      getByRole,
+    } = renderCathayPanel(post, {
+      connectorId: "cathaybk",
+      configured: true,
+      credentialsComplete: true,
+      sessionAvailable: false,
+      verificationPending: true,
+      verificationChannel: "email",
+      verificationExpiresAt: "2099-08-22T08:08:00.000Z",
+    });
+
+    const input = await findByPlaceholderText("例如 310307（不含英文前綴）");
+    await fireEvent.input(input, { target: { value: "123456" } });
+    await fireEvent.click(getByRole("button", { name: "驗證並完成首次同步" }));
+
+    expect(
+      await findByText("國泰世華驗證碼錯誤或已逾時，請重新輸入或取得驗證碼。"),
+    ).toBeInTheDocument();
+    expect(
+      getByPlaceholderText("例如 310307（不含英文前綴）"),
+    ).toBeInTheDocument();
+    expect(getByRole("button", { name: "重新寄送 Email" })).toBeInTheDocument();
+  });
+
+  it("closes an expired Cathay verification flow and restarts it", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-22T08:00:00.000Z"));
+    const post = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new ApiRequestError(
+          "CATHAY_OTP_SESSION_EXPIRED",
+          "驗證工作階段已逾時，請重新同步。",
+          400,
+        ),
+      )
+      .mockRejectedValueOnce(
+        new ApiRequestError(
+          "CATHAY_OTP_CHANNEL_REQUIRED",
+          "需要選擇驗證方式。",
+          400,
+        ),
+      );
+
+    try {
+      const { getByRole, getByText } = renderCathayPanel(post, {
+        connectorId: "cathaybk",
+        configured: true,
+        credentialsComplete: true,
+        sessionAvailable: false,
+        verificationPending: true,
+        verificationChannel: "email",
+        verificationExpiresAt: "2026-08-22T08:02:00.000Z",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(getByText("請於 2:00 內完成驗證")).toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(getByText("驗證工作階段已逾時")).toBeInTheDocument();
+
+      await fireEvent.click(getByRole("button", { name: "重新開始驗證" }));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(post).toHaveBeenCalledTimes(2);
+      expect(getByText("需要額外驗證")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
