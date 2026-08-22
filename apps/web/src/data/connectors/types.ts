@@ -11,6 +11,9 @@ export interface ConnectorSettings {
   publicConfig?: Record<string, unknown> | null;
   credentialsComplete?: boolean;
   sessionAvailable?: boolean;
+  verificationPending?: boolean;
+  verificationChannel?: "email" | "sms" | null;
+  verificationExpiresAt?: string | null;
 }
 
 export interface SyncJobRow {

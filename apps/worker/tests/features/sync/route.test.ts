@@ -8,6 +8,12 @@ import {
   HncbConnectionError,
 } from "../../../src/connectors/hncb";
 import {
+  CathayOtpChannelRequiredError,
+  CathayOtpInvalidError,
+  CathayOtpRequiredError,
+  CathayOtpSessionExpiredError,
+} from "../../../src/connectors/cathaybk";
+import {
   TaishinBrowserCapacityError,
   TaishinConnectionError,
 } from "../../../src/connectors/taishin";
@@ -21,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   prepareObankCaptchaSession: vi.fn(),
   startEinvoiceSyncRun: vi.fn(),
   syncCtbc: vi.fn(),
+  syncCathaybk: vi.fn(),
   syncEsun: vi.fn(),
   syncObank: vi.fn(),
   syncHncb: vi.fn(),
@@ -44,7 +51,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   prepareObankCaptchaSession: mocks.prepareObankCaptchaSession,
   safeErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
-  syncCathaybk: vi.fn(),
+  syncCathaybk: mocks.syncCathaybk,
   syncCtbc: mocks.syncCtbc,
   syncEinvoice: vi.fn(),
   syncEsun: mocks.syncEsun,
@@ -270,6 +277,88 @@ describe("E.SUN sync route", () => {
         message:
           "E.SUN browser login: duplicate-login dialog kept reappearing.",
       },
+    });
+  });
+});
+
+describe("Cathay sync routes", () => {
+  it("dispatches a manual sync without OTP overrides", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/cathaybk/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.syncCathaybk).toHaveBeenCalledWith(env, "manual", {});
+  });
+
+  it("passes the selected OTP channel and code to the sync service", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/cathaybk/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otpChannel: "email", otp: "123456" }),
+      },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.syncCathaybk).toHaveBeenCalledWith(env, "manual", {
+      otpChannel: "email",
+      otp: "123456",
+    });
+  });
+
+  it("rejects a malformed OTP channel before dispatch", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/cathaybk/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otpChannel: "push" }),
+      },
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "INVALID_REQUEST" },
+    });
+    expect(mocks.syncCathaybk).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      new CathayOtpChannelRequiredError(
+        "請選擇驗證方式。",
+        "pending-session",
+        "2026-08-22T12:00:00.000Z",
+      ),
+      "CATHAY_OTP_CHANNEL_REQUIRED",
+    ],
+    [
+      new CathayOtpRequiredError("Email 驗證碼已寄出。", "email"),
+      "CATHAY_EMAIL_OTP_REQUIRED",
+    ],
+    [
+      new CathayOtpRequiredError("簡訊驗證碼已寄出。", "sms"),
+      "CATHAY_SMS_OTP_REQUIRED",
+    ],
+    [new CathayOtpSessionExpiredError(), "CATHAY_OTP_SESSION_EXPIRED"],
+    [new CathayOtpInvalidError(), "CATHAY_OTP_INVALID"],
+  ])("maps %s to %s", async (error, code) => {
+    mocks.syncCathaybk.mockRejectedValueOnce(error);
+    const response = await syncRoutes.request(
+      "/connectors/cathaybk/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code },
     });
   });
 });

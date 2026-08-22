@@ -173,6 +173,97 @@ describe("connector settings state boundaries", () => {
     });
   });
 
+  it("reports Cathay trusted-device availability only for its device cookie", async () => {
+    mocks.findConnectorSettings.mockResolvedValue({
+      id: "cathay-settings",
+      connector_id: "cathaybk",
+      encrypted_config: JSON.stringify({
+        userId: "A123456789",
+        account: "user",
+        password: "password",
+        sessionCookies: JSON.stringify([
+          {
+            name: "CUB.eBank.DeviceId",
+            value: "trusted-device",
+            domain: ".cathaybk.com.tw",
+            expires: 2_000_000_000,
+          },
+        ]),
+      }),
+      public_config: null,
+      sync_cursor: null,
+      created_at: "2026-08-22T08:00:00.000Z",
+      updated_at: "2026-08-22T08:00:00.000Z",
+    });
+
+    await expect(
+      getConnectorSettingsView(env, "cathaybk"),
+    ).resolves.toMatchObject({
+      connectorId: "cathaybk",
+      credentialsComplete: true,
+      sessionAvailable: true,
+    });
+  });
+
+  it("reports a resumable Cathay Email verification session", async () => {
+    mocks.findConnectorSettings.mockResolvedValue({
+      id: "cathay-settings",
+      connector_id: "cathaybk",
+      encrypted_config: JSON.stringify({
+        userId: "A123456789",
+        account: "user",
+        password: "password",
+        browserSessionId: "pending-session",
+        browserSessionExpiresAt: "2099-08-22T08:08:00.000Z",
+        otpChannel: "email",
+      }),
+      public_config: null,
+      sync_cursor: null,
+      created_at: "2026-08-22T08:00:00.000Z",
+      updated_at: "2026-08-22T08:00:00.000Z",
+    });
+
+    await expect(
+      getConnectorSettingsView(env, "cathaybk"),
+    ).resolves.toMatchObject({
+      verificationPending: true,
+      verificationChannel: "email",
+      verificationExpiresAt: "2099-08-22T08:08:00.000Z",
+    });
+  });
+
+  it("clears Cathay trusted-device state when credentials change", async () => {
+    mocks.findConnectorSettings.mockResolvedValue({
+      id: "cathay-settings",
+      connector_id: "cathaybk",
+      encrypted_config: JSON.stringify({
+        userId: "A123456789",
+        account: "old-user",
+        password: "old-password",
+        sessionCookies: '[{"name":"CUB.eBank.DeviceId"}]',
+        sessionExpiresAt: "2027-09-26T08:00:00.000Z",
+      }),
+      public_config: null,
+      sync_cursor: JSON.stringify({ syncedAt: "2026-08-22T08:00:00.000Z" }),
+      created_at: "2026-08-22T07:00:00.000Z",
+      updated_at: "2026-08-22T08:00:00.000Z",
+    });
+
+    await updateConnectorSettings(env, "cathaybk", { account: "new-user" });
+
+    const saved = mocks.saveConnectorSettings.mock.calls[0]![1];
+    expect(JSON.parse(saved.encryptedConfig)).toEqual({
+      userId: "A123456789",
+      account: "new-user",
+      password: "old-password",
+    });
+    expect(mocks.clearConnectorCursor).toHaveBeenCalledWith(
+      env.DB,
+      "cathaybk",
+      expect.any(String),
+    );
+  });
+
   it("clears HNCB session state when credentials change", async () => {
     mocks.findConnectorSettings.mockResolvedValue({
       id: "hncb-settings",

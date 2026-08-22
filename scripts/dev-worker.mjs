@@ -78,6 +78,8 @@ const wrangler = spawn(
     "dev",
     "-c",
     "wrangler.local.toml",
+    "--port",
+    "8787",
     "--var",
     `CTBC_API_RELAY_URL:http://127.0.0.1:${address.port}/ctbc`,
     "--var",
@@ -87,6 +89,7 @@ const wrangler = spawn(
     cwd: workerDirectory,
     env: {
       ...process.env,
+      X_BROWSER_HEADFUL: process.env.X_BROWSER_HEADFUL ?? "true",
       XDG_CONFIG_HOME: path.join(projectRoot, ".wrangler-config"),
     },
     stdio: "inherit",

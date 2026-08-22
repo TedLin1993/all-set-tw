@@ -15,7 +15,7 @@
     Smartphone,
   } from "@lucide/svelte";
   import BrowserBankConnectionHelp from "./BrowserBankConnectionHelp.svelte";
-  import TdccConnectionProgress from "./TdccConnectionProgress.svelte";
+  import ConnectionProgress from "./ConnectionProgress.svelte";
   import Card from "@/shared/ui/Card.svelte";
   import Button from "@/shared/ui/Button.svelte";
   import Input from "@/shared/ui/Input.svelte";
@@ -65,6 +65,12 @@
   let tdccSetupStep = $state<"credentials" | "email" | "sms" | "complete">(
     "credentials",
   );
+  let cathayVerificationStep = $state<
+    "idle" | "choose" | "email" | "sms" | "complete"
+  >("idle");
+  let cathayOtpChannel = $state<"email" | "sms" | null>(null);
+  let cathayVerificationExpiresAt = $state<string | null>(null);
+  let cathayVerificationSecondsRemaining = $state<number | null>(null);
   let bankCaptchaImage = $state("");
   let bankCaptcha = $state("");
   let bankCaptchaDigitCount = $state(6);
@@ -96,6 +102,25 @@
   const tdccCredentialsComplete = $derived(
     connectorId === "tdcc" && Boolean($settings.data?.credentialsComplete),
   );
+  const cathayConnectionReady = $derived(
+    connectorId === "cathaybk" && Boolean($settings.data?.sessionAvailable),
+  );
+  const cathayVerificationExpired = $derived(
+    cathayVerificationSecondsRemaining !== null &&
+      cathayVerificationSecondsRemaining <= 0,
+  );
+  const cathayProgressStep = $derived(
+    cathayConnectionReady || cathayVerificationStep === "complete"
+      ? "complete"
+      : cathayVerificationExpired
+        ? "credentials"
+        : cathayVerificationStep === "sms"
+          ? "sms"
+          : cathayVerificationStep === "choose" ||
+              cathayVerificationStep === "email"
+            ? "email"
+            : "credentials",
+  );
   const intervalOptions = [
     { label: "每小時", minutes: 60 },
     { label: "每 6 小時", minutes: 360 },
@@ -120,8 +145,32 @@
       )) {
         if (values[key] === undefined) values[key] = String(value);
       }
+      if (connectorId === "cathaybk" && result.data) {
+        if (result.data.sessionAvailable) {
+          cathayVerificationStep = "complete";
+          cathayVerificationExpiresAt = null;
+          cathayVerificationSecondsRemaining = null;
+        } else if (result.data.verificationPending) {
+          cathayOtpChannel = result.data.verificationChannel ?? null;
+          cathayVerificationStep = cathayOtpChannel ?? "choose";
+          cathayVerificationExpiresAt =
+            result.data.verificationExpiresAt ?? null;
+          updateCathayVerificationCountdown();
+        } else if (result.data.verificationExpiresAt) {
+          cathayOtpChannel = null;
+          cathayVerificationStep = "choose";
+          cathayVerificationExpiresAt = result.data.verificationExpiresAt;
+          updateCathayVerificationCountdown();
+        } else if (cathayVerificationStep === "complete") {
+          cathayVerificationStep = "idle";
+        }
+      }
     }),
   );
+  onMount(() => {
+    const timer = setInterval(updateCathayVerificationCountdown, 1_000);
+    return () => clearInterval(timer);
+  });
   onDestroy(() => {
     destroyed = true;
     clearTimeout(einvoiceSyncQueuedTimer);
@@ -135,6 +184,7 @@
     },
     onSuccess: () => {
       error = "";
+      if (connectorId === "cathaybk") resetCathayVerification();
       for (const field of fields) {
         if (field.type === "text" || field.type === "password")
           values[field.key] = "";
@@ -152,19 +202,39 @@
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.syncJobs }),
   });
   const sync = createMutation({
-    mutationFn: (target: SyncTarget) => {
+    mutationFn: async (target: SyncTarget) => {
       if (demoMode) throw new Error("Demo site 已停用連接器同步。");
       const path =
         connectorId === "tdcc" && target !== "default"
           ? `/api/connectors/${connectorId}/sync/${target}`
           : `/api/connectors/${connectorId}/sync`;
       pendingSyncTarget = target;
-      return connectorId === "einvoice"
-        ? api.post<QueuedSyncResponse>(path, {})
-        : api.post(path);
+      const runSync = () =>
+        connectorId === "einvoice"
+          ? api.post<QueuedSyncResponse>(path, {})
+          : api.post(path);
+      try {
+        return await runSync();
+      } catch (errorValue) {
+        if (
+          connectorId === "cathaybk" &&
+          errorValue instanceof ApiRequestError &&
+          errorValue.code === "CATHAY_OTP_SESSION_EXPIRED"
+        ) {
+          return runSync();
+        }
+        throw errorValue;
+      }
     },
     onSuccess: () => {
       error = "";
+      if (connectorId === "cathaybk") {
+        resetCathayVerification();
+        cathayVerificationStep = "complete";
+        qc.invalidateQueries({
+          queryKey: queryKeys.connectorSettings(connectorId),
+        });
+      }
       if (connectorId === "einvoice") {
         showEinvoiceSyncQueued();
         startEinvoiceSyncPolling();
@@ -202,6 +272,7 @@
     },
     onError: (e) => {
       if (handleTdccVerificationRequired(e)) return;
+      if (handleCathayVerificationRequired(e)) return;
       error = e instanceof Error ? e.message : "同步失敗";
       if (browserBank)
         qc.invalidateQueries({
@@ -325,6 +396,44 @@
     },
   });
 
+  const requestCathayOtp = createMutation({
+    mutationFn: (channel: "email" | "sms") => {
+      if (demoMode) throw new Error("Demo site 已停用連接器同步。");
+      cathayOtpChannel = channel;
+      return api.post(`/api/connectors/${connectorId}/sync`, {
+        otpChannel: channel,
+      });
+    },
+    onSuccess: () => {
+      if (cathayOtpChannel) cathayVerificationStep = cathayOtpChannel;
+      error = "";
+    },
+    onError: (e) => {
+      if (handleCathayVerificationRequired(e)) return;
+      error = e instanceof Error ? e.message : "寄送驗證碼失敗";
+    },
+  });
+
+  const verifyCathayOtp = createMutation({
+    mutationFn: () => {
+      if (demoMode) throw new Error("Demo site 已停用連接器同步。");
+      if (!otp.trim()) throw new Error("請先輸入驗證碼。");
+      if (!cathayOtpChannel) throw new Error("請先選擇驗證方式。");
+      return api.post(`/api/connectors/${connectorId}/sync`, {
+        otp: otp.trim(),
+        otpChannel: cathayOtpChannel,
+      });
+    },
+    onSuccess: () => finishCathayVerification(),
+    onError: (e) => {
+      if (handleCathayVerificationRequired(e)) {
+        otp = "";
+        return;
+      }
+      error = e instanceof Error ? e.message : "驗證失敗";
+    },
+  });
+
   function handleTdccVerificationRequired(errorValue: unknown) {
     if (!(errorValue instanceof ApiRequestError)) return false;
     if (errorValue.code === "TDCC_EMAIL_OTP_REQUIRED") {
@@ -341,6 +450,92 @@
       return true;
     }
     return false;
+  }
+
+  function handleCathayVerificationRequired(errorValue: unknown) {
+    if (!(errorValue instanceof ApiRequestError)) return false;
+    if (errorValue.code === "CATHAY_OTP_CHANNEL_REQUIRED") {
+      error = "";
+      otp = "";
+      cathayOtpChannel = null;
+      cathayVerificationStep = "choose";
+      qc.invalidateQueries({
+        queryKey: queryKeys.connectorSettings(connectorId),
+      });
+      return true;
+    }
+    if (
+      errorValue.code === "CATHAY_EMAIL_OTP_REQUIRED" ||
+      errorValue.code === "CATHAY_SMS_OTP_REQUIRED"
+    ) {
+      error = "";
+      otp = "";
+      cathayOtpChannel =
+        errorValue.code === "CATHAY_SMS_OTP_REQUIRED" ? "sms" : "email";
+      cathayVerificationStep = cathayOtpChannel;
+      qc.invalidateQueries({
+        queryKey: queryKeys.connectorSettings(connectorId),
+      });
+      return true;
+    }
+    if (errorValue.code === "CATHAY_OTP_SESSION_EXPIRED") {
+      resetCathayVerification();
+      error = errorValue.message;
+      return true;
+    }
+    if (errorValue.code === "CATHAY_OTP_INVALID") {
+      otp = "";
+      error = errorValue.message;
+      return true;
+    }
+    return false;
+  }
+
+  function resetCathayVerification() {
+    if (connectorId !== "cathaybk") return;
+    otp = "";
+    cathayOtpChannel = null;
+    cathayVerificationExpiresAt = null;
+    cathayVerificationSecondsRemaining = null;
+    cathayVerificationStep = "idle";
+    $requestCathayOtp.reset();
+    $verifyCathayOtp.reset();
+  }
+
+  function finishCathayVerification() {
+    error = "";
+    resetCathayVerification();
+    cathayVerificationStep = "complete";
+    qc.invalidateQueries({
+      queryKey: queryKeys.connectorSettings(connectorId),
+    });
+    qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
+    qc.invalidateQueries({ queryKey: queryKeys.summary });
+    invalidateLatestSyncReport();
+    qc.invalidateQueries({ queryKey: queryKeys.bank });
+    qc.invalidateQueries({ queryKey: queryKeys.bills });
+  }
+
+  function updateCathayVerificationCountdown() {
+    if (!cathayVerificationExpiresAt) {
+      cathayVerificationSecondsRemaining = null;
+      return;
+    }
+    const expiresAt = Date.parse(cathayVerificationExpiresAt);
+    cathayVerificationSecondsRemaining = Number.isFinite(expiresAt)
+      ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1_000))
+      : 0;
+  }
+
+  function cathayCountdownLabel(seconds: number) {
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+
+  function restartCathayVerification() {
+    resetCathayVerification();
+    error = "";
+    $sync.mutate("default");
   }
 
   function finishTdccConnection() {
@@ -538,7 +733,12 @@
           size="sm"
           disabled={demoMode ||
             $sync.isPending ||
-            (connectorId === "einvoice" && einvoiceSyncPolling !== null)}
+            (connectorId === "einvoice" && einvoiceSyncPolling !== null) ||
+            (connectorId === "cathaybk" &&
+              !cathayVerificationExpired &&
+              (cathayVerificationStep === "choose" ||
+                cathayVerificationStep === "email" ||
+                cathayVerificationStep === "sms"))}
           onclick={() => {
             error = "";
             $sync.mutate("default");
@@ -562,9 +762,16 @@
       Demo site 已停用同步；你仍可查看示範資料與介面互動。
     </p>{/if}
   {#if connectorId === "tdcc"}
-    <TdccConnectionProgress
+    <ConnectionProgress
       step={tdccSetupStep}
       connectionReady={tdccConnectionReady}
+      source="tdcc"
+    />
+  {:else if connectorId === "cathaybk"}
+    <ConnectionProgress
+      step={cathayProgressStep}
+      connectionReady={cathayConnectionReady}
+      source="cathaybk"
     />
   {:else if browserBank}
     <BrowserBankConnectionHelp
@@ -590,7 +797,7 @@
     />
   {/if}
   <div
-    class={`mt-3 rounded-xl border border-ink/10 bg-paper p-3 text-sm ${connectorId === "tdcc" && !tdccConnectionReady ? "hidden" : ""}`}
+    class={`mt-3 rounded-xl border border-ink/10 bg-paper p-3 text-sm ${(connectorId === "tdcc" && !tdccConnectionReady) || (connectorId === "cathaybk" && !cathayConnectionReady && cathayVerificationStep !== "complete") ? "hidden" : ""}`}
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -903,7 +1110,141 @@
           >{/if}
       </div>
     </div>{/if}
-  {#if connectorId === "tdcc" && error}<p
+  {#if connectorId === "cathaybk" && (cathayVerificationStep === "choose" || cathayVerificationStep === "email" || cathayVerificationStep === "sms")}
+    <div
+      class="mt-3 overflow-hidden rounded-xl border border-steel/20 bg-steel/[0.055]"
+    >
+      <div class="flex items-start gap-3 border-b border-steel/15 px-4 py-3">
+        <span
+          class="grid size-9 shrink-0 place-items-center rounded-full bg-steel/10 text-steel"
+        >
+          {#if cathayVerificationStep === "sms"}<Smartphone
+              class="size-4.5"
+            />{:else}<Mail class="size-4.5" />{/if}
+        </span>
+        <div>
+          <p class="text-sm font-semibold text-ink">
+            {cathayVerificationExpired
+              ? "驗證工作階段已逾時"
+              : cathayVerificationStep === "choose"
+                ? "需要額外驗證"
+                : cathayVerificationStep === "sms"
+                  ? "簡訊驗證碼已寄出"
+                  : "Email 驗證碼已寄出"}
+          </p>
+          <p class="mt-0.5 text-sm leading-relaxed text-ink/60">
+            {cathayVerificationExpired
+              ? "為避免持續占用 Browser Run，驗證工作階段已關閉，請重新同步。"
+              : cathayVerificationStep === "choose"
+                ? "國泰世華要求額外驗證，請選擇驗證碼寄送方式。"
+                : cathayVerificationStep === "sms"
+                  ? "請輸入國泰世華寄到手機的驗證碼。"
+                  : "請查看國泰世華帳號登記的電子信箱，也別忘了檢查垃圾郵件匣。"}
+          </p>
+          {#if !cathayVerificationExpired && cathayVerificationSecondsRemaining !== null}
+            <p class="mt-1 text-xs font-semibold text-steel" aria-live="polite">
+              請於 {cathayCountdownLabel(cathayVerificationSecondsRemaining)}
+              內完成驗證
+            </p>
+          {/if}
+        </div>
+      </div>
+      {#if cathayVerificationExpired}
+        <div class="p-4">
+          <Button
+            size="sm"
+            disabled={$sync.isPending}
+            onclick={restartCathayVerification}
+            ><RefreshCw
+              class={$sync.isPending ? "size-4 animate-spin" : "size-4"}
+            />{$sync.isPending ? "重新連線中…" : "重新開始驗證"}</Button
+          >
+        </div>
+      {:else if cathayVerificationStep === "choose"}
+        <div class="flex flex-wrap gap-2 p-4">
+          <Button
+            size="sm"
+            disabled={$requestCathayOtp.isPending || $verifyCathayOtp.isPending}
+            onclick={() => {
+              error = "";
+              $requestCathayOtp.mutate("email");
+            }}
+            ><Mail class="size-4" />{$requestCathayOtp.isPending &&
+            cathayOtpChannel === "email"
+              ? "寄送中…"
+              : "使用 Email"}</Button
+          >
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={$requestCathayOtp.isPending || $verifyCathayOtp.isPending}
+            onclick={() => {
+              error = "";
+              $requestCathayOtp.mutate("sms");
+            }}
+            ><Smartphone class="size-4" />{$requestCathayOtp.isPending &&
+            cathayOtpChannel === "sms"
+              ? "寄送中…"
+              : "使用簡訊"}</Button
+          >
+        </div>
+      {:else}
+        <div class="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <label class="grid gap-1.5 text-sm font-medium">
+            驗證碼後 6 位數字
+            <Input
+              class="bg-white/80 tracking-[0.2em]"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              placeholder="例如 310307（不含英文前綴）"
+              bind:value={otp}
+            />
+          </label>
+          <Button
+            class="self-end"
+            size="sm"
+            disabled={$verifyCathayOtp.isPending || !otp.trim()}
+            onclick={() => {
+              error = "";
+              $verifyCathayOtp.mutate();
+            }}
+            ><ShieldCheck class="size-4" />{$verifyCathayOtp.isPending
+              ? "驗證與同步中…"
+              : "驗證並完成首次同步"}</Button
+          >
+        </div>
+        <div
+          class="flex flex-wrap items-center justify-between gap-2 border-t border-steel/15 px-4 py-2.5"
+        >
+          <button
+            type="button"
+            class="text-sm font-semibold text-ink/55 underline-offset-4 hover:text-ink hover:underline"
+            onclick={() => {
+              otp = "";
+              cathayOtpChannel = null;
+              cathayVerificationStep = "choose";
+              $requestCathayOtp.reset();
+            }}>返回選擇驗證方式</button
+          >
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={$requestCathayOtp.isPending || !cathayOtpChannel}
+            onclick={() => {
+              error = "";
+              $requestCathayOtp.mutate(cathayOtpChannel!);
+            }}
+            ><RefreshCw class="size-4" />{$requestCathayOtp.isPending
+              ? "重新寄送中…"
+              : cathayOtpChannel === "sms"
+                ? "重新寄送簡訊"
+                : "重新寄送 Email"}</Button
+          >
+        </div>
+      {/if}
+    </div>
+  {/if}
+  {#if (connectorId === "tdcc" || connectorId === "cathaybk") && error}<p
       class="mt-3 rounded-lg border border-coral/20 bg-coral/[0.06] px-3 py-2 text-sm font-medium text-coral"
     >
       {error}
@@ -915,6 +1256,8 @@
         ? "王道手動與排程同步都會在必要時接管其他登入中的裝置；同步會直接使用 App API，並由 Gemma 4 自動辨識四位英數驗證碼。"
         : connectorId === "tdcc"
           ? "排程同步不會在背景寄送驗證碼；登入失效時會標記為需要重新驗證。"
-          : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
+          : connectorId === "cathaybk"
+            ? "首次驗證會加入信任裝置；信任失效時需在手動同步中重新取得驗證碼。"
+            : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
   </p>
 </Card>

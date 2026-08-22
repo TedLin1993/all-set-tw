@@ -94,6 +94,25 @@ describe("connector state boundaries", () => {
     });
   });
 
+  it("removes Cathay trusted browser state from the cursor", () => {
+    expect(
+      splitConnectorCursorState(
+        "cathaybk",
+        JSON.stringify({
+          sessionCookies: "cathay-cookies",
+          sessionExpiresAt: "2026-08-22T12:00:00.000Z",
+          syncedAt: "2026-08-22T08:01:00.000Z",
+        }),
+      ),
+    ).toEqual({
+      safeCursor: JSON.stringify({ syncedAt: "2026-08-22T08:01:00.000Z" }),
+      secretState: {
+        sessionCookies: "cathay-cookies",
+        sessionExpiresAt: "2026-08-22T12:00:00.000Z",
+      },
+    });
+  });
+
   it("keeps TDCC trade watermarks while encrypting device session state", () => {
     expect(
       splitConnectorCursorState(

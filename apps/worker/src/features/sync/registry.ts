@@ -25,6 +25,7 @@ import {
   type HncbSyncOverrides,
   type TaishinSyncOverrides,
   type TdccSyncOverrides,
+  type CathaySyncOverrides,
 } from "./service";
 
 type ConnectorRuntimeDefinition = {
@@ -61,7 +62,8 @@ export const connectorRuntimeRegistry: Record<
     run: (env, trigger) => syncEsun(env, trigger),
   },
   cathaybk: {
-    run: (env, trigger) => syncCathaybk(env, trigger),
+    run: (env, trigger, _scope, overrides) =>
+      syncCathaybk(env, trigger, overrides as CathaySyncOverrides),
   },
   ctbc: {
     run: (env, trigger) => syncCtbc(env, trigger),

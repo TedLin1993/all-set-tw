@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   safelySendSyncNotification: vi.fn(),
   startEinvoiceSyncRun: vi.fn(),
   startSyncLockHeartbeat: vi.fn(),
+  syncCathaybk: vi.fn(),
   syncEsun: vi.fn(),
   syncTaishin: vi.fn(),
 }));
@@ -54,7 +55,7 @@ vi.mock("../../../src/features/sync/service", () => ({
       ? error.message.trim()
       : "同步失敗，但未取得錯誤原因。",
   startSyncLockHeartbeat: mocks.startSyncLockHeartbeat,
-  syncCathaybk: vi.fn(),
+  syncCathaybk: mocks.syncCathaybk,
   syncEinvoice: vi.fn(),
   syncEsun: mocks.syncEsun,
   syncSinopac: vi.fn(),
@@ -143,6 +144,16 @@ beforeEach(() => {
   });
   mocks.syncTaishin.mockResolvedValue({
     connectorId: "taishin",
+    scope: "all",
+    records: 2,
+    newRecords: {
+      invoices: 0,
+      bankTransactions: 2,
+      investmentTransactions: 0,
+    },
+  });
+  mocks.syncCathaybk.mockResolvedValue({
+    connectorId: "cathaybk",
     scope: "all",
     records: 2,
     newRecords: {
@@ -259,6 +270,20 @@ describe("scheduled sync rounds", () => {
     await runSchedulerTick(env(), scheduledController);
 
     expect(mocks.syncTaishin).toHaveBeenCalledWith(
+      expect.anything(),
+      "scheduled",
+      {},
+    );
+  });
+
+  it("dispatches a scheduled Cathay job without OTP overrides", async () => {
+    const job = syncJob("custom", "cathaybk");
+    mocks.findOpenDefaultScheduleBatchId.mockResolvedValue(null);
+    mocks.findNextDueSyncJob.mockResolvedValue(job);
+
+    await runSchedulerTick(env(), scheduledController);
+
+    expect(mocks.syncCathaybk).toHaveBeenCalledWith(
       expect.anything(),
       "scheduled",
       {},

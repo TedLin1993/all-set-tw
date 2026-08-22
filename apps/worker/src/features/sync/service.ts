@@ -19,7 +19,14 @@ import {
   TdccVerificationRequiredError,
   prepareObankCaptcha,
 } from "@taiwan-fin-hub/connectors";
-import { createCathaybkConnector } from "../../connectors/cathaybk";
+import {
+  CathayOtpChannelRequiredError,
+  CathayOtpInvalidError,
+  CathayOtpRequiredError,
+  CathayOtpSessionExpiredError,
+  CathayVerificationRequiredError,
+  createCathaybkConnector,
+} from "../../connectors/cathaybk";
 import { createCtbcFetch } from "../../connectors/ctbc";
 import { createEsunConnector } from "../../connectors/esun";
 import {
@@ -154,6 +161,11 @@ export type TaishinSyncOverrides = {
 
 export type ObankSyncOverrides = {
   captcha?: string;
+};
+
+export type CathaySyncOverrides = {
+  otp?: string;
+  otpChannel?: "email" | "sms";
 };
 
 export type TdccSyncOverrides = {
@@ -454,6 +466,7 @@ export async function syncEsun(
 export async function syncCathaybk(
   env: Env,
   trigger: SyncTrigger,
+  overrides: CathaySyncOverrides = {},
 ): Promise<SyncOutcome> {
   const connectorId = "cathaybk";
   const scope = "all";
@@ -465,15 +478,89 @@ export async function syncCathaybk(
   const config = parseCathaybkConfig({
     ...stored,
     ...parsePublicConnectorConfig(connectorId, settings.public_config),
+    ...(trigger === "manual" ? overrides : {}),
   });
+
+  if (trigger !== "manual" && config.browserSessionId) {
+    throw new NeedsUserActionError(
+      "國泰世華正在等待一次性驗證碼，排程同步不會在背景寄送驗證碼。",
+    );
+  }
 
   console.log(
     `[sync] ${connectorId}/${scope}: starting trigger=${trigger} (cursor=${settings.sync_cursor ? "set" : "none"})`,
   );
-  const result = await createCathaybkConnector(env.BROWSER).sync(
-    config,
-    settings.sync_cursor ?? undefined,
-  );
+  let result: Awaited<
+    ReturnType<ReturnType<typeof createCathaybkConnector>["sync"]>
+  >;
+  try {
+    result = await createCathaybkConnector(env.BROWSER).sync(
+      config,
+      settings.sync_cursor ?? undefined,
+    );
+  } catch (error) {
+    const cleaned = { ...stored };
+
+    if (error instanceof CathayOtpChannelRequiredError) {
+      delete cleaned.sessionCookies;
+      delete cleaned.sessionExpiresAt;
+      cleaned.browserSessionId = error.browserSessionId;
+      cleaned.browserSessionExpiresAt = error.browserSessionExpiresAt;
+      delete cleaned.otp;
+      delete cleaned.otpChannel;
+      await updateConnectorEncryptedConfig(
+        env.DB,
+        connectorId,
+        await encryptJson(cleaned, configEncryptionKey(env)),
+      );
+      throw error;
+    }
+
+    if (error instanceof CathayOtpRequiredError) {
+      cleaned.otpChannel = error.channel;
+      delete cleaned.otp;
+      await updateConnectorEncryptedConfig(
+        env.DB,
+        connectorId,
+        await encryptJson(cleaned, configEncryptionKey(env)),
+      );
+      throw error;
+    }
+
+    if (error instanceof CathayOtpInvalidError) {
+      delete cleaned.otp;
+      await updateConnectorEncryptedConfig(
+        env.DB,
+        connectorId,
+        await encryptJson(cleaned, configEncryptionKey(env)),
+      );
+      throw error;
+    }
+
+    // OTP submission, session expiry, and all other failures invalidate the
+    // transient Browser session. A subsequent manual sync starts a new login.
+    delete cleaned.browserSessionId;
+    delete cleaned.browserSessionExpiresAt;
+    delete cleaned.otp;
+    delete cleaned.otpChannel;
+    if (error instanceof CathayVerificationRequiredError) {
+      delete cleaned.sessionCookies;
+      delete cleaned.sessionExpiresAt;
+    }
+    await updateConnectorEncryptedConfig(
+      env.DB,
+      connectorId,
+      await encryptJson(cleaned, configEncryptionKey(env)),
+    );
+
+    if (error instanceof CathayOtpSessionExpiredError) {
+      throw error;
+    }
+    if (error instanceof CathayVerificationRequiredError) {
+      throw new NeedsUserActionError(error.message);
+    }
+    throw error;
+  }
 
   const bankAccounts = result.bankAccounts ?? [];
   const bankBalanceSnapshots = result.bankBalanceSnapshots ?? [];
@@ -504,12 +591,19 @@ export async function syncCathaybk(
   if (result.cursor) {
     const cursorState = splitConnectorCursorState(connectorId, result.cursor);
     persistedCursor = cursorState.safeCursor;
+    const {
+      browserSessionId: _browserSessionId,
+      browserSessionExpiresAt: _browserSessionExpiresAt,
+      otp: _otp,
+      otpChannel: _otpChannel,
+      ...reusableConfig
+    } = config;
     finalizeStatements.push(
       connectorStateStatement(
         env.DB,
         connectorId,
         await encryptConnectorConfig(env, connectorId, {
-          ...config,
+          ...reusableConfig,
           ...cursorState.secretState,
         }),
         serializePublicConfig(connectorId, config),
@@ -1700,6 +1794,10 @@ function serializePublicConfig(connectorId: ConnectorId, config: object) {
 export function isUserActionError(error: unknown) {
   if (
     error instanceof NeedsUserActionError ||
+    error instanceof CathayOtpChannelRequiredError ||
+    error instanceof CathayOtpRequiredError ||
+    error instanceof CathayOtpSessionExpiredError ||
+    error instanceof CathayVerificationRequiredError ||
     error instanceof TdccOtpExpiredError ||
     error instanceof TdccVerificationRequiredError ||
     error instanceof EInvoiceProtocolUnavailableError ||

@@ -9,6 +9,33 @@ import { findConnectorSettings, saveConnectorSettings } from "./repository";
 export class ConnectorConfigMissingError extends Error {}
 export class InvalidConnectorConfigError extends Error {}
 
+function hasValidCathayTrustedDevice(value: unknown) {
+  if (typeof value !== "string") return false;
+  try {
+    const cookies = JSON.parse(value) as unknown;
+    return (
+      Array.isArray(cookies) &&
+      cookies.some((cookie) => {
+        if (!cookie || typeof cookie !== "object") return false;
+        const candidate = cookie as Record<string, unknown>;
+        const domain = String(candidate.domain ?? "")
+          .replace(/^\./, "")
+          .toLowerCase();
+        return (
+          candidate.name === "CUB.eBank.DeviceId" &&
+          typeof candidate.value === "string" &&
+          candidate.value.length > 0 &&
+          typeof candidate.expires === "number" &&
+          candidate.expires > Date.now() / 1000 &&
+          (domain === "cathaybk.com.tw" || domain.endsWith(".cathaybk.com.tw"))
+        );
+      })
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function getConnectorSettingsView(
   env: Env,
   connectorId: ConnectorId,
@@ -16,6 +43,9 @@ export async function getConnectorSettingsView(
   const settings = await findConnectorSettings(env.DB, connectorId);
   let sessionAvailable = false;
   let credentialsComplete = false;
+  let verificationPending = false;
+  let verificationChannel: "email" | "sms" | null = null;
+  let verificationExpiresAt: string | null = null;
   if (settings) {
     const stored = await decryptJson<Record<string, unknown>>(
       settings.encrypted_config,
@@ -44,6 +74,23 @@ export async function getConnectorSettingsView(
         stored.sessionCookies.length > 0 &&
         (connectorId !== "sinopac" ||
           stored.protocol === "sinopac-mobile-app-json-v1");
+    } else if (connectorId === "cathaybk") {
+      sessionAvailable = hasValidCathayTrustedDevice(stored.sessionCookies);
+      verificationExpiresAt =
+        typeof stored.browserSessionExpiresAt === "string"
+          ? stored.browserSessionExpiresAt
+          : null;
+      verificationPending =
+        credentialsComplete &&
+        typeof stored.browserSessionId === "string" &&
+        stored.browserSessionId.length > 0 &&
+        verificationExpiresAt !== null &&
+        new Date(verificationExpiresAt) > new Date();
+      verificationChannel =
+        verificationPending &&
+        (stored.otpChannel === "email" || stored.otpChannel === "sms")
+          ? stored.otpChannel
+          : null;
     }
   }
   return {
@@ -58,6 +105,9 @@ export async function getConnectorSettingsView(
       : null,
     credentialsComplete,
     sessionAvailable,
+    verificationPending,
+    verificationChannel,
+    verificationExpiresAt,
   };
 }
 
