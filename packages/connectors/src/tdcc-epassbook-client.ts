@@ -545,30 +545,33 @@ export function normalizeBankTransactionDetails(
   // includes date+amounts.
   const stanCount = new Map<string, number>();
   for (const detail of details) {
-    if (detail.stan)
-      stanCount.set(detail.stan, (stanCount.get(detail.stan) ?? 0) + 1);
+    const stan = detail.stan?.trim();
+    if (stan) stanCount.set(stan, (stanCount.get(stan) ?? 0) + 1);
   }
 
   return details.map((detail) => {
-    const dt = detail.txnDateTime ?? "";
-    const occurredAt =
-      dt.length >= 14
-        ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}T${dt.slice(8, 10)}:${dt.slice(10, 12)}:${dt.slice(12, 14)}`
-        : new Date().toISOString();
-    const isDupStan = detail.stan && (stanCount.get(detail.stan) ?? 0) > 1;
+    const stan = detail.stan?.trim();
+    const dt = detail.txnDateTime?.trim() ?? "";
+    const hasValidDateTime = /^\d{14}$/.test(dt);
+    const occurredAt = hasValidDateTime
+      ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}T${dt.slice(8, 10)}:${dt.slice(10, 12)}:${dt.slice(12, 14)}`
+      : "1970-01-01T00:00:00";
+    const transferInAmount = detail.transferInAmount?.trim() || "0";
+    const transferOutAmount = detail.transferOutAmount?.trim() || "0";
+    const memo = detail.memo?.trim() || detail.summary?.trim();
+    const amount = String(Number(transferInAmount) - Number(transferOutAmount));
+    const isDupStan = stan && (stanCount.get(stan) ?? 0) > 1;
     const txnId = isDupStan
-      ? `${detail.stan}:${occurredAt}:${detail.transferInAmount ?? "0"}:${detail.transferOutAmount ?? "0"}`
-      : (detail.stan ?? occurredAt);
+      ? `${stan}:${occurredAt}:${transferInAmount}:${transferOutAmount}`
+      : stan ||
+        ["missing", occurredAt, amount, memo?.replace(/\s+/g, "") || "-"].join(
+          ":",
+        );
     return {
       txnId,
       occurredAt,
-      amount: String(
-        Number(detail.transferInAmount ?? "0") -
-          Number(detail.transferOutAmount ?? "0"),
-      ),
-      ...(detail.memo?.trim() || detail.summary?.trim()
-        ? { memo: detail.memo?.trim() || detail.summary?.trim() }
-        : {}),
+      amount,
+      ...(memo ? { memo } : {}),
     };
   });
 }
