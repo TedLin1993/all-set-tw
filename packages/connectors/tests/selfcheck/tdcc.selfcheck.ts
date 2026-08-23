@@ -4,10 +4,12 @@
 import assert from "node:assert/strict";
 import {
   createTdccConnector,
+  parseTdccTradePageItems,
   parseTdccConfig,
   TdccOtpExpiredError,
   TdccVerificationRequiredError,
 } from "../../src/tdcc";
+import { EPassbookClient } from "../../src/tdcc-epassbook-client";
 
 const calls: string[] = [];
 const tspPageTokens: string[] = [];
@@ -16,7 +18,8 @@ let mode:
   | "error_code_otp"
   | "stale_session"
   | "otp_expired"
-  | "pagination_incomplete" = "flag_otp";
+  | "pagination_incomplete"
+  | "pagination_loop" = "flag_otp";
 let fundUpdateTime = "20240615090000";
 
 function errorResponse(returnCode: string) {
@@ -173,6 +176,13 @@ function errorResponse(returnCode: string) {
   if (endpoint === "tsp/TSP007") {
     const pageToken = String(body.requestBody.pageToken ?? "");
     tspPageTokens.push(pageToken);
+    if (mode === "pagination_loop") {
+      return respond("0000", {
+        transactionDetails: [],
+        pageToken: "LOOP",
+        totalCount: 1,
+      });
+    }
     if (mode === "pagination_incomplete") {
       return respond("0000", {
         transactionDetails: [
@@ -214,6 +224,36 @@ function errorResponse(returnCode: string) {
       ],
       pageToken: "NEXT-1",
       totalCount: 2,
+    });
+  }
+  if (endpoint === "TR002") {
+    return respond("0000", {
+      items: [
+        [
+          "20240615",
+          "TXN-1",
+          "2330",
+          "TSMC",
+          "TW",
+          "",
+          "11",
+          "",
+          "11",
+          "20240614",
+          "B",
+          "買進",
+          "2",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "500",
+          "20240615",
+          "TWD",
+        ],
+      ],
+      lastServerTime: "20240615120000",
     });
   }
   throw new Error(`unexpected endpoint ${endpoint}`);
@@ -289,6 +329,59 @@ async function main() {
     "bank transactions should follow pageToken until exhausted",
   );
   assert.equal(JSON.parse(result.cursor!).session.tokenId, "TKN-1");
+
+  // The durable TDCC worker consumes one TSP007 page at a time. Verify the
+  // page contract and the TR002 page parser independently of full-sync loops.
+  const pageClient = new EPassbookClient({
+    devId: "dev-page",
+    devType: "Android:14",
+    devModel: "SM-G991B",
+    session: { tokenId: "TKN-1", richUrl: null },
+  });
+  mode = "flag_otp";
+  const firstPage = await pageClient.getBankTransactionsPage(
+    "004",
+    "1234567890",
+    "TWD",
+    "",
+  );
+  assert.equal(firstPage.pageToken, "");
+  assert.equal(firstPage.pageRecordCount, 1);
+  assert.equal(firstPage.totalCount, 2);
+  assert.equal(firstPage.nextPageToken, "NEXT-1");
+  assert.equal(firstPage.transactions[0]?.txnId, "live-cash-move-1");
+  const secondPage = await pageClient.getBankTransactionsPage(
+    "004",
+    "1234567890",
+    "TWD",
+    firstPage.nextPageToken,
+  );
+  assert.equal(secondPage.pageRecordCount, 1);
+  assert.equal(secondPage.nextPageToken, undefined);
+
+  const tradePage = await pageClient.getTradeDetailPage({
+    brokerNo: "9A92",
+    brokerAccount: "1234567",
+    updateType: "B",
+  });
+  assert.equal(tradePage.returnCode, "0000");
+  assert.equal(tradePage.items.length, 1);
+  const tradeRows = parseTdccTradePageItems(tradePage, {
+    brokerNo: "9A92",
+    brokerAccount: "1234567",
+    brokerName: "Test Broker",
+  });
+  assert.equal(tradeRows.length, 1);
+  assert.equal(tradeRows[0]?.sourceId, "2024061420240615TXN-1");
+  assert.equal(tradeRows[0]?.amount, 1000);
+
+  mode = "pagination_loop";
+  await assert.rejects(
+    pageClient.getBankTransactionsPage("004", "1234567890", "TWD", "LOOP"),
+    /PAGINATION_LOOP/,
+    "a page API must reject an immediately repeated page token",
+  );
+  mode = "flag_otp";
 
   const manualWithMovement = parseTdccConfig({
     holdings: [

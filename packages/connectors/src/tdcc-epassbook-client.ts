@@ -1,6 +1,6 @@
 // Ported from the TDCC ePassbook Android app's mobile API (reverse-engineered).
-// Trimmed to login/OTP + stock & fund holdings — bank balances, trade detail
-// drill-down, and asset trend charts are out of scope per docs/002-tdcc-connector.md.
+// Trimmed to the ePassbook login/OTP and snapshot/page APIs used by the
+// connector. Durable callers own pagination and promotion of staged pages.
 const BASE_URL = "https://epassbooksys.tdcc.com.tw/MPSBKV2/rest/";
 const APP_INFO = "tw.com.tdcc.epassbook:3.3.4";
 const API_VER = "20250220";
@@ -10,13 +10,53 @@ const MAX_BANK_TRANSACTION_PAGES = 1_000;
 const AES_IV = new TextEncoder().encode("0000000000000000");
 const encoder = new TextEncoder();
 
-type BankTransactionDetail = {
+export type BankTransactionDetail = {
   stan?: string;
   txnDateTime?: string;
   transferInAmount?: string;
   transferOutAmount?: string;
   summary?: string;
   memo?: string;
+};
+
+/** A normalized transaction returned by the TSP007 bank transaction API. */
+export type BankTransaction = {
+  txnId: string;
+  occurredAt: string;
+  amount: string;
+  memo?: string;
+};
+
+/**
+ * One TSP007 page. `pageToken` is the token used for this request (the first
+ * page uses an empty string); `nextPageToken` is omitted when the API reports
+ * that there are no more pages.
+ *
+ * `details` is intentionally kept alongside the normalized transactions. A
+ * durable Queue consumer can persist the raw page and re-run normalization at
+ * finalization, which preserves duplicate-STAN handling across page boundaries.
+ */
+export type BankTransactionPage = {
+  pageToken: string;
+  nextPageToken?: string;
+  totalCount?: number;
+  pageRecordCount: number;
+  details: BankTransactionDetail[];
+  transactions: BankTransaction[];
+};
+
+export type TradeDetailPage = {
+  brokerNo?: string;
+  brokerAccount?: string;
+  exchangeRates?: Record<string, unknown>;
+  items: unknown[];
+  lastServerTime?: string;
+  /** Canonical response code; `D0002` means no more records. */
+  returnCode: string;
+  returnMsg?: string;
+  /** Kept for backwards compatibility with the existing full-sync caller. */
+  _returnCode?: string;
+  _returnMsg?: string;
 };
 
 export class EPassbookError extends Error {
@@ -33,7 +73,7 @@ export type EPassbookSession = {
   richUrl: string | null;
 };
 
-type EPassbookClientOptions = {
+export type EPassbookClientOptions = {
   devId: string;
   devType: string;
   devModel: string;
@@ -320,12 +360,7 @@ export class EPassbookClient {
     acctNo: string,
     currency: string,
   ): Promise<{
-    transactions: Array<{
-      txnId: string;
-      occurredAt: string;
-      amount: string;
-      memo?: string;
-    }>;
+    transactions: BankTransaction[];
   }> {
     const details: BankTransactionDetail[] = [];
     const seenPageTokens = new Set<string>();
@@ -339,28 +374,23 @@ export class EPassbookClient {
           `TSP007 exceeded ${MAX_BANK_TRANSACTION_PAGES} pages.`,
         );
       }
+      if (seenPageTokens.has(pageToken)) {
+        throw new EPassbookError(
+          "PAGINATION_LOOP",
+          "TSP007 returned a repeated page token.",
+        );
+      }
       seenPageTokens.add(pageToken);
 
-      const raw = await this.post<{
-        transactionDetails?: BankTransactionDetail[];
-        pageToken?: string | null;
-        totalCount?: number | string;
-      }>("tsp/TSP007", {
-        bankId: bankNo,
-        accountNo: acctNo,
+      const pageResult = await this.getBankTransactionsPage(
+        bankNo,
+        acctNo,
         currency,
-        limitsInPage: BANK_TRANSACTION_PAGE_SIZE,
         pageToken,
-      });
-
-      const pageDetails = raw.transactionDetails ?? [];
-      details.push(...pageDetails);
-      const parsedTotal =
-        typeof raw.totalCount === "number" || typeof raw.totalCount === "string"
-          ? Number(raw.totalCount)
-          : Number.NaN;
-      if (Number.isFinite(parsedTotal) && parsedTotal >= 0)
-        expectedTotal = parsedTotal;
+      );
+      details.push(...pageResult.details);
+      if (pageResult.totalCount !== undefined)
+        expectedTotal = pageResult.totalCount;
 
       console.log(
         JSON.stringify({
@@ -369,15 +399,14 @@ export class EPassbookClient {
           account: maskAccountNumber(acctNo),
           currency,
           page,
-          records: pageDetails.length,
+          records: pageResult.pageRecordCount,
           totalCount: expectedTotal ?? null,
         }),
       );
 
       if (expectedTotal !== undefined && details.length >= expectedTotal) break;
 
-      const nextPageToken =
-        typeof raw.pageToken === "string" ? raw.pageToken : "";
+      const nextPageToken = pageResult.nextPageToken ?? "";
       if (!nextPageToken) {
         if (expectedTotal !== undefined && details.length < expectedTotal) {
           throw new EPassbookError(
@@ -396,47 +425,71 @@ export class EPassbookClient {
       pageToken = nextPageToken;
     }
 
-    // ponytail: some banks reuse the same stan for recurring/batch entries (e.g. interest).
-    // Count occurrences so duplicates get a compound key that includes date+amounts.
-    const stanCount = new Map<string, number>();
-    for (const d of details) {
-      if (d.stan) stanCount.set(d.stan, (stanCount.get(d.stan) ?? 0) + 1);
-    }
-
-    const transactions = details.map((d) => {
-      const dt = d.txnDateTime ?? "";
-      const occurredAt =
-        dt.length >= 14
-          ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}T${dt.slice(8, 10)}:${dt.slice(10, 12)}:${dt.slice(12, 14)}`
-          : new Date().toISOString();
-      const isDupStan = d.stan && (stanCount.get(d.stan) ?? 0) > 1;
-      const txnId = isDupStan
-        ? `${d.stan}:${occurredAt}:${d.transferInAmount ?? "0"}:${d.transferOutAmount ?? "0"}`
-        : (d.stan ?? occurredAt);
-      return {
-        txnId,
-        occurredAt,
-        amount: String(
-          Number(d.transferInAmount ?? "0") -
-            Number(d.transferOutAmount ?? "0"),
-        ),
-        ...(d.memo?.trim() || d.summary?.trim()
-          ? { memo: d.memo?.trim() || d.summary?.trim() }
-          : {}),
-      };
-    });
+    const transactions = normalizeBankTransactionDetails(details);
 
     return { transactions };
   }
 
-  async getTradeDetail(input: {
+  /**
+   * Fetch exactly one TSP007 page. The caller owns the cursor and can enqueue
+   * the returned `nextPageToken` as a separate Queue message.
+   */
+  async getBankTransactionsPage(
+    bankNo: string,
+    acctNo: string,
+    currency: string,
+    pageToken = "",
+  ): Promise<BankTransactionPage> {
+    const raw = await this.post<{
+      transactionDetails?: BankTransactionDetail[];
+      pageToken?: string | null;
+      totalCount?: number | string;
+    }>("tsp/TSP007", {
+      bankId: bankNo,
+      accountNo: acctNo,
+      currency,
+      limitsInPage: BANK_TRANSACTION_PAGE_SIZE,
+      pageToken,
+    });
+    const details = Array.isArray(raw.transactionDetails)
+      ? raw.transactionDetails
+      : [];
+    const parsedTotal =
+      typeof raw.totalCount === "number" || typeof raw.totalCount === "string"
+        ? Number(raw.totalCount)
+        : Number.NaN;
+    const totalCount =
+      Number.isFinite(parsedTotal) && parsedTotal >= 0
+        ? parsedTotal
+        : undefined;
+    const nextPageToken =
+      typeof raw.pageToken === "string" && raw.pageToken.length > 0
+        ? raw.pageToken
+        : undefined;
+    if (nextPageToken === pageToken && nextPageToken) {
+      throw new EPassbookError(
+        "PAGINATION_LOOP",
+        "TSP007 returned a repeated page token.",
+      );
+    }
+    return {
+      pageToken,
+      ...(nextPageToken ? { nextPageToken } : {}),
+      ...(totalCount !== undefined ? { totalCount } : {}),
+      pageRecordCount: details.length,
+      details,
+      transactions: normalizeBankTransactionDetails(details),
+    };
+  }
+
+  async getTradeDetailPage(input: {
     brokerNo: string;
     brokerAccount: string;
     postDate?: string;
     txnSerNo?: string;
     updateType: "B" | "F";
-  }) {
-    return this.post<{
+  }): Promise<TradeDetailPage> {
+    const payload = await this.post<{
       brokerNo?: string;
       brokerAccount?: string;
       exchangeRates?: Record<string, unknown>;
@@ -453,7 +506,71 @@ export class EPassbookClient {
       },
       { allowedReturnCodes: ["D0002"] },
     );
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const returnCode = payload._returnCode ?? "0000";
+    return {
+      brokerNo: payload.brokerNo,
+      brokerAccount: payload.brokerAccount,
+      exchangeRates: payload.exchangeRates,
+      items,
+      lastServerTime: payload.lastServerTime,
+      returnCode,
+      returnMsg: payload._returnMsg,
+      _returnCode: returnCode,
+      _returnMsg: payload._returnMsg,
+    };
   }
+
+  async getTradeDetail(input: {
+    brokerNo: string;
+    brokerAccount: string;
+    postDate?: string;
+    txnSerNo?: string;
+    updateType: "B" | "F";
+  }) {
+    return this.getTradeDetailPage(input);
+  }
+}
+
+/**
+ * Normalize raw TSP007 rows. Keeping this outside the client makes it usable
+ * by durable consumers when staged pages are finalized together (duplicate
+ * STAN values are only detectable after all pages have been collected).
+ */
+export function normalizeBankTransactionDetails(
+  details: BankTransactionDetail[],
+): BankTransaction[] {
+  // ponytail: some banks reuse the same stan for recurring/batch entries (e.g.
+  // interest). Count occurrences so duplicates get a compound key that
+  // includes date+amounts.
+  const stanCount = new Map<string, number>();
+  for (const detail of details) {
+    if (detail.stan)
+      stanCount.set(detail.stan, (stanCount.get(detail.stan) ?? 0) + 1);
+  }
+
+  return details.map((detail) => {
+    const dt = detail.txnDateTime ?? "";
+    const occurredAt =
+      dt.length >= 14
+        ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}T${dt.slice(8, 10)}:${dt.slice(10, 12)}:${dt.slice(12, 14)}`
+        : new Date().toISOString();
+    const isDupStan = detail.stan && (stanCount.get(detail.stan) ?? 0) > 1;
+    const txnId = isDupStan
+      ? `${detail.stan}:${occurredAt}:${detail.transferInAmount ?? "0"}:${detail.transferOutAmount ?? "0"}`
+      : (detail.stan ?? occurredAt);
+    return {
+      txnId,
+      occurredAt,
+      amount: String(
+        Number(detail.transferInAmount ?? "0") -
+          Number(detail.transferOutAmount ?? "0"),
+      ),
+      ...(detail.memo?.trim() || detail.summary?.trim()
+        ? { memo: detail.memo?.trim() || detail.summary?.trim() }
+        : {}),
+    };
+  });
 }
 
 function maskAccountNumber(value: string) {

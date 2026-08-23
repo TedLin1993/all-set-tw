@@ -321,6 +321,86 @@ export function emptySyncNewRecordCounts(): SyncNewRecordCounts {
   return { invoices: 0, bankTransactions: 0, investmentTransactions: 0 };
 }
 
+/**
+ * Append normalized records to a durable staging run without promoting them.
+ *
+ * Durable Queue based syncs use this between invocations.  The existing
+ * `persistStagedSyncWrite` helper below remains the one-shot compatibility
+ * path for connectors that still complete in a single invocation.
+ */
+export async function stageSyncWriteRecords(
+  db: D1Database,
+  runId: string,
+  records: SyncWriteRecord[],
+) {
+  if (records.length === 0) return;
+  const createdAt = new Date().toISOString();
+  for (let offset = 0; offset < records.length; offset += STAGING_CHUNK_SIZE) {
+    const chunk = records.slice(offset, offset + STAGING_CHUNK_SIZE);
+    await db
+      .prepare(
+        `INSERT INTO sync_write_staging (run_id, entity_type, record_key, payload, created_at)
+       SELECT
+         ?1,
+         json_extract(value, '$.entityType'),
+         json_extract(value, '$.recordKey'),
+         json_extract(value, '$.payload'),
+         ?2
+       FROM json_each(?3)
+       WHERE 1
+       ON CONFLICT(run_id, entity_type, record_key) DO UPDATE SET
+         payload = excluded.payload,
+         created_at = excluded.created_at`,
+      )
+      .bind(runId, createdAt, JSON.stringify(chunk))
+      .run();
+  }
+}
+
+export async function promoteStagedSyncWrite(
+  db: D1Database,
+  input: {
+    runId: string;
+    entityTypes: readonly SyncEntityType[];
+    beforePromoteStatements?: D1PreparedStatement[];
+    afterPromoteStatements?: D1PreparedStatement[];
+    finalizeStatements?: D1PreparedStatement[];
+  },
+) {
+  const entityTypes = new Set(input.entityTypes);
+  const promotionStatements = ENTITY_ORDER.filter((entityType) =>
+    entityTypes.has(entityType),
+  ).map((entityType) => promotionStatement(db, input.runId, entityType));
+  const newRecordCountStatements = Object.entries(NEW_RECORD_ENTITIES)
+    .filter(([entityType]) => entityTypes.has(entityType as SyncEntityType))
+    .map(([entityType, resultKey]) => ({
+      resultKey,
+      statement: newRecordCountStatement(
+        db,
+        input.runId,
+        entityType as keyof typeof NEW_RECORD_ENTITIES,
+      ),
+    }));
+  const countResultOffset = input.beforePromoteStatements?.length ?? 0;
+  const batchResults = await db.batch([
+    ...(input.beforePromoteStatements ?? []),
+    ...newRecordCountStatements.map(({ statement }) => statement),
+    ...promotionStatements,
+    ...(input.afterPromoteStatements ?? []),
+    ...(input.finalizeStatements ?? []),
+    db
+      .prepare("DELETE FROM sync_write_staging WHERE run_id = ?")
+      .bind(input.runId),
+  ]);
+  const newRecords = emptySyncNewRecordCounts();
+  for (const [index, { resultKey }] of newRecordCountStatements.entries()) {
+    const result = batchResults[countResultOffset + index] as
+      { results?: Array<{ count?: number }> } | undefined;
+    newRecords[resultKey] = result?.results?.[0]?.count ?? 0;
+  }
+  return newRecords;
+}
+
 export async function persistStagedSyncWrite(
   db: D1Database,
   input: {
@@ -331,70 +411,20 @@ export async function persistStagedSyncWrite(
   },
 ) {
   const runId = crypto.randomUUID();
-  const createdAt = new Date().toISOString();
   await db
     .prepare("DELETE FROM sync_write_staging WHERE created_at < ?")
     .bind(new Date(Date.now() - STAGING_RETENTION_MS).toISOString())
     .run();
 
   try {
-    for (
-      let offset = 0;
-      offset < input.records.length;
-      offset += STAGING_CHUNK_SIZE
-    ) {
-      const chunk = input.records.slice(offset, offset + STAGING_CHUNK_SIZE);
-      await db
-        .prepare(
-          `INSERT INTO sync_write_staging (run_id, entity_type, record_key, payload, created_at)
-         SELECT
-           ?1,
-           json_extract(value, '$.entityType'),
-           json_extract(value, '$.recordKey'),
-           json_extract(value, '$.payload'),
-           ?2
-         FROM json_each(?3)
-         WHERE 1
-         ON CONFLICT(run_id, entity_type, record_key) DO UPDATE SET
-           payload = excluded.payload,
-           created_at = excluded.created_at`,
-        )
-        .bind(runId, createdAt, JSON.stringify(chunk))
-        .run();
-    }
-
-    const entityTypes = new Set(
-      input.records.map((record) => record.entityType),
-    );
-    const promotionStatements = ENTITY_ORDER.filter((entityType) =>
-      entityTypes.has(entityType),
-    ).map((entityType) => promotionStatement(db, runId, entityType));
-    const newRecordCountStatements = Object.entries(NEW_RECORD_ENTITIES)
-      .filter(([entityType]) => entityTypes.has(entityType as SyncEntityType))
-      .map(([entityType, resultKey]) => ({
-        resultKey,
-        statement: newRecordCountStatement(
-          db,
-          runId,
-          entityType as keyof typeof NEW_RECORD_ENTITIES,
-        ),
-      }));
-    const countResultOffset = input.beforePromoteStatements?.length ?? 0;
-    const batchResults = await db.batch([
-      ...(input.beforePromoteStatements ?? []),
-      ...newRecordCountStatements.map(({ statement }) => statement),
-      ...promotionStatements,
-      ...(input.afterPromoteStatements ?? []),
-      ...(input.finalizeStatements ?? []),
-      db.prepare("DELETE FROM sync_write_staging WHERE run_id = ?").bind(runId),
-    ]);
-    const newRecords = emptySyncNewRecordCounts();
-    for (const [index, { resultKey }] of newRecordCountStatements.entries()) {
-      const result = batchResults[countResultOffset + index] as
-        { results?: Array<{ count?: number }> } | undefined;
-      newRecords[resultKey] = result?.results?.[0]?.count ?? 0;
-    }
-    return newRecords;
+    await stageSyncWriteRecords(db, runId, input.records);
+    return await promoteStagedSyncWrite(db, {
+      runId,
+      entityTypes: input.records.map((record) => record.entityType),
+      beforePromoteStatements: input.beforePromoteStatements,
+      afterPromoteStatements: input.afterPromoteStatements,
+      finalizeStatements: input.finalizeStatements,
+    });
   } catch (error) {
     await db
       .prepare("DELETE FROM sync_write_staging WHERE run_id = ?")
