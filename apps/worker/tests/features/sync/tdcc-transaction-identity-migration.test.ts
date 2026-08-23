@@ -25,9 +25,22 @@ function createDatabase() {
     .prepare(
       `INSERT INTO bank_accounts
         (id, connector_id, source_id, account_type, currency, created_at, updated_at)
-       VALUES (?, 'tdcc', ?, 'settlement_cash', 'TWD', ?, ?)`,
+       VALUES
+         ('account-a', 'tdcc', 'settlement:bank-a:account-a:TWD',
+          'settlement_cash', 'TWD', ?, ?),
+         ('account-b', 'tdcc', 'settlement:bank-b:account-b:TWD',
+          'settlement_cash', 'TWD', ?, ?),
+         ('account-external', 'ctbc', 'bank:external',
+          'savings', 'TWD', ?, ?)`,
     )
-    .run("account-1", "settlement:004:test:TWD", "2026-08-20", "2026-08-20");
+    .run(
+      "2026-04-01",
+      "2026-04-01",
+      "2026-04-01",
+      "2026-04-01",
+      "2026-04-01",
+      "2026-04-01",
+    );
   databases.push(database);
   return database;
 }
@@ -41,31 +54,37 @@ function insertTransaction(
     occurredAt?: string;
     amount?: number;
     memo?: string;
+    accountId?: string;
+    connectorId?: string;
+    currency?: string;
   },
 ) {
-  const occurredAt = input.occurredAt ?? "2026-08-21T00:00:00";
-  const amount = input.amount ?? 102;
+  const occurredAt = input.occurredAt ?? "2026-04-15T08:30:45";
+  const amount = input.amount ?? 375;
   database
     .prepare(
       `INSERT INTO bank_transactions
         (id, connector_id, account_id, source_id, posted_date, amount, currency,
          description, raw_payload, created_at, updated_at)
-       VALUES (?, 'tdcc', 'account-1', ?, ?, ?, 'TWD', ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.id,
+      input.connectorId ?? "tdcc",
+      input.accountId ?? "account-a",
       input.sourceId,
       occurredAt,
       amount,
-      input.memo ?? "利息102稅額0健保費0",
+      input.currency ?? "TWD",
+      input.memo ?? "Provider adjustment",
       JSON.stringify({
         txnId: input.txnId,
         occurredAt,
         amount: String(amount),
-        memo: input.memo ?? "利息102稅額0健保費0",
+        memo: input.memo ?? "Provider adjustment",
       }),
-      "2026-08-20",
-      "2026-08-23",
+      "2026-04-01",
+      "2026-04-16",
     );
 }
 
@@ -76,9 +95,9 @@ function applyMigration(database: DatabaseSync) {
 }
 
 describe("TDCC bank transaction identity migration", () => {
-  it("merges uniquely matched legacy rows and preserves user preferences", () => {
+  it("merges generic legacy identities with one canonical transaction", () => {
     const database = createDatabase();
-    const canonicalSourceId = "00000:2026-08-21T00:00:00:102.0:0.0";
+    const canonicalSourceId = "batch:2026-04-15T08:30:45:375.0:0.0";
     insertTransaction(database, {
       id: "canonical",
       sourceId: canonicalSourceId,
@@ -86,29 +105,29 @@ describe("TDCC bank transaction identity migration", () => {
     });
     insertTransaction(database, {
       id: "legacy-1",
-      sourceId: "settlement:004:test:TWD:2026-08-21:102:TWD:interest-a",
+      sourceId: "settlement:bank-a:account-a:TWD:legacy-a",
       txnId: "",
-      memo: "利息 102稅額 0健保費 0",
+      memo: "Provider  adjustment",
     });
     insertTransaction(database, {
       id: "legacy-2",
-      sourceId: "settlement:004:test:TWD:2026-08-21:102:TWD:interest-b",
+      sourceId: "settlement:bank-a:account-a:TWD:legacy-b",
       txnId: " ",
     });
     database.exec(`
       INSERT INTO bank_transaction_preferences
         (transaction_id, excluded_from_calculation, created_at, updated_at)
       VALUES
-        ('canonical', 0, '2026-08-23', '2026-08-23'),
-        ('legacy-1', 1, '2026-08-20', '2026-08-21');
+        ('canonical', 0, '2026-04-16', '2026-04-16'),
+        ('legacy-1', 1, '2026-04-01', '2026-04-15');
       INSERT INTO classification_overrides
         (id, target_type, target_id, category_id, created_at, updated_at)
       VALUES
         ('legacy-override', 'bank_transaction', 'legacy-2', 'insurance',
-         '2026-08-20', '2026-08-21');
+         '2026-04-01', '2026-04-15');
       INSERT INTO invoice_transaction_preferences
         (invoice_id, transaction_id, decision, created_at, updated_at)
-      VALUES ('invoice-1', 'legacy-1', 'linked', '2026-08-20', '2026-08-21');
+      VALUES ('invoice-1', 'legacy-1', 'linked', '2026-04-01', '2026-04-15');
     `);
 
     applyMigration(database);
@@ -151,7 +170,7 @@ describe("TDCC bank transaction identity migration", () => {
     const database = createDatabase();
     insertTransaction(database, {
       id: "ambiguous-legacy",
-      sourceId: "settlement:004:test:TWD:ambiguous",
+      sourceId: "settlement:bank-a:account-a:TWD:ambiguous",
       txnId: "",
     });
     insertTransaction(database, {
@@ -167,44 +186,44 @@ describe("TDCC bank transaction identity migration", () => {
 
     insertTransaction(database, {
       id: "invoice-legacy",
-      sourceId: "settlement:004:test:TWD:invoice",
+      sourceId: "settlement:bank-a:account-a:TWD:invoice",
       txnId: "",
-      occurredAt: "2026-08-22T00:00:00",
+      occurredAt: "2026-04-16T08:30:45",
     });
     insertTransaction(database, {
       id: "invoice-canonical",
       sourceId: "invoice-canonical-id",
       txnId: "invoice-canonical-id",
-      occurredAt: "2026-08-22T00:00:00",
+      occurredAt: "2026-04-16T08:30:45",
     });
     database.exec(`
       INSERT INTO invoice_transaction_preferences
         (invoice_id, transaction_id, decision, created_at, updated_at)
       VALUES
-        ('invoice-legacy-pref', 'invoice-legacy', 'linked', '2026-08-20', '2026-08-20'),
-        ('invoice-canonical-pref', 'invoice-canonical', 'linked', '2026-08-20', '2026-08-20');
+        ('invoice-legacy-pref', 'invoice-legacy', 'linked', '2026-04-01', '2026-04-01'),
+        ('invoice-canonical-pref', 'invoice-canonical', 'linked', '2026-04-01', '2026-04-01');
     `);
 
     insertTransaction(database, {
       id: "classification-legacy",
-      sourceId: "settlement:004:test:TWD:classification",
+      sourceId: "settlement:bank-a:account-a:TWD:classification",
       txnId: "",
-      occurredAt: "2026-08-23T00:00:00",
+      occurredAt: "2026-04-17T08:30:45",
     });
     insertTransaction(database, {
       id: "classification-canonical",
       sourceId: "classification-canonical-id",
       txnId: "classification-canonical-id",
-      occurredAt: "2026-08-23T00:00:00",
+      occurredAt: "2026-04-17T08:30:45",
     });
     database.exec(`
       INSERT INTO classification_overrides
         (id, target_type, target_id, category_id, created_at, updated_at)
       VALUES
         ('classification-legacy-override', 'bank_transaction',
-         'classification-legacy', 'tax', '2026-08-20', '2026-08-20'),
+         'classification-legacy', 'tax', '2026-04-01', '2026-04-01'),
         ('classification-canonical-override', 'bank_transaction',
-         'classification-canonical', 'insurance', '2026-08-20', '2026-08-20');
+         'classification-canonical', 'insurance', '2026-04-01', '2026-04-01');
     `);
 
     applyMigration(database);
@@ -219,6 +238,92 @@ describe("TDCC bank transaction identity migration", () => {
         .all()
         .map((row) => row.id),
     ).toEqual(["ambiguous-legacy", "classification-legacy", "invoice-legacy"]);
+    expect(
+      database
+        .prepare(
+          "SELECT invoice_id, transaction_id FROM invoice_transaction_preferences ORDER BY invoice_id",
+        )
+        .all(),
+    ).toEqual([
+      {
+        invoice_id: "invoice-canonical-pref",
+        transaction_id: "invoice-canonical",
+      },
+      {
+        invoice_id: "invoice-legacy-pref",
+        transaction_id: "invoice-legacy",
+      },
+    ]);
+    expect(
+      database
+        .prepare(
+          `SELECT target_id, category_id FROM classification_overrides
+           WHERE target_id LIKE 'classification-%' ORDER BY target_id`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        target_id: "classification-canonical",
+        category_id: "insurance",
+      },
+      { target_id: "classification-legacy", category_id: "tax" },
+    ]);
+  });
+
+  it("does not cross account, connector, timestamp, memo, or valid provider ids", () => {
+    const database = createDatabase();
+    const canonicalSourceId = "batch:2026-04-15T08:30:45:375.0:0.0";
+    insertTransaction(database, {
+      id: "canonical",
+      sourceId: canonicalSourceId,
+      txnId: canonicalSourceId,
+    });
+    insertTransaction(database, {
+      id: "other-account",
+      accountId: "account-b",
+      sourceId: "settlement:bank-b:account-b:TWD:legacy",
+      txnId: "",
+    });
+    insertTransaction(database, {
+      id: "other-connector",
+      accountId: "account-external",
+      connectorId: "ctbc",
+      sourceId: "settlement:external:legacy",
+      txnId: "",
+    });
+    insertTransaction(database, {
+      id: "valid-provider-id",
+      sourceId: "opaque-provider-id",
+      txnId: "opaque-provider-id",
+    });
+    insertTransaction(database, {
+      id: "different-time",
+      sourceId: "settlement:bank-a:account-a:TWD:different-time",
+      txnId: "",
+      occurredAt: "2026-04-15T08:30:46",
+    });
+    insertTransaction(database, {
+      id: "different-memo",
+      sourceId: "settlement:bank-a:account-a:TWD:different-memo",
+      txnId: "",
+      memo: "Another adjustment",
+    });
+
+    applyMigration(database);
+
+    expect(
+      database
+        .prepare("SELECT id FROM bank_transactions ORDER BY id")
+        .all()
+        .map((row) => row.id),
+    ).toEqual([
+      "canonical",
+      "different-memo",
+      "different-time",
+      "other-account",
+      "other-connector",
+      "valid-provider-id",
+    ]);
   });
 
   it("re-keys an empty durable source id without changing its transaction id", () => {
@@ -227,12 +332,12 @@ describe("TDCC bank transaction identity migration", () => {
       id: "empty-source-id",
       sourceId: "",
       txnId: "",
-      memo: "利息 102稅額 0健保費 0",
+      memo: "Provider adjustment",
     });
     database.exec(`
       INSERT INTO bank_transaction_preferences
         (transaction_id, excluded_from_calculation, created_at, updated_at)
-      VALUES ('empty-source-id', 1, '2026-08-20', '2026-08-20');
+      VALUES ('empty-source-id', 1, '2026-04-01', '2026-04-01');
     `);
 
     applyMigration(database);
@@ -245,7 +350,7 @@ describe("TDCC bank transaction identity migration", () => {
         .get(),
     ).toEqual({
       id: "empty-source-id",
-      source_id: "missing:2026-08-21T00:00:00:102:利息102稅額0健保費0",
+      source_id: "missing:2026-04-15T08:30:45:375:Provideradjustment",
     });
     expect(
       database
