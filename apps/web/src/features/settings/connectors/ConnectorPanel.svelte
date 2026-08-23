@@ -81,6 +81,11 @@
   let einvoiceSyncPolling = $state<"awaiting-active" | "active" | null>(null);
   let einvoiceSyncPreviousLastRunAt = $state<string | null>(null);
   let einvoiceSyncPollingTimer: ReturnType<typeof setTimeout> | undefined;
+  let tdccSyncQueued = $state(false);
+  let tdccSyncQueuedTimer: ReturnType<typeof setTimeout> | undefined;
+  let tdccSyncPolling = $state<"awaiting-active" | "active" | null>(null);
+  let tdccSyncPreviousLastRunAt = $state<string | null>(null);
+  let tdccSyncPollingTimer: ReturnType<typeof setTimeout> | undefined;
   let destroyed = false;
   const job = $derived(
     ($jobs.data ?? []).find(
@@ -175,6 +180,8 @@
     destroyed = true;
     clearTimeout(einvoiceSyncQueuedTimer);
     stopEinvoiceSyncPolling();
+    clearTimeout(tdccSyncQueuedTimer);
+    stopTdccSyncPolling();
   });
 
   const save = createMutation({
@@ -210,7 +217,7 @@
           : `/api/connectors/${connectorId}/sync`;
       pendingSyncTarget = target;
       const runSync = () =>
-        connectorId === "einvoice"
+        connectorId === "einvoice" || connectorId === "tdcc"
           ? api.post<QueuedSyncResponse>(path, {})
           : api.post(path);
       try {
@@ -240,8 +247,13 @@
         startEinvoiceSyncPolling();
         return;
       }
+      if (connectorId === "tdcc") {
+        showTdccSyncQueued();
+        startTdccSyncPolling();
+        tdccSetupStep = "complete";
+        return;
+      }
       invalidateLatestSyncReport();
-      if (connectorId === "tdcc") tdccSetupStep = "complete";
       qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
       qc.invalidateQueries({ queryKey: queryKeys.summary });
       if (
@@ -556,6 +568,8 @@
     qc.invalidateQueries({ queryKey: queryKeys.investments });
     qc.invalidateQueries({ queryKey: queryKeys.investmentTransactions });
     qc.invalidateQueries({ queryKey: queryKeys.bank });
+    showTdccSyncQueued();
+    startTdccSyncPolling();
   }
 
   function buildConfig() {
@@ -577,6 +591,14 @@
     clearTimeout(einvoiceSyncQueuedTimer);
     einvoiceSyncQueuedTimer = setTimeout(() => {
       einvoiceSyncQueued = false;
+    }, 5_000);
+  }
+
+  function showTdccSyncQueued() {
+    tdccSyncQueued = true;
+    clearTimeout(tdccSyncQueuedTimer);
+    tdccSyncQueuedTimer = setTimeout(() => {
+      tdccSyncQueued = false;
     }, 5_000);
   }
   function startEinvoiceSyncPolling() {
@@ -618,6 +640,50 @@
       void pollEinvoiceSyncJob();
     }, 2_000);
   }
+  function startTdccSyncPolling() {
+    tdccSyncPolling = "awaiting-active";
+    tdccSyncPreviousLastRunAt = job?.lastRunAt ?? null;
+    clearTimeout(tdccSyncPollingTimer);
+    void pollTdccSyncJob();
+  }
+  function stopTdccSyncPolling() {
+    tdccSyncPolling = null;
+    clearTimeout(tdccSyncPollingTimer);
+    tdccSyncPollingTimer = undefined;
+  }
+  async function pollTdccSyncJob() {
+    const syncJobs = await qc
+      .fetchQuery({ ...syncJobsQuery(() => api), staleTime: 0 })
+      .catch(() => undefined);
+    if (!tdccSyncPolling || destroyed) return;
+    const tdccJob = syncJobs?.find(
+      (syncJob) => syncJob.connectorId === "tdcc" && syncJob.scope === "all",
+    );
+    if (tdccJob?.running) {
+      tdccSyncPolling = "active";
+    } else if (
+      tdccJob &&
+      (tdccSyncPolling === "active" ||
+        tdccJob.lastRunAt !== tdccSyncPreviousLastRunAt)
+    ) {
+      const status = tdccJob?.lastStatus;
+      stopTdccSyncPolling();
+      if (status === "success") {
+        invalidateLatestSyncReport();
+        qc.invalidateQueries({ queryKey: queryKeys.summary });
+        qc.invalidateQueries({ queryKey: queryKeys.connectorSettings("tdcc") });
+        qc.invalidateQueries({ queryKey: queryKeys.investments });
+        qc.invalidateQueries({ queryKey: queryKeys.investmentTransactions });
+        qc.invalidateQueries({ queryKey: queryKeys.bank });
+      } else if (status === "failed" || status === "needs_user_action") {
+        error = tdccJob?.lastError ?? "集保同步失敗，請重新驗證。";
+      }
+      return;
+    }
+    tdccSyncPollingTimer = setTimeout(() => {
+      void pollTdccSyncJob();
+    }, 2_000);
+  }
   function invalidateLatestSyncReport() {
     qc.invalidateQueries({ queryKey: queryKeys.latestSyncReport });
   }
@@ -656,11 +722,20 @@
       {#if connectorId === "tdcc" && tdccConnectionReady}
         <Button
           size="sm"
-          disabled={demoMode || $sync.isPending || $verifyOtp.isPending}
+          disabled={demoMode ||
+            $sync.isPending ||
+            $verifyOtp.isPending ||
+            tdccSyncPolling !== null}
           onclick={() => $sync.mutate("default")}
           ><RefreshCw
             class={$sync.isPending ? "size-4 animate-spin" : "size-4"}
-          />{$sync.isPending ? "同步中…" : "同步"}</Button
+          />{$sync.isPending
+            ? "同步中…"
+            : tdccSyncQueued
+              ? "已排入同步"
+              : tdccSyncPolling
+                ? "同步中…"
+                : "同步"}</Button
         >
       {:else if connectorId === "tdcc"}
         <span

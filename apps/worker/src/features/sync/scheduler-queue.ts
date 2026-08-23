@@ -5,6 +5,8 @@ import {
   isEinvoiceUserActionError,
   processEinvoiceSyncChunk,
 } from "./einvoice-sync-service";
+import { failTdccSyncRun, processTdccSyncChunk } from "./tdcc-sync-service";
+import { isUserActionError } from "./service";
 
 const queueController = {
   cron: "queue:scheduled-sync",
@@ -12,7 +14,9 @@ const queueController = {
 
 export const SCHEDULED_SYNC_CHAIN_DELAY_SECONDS = 20;
 export const EINVOICE_SYNC_CHAIN_DELAY_SECONDS = 1;
+export const TDCC_SYNC_CHAIN_DELAY_SECONDS = 1;
 const EINVOICE_MAX_QUEUE_ATTEMPTS = 3;
+const TDCC_MAX_QUEUE_ATTEMPTS = 3;
 
 export async function enqueueScheduledSync(env: Env, delaySeconds = 0) {
   const message = { type: "run-next-scheduled-sync" } as const;
@@ -36,6 +40,19 @@ export async function enqueueEinvoiceSyncChunk(
   await env.SYNC_QUEUE.send(message);
 }
 
+export async function enqueueTdccSyncChunk(
+  env: Env,
+  runId: string,
+  delaySeconds = 0,
+) {
+  const message = { type: "run-tdcc-chunk", runId } as const;
+  if (delaySeconds > 0) {
+    await env.SYNC_QUEUE.send(message, { delaySeconds });
+    return;
+  }
+  await env.SYNC_QUEUE.send(message);
+}
+
 export async function consumeScheduledSyncQueue(
   batch: MessageBatch<ScheduledSyncQueueMessage>,
   env: Env,
@@ -43,6 +60,10 @@ export async function consumeScheduledSyncQueue(
   for (const message of batch.messages) {
     if (message.body.type === "run-einvoice-chunk") {
       await consumeEinvoiceChunkMessage(message, env);
+      continue;
+    }
+    if (message.body.type === "run-tdcc-chunk") {
+      await consumeTdccChunkMessage(message, env);
       continue;
     }
     if (message.body.type !== "run-next-scheduled-sync") {
@@ -61,6 +82,56 @@ export async function consumeScheduledSyncQueue(
       await enqueueScheduledSync(env, SCHEDULED_SYNC_CHAIN_DELAY_SECONDS);
     }
     message.ack();
+  }
+}
+
+async function consumeTdccChunkMessage(
+  message: Message<ScheduledSyncQueueMessage>,
+  env: Env,
+) {
+  if (message.body.type !== "run-tdcc-chunk") return;
+  try {
+    const result = await processTdccSyncChunk(
+      env,
+      message.body.runId,
+      message.id,
+    );
+    if (result.status === "busy") {
+      try {
+        await enqueueTdccSyncChunk(
+          env,
+          message.body.runId,
+          result.retryAfterSeconds,
+        );
+        message.ack();
+      } catch {
+        message.retry({ delaySeconds: result.retryAfterSeconds });
+      }
+      return;
+    }
+    if (result.status === "continue") {
+      await enqueueTdccSyncChunk(
+        env,
+        message.body.runId,
+        TDCC_SYNC_CHAIN_DELAY_SECONDS,
+      );
+    }
+    message.ack();
+  } catch (error) {
+    if (
+      isUserActionError(error) ||
+      message.attempts >= TDCC_MAX_QUEUE_ATTEMPTS
+    ) {
+      await failTdccSyncRun(
+        env,
+        message.body.runId,
+        error,
+        !isUserActionError(error),
+      );
+      message.ack();
+      return;
+    }
+    message.retry({ delaySeconds: retryDelaySeconds(message.attempts) });
   }
 }
 

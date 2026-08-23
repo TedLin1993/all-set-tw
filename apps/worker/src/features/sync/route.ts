@@ -42,6 +42,9 @@ import {
   type SyncOutcome,
 } from "./service";
 import { prepareConnectorChallenge, runConnectorSync } from "./registry";
+import { cancelQueuedTdccSyncRun, startTdccSyncRun } from "./tdcc-sync-service";
+import { enqueueTdccSyncChunk } from "./scheduler-queue";
+import type { TdccRunScope } from "./tdcc-run-repository";
 
 const tdccSyncBodySchema = z.object({
   otp: z.string().min(1).optional(),
@@ -131,12 +134,7 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     ),
     async (c) => {
       const overrides = c.req.valid("json");
-      return syncRouteResponse(
-        c,
-        withManualSyncLock(c.env, "tdcc", SYNC_SCOPE_ALL, () =>
-          runConnectorSync(c.env, "tdcc", "manual", SYNC_SCOPE_ALL, overrides),
-        ),
-      );
+      return queuedTdccSyncResponse(c, "all", overrides);
     },
   );
 
@@ -149,18 +147,7 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     ),
     async (c) => {
       const overrides = c.req.valid("json");
-      return syncRouteResponse(
-        c,
-        withManualSyncLock(c.env, "tdcc", TDCC_SCOPE_INVESTMENTS, () =>
-          runConnectorSync(
-            c.env,
-            "tdcc",
-            "manual",
-            TDCC_SCOPE_INVESTMENTS,
-            overrides,
-          ),
-        ),
-      );
+      return queuedTdccSyncResponse(c, "investments", overrides);
     },
   );
 
@@ -173,12 +160,7 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     ),
     async (c) => {
       const overrides = c.req.valid("json");
-      return syncRouteResponse(
-        c,
-        withManualSyncLock(c.env, "tdcc", TDCC_SCOPE_BANK, () =>
-          runConnectorSync(c.env, "tdcc", "manual", TDCC_SCOPE_BANK, overrides),
-        ),
-      );
+      return queuedTdccSyncResponse(c, "bank", overrides);
     },
   );
 
@@ -191,18 +173,7 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     ),
     async (c) => {
       const overrides = c.req.valid("json");
-      return syncRouteResponse(
-        c,
-        withManualSyncLock(c.env, "tdcc", TDCC_SCOPE_TRADES, () =>
-          runConnectorSync(
-            c.env,
-            "tdcc",
-            "manual",
-            TDCC_SCOPE_TRADES,
-            overrides,
-          ),
-        ),
-      );
+      return queuedTdccSyncResponse(c, "trades", overrides);
     },
   );
 
@@ -434,6 +405,40 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       );
     },
   );
+}
+
+async function queuedTdccSyncResponse(
+  c: Context<AppBindings>,
+  scope: TdccRunScope,
+  overrides: Record<string, unknown>,
+) {
+  try {
+    const { run, created } = await startTdccSyncRun(c.env, {
+      trigger: "manual",
+      scope,
+      overrides,
+    });
+    if (created) {
+      try {
+        await enqueueTdccSyncChunk(c.env, run.id);
+      } catch (error) {
+        await cancelQueuedTdccSyncRun(c.env, run.id, error);
+        throw error;
+      }
+    }
+    return c.json(
+      {
+        success: true as const,
+        connectorId: "tdcc" as const,
+        scope,
+        status: "queued" as const,
+        runId: run.id,
+      },
+      202,
+    );
+  } catch (error) {
+    return syncRouteResponse(c, Promise.reject(error) as Promise<SyncOutcome>);
+  }
 }
 
 async function syncRouteResponse(

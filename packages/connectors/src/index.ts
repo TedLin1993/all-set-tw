@@ -25,6 +25,17 @@ export {
   createTdccConnector,
   tdccConfigSchema,
   parseTdccConfig,
+  parseTdccCursor,
+  createTdccClient,
+  ensureTdccSession,
+  initializeTdccSnapshot,
+  normalizeTdccSnapshot,
+  stockAccountsFromPayload,
+  parseTdccStockAccounts,
+  parseTdccStockHoldings,
+  parseTdccFundHoldings,
+  toInvestmentTransaction,
+  parseTdccTradePageItems,
   syncTdccTradeHistory,
   TdccConnectionError,
   TdccOtpExpiredError,
@@ -36,7 +47,27 @@ export type {
   TdccCashBalance,
   TdccCashMovement,
   TdccClient,
+  TdccCursorState,
+  TdccTradeCursor,
+  TdccIdentity,
+  TdccStockAccount,
+  TdccBankEntry,
+  TdccSnapshotInitialization,
+  TdccSnapshotRecords,
 } from "./tdcc";
+export {
+  EPassbookClient,
+  EPassbookError,
+  normalizeBankTransactionDetails,
+} from "./tdcc-epassbook-client";
+export type {
+  EPassbookClientOptions,
+  EPassbookSession,
+  BankTransaction,
+  BankTransactionDetail,
+  BankTransactionPage,
+  TradeDetailPage,
+} from "./tdcc-epassbook-client";
 import { tdccConfigSchema } from "./tdcc";
 
 export { esunConfigSchema, parseEsunConfig } from "./esun";

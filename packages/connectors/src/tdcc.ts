@@ -12,6 +12,7 @@ import {
   EPassbookClient,
   EPassbookError,
   type EPassbookSession,
+  type TradeDetailPage,
 } from "./tdcc-epassbook-client";
 
 const tdccHoldingSchema = z.object({
@@ -160,7 +161,7 @@ export function createTdccConnector(
 
 export const tdccConnector = createTdccConnector();
 
-type TdccCursorState = {
+export type TdccCursorState = {
   deviceId: string;
   devType: string;
   devModel: string;
@@ -168,13 +169,13 @@ type TdccCursorState = {
   tradeCursors?: Record<string, TdccTradeCursor>;
 };
 
-type TdccTradeCursor = {
+export type TdccTradeCursor = {
   newest?: string;
   oldest?: string;
   backfillComplete?: boolean;
 };
 
-function readTdccCursor(
+export function parseTdccCursor(
   cursor: string | undefined,
 ): TdccCursorState | undefined {
   if (!cursor) return undefined;
@@ -184,6 +185,10 @@ function readTdccCursor(
     return undefined;
   }
 }
+
+// Keep the old private name local to this module while callers migrate to the
+// durable-sync helper above.
+const readTdccCursor = parseTdccCursor;
 
 // ponytail: TDCC signals "new/unrecognized device" two ways — a successful
 // login response with isDiffDevice/isEmailValid flags, or these error codes
@@ -230,12 +235,189 @@ export class TdccVerificationRequiredError extends Error {
   }
 }
 
-type TdccIdentity = {
+export type TdccIdentity = {
   deviceId: string;
   devType: string;
   devModel: string;
   session?: EPassbookSession;
 };
+
+export type TdccBankEntry = {
+  bankId: string;
+  accountNo: string;
+  accountType?: string;
+  currency: string;
+  balanceAmt: string;
+  availableBalance?: string;
+};
+
+/**
+ * Build the client and identity for a Queue chunk without performing a
+ * network request. The returned `previous` cursor is safe to persist again;
+ * it contains only device/session metadata and trade cursors.
+ */
+export function createTdccClient(
+  config: TdccConfig,
+  cursor?: string,
+): {
+  client: EPassbookClient;
+  identity: TdccIdentity;
+  previous?: TdccCursorState;
+} {
+  const previous = parseTdccCursor(cursor);
+  const identity: TdccIdentity = {
+    deviceId:
+      config.deviceId ??
+      previous?.deviceId ??
+      crypto.randomUUID().replace(/-/g, "").slice(0, 16),
+    devType: config.devType ?? previous?.devType ?? "Android:14",
+    devModel: config.devModel ?? previous?.devModel ?? "SM-G991B",
+    session: config.session ?? previous?.session,
+  };
+  return {
+    client: new EPassbookClient({
+      devId: identity.deviceId,
+      devType: identity.devType,
+      devModel: identity.devModel,
+      session: identity.session,
+    }),
+    identity,
+    previous,
+  };
+}
+
+/** Ensure a client has a trusted TDCC session, preserving OTP error classes. */
+export async function ensureTdccSession(
+  client: EPassbookClient,
+  config: TdccConfig,
+): Promise<EPassbookSession> {
+  if (!client.exportSession().tokenId) {
+    try {
+      await client.getInitialToken();
+      await loginWithDeviceVerification(client, config);
+    } catch (error) {
+      wrapTdccError(error);
+    }
+  }
+  return client.exportSession();
+}
+
+export type TdccSnapshotInitialization = {
+  client: EPassbookClient;
+  identity: TdccIdentity;
+  previous?: TdccCursorState;
+  session: EPassbookSession;
+  stockPayload: Record<string, unknown>;
+  fundPayload: Record<string, unknown>;
+  bankBalancesPayload: Awaited<ReturnType<EPassbookClient["getBankBalances"]>>;
+  trendPayload: Awaited<ReturnType<EPassbookClient["getAssetTrend"]>>;
+  stockAccounts: TdccStockAccount[];
+  bankEntries: TdccBankEntry[];
+  snapshot: TdccSnapshotRecords;
+};
+
+export type TdccSnapshotRecords = {
+  holdings: TdccHolding[];
+  investmentPositions: Array<Omit<InvestmentPosition, "id" | "connectorId">>;
+  cashBalances: TdccCashBalance[];
+  bankAccounts: Array<Omit<BankAccount, "id" | "connectorId">>;
+  bankBalanceSnapshots: Array<Omit<BankBalanceSnapshot, "id" | "connectorId">>;
+  netWorthHistory: NetWorthHistoryPoint[];
+};
+
+type TdccSnapshotPayload = Omit<
+  TdccSnapshotInitialization,
+  "client" | "identity" | "previous" | "session"
+>;
+
+async function fetchTdccSnapshot(
+  client: EPassbookClient,
+): Promise<TdccSnapshotPayload> {
+  const [stockPayload, fundPayload, bankBalancesPayload, trendPayload] =
+    await Promise.all([
+      client.getPositions(),
+      client.getFundPositions(),
+      client.getBankBalances(),
+      client.getAssetTrend("1Y").catch(() => null),
+    ]);
+  const tspInfos = bankBalancesPayload.tspAccountInfos ?? [];
+  const bankEntries: TdccBankEntry[] = tspInfos.flatMap((info) =>
+    (info.tspAccount ?? [])
+      .filter((account) => account.isShow !== false)
+      .map((account) => ({
+        bankId: info.bankId,
+        accountNo: account.accountNo,
+        accountType: account.accountType,
+        currency: account.currency || "TWD",
+        balanceAmt: account.balanceAmt,
+        availableBalance: account.availableBalance,
+      })),
+  );
+  const snapshot = normalizeTdccSnapshot({
+    stockPayload,
+    fundPayload,
+    bankBalancesPayload,
+    trendPayload,
+    bankEntries,
+  });
+  return {
+    stockPayload,
+    fundPayload,
+    bankBalancesPayload,
+    trendPayload,
+    stockAccounts: stockAccountsFromPayload(stockPayload),
+    bankEntries,
+    snapshot,
+  };
+}
+
+/**
+ * Login/restore a session and fetch only the bounded TDCC snapshot endpoints.
+ * TSP007/TR002 pagination is deliberately left to Queue chunks.
+ */
+export async function initializeTdccSnapshot(
+  config: TdccConfig,
+  cursor?: string,
+): Promise<TdccSnapshotInitialization> {
+  const state = createTdccClient(config, cursor);
+  try {
+    await ensureTdccSession(state.client, config);
+    const snapshot = await fetchTdccSnapshot(state.client);
+    return {
+      ...state,
+      session: state.client.exportSession(),
+      ...snapshot,
+    };
+  } catch (error) {
+    // A persisted token can expire between Queue chunks. Retry the bounded
+    // initialization once with a fresh login, matching syncTdccLive behavior.
+    const isStaleSession =
+      error instanceof EPassbookError &&
+      SESSION_EXPIRED_CODES.has(error.code) &&
+      Boolean(state.identity.session?.tokenId);
+    if (!isStaleSession) return wrapTdccError(error);
+    const fresh = createTdccClient(
+      { ...config, session: undefined },
+      JSON.stringify({
+        ...(state.previous ?? {}),
+        deviceId: state.identity.deviceId,
+        devType: state.identity.devType,
+        devModel: state.identity.devModel,
+        session: undefined,
+      }),
+    );
+    await ensureTdccSession(fresh.client, {
+      ...config,
+      session: undefined,
+    });
+    const snapshot = await fetchTdccSnapshot(fresh.client);
+    return {
+      ...fresh,
+      session: fresh.client.exportSession(),
+      ...snapshot,
+    };
+  }
+}
 
 async function syncTdccLive(config: TdccConfig, cursor?: string) {
   const previous = readTdccCursor(cursor);
@@ -614,13 +796,13 @@ function wrapTdccError(error: unknown): never {
   throw error;
 }
 
-type TdccStockAccount = {
+export type TdccStockAccount = {
   brokerNo: string;
   brokerAccount: string;
   brokerName?: string;
 };
 
-function stockAccountsFromPayload(
+export function stockAccountsFromPayload(
   payload: Record<string, unknown>,
 ): TdccStockAccount[] {
   const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
@@ -646,7 +828,10 @@ function stockAccountsFromPayload(
   return Array.from(byId.values());
 }
 
-function toInvestmentTransaction(
+/** Descriptive alias for callers that do not need the legacy function name. */
+export const parseTdccStockAccounts = stockAccountsFromPayload;
+
+export function toInvestmentTransaction(
   row: unknown[],
   account: TdccStockAccount,
 ): Omit<InvestmentTransaction, "id" | "connectorId"> {
@@ -723,6 +908,17 @@ function toInvestmentTransaction(
   };
 }
 
+/** Parse and normalize one TR002 page for a single stock account. */
+export function parseTdccTradePageItems(
+  page: Pick<TradeDetailPage, "items"> | { items?: unknown[] },
+  account: TdccStockAccount,
+): Array<Omit<InvestmentTransaction, "id" | "connectorId">> {
+  const rows = Array.isArray(page.items)
+    ? page.items.filter((item): item is unknown[] => Array.isArray(item))
+    : [];
+  return rows.map((row) => toInvestmentTransaction(row, account));
+}
+
 function parseStockHoldings(payload: Record<string, unknown>): TdccHolding[] {
   const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
   const holdings: TdccHolding[] = [];
@@ -784,6 +980,8 @@ function parseStockHoldings(payload: Record<string, unknown>): TdccHolding[] {
   return holdings;
 }
 
+export const parseTdccStockHoldings = parseStockHoldings;
+
 function marketValueFromTradeItem(item: unknown[]) {
   const quantity = Number(stringField(item[7]) || "0");
   const price = Number(stringField(item[17]) || "0");
@@ -826,6 +1024,94 @@ function parseFundHoldings(payload: Record<string, unknown>): TdccHolding[] {
         raw: fund,
       };
     });
+}
+
+export const parseTdccFundHoldings = parseFundHoldings;
+
+/**
+ * Convert the bounded snapshot endpoints into the same normalized records
+ * used by the legacy full sync. No TSP007/TR002 request is made here; cash
+ * movements and investment transactions are intentionally left to Queue page
+ * chunks.
+ */
+export function normalizeTdccSnapshot(input: {
+  stockPayload: Record<string, unknown>;
+  fundPayload: Record<string, unknown>;
+  bankBalancesPayload: Awaited<ReturnType<EPassbookClient["getBankBalances"]>>;
+  trendPayload: Awaited<ReturnType<EPassbookClient["getAssetTrend"]>>;
+  bankEntries?: TdccBankEntry[];
+  asOfAt?: string;
+}): TdccSnapshotRecords {
+  const holdings = [
+    ...parseStockHoldings(input.stockPayload),
+    ...parseFundHoldings(input.fundPayload),
+  ];
+  const bankEntries =
+    input.bankEntries ??
+    (input.bankBalancesPayload.tspAccountInfos ?? []).flatMap((info) =>
+      (info.tspAccount ?? [])
+        .filter((account) => account.isShow !== false)
+        .map((account) => ({
+          bankId: info.bankId,
+          accountNo: account.accountNo,
+          accountType: account.accountType,
+          currency: account.currency || "TWD",
+          balanceAmt: account.balanceAmt,
+          availableBalance: account.availableBalance,
+        })),
+    );
+  const asOfAt = input.asOfAt ?? new Date().toISOString();
+  const cashBalances: TdccCashBalance[] = bankEntries.map((entry) => ({
+    accountId: `${entry.bankId}:${entry.accountNo}:${entry.currency}`,
+    brokerName: entry.accountType || undefined,
+    balance: entry.balanceAmt,
+    availableBalance: entry.availableBalance || undefined,
+    currency: entry.currency.toUpperCase(),
+    asOfAt,
+    raw: entry,
+  }));
+
+  const toDate = (value: string) =>
+    `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+  const trendPayload = input.trendPayload;
+  const netWorthHistory: NetWorthHistoryPoint[] = trendPayload
+    ? [
+        ...trendPayload.chartDate.map((date, index) => ({
+          date: toDate(date),
+          netWorth: trendPayload.chartVal[index] ?? 0,
+          assetType: "total" as const,
+        })),
+        ...trendPayload.chartDate.map((date, index) => ({
+          date: toDate(date),
+          netWorth:
+            (trendPayload.chartVal[index] ?? 0) -
+            (trendPayload.fundChartVal[index] ?? 0),
+          assetType: "stock" as const,
+        })),
+        ...trendPayload.fundChartDate.map((date, index) => ({
+          date: toDate(date),
+          netWorth: trendPayload.fundChartVal[index] ?? 0,
+          assetType: "fund" as const,
+        })),
+      ]
+    : [];
+
+  return {
+    holdings,
+    investmentPositions: dedupeBySourceId(holdings.map(toInvestmentPosition)),
+    cashBalances,
+    bankAccounts: dedupeBySourceId([
+      ...holdings
+        .filter((holding) => holding.cashBalance !== undefined)
+        .map(toSettlementBankAccount),
+      ...cashBalances.map(toSettlementBankAccount),
+    ]),
+    bankBalanceSnapshots: dedupeByAccountAndSourceId([
+      ...holdings.flatMap(toSettlementBalanceSnapshot),
+      ...cashBalances.map(toBankBalanceSnapshot),
+    ]),
+    netWorthHistory,
+  };
 }
 
 function stringField(value: unknown): string {
