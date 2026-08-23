@@ -9,7 +9,10 @@ import {
   TdccOtpExpiredError,
   TdccVerificationRequiredError,
 } from "../../src/tdcc";
-import { EPassbookClient } from "../../src/tdcc-epassbook-client";
+import {
+  EPassbookClient,
+  normalizeBankTransactionDetails,
+} from "../../src/tdcc-epassbook-client";
 
 const calls: string[] = [];
 const tspPageTokens: string[] = [];
@@ -260,6 +263,73 @@ function errorResponse(returnCode: string) {
 }) as typeof fetch;
 
 async function main() {
+  const missingStanDetails = [
+    {
+      stan: " ",
+      txnDateTime: "20260821000000",
+      transferInAmount: "102.0",
+      transferOutAmount: "0.0",
+      memo: "利息 102稅額 0健保費 0",
+    },
+    {
+      stan: "",
+      txnDateTime: "20260821000000",
+      transferInAmount: "102.0",
+      transferOutAmount: "0.0",
+      memo: "利息102稅額0健保費0",
+    },
+  ];
+  const normalizedMissingStan =
+    normalizeBankTransactionDetails(missingStanDetails);
+  assert.ok(normalizedMissingStan[0]?.txnId);
+  assert.equal(
+    normalizedMissingStan[0]?.txnId,
+    normalizedMissingStan[1]?.txnId,
+    "blank STAN rows with whitespace-only memo differences need the same stable id",
+  );
+  assert.deepEqual(
+    normalizeBankTransactionDetails(missingStanDetails),
+    normalizedMissingStan,
+    "blank STAN ids must remain stable across syncs",
+  );
+
+  const duplicateStan = normalizeBankTransactionDetails([
+    {
+      stan: "00000",
+      txnDateTime: "20260821000000",
+      transferInAmount: "102.0",
+      transferOutAmount: "0.0",
+    },
+    {
+      stan: "00000",
+      txnDateTime: "20260620000000",
+      transferInAmount: "103.0",
+      transferOutAmount: "0.0",
+    },
+  ]);
+  assert.equal(
+    duplicateStan[0]?.txnId,
+    "00000:2026-08-21T00:00:00:102.0:0.0",
+    "existing compound ids for duplicate non-empty STAN values must stay compatible",
+  );
+
+  const malformedDate = normalizeBankTransactionDetails([
+    {
+      stan: "",
+      txnDateTime: "invalid",
+      transferInAmount: "1",
+    },
+  ]);
+  assert.equal(malformedDate[0]?.occurredAt, "1970-01-01T00:00:00");
+  assert.equal(malformedDate[0]?.txnId, "missing:1970-01-01T00:00:00:1:-");
+  assert.equal(
+    malformedDate[0]?.txnId,
+    normalizeBankTransactionDetails([
+      { stan: "", txnDateTime: "invalid", transferInAmount: "1" },
+    ])[0]?.txnId,
+    "malformed dates must not use the current wall-clock time in their id",
+  );
+
   const connector = createTdccConnector();
   const config = parseTdccConfig({ userId: "A123456789", password: "secret" });
 
