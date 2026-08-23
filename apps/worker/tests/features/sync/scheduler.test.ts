@@ -6,6 +6,7 @@ import type { Env } from "../../../src/platform/env";
 const mocks = vi.hoisted(() => ({
   acquireSyncJobLock: vi.fn(),
   cancelQueuedEinvoiceSyncRun: vi.fn(),
+  cancelQueuedTdccSyncRun: vi.fn(),
   claimCompletedDefaultScheduleBatch: vi.fn(),
   completeSyncJob: vi.fn(),
   ensureDefaultScheduleBatch: vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   safelySendScheduledSyncSummary: vi.fn(),
   safelySendSyncNotification: vi.fn(),
   startEinvoiceSyncRun: vi.fn(),
+  startTdccSyncRun: vi.fn(),
   startSyncLockHeartbeat: vi.fn(),
   syncCathaybk: vi.fn(),
   syncEsun: vi.fn(),
@@ -28,6 +30,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../../src/features/sync/einvoice-sync-service", () => ({
   cancelQueuedEinvoiceSyncRun: mocks.cancelQueuedEinvoiceSyncRun,
   startEinvoiceSyncRun: mocks.startEinvoiceSyncRun,
+}));
+
+vi.mock("../../../src/features/sync/tdcc-sync-service", () => ({
+  cancelQueuedTdccSyncRun: mocks.cancelQueuedTdccSyncRun,
+  startTdccSyncRun: mocks.startTdccSyncRun,
 }));
 
 vi.mock("@taiwan-fin-hub/db", () => ({
@@ -132,6 +139,11 @@ beforeEach(() => {
     created: true,
   });
   mocks.cancelQueuedEinvoiceSyncRun.mockResolvedValue(undefined);
+  mocks.startTdccSyncRun.mockResolvedValue({
+    run: { id: "tdcc-run-1" },
+    created: true,
+  });
+  mocks.cancelQueuedTdccSyncRun.mockResolvedValue(undefined);
   mocks.syncEsun.mockResolvedValue({
     connectorId: "esun",
     scope: "all",
@@ -325,6 +337,27 @@ describe("scheduled sync rounds", () => {
 
     expect(send).not.toHaveBeenCalled();
     expect(mocks.cancelQueuedEinvoiceSyncRun).not.toHaveBeenCalled();
+  });
+
+  it("requeues a reused custom TDCC run", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const job = syncJob("custom", "tdcc");
+    mocks.findOpenDefaultScheduleBatchId.mockResolvedValue(null);
+    mocks.findNextDueSyncJob.mockResolvedValue(job);
+    mocks.startTdccSyncRun.mockResolvedValueOnce({
+      run: { id: "tdcc-running" },
+      created: false,
+    });
+
+    await expect(
+      runSchedulerTick(env(send), scheduledController),
+    ).resolves.toBe(true);
+
+    expect(send).toHaveBeenCalledWith({
+      type: "run-tdcc-chunk",
+      runId: "tdcc-running",
+    });
+    expect(mocks.cancelQueuedTdccSyncRun).not.toHaveBeenCalled();
   });
 
   it("preserves the default batch ID when starting an e-invoice durable run", async () => {
