@@ -7,17 +7,18 @@ const migrationsDirectory = fileURLToPath(
   new URL("../../../../../packages/db/migrations/", import.meta.url),
 );
 const migrationFile = "0032_tdcc_bank_transaction_identity_cleanup.sql";
+const staleIdentityMigrationFile = "0033_tdcc_stale_identity_cleanup.sql";
 const databases: DatabaseSync[] = [];
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close();
 });
 
-function createDatabase() {
+function createDatabase(beforeMigration = migrationFile) {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON");
   for (const file of readdirSync(migrationsDirectory)
-    .filter((name) => name.endsWith(".sql") && name < migrationFile)
+    .filter((name) => name.endsWith(".sql") && name < beforeMigration)
     .sort()) {
     database.exec(readFileSync(`${migrationsDirectory}/${file}`, "utf8"));
   }
@@ -88,10 +89,8 @@ function insertTransaction(
     );
 }
 
-function applyMigration(database: DatabaseSync) {
-  database.exec(
-    readFileSync(`${migrationsDirectory}/${migrationFile}`, "utf8"),
-  );
+function applyMigration(database: DatabaseSync, migration = migrationFile) {
+  database.exec(readFileSync(`${migrationsDirectory}/${migration}`, "utf8"));
 }
 
 describe("TDCC bank transaction identity migration", () => {
@@ -359,5 +358,69 @@ describe("TDCC bank transaction identity migration", () => {
         )
         .get(),
     ).toEqual({ transaction_id: "empty-source-id" });
+  });
+
+  it("merges an older opaque provider id into a newer compound identity", () => {
+    const database = createDatabase(staleIdentityMigrationFile);
+    const canonicalSourceId = "batch:2026-04-15T08:30:45:375.0:0.0";
+    insertTransaction(database, {
+      id: "compound-canonical",
+      sourceId: canonicalSourceId,
+      txnId: canonicalSourceId,
+    });
+    insertTransaction(database, {
+      id: "opaque-legacy",
+      sourceId: "opaque-provider-id",
+      txnId: "opaque-provider-id",
+    });
+    database.exec(`
+      UPDATE bank_transactions
+      SET created_at = CASE id
+        WHEN 'opaque-legacy' THEN '2026-04-01T00:00:00.000Z'
+        WHEN 'compound-canonical' THEN '2026-04-16T00:00:00.000Z'
+      END
+      WHERE id IN ('opaque-legacy', 'compound-canonical');
+      INSERT INTO bank_transaction_preferences
+        (transaction_id, excluded_from_calculation, created_at, updated_at)
+      VALUES ('opaque-legacy', 1, '2026-04-01', '2026-04-15');
+      INSERT INTO classification_overrides
+        (id, target_type, target_id, category_id, created_at, updated_at)
+      VALUES ('opaque-legacy-override', 'bank_transaction', 'opaque-legacy',
+              'other', '2026-04-01', '2026-04-15');
+      INSERT INTO invoice_transaction_preferences
+        (invoice_id, transaction_id, decision, created_at, updated_at)
+      VALUES ('opaque-invoice', 'opaque-legacy', 'linked',
+              '2026-04-01', '2026-04-15');
+    `);
+
+    applyMigration(database, staleIdentityMigrationFile);
+
+    expect(
+      database
+        .prepare("SELECT id, source_id FROM bank_transactions ORDER BY id")
+        .all(),
+    ).toEqual([{ id: "compound-canonical", source_id: canonicalSourceId }]);
+    expect(
+      database
+        .prepare(
+          "SELECT transaction_id, excluded_from_calculation FROM bank_transaction_preferences",
+        )
+        .get(),
+    ).toEqual({
+      transaction_id: "compound-canonical",
+      excluded_from_calculation: 1,
+    });
+    expect(
+      database
+        .prepare("SELECT target_id, category_id FROM classification_overrides")
+        .get(),
+    ).toEqual({ target_id: "compound-canonical", category_id: "other" });
+    expect(
+      database
+        .prepare(
+          "SELECT transaction_id FROM invoice_transaction_preferences WHERE invoice_id = 'opaque-invoice'",
+        )
+        .get(),
+    ).toEqual({ transaction_id: "compound-canonical" });
   });
 });
