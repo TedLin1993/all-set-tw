@@ -107,16 +107,16 @@ async function runCustomScheduleJob(
       trigger: "scheduled",
       scope: "all",
     });
-    if (created) {
-      try {
-        await env.SYNC_QUEUE.send({
-          type: "run-tdcc-chunk",
-          runId: run.id,
-        });
-      } catch (error) {
+    try {
+      await env.SYNC_QUEUE.send({
+        type: "run-tdcc-chunk",
+        runId: run.id,
+      });
+    } catch (error) {
+      if (created) {
         await cancelQueuedTdccSyncRun(env, run.id, error);
-        throw error;
       }
+      throw error;
     }
     return true;
   }
@@ -155,16 +155,16 @@ async function runDefaultScheduleBatchJob(
       scope: "all",
       scheduledBatchId: batchId,
     });
-    if (created) {
-      try {
-        await env.SYNC_QUEUE.send({
-          type: "run-tdcc-chunk",
-          runId: run.id,
-        });
-      } catch (error) {
+    try {
+      await env.SYNC_QUEUE.send({
+        type: "run-tdcc-chunk",
+        runId: run.id,
+      });
+    } catch (error) {
+      if (created) {
         await cancelQueuedTdccSyncRun(env, run.id, error);
-        throw error;
       }
+      throw error;
     }
     return true;
   }

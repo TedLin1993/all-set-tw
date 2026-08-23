@@ -418,13 +418,13 @@ async function queuedTdccSyncResponse(
       scope,
       overrides,
     });
-    if (created) {
-      try {
-        await enqueueTdccSyncChunk(c.env, run.id);
-      } catch (error) {
+    try {
+      await enqueueTdccSyncChunk(c.env, run.id);
+    } catch (error) {
+      if (created) {
         await cancelQueuedTdccSyncRun(c.env, run.id, error);
-        throw error;
       }
+      throw error;
     }
     return c.json(
       {

@@ -3,8 +3,10 @@ import type { Env, ScheduledSyncQueueMessage } from "../../../src/platform/env";
 
 const mocks = vi.hoisted(() => ({
   failEinvoiceSyncRun: vi.fn(),
+  failTdccSyncRun: vi.fn(),
   isEinvoiceUserActionError: vi.fn(),
   processEinvoiceSyncChunk: vi.fn(),
+  processTdccSyncChunk: vi.fn(),
   runSchedulerTick: vi.fn(),
 }));
 
@@ -18,9 +20,15 @@ vi.mock("../../../src/features/sync/einvoice-sync-service", () => ({
   processEinvoiceSyncChunk: mocks.processEinvoiceSyncChunk,
 }));
 
+vi.mock("../../../src/features/sync/tdcc-sync-service", () => ({
+  failTdccSyncRun: mocks.failTdccSyncRun,
+  processTdccSyncChunk: mocks.processTdccSyncChunk,
+}));
+
 import {
   consumeScheduledSyncQueue,
   enqueueScheduledSync,
+  enqueueTdccSyncChunk,
 } from "../../../src/features/sync/scheduler-queue";
 
 function queueMessage(body: ScheduledSyncQueueMessage) {
@@ -62,6 +70,55 @@ describe("scheduled sync queue", () => {
     await enqueueScheduledSync(env(send));
 
     expect(send).toHaveBeenCalledWith({ type: "run-next-scheduled-sync" });
+  });
+
+  it("enqueues a TDCC chunk message", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+
+    await enqueueTdccSyncChunk(env(send), "tdcc-run-1");
+
+    expect(send).toHaveBeenCalledWith({
+      type: "run-tdcc-chunk",
+      runId: "tdcc-run-1",
+    });
+  });
+
+  it("dispatches a TDCC chunk and sends its continuation before ack", async () => {
+    const order: string[] = [];
+    const send = vi.fn(async () => order.push("send"));
+    const message = queueMessage({
+      type: "run-tdcc-chunk",
+      runId: "tdcc-run-1",
+    });
+    message.ack = vi.fn(() => order.push("ack"));
+    mocks.processTdccSyncChunk.mockResolvedValue({ status: "continue" });
+
+    await consumeScheduledSyncQueue(queueBatch(message), env(send));
+
+    expect(mocks.processTdccSyncChunk).toHaveBeenCalledWith(
+      expect.anything(),
+      "tdcc-run-1",
+      "message-1",
+    );
+    expect(send).toHaveBeenCalledWith(
+      { type: "run-tdcc-chunk", runId: "tdcc-run-1" },
+      { delaySeconds: 1 },
+    );
+    expect(order).toEqual(["send", "ack"]);
+  });
+
+  it("retries a transient TDCC chunk failure", async () => {
+    const message = queueMessage({
+      type: "run-tdcc-chunk",
+      runId: "tdcc-run-1",
+    });
+    mocks.processTdccSyncChunk.mockRejectedValue(new Error("HTTP 503"));
+
+    await consumeScheduledSyncQueue(queueBatch(message), env());
+
+    expect(message.retry).toHaveBeenCalledWith({ delaySeconds: 15 });
+    expect(message.ack).not.toHaveBeenCalled();
+    expect(mocks.failTdccSyncRun).not.toHaveBeenCalled();
   });
 
   it("delays the next invocation after processing a job", async () => {
