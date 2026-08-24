@@ -3,6 +3,8 @@ import {
   EInvoiceProtocolUnavailableError,
   ObankConnectionError,
   ObankProtocolError,
+  SkbankConnectionError,
+  SkbankProtocolError,
   TdccConnectionError,
   TdccVerificationRequiredError,
 } from "@taiwan-fin-hub/connectors";
@@ -215,6 +217,15 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       c,
       withManualSyncLock(c.env, "ctbc", SYNC_SCOPE_ALL, () =>
         runConnectorSync(c.env, "ctbc", "manual"),
+      ),
+    );
+  });
+
+  api.post("/connectors/skbank/sync", async (c) => {
+    return syncRouteResponse(
+      c,
+      withManualSyncLock(c.env, "skbank", SYNC_SCOPE_ALL, () =>
+        runConnectorSync(c.env, "skbank", "manual"),
       ),
     );
   });
@@ -522,6 +533,16 @@ async function syncRouteResponse(
     }
     if (error instanceof CtbcConnectionError) {
       return jsonError("CTBC_CONNECTION_FAILED", safeErrorMessage(error), 502);
+    }
+    if (
+      error instanceof SkbankConnectionError ||
+      error instanceof SkbankProtocolError
+    ) {
+      return jsonError(
+        "SKBANK_CONNECTION_FAILED",
+        safeErrorMessage(error),
+        502,
+      );
     }
     if (error instanceof TaishinConnectionError) {
       return jsonError(

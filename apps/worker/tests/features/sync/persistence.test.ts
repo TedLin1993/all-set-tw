@@ -219,6 +219,24 @@ describe("staged sync persistence", () => {
     });
   });
 
+  it("seeds a disabled SKBank all-scope sync job", () => {
+    const db = createDb();
+
+    expect(
+      db.database
+        .prepare(
+          `SELECT connector_id AS connectorId, scope, enabled, interval_minutes AS intervalMinutes
+           FROM sync_jobs WHERE id = 'skbank:all'`,
+        )
+        .get(),
+    ).toEqual({
+      connectorId: "skbank",
+      scope: "all",
+      enabled: 0,
+      intervalMinutes: 1440,
+    });
+  });
+
   it("links TDCC bank 822 records to the direct CTBC account", async () => {
     const db = createDb();
     db.database.exec(`
@@ -281,6 +299,35 @@ describe("staged sync persistence", () => {
         canonicalAccountId: "hncb:bank:hncb:777201604933",
       },
     ]);
+  });
+
+  it("links TDCC bank 103 records to the direct SKBank account", async () => {
+    const db = createDb();
+    db.database.exec(`
+      INSERT INTO bank_accounts
+        (id, connector_id, source_id, institution_name, account_name, account_type,
+         currency, bank_code, account_last4, raw_payload, created_at, updated_at)
+      VALUES
+        ('skbank-direct', 'skbank', 'bank:skbank:4321:hash', '新光銀行',
+         '末四碼 4321', 'savings', 'TWD', '103', '4321', '{}', '2026-08-23', '2026-08-23'),
+        ('tdcc-settlement', 'tdcc', 'settlement:103:987654321', '新光銀行',
+         '交割帳戶', 'settlement_cash', 'TWD', '103', '4321', '{}', '2026-08-23', '2026-08-23');
+    `);
+
+    await db.batch([
+      linkCanonicalBankAccountsStatement(
+        db as unknown as D1Database,
+      ) as unknown as D1PreparedStatement,
+    ]);
+
+    expect(
+      db.database
+        .prepare(
+          `SELECT canonical_account_id AS canonicalAccountId
+           FROM bank_accounts WHERE id = 'tdcc-settlement'`,
+        )
+        .get(),
+    ).toEqual({ canonicalAccountId: "skbank-direct" });
   });
 
   it("migrates preferences and removes E.SUN lifecycle shadow transactions", async () => {

@@ -8,6 +8,7 @@ import {
   prepareObankCaptchaSession,
   syncCathaybk,
   syncCtbc,
+  syncSkbank,
   syncEsun,
   syncSinopac,
   syncObank,
@@ -67,6 +68,9 @@ export const connectorRuntimeRegistry: Record<
   },
   ctbc: {
     run: (env, trigger) => syncCtbc(env, trigger),
+  },
+  skbank: {
+    run: (env, trigger) => syncSkbank(env, trigger),
   },
   sinopac: {
     run: (env, trigger, _scope, overrides) =>

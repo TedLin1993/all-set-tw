@@ -100,7 +100,11 @@ export function formatBankAccountName(account: {
 export function bankAccountLast5(sourceId: string) {
   const settlement = sourceId.match(/^settlement:[^:]+:([^:]+)/);
   const esun = sourceId.match(/^bank:esun:([^:]+)/);
-  const digits = (settlement?.[1] ?? esun?.[1] ?? "").replace(/\D/g, "");
+  const skbank = sourceId.match(/^bank:skbank:([^:]+)/);
+  const digits = (settlement?.[1] ?? esun?.[1] ?? skbank?.[1] ?? "").replace(
+    /\D/g,
+    "",
+  );
   return digits ? digits.slice(-5) : undefined;
 }
 

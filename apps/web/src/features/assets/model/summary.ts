@@ -7,6 +7,7 @@ const CONNECTOR_BANK_CODES: Record<string, string> = {
   hncb: "008",
   cathaybk: "013",
   obank: "048",
+  skbank: "103",
   sinopac: "807",
   esun: "808",
   taishin: "812",

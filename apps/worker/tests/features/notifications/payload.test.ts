@@ -51,6 +51,15 @@ describe("sync notification payload", () => {
     ).toBe("中國信託銀行已完成排程同步，開啟 App 查看結果。");
   });
 
+  it("labels SKBank scheduled sync notifications", () => {
+    expect(
+      syncNotificationPayload({
+        connectorId: "skbank",
+        status: "success",
+      }).body,
+    ).toBe("新光銀行已完成排程同步，開啟 App 查看結果。");
+  });
+
   it("maps statuses to their preference switches", () => {
     const preferences: NotificationPreferences = {
       success: false,

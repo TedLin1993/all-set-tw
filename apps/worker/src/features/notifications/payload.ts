@@ -24,6 +24,7 @@ const connectorLabels: Record<ConnectorId, string> = {
   sinopac: "永豐行動銀行",
   taishin: "台新銀行",
   ctbc: "中國信託銀行",
+  skbank: "新光銀行",
   obank: "王道銀行",
   hncb: "華南銀行",
 };
