@@ -58,6 +58,11 @@ export const connectorFields = {
     { key: "account", label: "使用者代號", type: "text" },
     { key: "password", label: "網路密碼", type: "password" },
   ],
+  skbank: [
+    { key: "nationalId", label: "身分證字號／統編", type: "text" },
+    { key: "alias", label: "網銀使用者代號", type: "text" },
+    { key: "password", label: "網銀密碼", type: "password" },
+  ],
   hncb: [
     { key: "userId", label: "身分證字號／統編", type: "text" },
     { key: "account", label: "使用者代號", type: "text" },

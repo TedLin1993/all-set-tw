@@ -28,6 +28,29 @@ describe("CTBC bank display", () => {
   });
 });
 
+describe("SKBank bank display", () => {
+  it("derives bank code 103 and only the account suffix", () => {
+    const sourceId = "bank:skbank:4321:0123456789abcdef";
+
+    expect(deriveBankMatchKey("skbank", sourceId)).toEqual({
+      bankCode: "103",
+      last4: "4321",
+    });
+    expect(
+      normalizeBankAccountDisplay({
+        connectorId: "skbank",
+        sourceId,
+        institutionName: null,
+        accountName: null,
+        accountType: "savings",
+      }),
+    ).toMatchObject({
+      institutionName: "新光銀行",
+      accountName: "末四碼 4321",
+    });
+  });
+});
+
 describe("O-Bank bank display", () => {
   it("derives bank code 048 and only the account suffix from a hashed source id", () => {
     const sourceId = "bank:obank:savings:1234:0123456789abcdef:TWD";

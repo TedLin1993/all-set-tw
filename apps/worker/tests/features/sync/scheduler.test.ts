@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   syncCathaybk: vi.fn(),
   syncEsun: vi.fn(),
   syncTaishin: vi.fn(),
+  syncSkbank: vi.fn(),
 }));
 
 vi.mock("../../../src/features/sync/einvoice-sync-service", () => ({
@@ -69,6 +70,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncObank: vi.fn(),
   syncHncb: vi.fn(),
   syncTaishin: mocks.syncTaishin,
+  syncSkbank: mocks.syncSkbank,
   syncTdcc: vi.fn(),
   SYNC_LOCK_LEASE_MS: 30 * 60 * 1000,
 }));

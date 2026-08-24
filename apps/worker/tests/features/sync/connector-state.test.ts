@@ -137,4 +137,21 @@ describe("connector state boundaries", () => {
       },
     });
   });
+
+  it("keeps SKBank device identity out of the persisted cursor", () => {
+    expect(
+      splitConnectorCursorState(
+        "skbank",
+        JSON.stringify({
+          syncedAt: "2026-08-23T13:47:34.701Z",
+          deviceId: "0198f55e-a1b2-7c3d-8e4f-123456789abc",
+        }),
+      ),
+    ).toEqual({
+      safeCursor: JSON.stringify({ syncedAt: "2026-08-23T13:47:34.701Z" }),
+      secretState: {
+        deviceId: "0198f55e-a1b2-7c3d-8e4f-123456789abc",
+      },
+    });
+  });
 });

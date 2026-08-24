@@ -276,6 +276,7 @@ export const supportedConnectorIds = [
   "sinopac",
   "taishin",
   "ctbc",
+  "skbank",
   "obank",
   "hncb",
 ] as const;
@@ -497,6 +498,23 @@ export const connectorCatalog = {
     credentialFields: ["userId", "account", "password"],
     secretStateFields: [],
     resetOnCredentialChangeFields: [],
+  },
+  skbank: {
+    id: "skbank",
+    title: "新光銀行",
+    description: "臺外幣帳戶、餘額、交易明細與信用卡帳單",
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: [],
+    credentialFields: ["nationalId", "alias", "password"],
+    secretStateFields: ["deviceId"],
+    resetOnCredentialChangeFields: ["deviceId"],
   },
   obank: {
     id: "obank",

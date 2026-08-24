@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CtbcConnectionError,
   ObankConnectionError,
+  SkbankConnectionError,
 } from "@taiwan-fin-hub/connectors";
 import {
   HncbBrowserCapacityError,
@@ -35,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   syncObank: vi.fn(),
   syncHncb: vi.fn(),
   syncTaishin: vi.fn(),
+  syncSkbank: vi.fn(),
 }));
 
 vi.mock("../../../src/features/sync/einvoice-sync-service", () => ({
@@ -68,6 +70,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncObank: mocks.syncObank,
   syncHncb: mocks.syncHncb,
   syncTaishin: mocks.syncTaishin,
+  syncSkbank: mocks.syncSkbank,
   syncTdcc: vi.fn(),
   SyncAlreadyRunningError: class SyncAlreadyRunningError extends Error {},
   SYNC_SCOPE_ALL: "all",
@@ -337,6 +340,33 @@ describe("CTBC sync route", () => {
     expect(failed.status).toBe(502);
     await expect(failed.json()).resolves.toMatchObject({
       error: { code: "CTBC_CONNECTION_FAILED" },
+    });
+  });
+});
+
+describe("SKBank sync route", () => {
+  it("dispatches a manual sync", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/skbank/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.syncSkbank).toHaveBeenCalledWith(env, "manual");
+  });
+
+  it("maps App API connection failures", async () => {
+    mocks.syncSkbank.mockRejectedValueOnce(new SkbankConnectionError());
+    const response = await syncRoutes.request(
+      "/connectors/skbank/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "SKBANK_CONNECTION_FAILED" },
     });
   });
 });

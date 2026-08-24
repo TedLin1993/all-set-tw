@@ -107,6 +107,38 @@ export {
 export type { CtbcFetch } from "./ctbc-mobile-api";
 import { ctbcConfigSchema } from "./ctbc";
 
+export {
+  parseSkbankConfig,
+  parseSkbankData,
+  skbankConfigSchema,
+  SkbankProtocolError,
+} from "./skbank";
+export type {
+  SkbankAccountQuery,
+  SkbankConfig,
+  SkbankData,
+  SkbankParseOptions,
+  SkbankTransactionPayload,
+} from "./skbank";
+export {
+  buildSkbankLoginRequest,
+  classifySkbankError,
+  createSkbankConnector,
+  requireSkbankCredentials,
+  SkbankConnectionError,
+  SkbankVerificationRequiredError,
+} from "./skbank-mobile-api";
+export type { SkbankFetch } from "./skbank-mobile-api";
+export {
+  hasSkbankCreditCard,
+  parseSkbankCreditCardData,
+} from "./skbank-credit-card";
+export type {
+  SkbankCreditCardData,
+  SkbankCreditCardPayloads,
+} from "./skbank-credit-card";
+import { skbankConfigSchema } from "./skbank";
+
 export { obankConfigSchema, parseObankConfig, parseObankData } from "./obank";
 export type { ObankConfig, ObankData, ObankPayloads } from "./obank";
 export {
@@ -691,6 +723,7 @@ export const connectorConfigSchemas = {
   sinopac: sinopacConfigSchema,
   taishin: taishinConfigSchema,
   ctbc: ctbcConfigSchema,
+  skbank: skbankConfigSchema,
   obank: obankConfigSchema,
   hncb: hncbConfigSchema,
 } satisfies Record<ConnectorId, z.ZodTypeAny>;
