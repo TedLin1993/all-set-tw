@@ -32,9 +32,8 @@ export type BankTransaction = {
  * page uses an empty string); `nextPageToken` is omitted when the API reports
  * that there are no more pages.
  *
- * `details` is intentionally kept alongside the normalized transactions. A
- * durable Queue consumer can persist the raw page and re-run normalization at
- * finalization, which preserves duplicate-STAN handling across page boundaries.
+ * `details` is intentionally kept alongside the normalized transactions so a
+ * durable Queue consumer can persist the provider rows across page boundaries.
  */
 export type BankTransactionPage = {
   pageToken: string;
@@ -532,25 +531,11 @@ export class EPassbookClient {
   }
 }
 
-/**
- * Normalize raw TSP007 rows. Keeping this outside the client makes it usable
- * by durable consumers when staged pages are finalized together (duplicate
- * STAN values are only detectable after all pages have been collected).
- */
+/** Normalize raw TSP007 rows into identities that depend on one row only. */
 export function normalizeBankTransactionDetails(
   details: BankTransactionDetail[],
 ): BankTransaction[] {
-  // ponytail: some banks reuse the same stan for recurring/batch entries (e.g.
-  // interest). Count occurrences so duplicates get a compound key that
-  // includes date+amounts.
-  const stanCount = new Map<string, number>();
-  for (const detail of details) {
-    const stan = detail.stan?.trim();
-    if (stan) stanCount.set(stan, (stanCount.get(stan) ?? 0) + 1);
-  }
-
   return details.map((detail) => {
-    const stan = detail.stan?.trim();
     const dt = detail.txnDateTime?.trim() ?? "";
     const hasValidDateTime = /^\d{14}$/.test(dt);
     const occurredAt = hasValidDateTime
@@ -560,13 +545,14 @@ export function normalizeBankTransactionDetails(
     const transferOutAmount = detail.transferOutAmount?.trim() || "0";
     const memo = detail.memo?.trim() || detail.summary?.trim();
     const amount = String(Number(transferInAmount) - Number(transferOutAmount));
-    const isDupStan = stan && (stanCount.get(stan) ?? 0) > 1;
-    const txnId = isDupStan
-      ? `${stan}:${occurredAt}:${transferInAmount}:${transferOutAmount}`
-      : stan ||
-        ["missing", occurredAt, amount, memo?.replace(/\s+/g, "") || "-"].join(
-          ":",
-        );
+    // Keep the established prefix, but do not include STAN because TDCC may
+    // add it after the transaction first appears.
+    const txnId = [
+      "missing",
+      occurredAt,
+      amount,
+      memo?.replace(/[\u0009-\u000d\u0020\u00a0\u3000]+/g, "") || "-",
+    ].join(":");
     return {
       txnId,
       occurredAt,

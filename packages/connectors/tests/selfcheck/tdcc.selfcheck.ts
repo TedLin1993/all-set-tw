@@ -293,13 +293,17 @@ async function main() {
     "blank STAN ids must remain stable across syncs",
   );
 
-  const duplicateStan = normalizeBankTransactionDetails([
-    {
-      stan: "00000",
-      txnDateTime: "20260821000000",
-      transferInAmount: "102.0",
-      transferOutAmount: "0.0",
-    },
+  const semanticTransactionDetail = {
+    txnDateTime: "20260821000000",
+    transferInAmount: "102.0",
+    transferOutAmount: "0.0",
+    memo: "Interest payment",
+  };
+  const transactionWithoutStan = normalizeBankTransactionDetails([
+    semanticTransactionDetail,
+  ])[0];
+  const transactionWithStan = normalizeBankTransactionDetails([
+    { ...semanticTransactionDetail, stan: "00000" },
     {
       stan: "00000",
       txnDateTime: "20260620000000",
@@ -308,9 +312,13 @@ async function main() {
     },
   ]);
   assert.equal(
-    duplicateStan[0]?.txnId,
-    "00000:2026-08-21T00:00:00:102.0:0.0",
-    "existing compound ids for duplicate non-empty STAN values must stay compatible",
+    transactionWithoutStan?.txnId,
+    "missing:2026-08-21T00:00:00:102:Interestpayment",
+  );
+  assert.equal(
+    transactionWithStan[0]?.txnId,
+    transactionWithoutStan?.txnId,
+    "a STAN appearing later must not change the transaction id",
   );
 
   const malformedDate = normalizeBankTransactionDetails([
@@ -389,9 +397,15 @@ async function main() {
   assert.equal(result.bankBalanceSnapshots?.length, 1);
   assert.equal(result.bankBalanceSnapshots?.[0]?.balance, 45678);
   assert.equal(result.bankTransactions?.length, 2);
-  assert.equal(result.bankTransactions?.[0]?.sourceId, "live-cash-move-1");
+  assert.equal(
+    result.bankTransactions?.[0]?.sourceId,
+    "missing:2024-06-14T12:00:00:1000:Settlementcredit",
+  );
   assert.equal(result.bankTransactions?.[0]?.amount, 1000);
-  assert.equal(result.bankTransactions?.[1]?.sourceId, "live-cash-move-2");
+  assert.equal(
+    result.bankTransactions?.[1]?.sourceId,
+    "missing:2024-06-15T13:00:00:-250:Settlementdebit",
+  );
   assert.equal(result.bankTransactions?.[1]?.amount, -250);
   assert.deepEqual(
     tspPageTokens.slice(0, 2),
@@ -419,7 +433,10 @@ async function main() {
   assert.equal(firstPage.pageRecordCount, 1);
   assert.equal(firstPage.totalCount, 2);
   assert.equal(firstPage.nextPageToken, "NEXT-1");
-  assert.equal(firstPage.transactions[0]?.txnId, "live-cash-move-1");
+  assert.equal(
+    firstPage.transactions[0]?.txnId,
+    "missing:2024-06-14T12:00:00:1000:Settlementcredit",
+  );
   const secondPage = await pageClient.getBankTransactionsPage(
     "004",
     "1234567890",

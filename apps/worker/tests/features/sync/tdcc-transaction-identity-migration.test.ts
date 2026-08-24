@@ -8,6 +8,7 @@ const migrationsDirectory = fileURLToPath(
 );
 const migrationFile = "0032_tdcc_bank_transaction_identity_cleanup.sql";
 const staleIdentityMigrationFile = "0033_tdcc_stale_identity_cleanup.sql";
+const lateIdentityMigrationFile = "0035_tdcc_late_identity_reconciliation.sql";
 const databases: DatabaseSync[] = [];
 
 afterEach(() => {
@@ -422,5 +423,297 @@ describe("TDCC bank transaction identity migration", () => {
         )
         .get(),
     ).toEqual({ transaction_id: "compound-canonical" });
+  });
+
+  it("re-keys old TDCC identities from semantic fields without changing row ids", () => {
+    const database = createDatabase(lateIdentityMigrationFile);
+    insertTransaction(database, {
+      id: "settlement-old",
+      sourceId: "settlement:bank-a:account-a:TWD:legacy",
+      txnId: "",
+    });
+    insertTransaction(database, {
+      id: "plain-old",
+      sourceId: "batch",
+      txnId: "batch",
+      occurredAt: "2026-04-16T08:30:45",
+      memo: "Plain payment",
+    });
+    const compoundSourceId = "batch:2026-04-17T08:30:45:375.0:0.0";
+    insertTransaction(database, {
+      id: "compound-old",
+      sourceId: compoundSourceId,
+      txnId: compoundSourceId,
+      occurredAt: "2026-04-17T08:30:45",
+      memo: "Compound payment",
+    });
+    database.exec(`
+      UPDATE bank_transactions
+      SET posted_date = '2026-04-15T08:30:45.000Z'
+      WHERE id = 'settlement-old';
+      INSERT INTO bank_transaction_preferences
+        (transaction_id, excluded_from_calculation, created_at, updated_at)
+      VALUES ('settlement-old', 1, '2026-04-01', '2026-04-15');
+      INSERT INTO classification_overrides
+        (id, target_type, target_id, category_id, created_at, updated_at)
+      VALUES ('settlement-old-override', 'bank_transaction',
+              'settlement-old', 'other', '2026-04-01', '2026-04-15');
+      INSERT INTO invoice_transaction_preferences
+        (invoice_id, transaction_id, decision, created_at, updated_at)
+      VALUES ('settlement-old-invoice', 'settlement-old', 'linked',
+              '2026-04-01', '2026-04-15');
+    `);
+
+    applyMigration(database, lateIdentityMigrationFile);
+    applyMigration(database, lateIdentityMigrationFile);
+    database.exec(`
+      INSERT INTO bank_transactions
+        (id, connector_id, account_id, source_id, posted_date, amount, currency,
+         description, raw_payload, created_at, updated_at)
+      VALUES
+        ('new-sync-id', 'tdcc', 'account-a',
+         'missing:2026-04-15T08:30:45:375:Provideradjustment',
+         '2026-04-15T08:30:45.000Z', 375, 'TWD', 'Provider adjustment',
+         '{}', '2026-04-20', '2026-04-20')
+      ON CONFLICT(connector_id, account_id, source_id) DO UPDATE SET
+        updated_at = excluded.updated_at;
+    `);
+
+    expect(
+      database
+        .prepare("SELECT id, source_id FROM bank_transactions ORDER BY id")
+        .all(),
+    ).toEqual([
+      {
+        id: "compound-old",
+        source_id: "missing:2026-04-17T08:30:45:375:Compoundpayment",
+      },
+      {
+        id: "plain-old",
+        source_id: "missing:2026-04-16T08:30:45:375:Plainpayment",
+      },
+      {
+        id: "settlement-old",
+        source_id: "missing:2026-04-15T08:30:45:375:Provideradjustment",
+      },
+    ]);
+    expect(
+      database
+        .prepare("SELECT transaction_id FROM bank_transaction_preferences")
+        .get(),
+    ).toEqual({ transaction_id: "settlement-old" });
+    expect(
+      database.prepare("SELECT target_id FROM classification_overrides").get(),
+    ).toEqual({ target_id: "settlement-old" });
+    expect(
+      database
+        .prepare(
+          "SELECT transaction_id FROM invoice_transaction_preferences WHERE invoice_id = 'settlement-old-invoice'",
+        )
+        .get(),
+    ).toEqual({ transaction_id: "settlement-old" });
+  });
+
+  it("merges semantic TDCC duplicates and transfers user references", () => {
+    const database = createDatabase(lateIdentityMigrationFile);
+    const canonicalSourceId =
+      "missing:2026-04-15T08:30:45:375:Provideradjustment";
+    insertTransaction(database, {
+      id: "settlement-legacy",
+      sourceId: "settlement:bank-a:account-a:TWD:legacy",
+      txnId: "",
+      memo: "Provider  adjustment",
+    });
+    insertTransaction(database, {
+      id: "missing-canonical",
+      sourceId: canonicalSourceId,
+      txnId: canonicalSourceId,
+    });
+
+    const batchOccurredAt = "2026-04-18T08:30:45";
+    const compoundSourceId = `batch:${batchOccurredAt}:375.0:0.0`;
+    insertTransaction(database, {
+      id: "compound-legacy",
+      sourceId: compoundSourceId,
+      txnId: compoundSourceId,
+      occurredAt: batchOccurredAt,
+      memo: "Batch payment",
+    });
+    insertTransaction(database, {
+      id: "plain-newer",
+      sourceId: "batch",
+      txnId: "batch",
+      occurredAt: batchOccurredAt,
+      memo: "Batch payment",
+    });
+    database.exec(`
+      UPDATE bank_transactions
+      SET created_at = CASE id
+        WHEN 'settlement-legacy' THEN '2026-04-01T00:00:00.000Z'
+        WHEN 'missing-canonical' THEN '2026-04-16T00:00:00.000Z'
+        WHEN 'compound-legacy' THEN '2026-04-01T00:00:00.000Z'
+        WHEN 'plain-newer' THEN '2026-04-16T00:00:00.000Z'
+      END
+      WHERE id IN (
+        'settlement-legacy',
+        'missing-canonical',
+        'compound-legacy',
+        'plain-newer'
+      );
+      INSERT INTO bank_transaction_preferences
+        (transaction_id, excluded_from_calculation, created_at, updated_at)
+      VALUES ('settlement-legacy', 1, '2026-04-01', '2026-04-15');
+      INSERT INTO classification_overrides
+        (id, target_type, target_id, category_id, created_at, updated_at)
+      VALUES ('settlement-legacy-override', 'bank_transaction',
+              'settlement-legacy', 'other', '2026-04-01', '2026-04-15');
+      INSERT INTO invoice_transaction_preferences
+        (invoice_id, transaction_id, decision, created_at, updated_at)
+      VALUES ('settlement-invoice', 'settlement-legacy', 'linked',
+              '2026-04-01', '2026-04-15');
+    `);
+
+    applyMigration(database, lateIdentityMigrationFile);
+
+    expect(
+      database
+        .prepare("SELECT id, source_id FROM bank_transactions ORDER BY id")
+        .all(),
+    ).toEqual([
+      {
+        id: "missing-canonical",
+        source_id: canonicalSourceId,
+      },
+      {
+        id: "plain-newer",
+        source_id: `missing:${batchOccurredAt}:375:Batchpayment`,
+      },
+    ]);
+    expect(
+      database
+        .prepare(
+          "SELECT transaction_id, excluded_from_calculation FROM bank_transaction_preferences",
+        )
+        .get(),
+    ).toEqual({
+      transaction_id: "missing-canonical",
+      excluded_from_calculation: 1,
+    });
+    expect(
+      database
+        .prepare("SELECT target_id, category_id FROM classification_overrides")
+        .get(),
+    ).toEqual({ target_id: "missing-canonical", category_id: "other" });
+    expect(
+      database
+        .prepare(
+          "SELECT transaction_id FROM invoice_transaction_preferences WHERE invoice_id = 'settlement-invoice'",
+        )
+        .get(),
+    ).toEqual({ transaction_id: "missing-canonical" });
+  });
+
+  it("keeps semantic duplicates with conflicting user decisions untouched", () => {
+    const database = createDatabase(lateIdentityMigrationFile);
+    const canonicalSourceId =
+      "missing:2026-04-15T08:30:45:375:Provideradjustment";
+    insertTransaction(database, {
+      id: "conflict-legacy",
+      sourceId: "batch",
+      txnId: "batch",
+    });
+    insertTransaction(database, {
+      id: "conflict-canonical",
+      sourceId: canonicalSourceId,
+      txnId: canonicalSourceId,
+    });
+    database.exec(`
+      INSERT INTO classification_overrides
+        (id, target_type, target_id, category_id, created_at, updated_at)
+      VALUES
+        ('conflict-legacy-override', 'bank_transaction',
+         'conflict-legacy', 'tax', '2026-04-01', '2026-04-01'),
+        ('conflict-canonical-override', 'bank_transaction',
+         'conflict-canonical', 'insurance', '2026-04-01', '2026-04-01');
+      INSERT INTO invoice_transaction_preferences
+        (invoice_id, transaction_id, decision, created_at, updated_at)
+      VALUES
+        ('conflict-legacy-invoice', 'conflict-legacy', 'linked',
+         '2026-04-01', '2026-04-01'),
+        ('conflict-canonical-invoice', 'conflict-canonical', 'linked',
+         '2026-04-01', '2026-04-01');
+    `);
+
+    applyMigration(database, lateIdentityMigrationFile);
+
+    expect(
+      database
+        .prepare("SELECT id, source_id FROM bank_transactions ORDER BY id")
+        .all(),
+    ).toEqual([
+      { id: "conflict-canonical", source_id: canonicalSourceId },
+      { id: "conflict-legacy", source_id: "batch" },
+    ]);
+    expect(
+      database
+        .prepare(
+          "SELECT target_id, category_id FROM classification_overrides ORDER BY target_id",
+        )
+        .all(),
+    ).toEqual([
+      { target_id: "conflict-canonical", category_id: "insurance" },
+      { target_id: "conflict-legacy", category_id: "tax" },
+    ]);
+    expect(
+      database
+        .prepare(
+          "SELECT invoice_id, transaction_id FROM invoice_transaction_preferences ORDER BY invoice_id",
+        )
+        .all(),
+    ).toEqual([
+      {
+        invoice_id: "conflict-canonical-invoice",
+        transaction_id: "conflict-canonical",
+      },
+      {
+        invoice_id: "conflict-legacy-invoice",
+        transaction_id: "conflict-legacy",
+      },
+    ]);
+  });
+
+  it("leaves an invalid target occupant and colliding row untouched", () => {
+    const database = createDatabase(lateIdentityMigrationFile);
+    const occupiedSourceId = "missing:2026-04-15T08:30:45:0:Provideradjustment";
+    insertTransaction(database, {
+      id: "invalid-amount",
+      sourceId: occupiedSourceId,
+      txnId: occupiedSourceId,
+      amount: 0,
+    });
+    insertTransaction(database, {
+      id: "valid-candidate",
+      sourceId: "legacy-zero",
+      txnId: "legacy-zero",
+      amount: 0,
+    });
+    database.exec(`
+      UPDATE bank_transactions
+      SET raw_payload = json_set(raw_payload, '$.amount', 'bad')
+      WHERE id = 'invalid-amount';
+    `);
+
+    applyMigration(database, lateIdentityMigrationFile);
+
+    expect(
+      database
+        .prepare(
+          "SELECT id, source_id FROM bank_transactions WHERE id IN ('invalid-amount', 'valid-candidate') ORDER BY id",
+        )
+        .all(),
+    ).toEqual([
+      { id: "invalid-amount", source_id: occupiedSourceId },
+      { id: "valid-candidate", source_id: "legacy-zero" },
+    ]);
   });
 });
