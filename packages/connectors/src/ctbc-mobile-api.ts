@@ -6,7 +6,7 @@ import { BANK_SYNC_MONTHS } from "./sync-window";
 const CTBC_IMP_ORIGIN = "https://eb.ctbcbank.com/IMP";
 const CTBC_APPLICATION = "EBMW_Adapter";
 const CTBC_RESOURCE_ENDPOINT = `${CTBC_IMP_ORIGIN}/api/adapters/${CTBC_APPLICATION}/resource/ebmwResource`;
-const CTBC_APP_VERSION = "5.2.25";
+const CTBC_APP_VERSION = "5.2.26";
 const CTBC_WEB_VERSION = "20260722182433427";
 // MobileFirst client-credential value shipped in the public Android package.
 const CTBC_PUBLIC_CLIENT_TOKEN = "2ae74c0ad7a14739a2aab7340616d70e";
@@ -73,7 +73,7 @@ export function requireCtbcCredentials(
 }
 
 /**
- * Reproduces the App 5.2.25 `makeEncryptPINClear` format. Plaintext exists only
+ * Reproduces the App 5.2.26 `makeEncryptPINClear` format. Plaintext exists only
  * for the duration of this call and is never returned or included in errors.
  */
 export function encryptCtbcPin(
@@ -478,11 +478,28 @@ async function fetchDepositTransactions(
   depositOverview: JsonRecord,
 ) {
   const transactions: unknown[] = [];
-  const accountIds = extractDepositAccountIds(depositOverview);
-  for (const accountId of accountIds) {
-    const initial = await session.resource(DEPOSIT_TRANSACTIONS_INIT_RESOURCE, {
-      accountId,
-    });
+  const accounts = extractDepositAccounts(depositOverview);
+  for (const account of accounts) {
+    const { accountId } = account;
+    let initial: JsonRecord;
+    try {
+      initial = await session.resource(DEPOSIT_TRANSACTIONS_INIT_RESOURCE, {
+        accountId,
+      });
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: "ctbc_deposit_init_failed",
+          accountIndex: account.overviewIndex,
+          accountCount: accounts.length,
+          overviewFields: account.fields,
+          requestedLast4: last4(accountId),
+          requestedLength: accountId.length,
+          requestedMasked: /[*Ｘx#•]/.test(accountId),
+        }),
+      );
+      throw error;
+    }
     const queryAccountId = selectTransactionAccountId(initial, accountId);
     for (const range of monthlyRanges(BANK_SYNC_MONTHS)) {
       let response: JsonRecord;
@@ -595,14 +612,16 @@ async function fetchPagedCardItems(
   return { rsData: { ...data, allItems } };
 }
 
-function extractDepositAccountIds(payload: JsonRecord) {
+function extractDepositAccounts(payload: JsonRecord) {
   const rsData = responseData(payload);
   const twd = recordValue(rsData.twdAcctSummaryResponse);
   const demand = recordValue(twd.demDepBalSummaryResponse);
-  return arrayValue(demand.infoList).flatMap((value) => {
+  return arrayValue(demand.infoList).flatMap((value, overviewIndex) => {
     if (!isRecord(value)) return [];
     const accountId = stringValue(value.accountId).trim();
-    return accountId ? [accountId] : [];
+    return accountId
+      ? [{ accountId, fields: Object.keys(value).sort(), overviewIndex }]
+      : [];
   });
 }
 
