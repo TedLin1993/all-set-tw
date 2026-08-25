@@ -33,7 +33,7 @@ describe("CTBC mobile API connector", () => {
     }
   });
 
-  it("generates the App 5.2.25 AES and RSA login format", () => {
+  it("generates the App 5.2.26 AES and RSA login format", () => {
     const encrypted = encryptCtbcPin("test-password", (length) =>
       new Uint8Array(length).fill(7),
     );
@@ -229,6 +229,7 @@ describe("CTBC mobile API connector", () => {
     expect(headerValue(calls[3]?.init.headers, "checksum")).toMatch(
       /^[0-9a-f]{64}$/,
     );
+    expect((calls[3]?.body as { appVer?: string }).appVer).toBe("5.2.26");
     expect(JSON.stringify(calls)).not.toContain("bank-password");
     expect(JSON.stringify(calls)).not.toContain("bank-user");
     expect(
@@ -262,6 +263,64 @@ describe("CTBC mobile API connector", () => {
       name: "CtbcVerificationRequiredError",
       message: expect.not.stringContaining("sensitive-upstream-text"),
     });
+  });
+
+  it("logs only safe account diagnostics when deposit initialization fails", async () => {
+    const accountId = "123456789012";
+    const responses = [
+      jsonResponse({ access_token: "oauth-token" }),
+      jsonResponse({ statusCode: "0000" }),
+      jsonResponse({ success: true, rsData: { seed: "seed" }, token: "token" }),
+      jsonResponse({ code: "0000", rsData: {}, token: "login-token" }),
+      jsonResponse({
+        code: "0000",
+        rsData: {
+          twdAcctSummaryResponse: {
+            demDepBalSummaryResponse: {
+              infoList: [
+                { accountNickName: "無帳號項目" },
+                { accountId, accountNickName: "薪轉帳戶" },
+              ],
+            },
+          },
+        },
+      }),
+      jsonResponse({ sys: "SVC", code: "0131", rsData: {} }),
+      jsonResponse({ code: "0000", rsData: {} }),
+    ];
+    const fetcher = vi.fn(async () => responses.shift()!) as CtbcFetch;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(
+      createCtbcConnector(fetcher).sync({
+        userId: "A123456789",
+        account: "bank-user",
+        password: "bank-password",
+      }),
+    ).rejects.toMatchObject({
+      name: "CtbcConnectionError",
+      message: "中國信託資料同步暫時無法完成。",
+    });
+
+    const initFailure = warn.mock.calls
+      .map(
+        ([message]) => JSON.parse(String(message)) as Record<string, unknown>,
+      )
+      .find((entry) => entry.event === "ctbc_deposit_init_failed");
+    expect(initFailure).toEqual({
+      event: "ctbc_deposit_init_failed",
+      accountIndex: 1,
+      accountCount: 1,
+      overviewFields: ["accountId", "accountNickName"],
+      requestedLast4: "9012",
+      requestedLength: 12,
+      requestedMasked: false,
+    });
+    expect(JSON.stringify(initFailure)).not.toContain(accountId);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("薪轉帳戶");
+    expect(responses).toHaveLength(0);
+
+    warn.mockRestore();
   });
 });
 
