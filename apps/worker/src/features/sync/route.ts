@@ -12,6 +12,11 @@ import { zValidator } from "@hono/zod-validator";
 import { type Context, type Hono } from "hono";
 import { z } from "zod";
 import {
+  FirstbankBrowserCapacityError,
+  FirstbankConnectionError,
+  FirstbankVerificationRequiredError,
+} from "../../connectors/firstbank";
+import {
   HncbBrowserCapacityError,
   HncbConnectionError,
   HncbVerificationRequiredError,
@@ -78,6 +83,13 @@ const obankSyncBodySchema = z.object({
   captcha: z
     .string()
     .regex(/^[A-Za-z0-9]{4}$/)
+    .optional(),
+});
+
+const firstbankSyncBodySchema = z.object({
+  captcha: z
+    .string()
+    .regex(/^[A-Za-z0-9]{4,8}$/)
     .optional(),
 });
 
@@ -416,6 +428,67 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       );
     },
   );
+
+  api.post("/connectors/firstbank/captcha", async (c) => {
+    try {
+      return c.json(await prepareConnectorChallenge(c.env, "firstbank"));
+    } catch (error) {
+      if (error instanceof SyncAlreadyRunningError) {
+        return jsonError(
+          "SYNC_ALREADY_RUNNING",
+          "第一銀行已有驗證或同步作業正在進行。",
+          409,
+        );
+      }
+      if (error instanceof NeedsUserActionError) {
+        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      }
+      if (error instanceof FirstbankBrowserCapacityError) {
+        const response = jsonError(
+          "FIRSTBANK_BROWSER_BUSY",
+          error.message,
+          429,
+        );
+        response.headers.set("Retry-After", String(error.retryAfterSeconds));
+        return response;
+      }
+      if (error instanceof FirstbankConnectionError) {
+        return jsonError("FIRSTBANK_CONNECTION_FAILED", error.message, 502);
+      }
+      if (error instanceof FirstbankVerificationRequiredError) {
+        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      }
+      return jsonError(
+        "FIRSTBANK_CAPTCHA_FAILED",
+        safeErrorMessage(error),
+        502,
+      );
+    }
+  });
+
+  api.post(
+    "/connectors/firstbank/sync",
+    zValidator(
+      "json",
+      firstbankSyncBodySchema,
+      validationHook("INVALID_REQUEST", "第一銀行 sync options are invalid."),
+    ),
+    async (c) => {
+      const overrides = c.req.valid("json");
+      return syncRouteResponse(
+        c,
+        withManualSyncLock(c.env, "firstbank", SYNC_SCOPE_ALL, () =>
+          runConnectorSync(
+            c.env,
+            "firstbank",
+            "manual",
+            SYNC_SCOPE_ALL,
+            overrides,
+          ),
+        ),
+      );
+    },
+  );
 }
 
 async function queuedTdccSyncResponse(
@@ -568,6 +641,18 @@ async function syncRouteResponse(
       error instanceof ObankProtocolError
     ) {
       return jsonError("OBANK_CONNECTION_FAILED", safeErrorMessage(error), 502);
+    }
+    if (error instanceof FirstbankBrowserCapacityError) {
+      const response = jsonError("FIRSTBANK_BROWSER_BUSY", error.message, 429);
+      response.headers.set("Retry-After", String(error.retryAfterSeconds));
+      return response;
+    }
+    if (error instanceof FirstbankConnectionError) {
+      return jsonError(
+        "FIRSTBANK_CONNECTION_FAILED",
+        safeErrorMessage(error),
+        502,
+      );
     }
     return jsonError("SYNC_FAILED", safeErrorMessage(error), 500);
   }

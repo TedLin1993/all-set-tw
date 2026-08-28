@@ -5,6 +5,10 @@ import {
   SkbankConnectionError,
 } from "@taiwan-fin-hub/connectors";
 import {
+  FirstbankBrowserCapacityError,
+  FirstbankConnectionError,
+} from "../../../src/connectors/firstbank";
+import {
   HncbBrowserCapacityError,
   HncbConnectionError,
 } from "../../../src/connectors/hncb";
@@ -28,12 +32,14 @@ const mocks = vi.hoisted(() => ({
   prepareTaishinCaptchaSession: vi.fn(),
   prepareHncbCaptchaSession: vi.fn(),
   prepareObankCaptchaSession: vi.fn(),
+  prepareFirstbankCaptchaSession: vi.fn(),
   startEinvoiceSyncRun: vi.fn(),
   startTdccSyncRun: vi.fn(),
   syncCtbc: vi.fn(),
   syncCathaybk: vi.fn(),
   syncEsun: vi.fn(),
   syncObank: vi.fn(),
+  syncFirstbank: vi.fn(),
   syncHncb: vi.fn(),
   syncTaishin: vi.fn(),
   syncSkbank: vi.fn(),
@@ -60,6 +66,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   prepareHncbCaptchaSession: mocks.prepareHncbCaptchaSession,
   prepareTaishinCaptchaSession: mocks.prepareTaishinCaptchaSession,
   prepareObankCaptchaSession: mocks.prepareObankCaptchaSession,
+  prepareFirstbankCaptchaSession: mocks.prepareFirstbankCaptchaSession,
   safeErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
   syncCathaybk: mocks.syncCathaybk,
@@ -68,6 +75,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncEsun: mocks.syncEsun,
   syncSinopac: vi.fn(),
   syncObank: mocks.syncObank,
+  syncFirstbank: mocks.syncFirstbank,
   syncHncb: mocks.syncHncb,
   syncTaishin: mocks.syncTaishin,
   syncSkbank: mocks.syncSkbank,
@@ -176,6 +184,24 @@ beforeEach(() => {
     newRecords: {
       invoices: 0,
       bankTransactions: 3,
+      investmentTransactions: 0,
+    },
+    cursorUpdated: true,
+  });
+  mocks.prepareFirstbankCaptchaSession.mockResolvedValue({
+    captchaImage: "data:image/jpeg;base64,AQID",
+    expiresAt: "2026-08-25T12:02:00.000Z",
+    captchaLength: 4,
+    captchaKind: "alphanumeric",
+  });
+  mocks.syncFirstbank.mockResolvedValue({
+    success: true,
+    connectorId: "firstbank",
+    scope: "all",
+    records: 2,
+    newRecords: {
+      invoices: 0,
+      bankTransactions: 0,
       investmentTransactions: 0,
     },
     cursorUpdated: true,
@@ -682,6 +708,100 @@ describe("O-Bank sync routes", () => {
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "OBANK_CONNECTION_FAILED" },
+    });
+  });
+});
+
+describe("First Bank web sync routes", () => {
+  it("returns alphanumeric CAPTCHA metadata", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/firstbank/captcha",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      captchaLength: 4,
+      captchaKind: "alphanumeric",
+      captchaImage: "data:image/jpeg;base64,AQID",
+    });
+  });
+
+  it("maps browser capacity while preparing CAPTCHA", async () => {
+    mocks.prepareFirstbankCaptchaSession.mockRejectedValueOnce(
+      new FirstbankBrowserCapacityError("browser busy", 17),
+    );
+    const response = await syncRoutes.request(
+      "/connectors/firstbank/captcha",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("17");
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FIRSTBANK_BROWSER_BUSY" },
+    });
+  });
+
+  it("accepts four to eight alphanumeric characters and rejects malformed input", async () => {
+    const valid = await syncRoutes.request(
+      "/connectors/firstbank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "XVSH" }),
+      },
+      env,
+    );
+    expect(valid.status).toBe(200);
+    expect(mocks.syncFirstbank).toHaveBeenCalledWith(env, "manual", {
+      captcha: "XVSH",
+    });
+
+    const invalid = await syncRoutes.request(
+      "/connectors/firstbank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "A1-_" }),
+      },
+      env,
+    );
+    expect(invalid.status).toBe(400);
+  });
+
+  it("maps web connection failures", async () => {
+    mocks.syncFirstbank.mockRejectedValueOnce(
+      new FirstbankConnectionError("schema drift"),
+    );
+    const response = await syncRoutes.request(
+      "/connectors/firstbank/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FIRSTBANK_CONNECTION_FAILED" },
+    });
+  });
+
+  it("maps browser capacity during sync", async () => {
+    mocks.syncFirstbank.mockRejectedValueOnce(
+      new FirstbankBrowserCapacityError("browser busy", 9),
+    );
+    const response = await syncRoutes.request(
+      "/connectors/firstbank/sync",
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("9");
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "FIRSTBANK_BROWSER_BUSY" },
     });
   });
 });

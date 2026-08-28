@@ -54,6 +54,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   prepareHncbCaptchaSession: vi.fn(),
   prepareTaishinCaptchaSession: vi.fn(),
   prepareObankCaptchaSession: vi.fn(),
+  prepareFirstbankCaptchaSession: vi.fn(),
   safeErrorLogDetails: (error: unknown) => ({
     errorName: error instanceof Error ? error.name : typeof error,
     ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
@@ -68,6 +69,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncEsun: mocks.syncEsun,
   syncSinopac: vi.fn(),
   syncObank: vi.fn(),
+  syncFirstbank: vi.fn(),
   syncHncb: vi.fn(),
   syncTaishin: mocks.syncTaishin,
   syncSkbank: mocks.syncSkbank,

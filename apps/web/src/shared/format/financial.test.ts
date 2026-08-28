@@ -19,6 +19,7 @@ describe("financial formatting helpers", () => {
     expect(bankAccountLast5("settlement:esun:1234567890")).toBe("67890");
     expect(bankAccountLast5("bank:esun:987654321")).toBe("54321");
     expect(bankAccountLast5("bank:skbank:4321:hash")).toBe("4321");
+    expect(bankAccountLast5("bank:firstbank:12345:hash")).toBe("12345");
     expect(bankAccountLast5("other:account")).toBeUndefined();
   });
 

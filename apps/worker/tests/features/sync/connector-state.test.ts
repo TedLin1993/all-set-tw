@@ -94,6 +94,33 @@ describe("connector state boundaries", () => {
     });
   });
 
+  it("removes reusable First Bank browser state from the cursor", () => {
+    expect(
+      splitConnectorCursorState(
+        "firstbank",
+        JSON.stringify({
+          sessionCookies: "sensitive-cookie",
+          sessionCreatedAt: "2026-08-27T08:00:00.000Z",
+          browserSessionId: "pending-session",
+          browserSessionExpiresAt: "2026-08-27T08:02:00.000Z",
+          captchaDigitCount: 4,
+          captcha: "1234",
+          syncedAt: "2026-08-27T08:01:00.000Z",
+        }),
+      ),
+    ).toEqual({
+      safeCursor: JSON.stringify({ syncedAt: "2026-08-27T08:01:00.000Z" }),
+      secretState: {
+        sessionCookies: "sensitive-cookie",
+        sessionCreatedAt: "2026-08-27T08:00:00.000Z",
+        browserSessionId: "pending-session",
+        browserSessionExpiresAt: "2026-08-27T08:02:00.000Z",
+        captchaDigitCount: 4,
+        captcha: "1234",
+      },
+    });
+  });
+
   it("removes Cathay trusted browser state from the cursor", () => {
     expect(
       splitConnectorCursorState(

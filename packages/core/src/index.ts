@@ -279,6 +279,7 @@ export const supportedConnectorIds = [
   "skbank",
   "obank",
   "hncb",
+  "firstbank",
 ] as const;
 export type ConnectorId = (typeof supportedConnectorIds)[number];
 
@@ -529,6 +530,37 @@ export const connectorCatalog = {
     resetOnCredentialChangeFields: [
       "pendingSession",
       "pendingSessionExpiresAt",
+      "captcha",
+    ],
+  },
+  firstbank: {
+    id: "firstbank",
+    title: "第一銀行",
+    description: "存款帳戶、餘額與交易明細；信用卡帳單與刷卡明細",
+    connectionMode: "browser_captcha_session",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: [],
+    credentialFields: ["userId", "account", "password"],
+    secretStateFields: [
+      "sessionCookies",
+      "sessionCreatedAt",
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captchaDigitCount",
+      "captcha",
+    ],
+    resetOnCredentialChangeFields: [
+      "sessionCookies",
+      "sessionCreatedAt",
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captchaDigitCount",
       "captcha",
     ],
   },

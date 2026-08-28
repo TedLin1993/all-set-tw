@@ -67,6 +67,7 @@ export async function getConnectorSettingsView(
       connectorId === "esun" ||
       connectorId === "sinopac" ||
       connectorId === "taishin" ||
+      connectorId === "firstbank" ||
       connectorId === "hncb"
     ) {
       sessionAvailable =

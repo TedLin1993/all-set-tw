@@ -60,6 +60,15 @@ describe("sync notification payload", () => {
     ).toBe("新光銀行已完成排程同步，開啟 App 查看結果。");
   });
 
+  it("labels First Bank scheduled sync notifications", () => {
+    expect(
+      syncNotificationPayload({
+        connectorId: "firstbank",
+        status: "success",
+      }).body,
+    ).toBe("第一銀行已完成排程同步，開啟 App 查看結果。");
+  });
+
   it("maps statuses to their preference switches", () => {
     const preferences: NotificationPreferences = {
       success: false,
