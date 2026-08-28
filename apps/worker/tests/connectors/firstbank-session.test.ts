@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const puppeteerMock = vi.hoisted(() => ({
   connect: vi.fn(),
@@ -42,11 +42,17 @@ const transactionTables = `
   </table>
 `;
 
+const TRANSACTION_RESULT_URL =
+  "https://ibank.firstbank.com.tw/NetBank/2/010103.html";
+const TRANSACTION_QUERY_URL =
+  "https://ibank.firstbank.com.tw/NetBank/2/0101.html";
+
 type Listener = (...args: unknown[]) => void;
 
 function makeFrame(options?: { authenticated?: boolean }) {
   let currentUrl = options?.authenticated ? FRAME_URL : LOGIN_URL;
   return {
+    detached: false,
     name: vi.fn().mockReturnValue("main"),
     url: vi.fn().mockImplementation(() => currentUrl),
     goto: vi.fn().mockImplementation(async (url: string) => {
@@ -176,6 +182,68 @@ function makeBrowser(page: ReturnType<typeof makePage>) {
   };
 }
 
+function makeTransactionResultFrame() {
+  const frame = makeFrame({ authenticated: true });
+  frame.url.mockReturnValue(TRANSACTION_RESULT_URL);
+  frame.evaluate.mockImplementation(async (fn: unknown) => {
+    const source = String(fn);
+    if (source.includes("#btnOpen") || source.includes("#tFunc")) return true;
+    if (source.includes("交易日期")) return true;
+    if (source.includes('querySelectorAll("table")')) return transactionTables;
+    if (source.includes("searchBtn")) return false;
+    if (source.includes("請選擇查詢帳號")) return false;
+    return undefined;
+  });
+  frame.content.mockResolvedValue(transactionTables);
+  return frame;
+}
+
+function makeEmptyLiveFrame() {
+  const frame = makeFrame({ authenticated: true });
+  frame.url.mockReturnValue(TRANSACTION_QUERY_URL);
+  frame.evaluate.mockImplementation(async (fn: unknown) => {
+    const source = String(fn);
+    if (source.includes("#btnOpen") || source.includes("#tFunc")) return true;
+    if (source.includes("交易日期")) return false;
+    if (source.includes('querySelectorAll("table")')) return "";
+    if (source.includes("searchBtn")) return false;
+    if (source.includes("請選擇查詢帳號")) return false;
+    return undefined;
+  });
+  frame.content.mockResolvedValue("<html><body></body></html>");
+  return frame;
+}
+
+function detachQueryFrameAfterSearch(
+  page: ReturnType<typeof makePage>,
+  nextFrames: Array<ReturnType<typeof makeFrame>>,
+) {
+  const queryFrame = page.frame;
+  const previousEvaluate = queryFrame.evaluate;
+  queryFrame.evaluate = vi
+    .fn()
+    .mockImplementation(async (fn: unknown, arg?: unknown) => {
+      const source = String(fn);
+      if (queryFrame.detached) {
+        throw new Error(
+          "Execution context was destroyed, most likely because of a navigation.",
+        );
+      }
+      if (source.includes("searchBtn") && source.includes(".click()")) {
+        queryFrame.detached = true;
+        page.frames.mockImplementation(() => nextFrames);
+        return true;
+      }
+      return previousEvaluate(fn, arg);
+    });
+  queryFrame.content.mockImplementation(async () => {
+    if (queryFrame.detached) {
+      throw new Error("Attempted to use detached Frame");
+    }
+    return "<html><body><form>查詢帳號</form></body></html>";
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   puppeteerMock.sessions.mockResolvedValue([]);
@@ -185,6 +253,10 @@ beforeEach(() => {
     allowedBrowserAcquisitions: 1,
     timeUntilNextAllowedBrowserAcquisition: 0,
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("第一銀行 browser session lifecycle", () => {
@@ -383,5 +455,64 @@ describe("第一銀行 browser session lifecycle", () => {
     );
     expect(page.mouse.click).not.toHaveBeenCalled();
     expect(browser.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("第一銀行交易明細 frame 重綁", () => {
+  it("query 導覽摧毀舊 frame 後，改從含交易日期表頭的新 frame 讀取明細", async () => {
+    const page = makePage({ authenticated: true });
+    const resultFrame = makeTransactionResultFrame();
+    detachQueryFrameAfterSearch(page, [resultFrame]);
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const result = await createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          amount: -100,
+          description: "測試交易",
+        }),
+      ]),
+    );
+    expect(resultFrame.evaluate).toHaveBeenCalled();
+    expect(page.frame.evaluate).toHaveBeenCalled();
+  });
+
+  it("沒有任何 live frame 含交易明細表格時仍回報讀取失敗", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    const emptyFrame = makeEmptyLiveFrame();
+    detachQueryFrameAfterSearch(page, [emptyFrame]);
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    const expectation = expect(pending).rejects.toThrow(
+      "第一銀行交易明細讀取失敗。",
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    await expectation;
+    await expect(pending).rejects.toBeInstanceOf(FirstbankConnectionError);
+    expect(emptyFrame.content).not.toHaveBeenCalled();
   });
 });
