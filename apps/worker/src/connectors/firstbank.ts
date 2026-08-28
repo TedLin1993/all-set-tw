@@ -790,12 +790,19 @@ async function collectFirstbankPayloads(
     await waitForDepositOverview(frame);
 
     await navigateFrame(frame, TRANSACTION_URL);
-    await submitTransactionQuery(frame);
-    const transactionHistoryHtml = await serializeFirstbankTables(frame);
+    const queryFrame = await waitForLiveTransactionQueryFrame(page, frame);
+    const resultFrame = await submitTransactionQuery(page, queryFrame);
+    const transactionHistoryHtml = await serializeFirstbankTables(resultFrame);
 
-    await collectCardPayload(frame, "F1632", 1, "cardBill", captured);
-    await collectCardPayload(frame, "F1633", 2, "recentPayments", captured);
-    await collectCardPayload(frame, "F1634", 3, "cardUnbilled", captured);
+    await collectCardPayload(resultFrame, "F1632", 1, "cardBill", captured);
+    await collectCardPayload(
+      resultFrame,
+      "F1633",
+      2,
+      "recentPayments",
+      captured,
+    );
+    await collectCardPayload(resultFrame, "F1634", 3, "cardUnbilled", captured);
     await Promise.allSettled(responseTasks);
 
     return {
@@ -941,21 +948,29 @@ function cardResponseKey(url: string): CardPayloadKey | undefined {
   return undefined;
 }
 
-async function submitTransactionQuery(frame: Frame) {
-  try {
-    await dismissBankNotice(frame);
-    await fillTransactionDateRange(frame);
-    await waitForQueryAccountOptions(frame);
-    await selectQueryAccount(frame);
-    await clickTransactionSearch(frame);
-    if (!(await waitForTransactionResult(frame))) {
-      await selectQueryAccount(frame);
-      await clickTransactionSearch(frame);
-      await waitForTransactionResult(frame);
+async function submitTransactionQuery(page: Page, frame: Frame) {
+  await dismissBankNotice(frame);
+  await fillTransactionDateRange(frame);
+  await waitForQueryAccountOptions(frame);
+  await selectQueryAccount(frame);
+  await clickTransactionSearch(frame);
+
+  // Cloudflare Browser Rendering often invalidates the iframe handle when
+  // #searchBtn navigates 0101.html → 010103.html. Drop the old Frame and
+  // re-resolve a live document that actually has the result header.
+  let resultFrame = await waitForLiveTransactionResultFrame(page);
+  if (!resultFrame) {
+    const retryFrame = await findLiveTransactionQueryFrame(page);
+    if (retryFrame && (await pageAsksForQueryAccount(retryFrame))) {
+      await selectQueryAccount(retryFrame);
+      await clickTransactionSearch(retryFrame);
+      resultFrame = await waitForLiveTransactionResultFrame(page);
     }
-  } catch (error) {
-    if (!isRecoverableFrameError(error)) throw error;
   }
+  if (!resultFrame) {
+    throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
+  }
+  return resultFrame;
 }
 
 async function waitForDepositOverview(frame: Frame) {
@@ -981,15 +996,70 @@ async function hasDepositOverview(frame: Frame) {
   }
 }
 
-async function waitForTransactionResult(frame: Frame) {
+async function waitForLiveTransactionQueryFrame(page: Page, preferred?: Frame) {
   const deadline = Date.now() + ACTION_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    await dismissBankNotice(frame);
-    if (await hasTransactionResultHeader(frame)) return true;
-    if (await pageAsksForQueryAccount(frame)) return false;
+    const found = await findLiveTransactionQueryFrame(page);
+    if (found) return found;
     await delay(FRAME_READ_RETRY_MS);
   }
-  return hasTransactionResultHeader(frame);
+  const found = await findLiveTransactionQueryFrame(page);
+  if (found) return found;
+  if (
+    preferred &&
+    !isDetachedFrame(preferred) &&
+    liveFrames(page).includes(preferred)
+  ) {
+    return preferred;
+  }
+  return waitForAuthenticatedFrame(page);
+}
+
+async function findLiveTransactionQueryFrame(page: Page) {
+  for (const frame of liveFrames(page)) {
+    if (await hasTransactionSearchControl(frame)) return frame;
+  }
+  return undefined;
+}
+
+async function hasTransactionSearchControl(frame: Frame) {
+  try {
+    return Boolean(
+      await withActionTimeout(
+        frame.evaluate(() =>
+          Boolean(document.querySelector("#searchBtn, input[name=showList]")),
+        ),
+      ),
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function waitForLiveTransactionResultFrame(page: Page) {
+  const deadline = Date.now() + ACTION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const result = await findLiveTransactionResultFrame(page);
+    if (result) return result;
+    if (await anyLiveFrameAsksForQueryAccount(page)) return undefined;
+    await delay(FRAME_READ_RETRY_MS);
+  }
+  return findLiveTransactionResultFrame(page);
+}
+
+async function findLiveTransactionResultFrame(page: Page) {
+  for (const frame of liveFrames(page)) {
+    await dismissBankNotice(frame);
+    if (await hasTransactionResultHeader(frame)) return frame;
+  }
+  return undefined;
+}
+
+async function anyLiveFrameAsksForQueryAccount(page: Page) {
+  for (const frame of liveFrames(page)) {
+    if (await pageAsksForQueryAccount(frame)) return true;
+  }
+  return false;
 }
 
 async function fillTransactionDateRange(frame: Frame) {
@@ -1099,18 +1169,27 @@ async function clickTransactionSearch(frame: Frame) {
       timeout: NAVIGATION_TIMEOUT_MS,
     })
     .catch(() => undefined);
-  const submitted = await withActionTimeout(
-    frame.evaluate(() => {
-      const searchBtn = document.querySelector<HTMLElement>(
-        "#searchBtn, input[name=showList]",
-      );
-      if (searchBtn) {
-        searchBtn.click();
-        return true;
-      }
-      return false;
-    }),
-  );
+  let submitted = false;
+  try {
+    submitted = Boolean(
+      await withActionTimeout(
+        frame.evaluate(() => {
+          const searchBtn = document.querySelector<HTMLElement>(
+            "#searchBtn, input[name=showList]",
+          );
+          if (searchBtn) {
+            searchBtn.click();
+            return true;
+          }
+          return false;
+        }),
+      ),
+    );
+  } catch (error) {
+    if (!isRecoverableFrameError(error)) throw error;
+    // The click itself can destroy the iframe execution context.
+    submitted = true;
+  }
   if (!submitted) {
     throw new FirstbankConnectionError("第一銀行交易明細查詢按鈕格式已變更。");
   }
@@ -1246,12 +1325,7 @@ async function serializeFirstbankTables(frame: Frame): Promise<string> {
   ).catch(() => "");
 
   if (typeof serialized === "string" && serialized.trim()) {
-    if (serialized.length > MAX_SERIALIZED_TABLE_BYTES) {
-      throw new FirstbankConnectionError(
-        "第一銀行交易明細資料量超過單次同步上限。",
-      );
-    }
-    return serialized;
+    return assertSerializedTransactionTables(serialized);
   }
 
   // Some browser mocks and older Puppeteer frames do not expose table rows
@@ -1267,12 +1341,7 @@ async function serializeFirstbankTables(frame: Frame): Promise<string> {
     if (!tables.trim()) {
       throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
     }
-    if (tables.length > MAX_SERIALIZED_TABLE_BYTES) {
-      throw new FirstbankConnectionError(
-        "第一銀行交易明細資料量超過單次同步上限。",
-      );
-    }
-    return tables;
+    return assertSerializedTransactionTables(tables);
   } catch (error) {
     if (error instanceof FirstbankConnectionError) throw error;
     throw new FirstbankConnectionError(
@@ -1622,6 +1691,22 @@ function errorMessage(error: unknown) {
 
 function isDetachedFrame(frame: Frame) {
   return Boolean((frame as Frame & { detached?: boolean }).detached);
+}
+
+function liveFrames(page: Page) {
+  return page.frames().filter((frame) => !isDetachedFrame(frame));
+}
+
+function assertSerializedTransactionTables(html: string) {
+  if (html.length > MAX_SERIALIZED_TABLE_BYTES) {
+    throw new FirstbankConnectionError(
+      "第一銀行交易明細資料量超過單次同步上限。",
+    );
+  }
+  if (!/交易日期|交易日/.test(html) || !/支出|存入|交易金額/.test(html)) {
+    throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
+  }
+  return html;
 }
 
 async function withActionTimeout<T>(action: Promise<T>) {

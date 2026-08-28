@@ -53,6 +53,14 @@
 - 後端測試：`npm run test:backend`
 - 全部 workspace 建置：`npm run build`
 
+## 提交與 PR 前必跑檢查
+
+每次 commit 或開／更新 PR 前，必須從 **repo root** 跑與 CI 相同的檢查，不得省略。
+
+- 先跑 `npm run format:check`，再跑 `npm run typecheck`，然後跑此次變更適用的 `npm run test:backend` 或前端 unit tests。
+- **禁止**用 `prettier --check <touched files>` 代替 `npm run format:check`。只對改動檔跑 Prettier 通過，不算完成。
+- CI（`.github/workflows/ci.yml`）順序為 `format:check` → `typecheck` → `test:backend` → `test:unit` → `build`。在本地通過前三項中適用的檢查之前，不得視為 commit 完成。
+
 ## 文件維護
 
 - 架構判斷以實際程式碼及各 workspace 的 `package.json` 為最終依據。
