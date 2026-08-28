@@ -619,7 +619,9 @@ async function confirmVisibleLoginPrompts(page: Page) {
     try {
       await withActionTimeout(
         target.evaluate(() => {
-          const isVisible = (element: Element | null) => {
+          const isVisible = (
+            element: Element | null,
+          ): element is HTMLElement => {
             if (!(element instanceof HTMLElement)) return false;
             const style = window.getComputedStyle(element);
             if (style.display === "none" || style.visibility === "hidden") {
