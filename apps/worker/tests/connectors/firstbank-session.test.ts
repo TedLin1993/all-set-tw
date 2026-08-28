@@ -59,13 +59,12 @@ function makeFrame(options?: { authenticated?: boolean }) {
         return { ok: true, status: 200, text: depositTables };
       }
       if (source.includes('querySelectorAll("table")')) {
-        return currentUrl.includes("0101")
-          ? transactionTables
-          : depositTables;
+        return currentUrl.includes("0101") ? transactionTables : depositTables;
       }
       if (source.includes('querySelectorAll("select")')) return true;
       if (source.includes("searchBtn")) return true;
-      if (source.includes("帳面餘額") || source.includes("可用餘額")) return true;
+      if (source.includes("帳面餘額") || source.includes("可用餘額"))
+        return true;
       if (source.includes("交易日期")) return true;
       if (source.includes("targetLabel")) return false;
       return undefined;
@@ -85,13 +84,15 @@ function makePage(options?: {
   const listeners = new Map<string, Set<Listener>>();
   const frame = makeFrame(options);
   const originalFrameEvaluate = frame.evaluate;
-  frame.evaluate = vi.fn().mockImplementation(async (fn: unknown, arg?: unknown) => {
-    const source = String(fn);
-    if (source.includes("#btnOpen") || source.includes("#tFunc")) {
-      return authenticated;
-    }
-    return originalFrameEvaluate(fn, arg);
-  });
+  frame.evaluate = vi
+    .fn()
+    .mockImplementation(async (fn: unknown, arg?: unknown) => {
+      const source = String(fn);
+      if (source.includes("#btnOpen") || source.includes("#tFunc")) {
+        return authenticated;
+      }
+      return originalFrameEvaluate(fn, arg);
+    });
   const page = {
     frame,
     $: vi.fn().mockImplementation(async (selector: string) => {

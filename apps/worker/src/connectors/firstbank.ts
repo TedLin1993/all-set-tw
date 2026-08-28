@@ -415,38 +415,7 @@ async function submitLogin(page: Page, captcha: string) {
   await fillInput(page, "#vrfyCode", captcha);
   try {
     await page.waitForFunction(
-        () => {
-          const image =
-            document.querySelector<HTMLImageElement>("#captchaLoginArea");
-          const area = document.querySelector<HTMLAreaElement>(
-            'map[name="loginMap"] area',
-          );
-          const [left, top, right, bottom] = (area?.coords ?? "")
-            .split(",")
-            .map((value) => Number(value.trim()));
-          return Boolean(
-            image?.complete &&
-            image.naturalWidth > 0 &&
-            [left, top, right, bottom].every(Number.isFinite) &&
-            right > left &&
-            bottom > top &&
-            image.getBoundingClientRect().width > 0 &&
-            image.getBoundingClientRect().height > 0,
-          );
-        },
-        { timeout: ACTION_TIMEOUT_MS },
-      );
-    } catch (error) {
-      throw new FirstbankConnectionError(
-        "第一銀行登入按鈕尚未載入完成，請重新取得圖形驗證碼。",
-        undefined,
-        undefined,
-        error,
-      );
-    }
-
-    const loginPoint = await withActionTimeout(
-      page.evaluate(() => {
+      () => {
         const image =
           document.querySelector<HTMLImageElement>("#captchaLoginArea");
         const area = document.querySelector<HTMLAreaElement>(
@@ -455,55 +424,33 @@ async function submitLogin(page: Page, captcha: string) {
         const [left, top, right, bottom] = (area?.coords ?? "")
           .split(",")
           .map((value) => Number(value.trim()));
-        if (
-          !image ||
-          ![left, top, right, bottom].every(Number.isFinite) ||
-          right <= left ||
-          bottom <= top ||
-          image.naturalWidth <= 0 ||
-          image.naturalHeight <= 0
-        ) {
-          return null;
-        }
-        const rect = image.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return null;
-        return {
-          x: rect.left + ((left + right) / 2 / image.naturalWidth) * rect.width,
-          y:
-            rect.top + ((top + bottom) / 2 / image.naturalHeight) * rect.height,
-        };
-      }),
+        return Boolean(
+          image?.complete &&
+          image.naturalWidth > 0 &&
+          [left, top, right, bottom].every(Number.isFinite) &&
+          right > left &&
+          bottom > top &&
+          image.getBoundingClientRect().width > 0 &&
+          image.getBoundingClientRect().height > 0,
+        );
+      },
+      { timeout: ACTION_TIMEOUT_MS },
     );
-    if (!loginPoint) {
-      throw new FirstbankConnectionError(
-        "第一銀行登入按鈕格式已變更，請重新取得圖形驗證碼。",
-      );
-    }
+  } catch (error) {
+    throw new FirstbankConnectionError(
+      "第一銀行登入按鈕尚未載入完成，請重新取得圖形驗證碼。",
+      undefined,
+      undefined,
+      error,
+    );
+  }
 
-    const navigation = page
-      .waitForNavigation({
-        waitUntil: "domcontentloaded",
-        timeout: NAVIGATION_TIMEOUT_MS,
-      })
-      .catch(() => undefined);
-    try {
-      await withActionTimeout(page.mouse.click(loginPoint.x, loginPoint.y));
-    } catch (error) {
-      if (!isRecoverableFrameError(error)) throw error;
-    }
-    // Public-IP / night-window confirms can block navigation. Leave the
-    // wait running; waitForLoginResult clicks those prompts and classifies.
-    await Promise.race([navigation, delay(LOGIN_RESULT_POLL_MS)]);
-}
-
-
-async function clickLoginMap(page: Page) {
   const loginPoint = await withActionTimeout(
     page.evaluate(() => {
       const image =
         document.querySelector<HTMLImageElement>("#captchaLoginArea");
       const area = document.querySelector<HTMLAreaElement>(
-        "map[name=\"loginMap\"] area",
+        'map[name="loginMap"] area',
       );
       const [left, top, right, bottom] = (area?.coords ?? "")
         .split(",")
@@ -522,8 +469,58 @@ async function clickLoginMap(page: Page) {
       if (rect.width <= 0 || rect.height <= 0) return null;
       return {
         x: rect.left + ((left + right) / 2 / image.naturalWidth) * rect.width,
-        y:
-          rect.top + ((top + bottom) / 2 / image.naturalHeight) * rect.height,
+        y: rect.top + ((top + bottom) / 2 / image.naturalHeight) * rect.height,
+      };
+    }),
+  );
+  if (!loginPoint) {
+    throw new FirstbankConnectionError(
+      "第一銀行登入按鈕格式已變更，請重新取得圖形驗證碼。",
+    );
+  }
+
+  const navigation = page
+    .waitForNavigation({
+      waitUntil: "domcontentloaded",
+      timeout: NAVIGATION_TIMEOUT_MS,
+    })
+    .catch(() => undefined);
+  try {
+    await withActionTimeout(page.mouse.click(loginPoint.x, loginPoint.y));
+  } catch (error) {
+    if (!isRecoverableFrameError(error)) throw error;
+  }
+  // Public-IP / night-window confirms can block navigation. Leave the
+  // wait running; waitForLoginResult clicks those prompts and classifies.
+  await Promise.race([navigation, delay(LOGIN_RESULT_POLL_MS)]);
+}
+
+async function clickLoginMap(page: Page) {
+  const loginPoint = await withActionTimeout(
+    page.evaluate(() => {
+      const image =
+        document.querySelector<HTMLImageElement>("#captchaLoginArea");
+      const area = document.querySelector<HTMLAreaElement>(
+        'map[name="loginMap"] area',
+      );
+      const [left, top, right, bottom] = (area?.coords ?? "")
+        .split(",")
+        .map((value) => Number(value.trim()));
+      if (
+        !image ||
+        ![left, top, right, bottom].every(Number.isFinite) ||
+        right <= left ||
+        bottom <= top ||
+        image.naturalWidth <= 0 ||
+        image.naturalHeight <= 0
+      ) {
+        return null;
+      }
+      const rect = image.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      return {
+        x: rect.left + ((left + right) / 2 / image.naturalWidth) * rect.width,
+        y: rect.top + ((top + bottom) / 2 / image.naturalHeight) * rect.height,
       };
     }),
   );
@@ -593,9 +590,7 @@ async function waitForLoginResult(
 function isDuplicateLoginText(text: string) {
   return (
     isMultiSessionLogin(text) ||
-    /Duplicate login|重複登入|重覆登入|前次連線|previous log out/i.test(
-      text,
-    )
+    /Duplicate login|重複登入|重覆登入|前次連線|previous log out/i.test(text)
   );
 }
 
@@ -667,7 +662,9 @@ async function confirmVisibleLoginPrompts(page: Page) {
     }
   };
   await clickConfirms(page);
-  for (const frame of page.frames().filter((frame) => !isDetachedFrame(frame))) {
+  for (const frame of page
+    .frames()
+    .filter((frame) => !isDetachedFrame(frame))) {
     await clickConfirms(frame);
   }
 }
@@ -690,7 +687,9 @@ async function readLoginPageText(page: Page) {
     }
   };
   await collect(page);
-  for (const frame of page.frames().filter((frame) => !isDetachedFrame(frame))) {
+  for (const frame of page
+    .frames()
+    .filter((frame) => !isDetachedFrame(frame))) {
     await collect(frame);
   }
   return chunks.join("\n");
@@ -742,7 +741,9 @@ async function dismissPostLoginNotice(page: Page) {
   };
 
   let dismissed = await tryDismiss(page);
-  for (const frame of page.frames().filter((frame) => !isDetachedFrame(frame))) {
+  for (const frame of page
+    .frames()
+    .filter((frame) => !isDetachedFrame(frame))) {
     if (await tryDismiss(frame)) dismissed = true;
   }
   return dismissed;
@@ -1048,17 +1049,13 @@ async function selectQueryAccount(frame: Frame, dryRun = false) {
         frame.evaluate((shouldSelect) => {
           const isPlaceholder = (text: string, value: string) => {
             const normalized = text.replace(/\s+/g, "");
-            return (
-              !value.trim() ||
-              /請選擇|選擇帳號|^-+$/.test(normalized)
-            );
+            return !value.trim() || /請選擇|選擇帳號|^-+$/.test(normalized);
           };
-          const select = Array.from(
-            document.querySelectorAll("select"),
-          ).find((candidate) =>
-            Array.from(candidate.options).some(
-              (option) => !isPlaceholder(option.text, option.value),
-            ),
+          const select = Array.from(document.querySelectorAll("select")).find(
+            (candidate) =>
+              Array.from(candidate.options).some(
+                (option) => !isPlaceholder(option.text, option.value),
+              ),
           );
           if (!select) return false;
           const option = Array.from(select.options).find(
@@ -1113,9 +1110,7 @@ async function clickTransactionSearch(frame: Frame) {
     }),
   );
   if (!submitted) {
-    throw new FirstbankConnectionError(
-      "第一銀行交易明細查詢按鈕格式已變更。",
-    );
+    throw new FirstbankConnectionError("第一銀行交易明細查詢按鈕格式已變更。");
   }
   await waitForNavigation(navigation, NAVIGATION_TIMEOUT_MS);
 }
@@ -1155,8 +1150,7 @@ async function hasTransactionResultHeader(frame: Frame) {
           return rows.some((row) => {
             const text = (row.innerText || "").replace(/\s+/g, " ");
             return (
-              /交易日期|交易日/.test(text) &&
-              /支出|存入|交易金額/.test(text)
+              /交易日期|交易日/.test(text) && /支出|存入|交易金額/.test(text)
             );
           });
         }),
