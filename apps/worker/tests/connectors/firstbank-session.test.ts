@@ -507,9 +507,8 @@ describe("第一銀行交易明細 frame 重綁", () => {
         },
       ]),
     });
-    const expectation = expect(pending).rejects.toThrow(
-      "第一銀行交易明細讀取失敗。",
-    );
+    const expectation =
+      expect(pending).rejects.toThrow("第一銀行交易明細讀取失敗。");
     await vi.advanceTimersByTimeAsync(20_000);
     await expectation;
     await expect(pending).rejects.toBeInstanceOf(FirstbankConnectionError);
