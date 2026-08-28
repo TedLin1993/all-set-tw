@@ -345,14 +345,14 @@ export function linkCanonicalBankAccountsStatement(db: D1Database) {
     `UPDATE bank_accounts
     SET canonical_account_id = (
       SELECT direct.id FROM bank_accounts direct
-      WHERE direct.connector_id IN ('esun', 'cathaybk', 'ctbc', 'skbank', 'obank', 'hncb')
+      WHERE direct.connector_id IN ('esun', 'cathaybk', 'ctbc', 'skbank', 'obank', 'hncb', 'firstbank')
         AND direct.bank_code = bank_accounts.bank_code
         AND direct.account_last4 = bank_accounts.account_last4
         AND direct.currency = bank_accounts.currency
       ORDER BY direct.connector_id
       LIMIT 1
     )
-    WHERE connector_id NOT IN ('esun', 'cathaybk', 'ctbc', 'skbank', 'obank', 'hncb')
+    WHERE connector_id NOT IN ('esun', 'cathaybk', 'ctbc', 'skbank', 'obank', 'hncb', 'firstbank')
       AND bank_code IS NOT NULL
       AND account_last4 IS NOT NULL`,
   );

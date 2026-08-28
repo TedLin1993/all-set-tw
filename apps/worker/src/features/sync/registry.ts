@@ -6,12 +6,14 @@ import {
   prepareHncbCaptchaSession,
   prepareTaishinCaptchaSession,
   prepareObankCaptchaSession,
+  prepareFirstbankCaptchaSession,
   syncCathaybk,
   syncCtbc,
   syncSkbank,
   syncEsun,
   syncSinopac,
   syncObank,
+  syncFirstbank,
   syncHncb,
   syncTaishin,
   syncTdcc,
@@ -21,6 +23,7 @@ import {
   TDCC_SCOPE_TRADES,
   type SinopacSyncOverrides,
   type ObankSyncOverrides,
+  type FirstbankSyncOverrides,
   type SyncOutcome,
   type SyncScope,
   type HncbSyncOverrides,
@@ -91,6 +94,11 @@ export const connectorRuntimeRegistry: Record<
     run: (env, trigger, _scope, overrides) =>
       syncObank(env, trigger, overrides as ObankSyncOverrides),
     prepareChallenge: prepareObankCaptchaSession,
+  },
+  firstbank: {
+    run: (env, trigger, _scope, overrides) =>
+      syncFirstbank(env, trigger, overrides as FirstbankSyncOverrides),
+    prepareChallenge: prepareFirstbankCaptchaSession,
   },
 };
 

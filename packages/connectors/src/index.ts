@@ -160,6 +160,18 @@ export type {
 } from "./obank-mobile-api";
 import { obankConfigSchema } from "./obank";
 
+export {
+  firstbankConfigSchema,
+  parseFirstbankConfig,
+  parseFirstbankData,
+} from "./firstbank";
+export type {
+  FirstbankConfig,
+  FirstbankData,
+  FirstbankPayloads,
+} from "./firstbank";
+import { firstbankConfigSchema } from "./firstbank";
+
 export { hncbConfigSchema, parseHncbConfig, parseHncbData } from "./hncb";
 export type { HncbConfig, HncbData, HncbPayloads } from "./hncb";
 import { hncbConfigSchema } from "./hncb";
@@ -725,6 +737,7 @@ export const connectorConfigSchemas = {
   ctbc: ctbcConfigSchema,
   skbank: skbankConfigSchema,
   obank: obankConfigSchema,
+  firstbank: firstbankConfigSchema,
   hncb: hncbConfigSchema,
 } satisfies Record<ConnectorId, z.ZodTypeAny>;
 

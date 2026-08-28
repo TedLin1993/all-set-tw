@@ -113,7 +113,72 @@ function renderCathayPanel(
   return { ...result, api, queryClient };
 }
 
+function renderFirstbankPanel() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+  });
+  const api = {
+    get: vi.fn((path: string) => {
+      if (path === "/api/sync-jobs") {
+        return Promise.resolve([
+          syncJob({
+            id: "firstbank:all",
+            connectorId: "firstbank",
+            enabled: true,
+            lastStatus: "failed",
+            lastError:
+              "第一銀行登入資料驗證失敗，請確認設定後重試。請重新取得驗證碼。",
+          }),
+        ]);
+      }
+      if (path === "/api/connectors/firstbank/settings") {
+        return Promise.resolve({
+          connectorId: "firstbank",
+          configured: true,
+          credentialsComplete: true,
+          sessionAvailable: false,
+          updatedAt: "2026-08-26T00:00:00.000Z",
+        });
+      }
+      return Promise.resolve({});
+    }),
+    post: vi.fn(),
+    patch: vi.fn(),
+  } as unknown as ApiClient;
+  const result = render(
+    ConnectorPanel,
+    {
+      props: {
+        api,
+        connectorId: "firstbank",
+        demoMode: false,
+        title: "第一銀行",
+        fields: connectorFields.firstbank as ConnectorField[],
+      },
+    },
+    {
+      wrapper: QueryClientProvider,
+      wrapperProps: { client: queryClient },
+    },
+  );
+  return { ...result, api };
+}
+
 describe("ConnectorPanel", () => {
+  it("enables First Bank web sync and keeps both verification paths available", async () => {
+    const { api, findByText, getByRole } = renderFirstbankPanel();
+
+    expect(await findByText("自動同步：開")).toBeInTheDocument();
+    expect(await findByText("狀態：失敗")).toBeInTheDocument();
+    expect(
+      await findByText(/上次同步：第一銀行登入資料驗證失敗/),
+    ).toBeInTheDocument();
+    expect(getByRole("button", { name: "自動驗證並同步" })).toBeEnabled();
+    expect(getByRole("button", { name: "人工輸入驗證碼" })).toBeEnabled();
+    expect(api.post).not.toHaveBeenCalled();
+    expect(api.patch).not.toHaveBeenCalled();
+  });
+
   it("shows a fallback when a failed sync has an empty stored error", async () => {
     const { findByText } = renderEinvoicePanel([
       [syncJob({ lastStatus: "failed", lastError: "" })],

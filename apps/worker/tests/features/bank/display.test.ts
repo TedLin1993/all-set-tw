@@ -101,3 +101,26 @@ describe("HNCB bank display", () => {
     });
   });
 });
+
+describe("First Bank display", () => {
+  it("derives bank code 007 and only the account suffix", () => {
+    const sourceId = "bank:firstbank:1234:0123456789abcdef";
+
+    expect(deriveBankMatchKey("firstbank", sourceId)).toEqual({
+      bankCode: "007",
+      last4: "1234",
+    });
+    expect(
+      normalizeBankAccountDisplay({
+        connectorId: "firstbank",
+        sourceId,
+        institutionName: null,
+        accountName: null,
+        accountType: "savings",
+      }),
+    ).toMatchObject({
+      institutionName: "第一銀行",
+      accountName: "末四碼 1234",
+    });
+  });
+});

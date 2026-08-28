@@ -37,4 +37,16 @@ describe("browserCaptchaFailure", () => {
       sessionInvalidated: true,
     });
   });
+
+  it("invalidates a First Bank CAPTCHA session after a browser failure", () => {
+    const message = "第一銀行瀏覽器工作階段已失效。";
+    expect(
+      browserCaptchaFailure(
+        new ApiRequestError("FIRSTBANK_CONNECTION_FAILED", message, 502),
+      ),
+    ).toEqual({
+      message: `${message} 請重新取得驗證碼。`,
+      sessionInvalidated: true,
+    });
+  });
 });

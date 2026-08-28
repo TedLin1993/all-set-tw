@@ -173,6 +173,32 @@ describe("connector settings state boundaries", () => {
     });
   });
 
+  it("reports First Bank session availability from encrypted cookies", async () => {
+    mocks.findConnectorSettings.mockResolvedValue({
+      id: "firstbank-settings",
+      connector_id: "firstbank",
+      encrypted_config: JSON.stringify({
+        userId: "A123456789",
+        account: "user",
+        password: "password",
+        sessionCookies: "firstbank-cookie",
+        sessionCreatedAt: "2026-08-27T08:00:00.000Z",
+      }),
+      public_config: null,
+      sync_cursor: JSON.stringify({ syncedAt: "2026-08-27T08:00:00.000Z" }),
+      created_at: "2026-08-27T07:00:00.000Z",
+      updated_at: "2026-08-27T08:00:00.000Z",
+    });
+
+    await expect(
+      getConnectorSettingsView(env, "firstbank"),
+    ).resolves.toMatchObject({
+      connectorId: "firstbank",
+      credentialsComplete: true,
+      sessionAvailable: true,
+    });
+  });
+
   it("reports Cathay trusted-device availability only for its device cookie", async () => {
     mocks.findConnectorSettings.mockResolvedValue({
       id: "cathay-settings",
@@ -293,6 +319,42 @@ describe("connector settings state boundaries", () => {
     expect(mocks.clearConnectorCursor).toHaveBeenCalledWith(
       env.DB,
       "hncb",
+      expect.any(String),
+    );
+  });
+
+  it("clears First Bank browser state when credentials change", async () => {
+    mocks.findConnectorSettings.mockResolvedValue({
+      id: "firstbank-settings",
+      connector_id: "firstbank",
+      encrypted_config: JSON.stringify({
+        userId: "A123456789",
+        account: "old-user",
+        password: "old-password",
+        sessionCookies: "old-cookie",
+        sessionCreatedAt: "2026-08-27T08:00:00.000Z",
+        browserSessionId: "pending-session",
+        browserSessionExpiresAt: "2026-08-27T08:02:00.000Z",
+        captchaDigitCount: 4,
+        captcha: "1234",
+      }),
+      public_config: null,
+      sync_cursor: JSON.stringify({ syncedAt: "2026-08-27T08:00:00.000Z" }),
+      created_at: "2026-08-27T07:00:00.000Z",
+      updated_at: "2026-08-27T08:00:00.000Z",
+    });
+
+    await updateConnectorSettings(env, "firstbank", { account: "new-user" });
+
+    const saved = mocks.saveConnectorSettings.mock.calls[0]![1];
+    expect(JSON.parse(saved.encryptedConfig)).toEqual({
+      userId: "A123456789",
+      account: "new-user",
+      password: "old-password",
+    });
+    expect(mocks.clearConnectorCursor).toHaveBeenCalledWith(
+      env.DB,
+      "firstbank",
       expect.any(String),
     );
   });

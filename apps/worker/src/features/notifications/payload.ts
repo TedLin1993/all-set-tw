@@ -27,6 +27,7 @@ const connectorLabels: Record<ConnectorId, string> = {
   skbank: "新光銀行",
   obank: "王道銀行",
   hncb: "華南銀行",
+  firstbank: "第一銀行",
 };
 
 export function syncNotificationPayload(

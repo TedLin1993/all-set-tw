@@ -101,10 +101,14 @@ export function bankAccountLast5(sourceId: string) {
   const settlement = sourceId.match(/^settlement:[^:]+:([^:]+)/);
   const esun = sourceId.match(/^bank:esun:([^:]+)/);
   const skbank = sourceId.match(/^bank:skbank:([^:]+)/);
-  const digits = (settlement?.[1] ?? esun?.[1] ?? skbank?.[1] ?? "").replace(
-    /\D/g,
-    "",
-  );
+  const firstbank = sourceId.match(/^bank:firstbank:([^:]+)/);
+  const digits = (
+    settlement?.[1] ??
+    esun?.[1] ??
+    skbank?.[1] ??
+    firstbank?.[1] ??
+    ""
+  ).replace(/\D/g, "");
   return digits ? digits.slice(-5) : undefined;
 }
 
