@@ -76,6 +76,10 @@ type TransactionDocumentMeta = {
 type TransactionResponseCapture = {
   armed: boolean;
   html?: string;
+  verificationRequested: boolean;
+  verificationResponded: boolean;
+  verificationFailed: boolean;
+  verificationRequestIds: Set<string>;
   requestIds: Set<string>;
   documentMeta: Map<string, TransactionDocumentMeta>;
   pending: Set<Promise<void>>;
@@ -94,6 +98,7 @@ type TransactionLoadingEvent = {
 };
 
 type NetworkRequestWillBeSentEvent = {
+  requestId: string;
   type?: string;
   request: { url: string };
 };
@@ -857,6 +862,10 @@ async function collectFirstbankPayloads(
       path,
       resourceType: event.type,
     });
+    if (transactionResponse.armed && isTransactionVerificationResponse(url)) {
+      transactionResponse.verificationRequested = true;
+      transactionResponse.verificationRequestIds.add(event.requestId);
+    }
   };
   const onTransactionDocumentResponse = (
     event: TransactionDocumentResponseEvent,
@@ -868,6 +877,21 @@ async function collectFirstbankPayloads(
     const resourceType = event.type;
     if (isNetBankTwoPath(path) && isCapturableResourceType(resourceType)) {
       logFirstbankStage("0101-cdp-response", {
+        path,
+        status,
+        resourceType,
+      });
+    }
+    if (
+      transactionResponse.armed &&
+      isTransactionVerificationResponse(url) &&
+      transactionResponse.verificationRequestIds.delete(event.requestId)
+    ) {
+      transactionResponse.verificationResponded = true;
+      if (typeof status === "number" && (status < 200 || status >= 400)) {
+        transactionResponse.verificationFailed = true;
+      }
+      logFirstbankStage("0101-verification-response", {
         path,
         status,
         resourceType,
@@ -905,6 +929,12 @@ async function collectFirstbankPayloads(
     void task.catch(() => undefined);
   };
   const onTransactionDocumentFailed = (event: TransactionLoadingEvent) => {
+    if (transactionResponse.verificationRequestIds.delete(event.requestId)) {
+      transactionResponse.verificationFailed = true;
+      logFirstbankStage("0101-verification-failed", {
+        path: "/NetBank/2/verifyDV.html",
+      });
+    }
     transactionResponse.requestIds.delete(event.requestId);
     transactionResponse.documentMeta.delete(event.requestId);
   };
@@ -1124,6 +1154,10 @@ function createTransactionResponseCapture(): TransactionResponseCapture {
   });
   const capture: TransactionResponseCapture = {
     armed: false,
+    verificationRequested: false,
+    verificationResponded: false,
+    verificationFailed: false,
+    verificationRequestIds: new Set(),
     requestIds: new Set(),
     documentMeta: new Map(),
     pending: new Set(),
@@ -1288,6 +1322,14 @@ async function waitForTransactionHistory(
     logFirstbankStage("010103-timeout-frame", {
       path: framePathname(frame),
     });
+  }
+  if (
+    capture.verificationRequested &&
+    (!capture.verificationResponded ||
+      capture.verificationFailed ||
+      capture.verificationRequestIds.size > 0)
+  ) {
+    throw new FirstbankConnectionError("第一銀行交易明細前置驗證沒有完成。");
   }
   throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
 }
@@ -1469,14 +1511,18 @@ async function clickTransactionSearch(frame: Frame) {
             "#searchBtn, input[name=showList]",
           );
           if (!searchBtn) return false;
-          searchBtn.click();
+          // First Bank's click handler performs a synchronous verifyDV XHR.
+          // Let Runtime.evaluate return before that handler starts so Browser
+          // Run can continue delivering the response and navigation events.
+          setTimeout(() => searchBtn.click(), 0);
           return true;
         }),
       ),
     );
   } catch (error) {
     if (!isRecoverableFrameError(error)) throw error;
-    // The native click can destroy the iframe execution context immediately.
+    // The queued click can navigate or replace the iframe immediately after
+    // Runtime.evaluate returns. Network listeners remain armed above.
     submitted = true;
   }
   if (!submitted) {
@@ -1989,6 +2035,18 @@ function isTransactionResultResponse(url: string) {
   }
 }
 
+function isTransactionVerificationResponse(url: string) {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.origin === ORIGIN &&
+      parsed.pathname.toLowerCase().split(";")[0] === "/netbank/2/verifydv.html"
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isFirstbankUrl(url: string) {
   try {
     return new URL(url).origin === ORIGIN;
@@ -2016,7 +2074,7 @@ function framePathname(frame: Frame) {
 
 function urlPathname(url: string) {
   try {
-    return new URL(url).pathname;
+    return new URL(url).pathname.split(";")[0];
   } catch {
     return "(invalid)";
   }

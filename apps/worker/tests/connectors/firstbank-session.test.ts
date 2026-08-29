@@ -46,6 +46,7 @@ const TRANSACTION_RESULT_URL =
   "https://ibank.firstbank.com.tw/NetBank/2/010103.html";
 const TRANSACTION_QUERY_URL =
   "https://ibank.firstbank.com.tw/NetBank/2/0101.html";
+const VERIFY_DV_URL = "https://ibank.firstbank.com.tw/NetBank/2/verifyDV.html";
 
 function base64Text(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -74,8 +75,10 @@ function makeFrame(options?: { authenticated?: boolean }) {
       if (source.includes("fetch(resourcePath")) {
         return { ok: true, status: 200, text: depositTables };
       }
-      if (source.includes("searchBtn") && source.includes(".click()")) {
-        currentUrl = TRANSACTION_RESULT_URL;
+      if (source.includes("searchBtn") && source.includes("setTimeout")) {
+        setTimeout(() => {
+          currentUrl = TRANSACTION_RESULT_URL;
+        }, 0);
         return true;
       }
       if (source.includes('querySelectorAll("table")')) {
@@ -87,7 +90,7 @@ function makeFrame(options?: { authenticated?: boolean }) {
       if (source.includes("searchBtn")) return true;
       if (source.includes("帳面餘額") || source.includes("可用餘額"))
         return true;
-      if (source.includes("交易日期")) return true;
+      if (source.includes("交易日期")) return currentUrl.includes("010103");
       if (source.includes("targetLabel")) return false;
       return undefined;
     }),
@@ -221,6 +224,28 @@ function makePage(options?: {
         listener(response);
       return response;
     },
+    emitCdpRequest(url: string, requestId: string, resourceType = "XHR") {
+      for (const listener of cdpListeners.get("Network.requestWillBeSent") ??
+        [])
+        listener({ requestId, type: resourceType, request: { url } });
+    },
+    emitCdpResponse(
+      url: string,
+      requestId: string,
+      status = 200,
+      resourceType = "XHR",
+    ) {
+      for (const listener of cdpListeners.get("Network.responseReceived") ?? [])
+        listener({
+          requestId,
+          type: resourceType,
+          response: { url, status },
+        });
+    },
+    emitCdpLoadingFailed(requestId: string) {
+      for (const listener of cdpListeners.get("Network.loadingFailed") ?? [])
+        listener({ requestId });
+    },
     emitTransactionDocumentReceived(
       url: string,
       body: string,
@@ -292,9 +317,19 @@ function postedTransactionQuery(frame: ReturnType<typeof makeFrame>) {
 }
 
 function clickedTransactionSearch(frame: ReturnType<typeof makeFrame>) {
-  return frame.evaluate.mock.calls.some(
-    ([fn]) =>
-      String(fn).includes("searchBtn") && String(fn).includes(".click()"),
+  return frame.evaluate.mock.calls.some(([fn]) => {
+    const source = String(fn);
+    return (
+      source.includes("searchBtn") &&
+      source.includes("setTimeout") &&
+      source.includes(".click()")
+    );
+  });
+}
+
+function directlySubmitsForm(frame: ReturnType<typeof makeFrame>) {
+  return frame.evaluate.mock.calls.some(([fn]) =>
+    String(fn).includes("form.submit"),
   );
 }
 
@@ -337,6 +372,7 @@ function detachQueryFrameAfterSearch(
     loadingFinishedDelayMs?: number;
     fetchDelayMs?: number;
     resourceType?: string;
+    verification?: "response" | "pending" | "failed";
   },
 ) {
   const queryFrame = page.frame;
@@ -348,43 +384,55 @@ function detachQueryFrameAfterSearch(
       if (queryFrame.detached) {
         throw new Error("Execution context was destroyed during navigation");
       }
-      if (source.includes("searchBtn") && source.includes(".click()")) {
-        queryFrame.detached = true;
-        page.frames.mockImplementation(() => nextFrames);
-        if (responseHtml !== undefined) {
-          const fetchDelayMs = timing?.fetchDelayMs;
-          if (fetchDelayMs !== undefined) {
-            setTimeout(() => {
-              page.emitFetchPaused(responseUrl, responseHtml, base64Encoded);
-            }, fetchDelayMs);
+      if (source.includes("searchBtn") && source.includes("setTimeout")) {
+        // Match the connector's browser-side timer: Runtime.evaluate returns
+        // first, then the real button click emits the bank requests.
+        setTimeout(() => {
+          const verification = timing?.verification ?? "response";
+          page.emitCdpRequest(VERIFY_DV_URL, "verify-dv");
+          if (verification === "pending") return;
+          if (verification === "failed") {
+            page.emitCdpLoadingFailed("verify-dv");
+            return;
           }
-          if (
-            timing?.delayMs !== undefined ||
-            timing?.loadingFinishedDelayMs !== undefined
-          ) {
-            const delayMs = timing?.delayMs ?? 0;
-            const loadingFinishedDelayMs =
-              timing?.loadingFinishedDelayMs ?? delayMs;
-            setTimeout(() => {
-              page.emitTransactionDocumentReceived(
+          page.emitCdpResponse(VERIFY_DV_URL, "verify-dv");
+          queryFrame.detached = true;
+          page.frames.mockImplementation(() => nextFrames);
+          if (responseHtml !== undefined) {
+            const fetchDelayMs = timing?.fetchDelayMs;
+            if (fetchDelayMs !== undefined) {
+              setTimeout(() => {
+                page.emitFetchPaused(responseUrl, responseHtml, base64Encoded);
+              }, fetchDelayMs);
+            }
+            if (
+              timing?.delayMs !== undefined ||
+              timing?.loadingFinishedDelayMs !== undefined
+            ) {
+              const delayMs = timing?.delayMs ?? 0;
+              const loadingFinishedDelayMs =
+                timing?.loadingFinishedDelayMs ?? delayMs;
+              setTimeout(() => {
+                page.emitTransactionDocumentReceived(
+                  responseUrl,
+                  responseHtml,
+                  base64Encoded,
+                  200,
+                  timing?.resourceType ?? "Document",
+                );
+              }, delayMs);
+              setTimeout(() => {
+                page.emitTransactionDocumentLoaded();
+              }, loadingFinishedDelayMs);
+            } else if (fetchDelayMs === undefined) {
+              page.emitTransactionDocument(
                 responseUrl,
                 responseHtml,
                 base64Encoded,
-                200,
-                timing?.resourceType ?? "Document",
               );
-            }, delayMs);
-            setTimeout(() => {
-              page.emitTransactionDocumentLoaded();
-            }, loadingFinishedDelayMs);
-          } else if (fetchDelayMs === undefined) {
-            page.emitTransactionDocument(
-              responseUrl,
-              responseHtml,
-              base64Encoded,
-            );
+            }
           }
-        }
+        }, 0);
         return true;
       }
       return previousEvaluate(fn, arg);
@@ -634,6 +682,7 @@ describe("第一銀行交易明細 010103 擷取", () => {
     );
     expect(clickedTransactionSearch(page.frame)).toBe(true);
     expect(postedTransactionQuery(page.frame)).toBe(false);
+    expect(directlySubmitsForm(page.frame)).toBe(false);
     expect(resultFrame.evaluate).toHaveBeenCalled();
     expect(page.frame.waitForNavigation).not.toHaveBeenCalled();
   });
@@ -769,6 +818,76 @@ describe("第一銀行交易明細 010103 擷取", () => {
     );
   });
 
+  it("verifyDV 只有 request 沒有 response 時回報前置驗證未完成", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+      TRANSACTION_RESULT_URL,
+      false,
+      { verification: "pending" },
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    const expectation =
+      expect(pending).rejects.toThrow("第一銀行交易明細前置驗證沒有完成。");
+    await vi.advanceTimersByTimeAsync(11_000);
+    await expectation;
+    expect(clickedTransactionSearch(page.frame)).toBe(true);
+    expect(page.cdpSession.send).not.toHaveBeenCalledWith(
+      "Network.getResponseBody",
+      expect.anything(),
+    );
+  });
+
+  it("verifyDV loadingFailed 時回報前置驗證未完成", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+      TRANSACTION_RESULT_URL,
+      false,
+      { verification: "failed" },
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    const expectation =
+      expect(pending).rejects.toThrow("第一銀行交易明細前置驗證沒有完成。");
+    await vi.advanceTimersByTimeAsync(11_000);
+    await expectation;
+    expect(clickedTransactionSearch(page.frame)).toBe(true);
+    expect(page.cdpSession.send).not.toHaveBeenCalledWith(
+      "Network.getResponseBody",
+      expect.anything(),
+    );
+  });
+
   it("延遲到達的 CDP 010103 document 仍可擷取明細", async () => {
     vi.useFakeTimers();
     const logs: string[] = [];
@@ -780,7 +899,7 @@ describe("第一銀行交易明細 010103 擷取", () => {
       page,
       [makeEmptyLiveFrame()],
       transactionTables,
-      TRANSACTION_RESULT_URL,
+      `${TRANSACTION_RESULT_URL};jsessionid=synthetic-secret`,
       false,
       { delayMs: 3_000 },
     );
@@ -821,6 +940,25 @@ describe("第一銀行交易明細 010103 擷取", () => {
       expect(joined).toContain("status=200");
       expect(joined).toMatch(/bodyLength=\d+/);
       expect(joined).toContain("hasTxnDateHeader=true");
+      const verificationRequestIndex = logs.findIndex((line) =>
+        line.includes("0101-cdp-request path=/NetBank/2/verifyDV.html"),
+      );
+      const verificationResponseIndex = logs.findIndex((line) =>
+        line.includes(
+          "0101-verification-response path=/NetBank/2/verifyDV.html",
+        ),
+      );
+      const transactionResponseIndex = logs.findIndex((line) =>
+        line.includes("010103-cdp-response path=/NetBank/2/010103.html"),
+      );
+      expect(verificationRequestIndex).toBeGreaterThanOrEqual(0);
+      expect(verificationResponseIndex).toBeGreaterThan(
+        verificationRequestIndex,
+      );
+      expect(transactionResponseIndex).toBeGreaterThan(
+        verificationResponseIndex,
+      );
+      expect(joined).not.toContain("synthetic-secret");
       expect(joined).not.toContain("測試交易");
       expect(joined).not.toContain("123456789012");
       expect(joined).not.toContain("encrypted-at-rest");
