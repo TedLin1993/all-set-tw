@@ -64,6 +64,13 @@ function makeFrame(options?: { authenticated?: boolean }) {
       if (source.includes("fetch(resourcePath")) {
         return { ok: true, status: 200, text: depositTables };
       }
+      if (source.includes("new FormData(form)")) {
+        return {
+          action: TRANSACTION_RESULT_URL,
+          method: "POST",
+          body: "txnStart=2026/07/29&txnEnd=2026/08/29&showList=Y",
+        };
+      }
       if (source.includes('querySelectorAll("table")')) {
         return currentUrl.includes("0101") ? transactionTables : depositTables;
       }
@@ -212,6 +219,31 @@ function makeEmptyLiveFrame() {
   });
   frame.content.mockResolvedValue("<html><body></body></html>");
   return frame;
+}
+
+function makePostFallbackFrame() {
+  const frame = makeEmptyLiveFrame();
+  const previousEvaluate = frame.evaluate;
+  frame.evaluate = vi
+    .fn()
+    .mockImplementation(async (fn: unknown, arg?: unknown) => {
+      const source = String(fn);
+      if (
+        source.includes("fetch(action") ||
+        source.includes("payload.action")
+      ) {
+        return { ok: true, status: 200, text: transactionTables };
+      }
+      return previousEvaluate(fn, arg);
+    });
+  return frame;
+}
+
+function postedTransactionQuery(frame: ReturnType<typeof makeFrame>) {
+  return frame.evaluate.mock.calls.some(
+    ([fn]) =>
+      String(fn).includes("payload.action") && String(fn).includes("fetch("),
+  );
 }
 
 function detachQueryFrameAfterSearch(
@@ -487,6 +519,50 @@ describe("第一銀行交易明細 frame 重綁", () => {
     );
     expect(resultFrame.evaluate).toHaveBeenCalled();
     expect(page.frame.evaluate).toHaveBeenCalled();
+    expect(postedTransactionQuery(resultFrame)).toBe(false);
+  });
+
+  it("結果 iframe 未出現時，改從仍活著的 frame POST 0101 表單取得明細", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    const liveFrame = makePostFallbackFrame();
+    detachQueryFrameAfterSearch(page, [liveFrame]);
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const result = await pending;
+
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          amount: -100,
+          description: "測試交易",
+        }),
+      ]),
+    );
+    expect(postedTransactionQuery(liveFrame)).toBe(true);
+    const postCall = liveFrame.evaluate.mock.calls.find(
+      ([fn]) =>
+        String(fn).includes("payload.action") && String(fn).includes("fetch("),
+    );
+    expect(postCall?.[1]).toEqual(
+      expect.objectContaining({
+        action: TRANSACTION_RESULT_URL,
+        method: "POST",
+      }),
+    );
+    expect(liveFrame.content).not.toHaveBeenCalled();
   });
 
   it("沒有任何 live frame 含交易明細表格時仍回報讀取失敗", async () => {
@@ -509,9 +585,10 @@ describe("第一銀行交易明細 frame 重綁", () => {
     });
     const expectation =
       expect(pending).rejects.toThrow("第一銀行交易明細讀取失敗。");
-    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.advanceTimersByTimeAsync(5_000);
     await expectation;
     await expect(pending).rejects.toBeInstanceOf(FirstbankConnectionError);
     expect(emptyFrame.content).not.toHaveBeenCalled();
+    expect(postedTransactionQuery(emptyFrame)).toBe(true);
   });
 });
