@@ -34,10 +34,6 @@ const LOGIN_RESULT_ATTEMPTS = 30;
 const LOGIN_RESULT_POLL_MS = 500;
 const FRAME_TIMEOUT_MS = 15_000;
 const FRAME_READ_RETRY_MS = 250;
-// After #searchBtn, a missing 010103 iframe will never appear. Poll briefly
-// then POST the live 0101 form; do not stack another 10s ACTION_TIMEOUT.
-const RESULT_FRAME_WAIT_MS = 2_000;
-const FRAME_PROBE_TIMEOUT_MS = 1_000;
 const CARD_RESPONSE_TIMEOUT_MS = 10_000;
 const SESSION_RELEASE_TIMEOUT_MS = 2_000;
 const SESSION_RELEASE_POLL_MS = 100;
@@ -801,11 +797,8 @@ async function collectFirstbankPayloads(
 
     await navigateFrame(frame, TRANSACTION_URL);
     const queryFrame = await waitForLiveTransactionQueryFrame(page, frame);
-    const transactionHistoryHtml = await submitTransactionQuery(
-      page,
-      queryFrame,
-    );
-    const cardFrame = pickLiveFrame(page, frame) ?? queryFrame;
+    const transactionHistoryHtml = await submitTransactionQuery(queryFrame);
+    const cardFrame = pickLiveFrame(page, queryFrame) ?? queryFrame;
 
     await collectCardPayload(cardFrame, "F1632", 1, "cardBill", captured);
     await collectCardPayload(cardFrame, "F1633", 2, "recentPayments", captured);
@@ -955,40 +948,19 @@ function cardResponseKey(url: string): CardPayloadKey | undefined {
   return undefined;
 }
 
-async function submitTransactionQuery(page: Page, frame: Frame) {
+async function submitTransactionQuery(frame: Frame) {
   await dismissBankNotice(frame);
   await fillTransactionDateRange(frame);
   await waitForQueryAccountOptions(frame);
   await selectQueryAccount(frame);
   const queryPost = await captureTransactionQueryPost(frame);
-  await clickTransactionSearch(frame);
-
-  // Cloudflare Browser Rendering often invalidates the iframe handle when
-  // #searchBtn navigates 0101.html → 010103.html. Drop the old Frame and
-  // re-resolve a live document that actually has the result header.
-  let resultFrame = await waitForLiveTransactionResultFrame(page);
-  if (!resultFrame) {
-    const retryFrame = await findLiveTransactionQueryFrame(page);
-    if (retryFrame && (await pageAsksForQueryAccount(retryFrame))) {
-      await selectQueryAccount(retryFrame);
-      await clickTransactionSearch(retryFrame);
-      resultFrame = await waitForLiveTransactionResultFrame(page);
-    }
+  if (!queryPost) {
+    throw new FirstbankConnectionError("第一銀行交易明細查詢表單格式已變更。");
   }
-  if (resultFrame) {
-    try {
-      return await serializeFirstbankTables(resultFrame);
-    } catch (error) {
-      if (!isTransactionHistoryReadError(error)) throw error;
-    }
-  }
-
-  // Result iframe is gone or empty. POST the live 0101 form from a still-live
-  // frame (same pattern as deposit overview) instead of waiting out another
-  // iframe timeout.
-  const posted = await postTransactionQuery(page, frame, queryPost);
-  if (posted) return posted;
-  throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
+  // Same pattern as deposit overview: keep the live 0101 document and POST
+  // its form via fetch. Clicking #searchBtn navigates 0101 → 010103 and
+  // Cloudflare Browser Rendering drops the iframe.
+  return postTransactionQuery(frame, queryPost);
 }
 
 async function waitForDepositOverview(frame: Frame) {
@@ -1052,36 +1024,6 @@ async function hasTransactionSearchControl(frame: Frame) {
   } catch {
     return false;
   }
-}
-
-async function waitForLiveTransactionResultFrame(page: Page) {
-  const deadline = Date.now() + RESULT_FRAME_WAIT_MS;
-  while (Date.now() < deadline) {
-    const result = await findLiveTransactionResultFrame(page);
-    if (result) return result;
-    if (await anyLiveFrameAsksForQueryAccount(page)) return undefined;
-    await delay(FRAME_READ_RETRY_MS);
-  }
-  return findLiveTransactionResultFrame(page);
-}
-
-async function findLiveTransactionResultFrame(page: Page) {
-  for (const frame of liveFrames(page)) {
-    await dismissBankNotice(frame, FRAME_PROBE_TIMEOUT_MS);
-    if (await hasTransactionResultHeader(frame, FRAME_PROBE_TIMEOUT_MS)) {
-      return frame;
-    }
-  }
-  return undefined;
-}
-
-async function anyLiveFrameAsksForQueryAccount(page: Page) {
-  for (const frame of liveFrames(page)) {
-    if (await pageAsksForQueryAccount(frame, FRAME_PROBE_TIMEOUT_MS)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 async function fillTransactionDateRange(frame: Frame) {
@@ -1170,52 +1112,7 @@ async function selectQueryAccount(frame: Frame, dryRun = false) {
   }
 }
 
-async function pageAsksForQueryAccount(
-  frame: Frame,
-  timeoutMs = ACTION_TIMEOUT_MS,
-) {
-  try {
-    return Boolean(
-      await withActionTimeout(
-        frame.evaluate(() =>
-          /請選擇查詢帳號|請選擇.*帳號/.test(document.body?.innerText ?? ""),
-        ),
-        timeoutMs,
-      ),
-    );
-  } catch {
-    return false;
-  }
-}
-
-async function clickTransactionSearch(frame: Frame) {
-  let submitted = false;
-  try {
-    submitted = Boolean(
-      await withActionTimeout(
-        frame.evaluate(() => {
-          const searchBtn = document.querySelector<HTMLElement>(
-            "#searchBtn, input[name=showList]",
-          );
-          if (searchBtn) {
-            searchBtn.click();
-            return true;
-          }
-          return false;
-        }),
-      ),
-    );
-  } catch (error) {
-    if (!isRecoverableFrameError(error)) throw error;
-    // The click itself can destroy the iframe execution context.
-    submitted = true;
-  }
-  if (!submitted) {
-    throw new FirstbankConnectionError("第一銀行交易明細查詢按鈕格式已變更。");
-  }
-}
-
-async function dismissBankNotice(frame: Frame, timeoutMs = ACTION_TIMEOUT_MS) {
+async function dismissBankNotice(frame: Frame) {
   try {
     await withActionTimeout(
       frame.evaluate(() => {
@@ -1235,34 +1132,9 @@ async function dismissBankNotice(frame: Frame, timeoutMs = ACTION_TIMEOUT_MS) {
         match?.click();
         return Boolean(match);
       }),
-      timeoutMs,
     );
   } catch {
     // Notice may already be gone after navigation.
-  }
-}
-
-async function hasTransactionResultHeader(
-  frame: Frame,
-  timeoutMs = ACTION_TIMEOUT_MS,
-) {
-  try {
-    return Boolean(
-      await withActionTimeout(
-        frame.evaluate(() => {
-          const rows = Array.from(document.querySelectorAll("tr"));
-          return rows.some((row) => {
-            const text = (row.innerText || "").replace(/\s+/g, " ");
-            return (
-              /交易日期|交易日/.test(text) && /支出|存入|交易金額/.test(text)
-            );
-          });
-        }),
-        timeoutMs,
-      ),
-    );
-  } catch {
-    return false;
   }
 }
 
@@ -1363,19 +1235,12 @@ async function captureTransactionQueryPost(
 }
 
 async function postTransactionQuery(
-  page: Page,
-  queryFrame: Frame,
-  snapshot: TransactionQueryPost | undefined,
+  frame: Frame,
+  payload: TransactionQueryPost,
 ) {
-  const liveQuery = await findLiveTransactionQueryFrame(page);
-  const request =
-    (liveQuery ? await captureTransactionQueryPost(liveQuery) : undefined) ??
-    snapshot;
-  const postFrame = liveQuery ?? pickLiveFrame(page, queryFrame);
-  if (!request || !postFrame) return undefined;
   try {
     const value = await withActionTimeout(
-      postFrame.evaluate(async (payload: TransactionQueryPost) => {
+      frame.evaluate(async (payload: TransactionQueryPost) => {
         try {
           const method =
             payload.method.toUpperCase() === "GET" ? "GET" : "POST";
@@ -1402,7 +1267,7 @@ async function postTransactionQuery(
         } catch {
           return { ok: false, status: 0, text: "" };
         }
-      }, request),
+      }, payload),
     );
     if (
       isRecord(value) &&
@@ -1414,66 +1279,7 @@ async function postTransactionQuery(
   } catch (error) {
     if (!isRecoverableFrameError(error)) throw error;
   }
-  return undefined;
-}
-
-async function serializeFirstbankTables(frame: Frame): Promise<string> {
-  const serialized = await withActionTimeout(
-    frame.evaluate(() => {
-      const escape = (value: string) =>
-        value
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
-      return Array.from(document.querySelectorAll("table"))
-        .map((table) => {
-          const rows = Array.from(table.rows);
-          if (rows.length === 0) return "";
-          const rowHtml = rows
-            .map((row) => {
-              const className = row.getAttribute("class");
-              const rowAttributes = className
-                ? ` class="${escape(className)}"`
-                : "";
-              const cells = Array.from(row.cells)
-                .map((cell) => {
-                  const text = (cell.innerText || cell.textContent || "")
-                    .replace(/\s+/g, " ")
-                    .trim();
-                  return `<td>${escape(text)}</td>`;
-                })
-                .join("");
-              return `<tr${rowAttributes}>${cells}</tr>`;
-            })
-            .join("");
-          return `<table>${rowHtml}</table>`;
-        })
-        .filter(Boolean)
-        .join("\n");
-    }),
-  ).catch(() => "");
-
-  if (typeof serialized === "string" && serialized.trim()) {
-    return assertSerializedTransactionTables(serialized);
-  }
-
-  // Some browser mocks and older Puppeteer frames do not expose table rows
-  // through evaluate after a navigation. Keep the fallback table-only.
-  try {
-    const html = await withActionTimeout(frame.content());
-    if (typeof html !== "string") {
-      throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
-    }
-    return transactionHistoryFromHtml(html);
-  } catch (error) {
-    if (error instanceof FirstbankConnectionError) throw error;
-    throw new FirstbankConnectionError(
-      "第一銀行交易明細讀取失敗。",
-      undefined,
-      undefined,
-      error,
-    );
-  }
+  throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
 }
 
 async function waitForAuthenticatedFrame(
@@ -1837,13 +1643,6 @@ function isFirstbankAction(url: string) {
   } catch {
     return false;
   }
-}
-
-function isTransactionHistoryReadError(error: unknown) {
-  return (
-    error instanceof FirstbankConnectionError &&
-    error.message === "第一銀行交易明細讀取失敗。"
-  );
 }
 
 function transactionHistoryFromHtml(html: string) {
