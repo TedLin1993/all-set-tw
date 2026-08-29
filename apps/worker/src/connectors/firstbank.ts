@@ -34,8 +34,8 @@ const LOGIN_RESULT_ATTEMPTS = 30;
 const LOGIN_RESULT_POLL_MS = 500;
 const FRAME_TIMEOUT_MS = 15_000;
 const FRAME_READ_RETRY_MS = 250;
-// After #searchBtn, a missing 010103 iframe will never appear. Poll briefly
-// then POST the live 0101 form; do not stack another 10s ACTION_TIMEOUT.
+// 010103 may replace and detach its iframe in Browser Rendering. Probe only
+// briefly before using the response body already captured from the same click.
 const RESULT_FRAME_WAIT_MS = 2_000;
 const FRAME_PROBE_TIMEOUT_MS = 1_000;
 const CARD_RESPONSE_TIMEOUT_MS = 10_000;
@@ -62,13 +62,13 @@ type CaptchaImage = {
 
 type CardPayloadKey = "cardBill" | "recentPayments" | "cardUnbilled";
 
-type TransactionQueryPost = {
-  action: string;
-  method: string;
-  body: string;
-};
-
 type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>>;
+
+type TransactionResponseCapture = {
+  armed: boolean;
+  html?: string;
+  pending: Set<Promise<void>>;
+};
 
 type BrowserResponse = {
   url(): string;
@@ -785,7 +785,23 @@ async function collectFirstbankPayloads(
   const frame = await waitForAuthenticatedFrame(page);
   const captured: CapturedCardResponses = {};
   const responseTasks: Promise<void>[] = [];
+  const transactionResponse: TransactionResponseCapture = {
+    armed: false,
+    pending: new Set(),
+  };
   const onResponse = (response: BrowserResponse) => {
+    if (
+      transactionResponse.armed &&
+      isTransactionResultResponse(response.url())
+    ) {
+      let task: Promise<void>;
+      task = captureTransactionResponse(response, transactionResponse).finally(
+        () => transactionResponse.pending.delete(task),
+      );
+      transactionResponse.pending.add(task);
+      void task.catch(() => undefined);
+      return;
+    }
     const key = cardResponseKey(response.url());
     if (!key) return;
     const task = captureCardResponse(response, key, captured);
@@ -804,6 +820,7 @@ async function collectFirstbankPayloads(
     const transactionHistoryHtml = await submitTransactionQuery(
       page,
       queryFrame,
+      transactionResponse,
     );
     const cardFrame = pickLiveFrame(page, frame) ?? queryFrame;
 
@@ -955,26 +972,34 @@ function cardResponseKey(url: string): CardPayloadKey | undefined {
   return undefined;
 }
 
-async function submitTransactionQuery(page: Page, frame: Frame) {
+async function captureTransactionResponse(
+  response: BrowserResponse,
+  capture: TransactionResponseCapture,
+) {
+  try {
+    const html = transactionHistoryFromHtml(await response.text());
+    capture.html ??= html;
+  } catch {
+    // Invalid 010103 bodies do not mask a later live frame or valid response.
+  }
+}
+
+async function submitTransactionQuery(
+  page: Page,
+  frame: Frame,
+  transactionResponse: TransactionResponseCapture,
+) {
   await dismissBankNotice(frame);
   await fillTransactionDateRange(frame);
   await waitForQueryAccountOptions(frame);
   await selectQueryAccount(frame);
-  const queryPost = await captureTransactionQueryPost(frame);
+  transactionResponse.armed = true;
   await clickTransactionSearch(frame);
 
-  // Cloudflare Browser Rendering often invalidates the iframe handle when
-  // #searchBtn navigates 0101.html → 010103.html. Drop the old Frame and
-  // re-resolve a live document that actually has the result header.
-  let resultFrame = await waitForLiveTransactionResultFrame(page);
-  if (!resultFrame) {
-    const retryFrame = await findLiveTransactionQueryFrame(page);
-    if (retryFrame && (await pageAsksForQueryAccount(retryFrame))) {
-      await selectQueryAccount(retryFrame);
-      await clickTransactionSearch(retryFrame);
-      resultFrame = await waitForLiveTransactionResultFrame(page);
-    }
-  }
+  const resultFrame = await waitForLiveTransactionResultFrame(
+    page,
+    transactionResponse,
+  );
   if (resultFrame) {
     try {
       return await serializeFirstbankTables(resultFrame);
@@ -983,11 +1008,14 @@ async function submitTransactionQuery(page: Page, frame: Frame) {
     }
   }
 
-  // Result iframe is gone or empty. POST the live 0101 form from a still-live
-  // frame (same pattern as deposit overview) instead of waiting out another
-  // iframe timeout.
-  const posted = await postTransactionQuery(page, frame, queryPost);
-  if (posted) return posted;
+  if (transactionResponse.html) return transactionResponse.html;
+  if (transactionResponse.pending.size > 0) {
+    await withActionTimeout(
+      Promise.allSettled(transactionResponse.pending),
+      FRAME_PROBE_TIMEOUT_MS,
+    ).catch(() => undefined);
+    if (transactionResponse.html) return transactionResponse.html;
+  }
   throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
 }
 
@@ -1054,12 +1082,15 @@ async function hasTransactionSearchControl(frame: Frame) {
   }
 }
 
-async function waitForLiveTransactionResultFrame(page: Page) {
+async function waitForLiveTransactionResultFrame(
+  page: Page,
+  transactionResponse: TransactionResponseCapture,
+) {
   const deadline = Date.now() + RESULT_FRAME_WAIT_MS;
   while (Date.now() < deadline) {
     const result = await findLiveTransactionResultFrame(page);
     if (result) return result;
-    if (await anyLiveFrameAsksForQueryAccount(page)) return undefined;
+    if (transactionResponse.html) return undefined;
     await delay(FRAME_READ_RETRY_MS);
   }
   return findLiveTransactionResultFrame(page);
@@ -1067,21 +1098,13 @@ async function waitForLiveTransactionResultFrame(page: Page) {
 
 async function findLiveTransactionResultFrame(page: Page) {
   for (const frame of liveFrames(page)) {
+    if (!isTransactionResultResponse(frame.url())) continue;
     await dismissBankNotice(frame, FRAME_PROBE_TIMEOUT_MS);
     if (await hasTransactionResultHeader(frame, FRAME_PROBE_TIMEOUT_MS)) {
       return frame;
     }
   }
   return undefined;
-}
-
-async function anyLiveFrameAsksForQueryAccount(page: Page) {
-  for (const frame of liveFrames(page)) {
-    if (await pageAsksForQueryAccount(frame, FRAME_PROBE_TIMEOUT_MS)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 async function fillTransactionDateRange(frame: Frame) {
@@ -1170,24 +1193,6 @@ async function selectQueryAccount(frame: Frame, dryRun = false) {
   }
 }
 
-async function pageAsksForQueryAccount(
-  frame: Frame,
-  timeoutMs = ACTION_TIMEOUT_MS,
-) {
-  try {
-    return Boolean(
-      await withActionTimeout(
-        frame.evaluate(() =>
-          /請選擇查詢帳號|請選擇.*帳號/.test(document.body?.innerText ?? ""),
-        ),
-        timeoutMs,
-      ),
-    );
-  } catch {
-    return false;
-  }
-}
-
 async function clickTransactionSearch(frame: Frame) {
   let submitted = false;
   try {
@@ -1197,17 +1202,15 @@ async function clickTransactionSearch(frame: Frame) {
           const searchBtn = document.querySelector<HTMLElement>(
             "#searchBtn, input[name=showList]",
           );
-          if (searchBtn) {
-            searchBtn.click();
-            return true;
-          }
-          return false;
+          if (!searchBtn) return false;
+          searchBtn.click();
+          return true;
         }),
       ),
     );
   } catch (error) {
     if (!isRecoverableFrameError(error)) throw error;
-    // The click itself can destroy the iframe execution context.
+    // The native click can destroy the iframe execution context immediately.
     submitted = true;
   }
   if (!submitted) {
@@ -1312,111 +1315,6 @@ async function fetchFrameResource(frame: Frame, path: string): Promise<string> {
   throw new FirstbankConnectionError("第一銀行存款總覽讀取失敗。");
 }
 
-async function captureTransactionQueryPost(
-  frame: Frame,
-): Promise<TransactionQueryPost | undefined> {
-  try {
-    const value = await withActionTimeout(
-      frame.evaluate(() => {
-        const form = document.querySelector("form");
-        if (!form) return null;
-        const action = new URL(
-          form.getAttribute("action") || form.action || "",
-          window.location.href,
-        ).href;
-        const method = (
-          form.getAttribute("method") ||
-          form.method ||
-          "POST"
-        ).toUpperCase();
-        const params = new URLSearchParams();
-        const formData = new FormData(form);
-        for (const [name, fieldValue] of formData.entries()) {
-          params.append(name, String(fieldValue));
-        }
-        const searchBtn = document.querySelector<HTMLInputElement>(
-          "#searchBtn, input[name=showList]",
-        );
-        if (searchBtn?.name && !params.has(searchBtn.name)) {
-          params.append(searchBtn.name, searchBtn.value ?? "");
-        }
-        return { action, method, body: params.toString() };
-      }),
-    );
-    if (
-      isRecord(value) &&
-      typeof value.action === "string" &&
-      isFirstbankAction(value.action) &&
-      typeof value.method === "string" &&
-      typeof value.body === "string"
-    ) {
-      return {
-        action: value.action,
-        method: value.method,
-        body: value.body,
-      };
-    }
-  } catch (error) {
-    if (!isRecoverableFrameError(error)) throw error;
-  }
-  return undefined;
-}
-
-async function postTransactionQuery(
-  page: Page,
-  queryFrame: Frame,
-  snapshot: TransactionQueryPost | undefined,
-) {
-  const liveQuery = await findLiveTransactionQueryFrame(page);
-  const request =
-    (liveQuery ? await captureTransactionQueryPost(liveQuery) : undefined) ??
-    snapshot;
-  const postFrame = liveQuery ?? pickLiveFrame(page, queryFrame);
-  if (!request || !postFrame) return undefined;
-  try {
-    const value = await withActionTimeout(
-      postFrame.evaluate(async (payload: TransactionQueryPost) => {
-        try {
-          const method =
-            payload.method.toUpperCase() === "GET" ? "GET" : "POST";
-          const action =
-            method === "GET" && payload.body
-              ? `${payload.action}${payload.action.includes("?") ? "&" : "?"}${payload.body}`
-              : payload.action;
-          const response = await fetch(action, {
-            method,
-            credentials: "same-origin",
-            headers: {
-              Accept: "text/html, application/json",
-              ...(method === "GET"
-                ? {}
-                : { "Content-Type": "application/x-www-form-urlencoded" }),
-            },
-            body: method === "GET" ? undefined : payload.body,
-          });
-          return {
-            ok: response.ok,
-            status: response.status,
-            text: await response.text(),
-          };
-        } catch {
-          return { ok: false, status: 0, text: "" };
-        }
-      }, request),
-    );
-    if (
-      isRecord(value) &&
-      value.ok === true &&
-      typeof value.text === "string"
-    ) {
-      return transactionHistoryFromHtml(value.text);
-    }
-  } catch (error) {
-    if (!isRecoverableFrameError(error)) throw error;
-  }
-  return undefined;
-}
-
 async function serializeFirstbankTables(frame: Frame): Promise<string> {
   const serialized = await withActionTimeout(
     frame.evaluate(() => {
@@ -1456,24 +1354,7 @@ async function serializeFirstbankTables(frame: Frame): Promise<string> {
   if (typeof serialized === "string" && serialized.trim()) {
     return assertSerializedTransactionTables(serialized);
   }
-
-  // Some browser mocks and older Puppeteer frames do not expose table rows
-  // through evaluate after a navigation. Keep the fallback table-only.
-  try {
-    const html = await withActionTimeout(frame.content());
-    if (typeof html !== "string") {
-      throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
-    }
-    return transactionHistoryFromHtml(html);
-  } catch (error) {
-    if (error instanceof FirstbankConnectionError) throw error;
-    throw new FirstbankConnectionError(
-      "第一銀行交易明細讀取失敗。",
-      undefined,
-      undefined,
-      error,
-    );
-  }
+  throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
 }
 
 async function waitForAuthenticatedFrame(
@@ -1831,9 +1712,13 @@ function pickLiveFrame(page: Page, preferred?: Frame) {
   return liveFrames(page)[0];
 }
 
-function isFirstbankAction(url: string) {
+function isTransactionResultResponse(url: string) {
   try {
-    return new URL(url).origin === ORIGIN;
+    const parsed = new URL(url);
+    return (
+      parsed.origin === ORIGIN &&
+      parsed.pathname.toLowerCase() === "/netbank/2/010103.html"
+    );
   } catch {
     return false;
   }
