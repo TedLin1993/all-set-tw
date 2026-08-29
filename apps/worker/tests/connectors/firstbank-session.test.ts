@@ -44,16 +44,18 @@ const transactionTables = `
 
 const TRANSACTION_RESULT_URL =
   "https://ibank.firstbank.com.tw/NetBank/2/010103.html";
+const TRANSACTION_QUERY_URL =
+  "https://ibank.firstbank.com.tw/NetBank/2/0101.html";
 
 type Listener = (...args: unknown[]) => void;
 
-function makeFrame(options?: {
-  authenticated?: boolean;
-  transactionPostHtml?: string;
-}) {
+function makeFrame(options?: { authenticated?: boolean }) {
   let currentUrl = options?.authenticated ? FRAME_URL : LOGIN_URL;
   return {
     detached: false,
+    setUrl(url: string) {
+      currentUrl = url;
+    },
     name: vi.fn().mockReturnValue("main"),
     url: vi.fn().mockImplementation(() => currentUrl),
     goto: vi.fn().mockImplementation(async (url: string) => {
@@ -65,22 +67,14 @@ function makeFrame(options?: {
       if (source.includes("fetch(resourcePath")) {
         return { ok: true, status: 200, text: depositTables };
       }
-      if (source.includes("new FormData(form)")) {
-        return {
-          action: TRANSACTION_RESULT_URL,
-          method: "POST",
-          body: "txnStart=2026/07/29&txnEnd=2026/08/29&showList=Y",
-        };
-      }
-      if (source.includes("payload.action") && source.includes("fetch(")) {
-        return {
-          ok: true,
-          status: 200,
-          text: options?.transactionPostHtml ?? transactionTables,
-        };
+      if (source.includes("searchBtn") && source.includes(".click()")) {
+        currentUrl = TRANSACTION_RESULT_URL;
+        return true;
       }
       if (source.includes('querySelectorAll("table")')) {
-        return currentUrl.includes("0101") ? transactionTables : depositTables;
+        return currentUrl.includes("010103")
+          ? transactionTables
+          : depositTables;
       }
       if (source.includes('querySelectorAll("select")')) return true;
       if (source.includes("searchBtn")) return true;
@@ -97,7 +91,6 @@ function makeFrame(options?: {
 function makePage(options?: {
   authenticated?: boolean;
   afterLogin?: "frame" | "interstitial";
-  transactionPostHtml?: string;
 }) {
   const afterLogin = options?.afterLogin ?? "frame";
   let currentUrl = options?.authenticated ? FRAME_URL : LOGIN_URL;
@@ -148,7 +141,7 @@ function makePage(options?: {
       if (options?.authenticated) {
         authenticated = true;
         currentUrl = FRAME_URL;
-        frame.url.mockReturnValue(FRAME_URL);
+        frame.setUrl(FRAME_URL);
       }
     }),
     off: vi.fn().mockImplementation((event: string, listener: Listener) => {
@@ -167,7 +160,7 @@ function makePage(options?: {
       click: vi.fn().mockImplementation(async () => {
         authenticated = true;
         currentUrl = FRAME_URL;
-        frame.url.mockReturnValue(FRAME_URL);
+        frame.setUrl(FRAME_URL);
       }),
     },
     type: vi.fn().mockResolvedValue(undefined),
@@ -179,10 +172,15 @@ function makePage(options?: {
       const response = {
         url: () => url,
         json: vi.fn().mockResolvedValue(payload),
-        text: vi.fn().mockResolvedValue(JSON.stringify(payload)),
+        text: vi
+          .fn()
+          .mockResolvedValue(
+            typeof payload === "string" ? payload : JSON.stringify(payload),
+          ),
       };
       for (const listener of listeners.get("response") ?? [])
         listener(response);
+      return response;
     },
   };
   return page;
@@ -210,6 +208,66 @@ function clickedTransactionSearch(frame: ReturnType<typeof makeFrame>) {
     ([fn]) =>
       String(fn).includes("searchBtn") && String(fn).includes(".click()"),
   );
+}
+
+function makeTransactionResultFrame() {
+  const frame = makeFrame({ authenticated: true });
+  frame.url.mockReturnValue(TRANSACTION_RESULT_URL);
+  frame.evaluate.mockImplementation(async (fn: unknown) => {
+    const source = String(fn);
+    if (source.includes("#btnOpen") || source.includes("#tFunc")) return true;
+    if (source.includes("交易日期")) return true;
+    if (source.includes('querySelectorAll("table")')) return transactionTables;
+    if (source.includes("searchBtn")) return false;
+    return undefined;
+  });
+  return frame;
+}
+
+function makeEmptyLiveFrame() {
+  const frame = makeFrame({ authenticated: true });
+  frame.url.mockReturnValue(TRANSACTION_QUERY_URL);
+  frame.evaluate.mockImplementation(async (fn: unknown) => {
+    const source = String(fn);
+    if (source.includes("#btnOpen") || source.includes("#tFunc")) return true;
+    if (source.includes("交易日期")) return false;
+    if (source.includes('querySelectorAll("table")')) return "";
+    if (source.includes("searchBtn")) return false;
+    return undefined;
+  });
+  return frame;
+}
+
+function detachQueryFrameAfterSearch(
+  page: ReturnType<typeof makePage>,
+  nextFrames: Array<ReturnType<typeof makeFrame>>,
+  responseHtml?: string,
+) {
+  let resultResponse:
+    ReturnType<ReturnType<typeof makePage>["emitResponse"]> | undefined;
+  const queryFrame = page.frame;
+  const previousEvaluate = queryFrame.evaluate;
+  queryFrame.evaluate = vi
+    .fn()
+    .mockImplementation(async (fn: unknown, arg?: unknown) => {
+      const source = String(fn);
+      if (queryFrame.detached) {
+        throw new Error("Execution context was destroyed during navigation");
+      }
+      if (source.includes("searchBtn") && source.includes(".click()")) {
+        queryFrame.detached = true;
+        page.frames.mockImplementation(() => nextFrames);
+        if (responseHtml !== undefined) {
+          resultResponse = page.emitResponse(
+            TRANSACTION_RESULT_URL,
+            responseHtml,
+          );
+        }
+        return true;
+      }
+      return previousEvaluate(fn, arg);
+    });
+  return () => resultResponse;
 }
 
 beforeEach(() => {
@@ -426,9 +484,11 @@ describe("第一銀行 browser session lifecycle", () => {
   });
 });
 
-describe("第一銀行交易明細 in-frame POST", () => {
-  it("填完 0101 表單後直接 POST，不點擊 searchBtn，並從回應 HTML 解析明細", async () => {
+describe("第一銀行交易明細 010103 擷取", () => {
+  it("點擊 searchBtn 後序列化仍存活的 010103 frame", async () => {
     const page = makePage({ authenticated: true });
+    const resultFrame = makeTransactionResultFrame();
+    detachQueryFrameAfterSearch(page, [resultFrame]);
     const browser = makeBrowser(page);
     puppeteerMock.launch.mockResolvedValue(browser);
 
@@ -451,27 +511,48 @@ describe("第一銀行交易明細 in-frame POST", () => {
         }),
       ]),
     );
-    expect(postedTransactionQuery(page.frame)).toBe(true);
-    expect(clickedTransactionSearch(page.frame)).toBe(false);
-    const postCall = page.frame.evaluate.mock.calls.find(
-      ([fn]) =>
-        String(fn).includes("payload.action") && String(fn).includes("fetch("),
-    );
-    expect(postCall?.[1]).toEqual(
-      expect.objectContaining({
-        action: TRANSACTION_RESULT_URL,
-        method: "POST",
-      }),
-    );
-    expect(page.frame.content).not.toHaveBeenCalled();
+    expect(clickedTransactionSearch(page.frame)).toBe(true);
+    expect(postedTransactionQuery(page.frame)).toBe(false);
+    expect(resultFrame.evaluate).toHaveBeenCalled();
     expect(page.frame.waitForNavigation).not.toHaveBeenCalled();
   });
 
-  it("POST HTML 沒有交易表格時仍回報讀取失敗", async () => {
-    const page = makePage({
-      authenticated: true,
-      transactionPostHtml: "<html><body><frameset></frameset></body></html>",
+  it("010103 iframe 消失時改從 page response 讀取明細", async () => {
+    const page = makePage({ authenticated: true });
+    const liveFrame = makeEmptyLiveFrame();
+    const resultResponse = detachQueryFrameAfterSearch(
+      page,
+      [liveFrame],
+      transactionTables,
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const result = await createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
     });
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: -100, description: "測試交易" }),
+      ]),
+    );
+    expect(clickedTransactionSearch(page.frame)).toBe(true);
+    expect(postedTransactionQuery(page.frame)).toBe(false);
+    expect(resultResponse()?.text).toHaveBeenCalledOnce();
+    expect(page.frame.waitForNavigation).not.toHaveBeenCalled();
+  });
+
+  it("沒有 010103 frame 或 HTTP 回應時快速回報讀取失敗", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    detachQueryFrameAfterSearch(page, []);
     const browser = makeBrowser(page);
     puppeteerMock.launch.mockResolvedValue(browser);
 
@@ -485,11 +566,12 @@ describe("第一銀行交易明細 in-frame POST", () => {
         },
       ]),
     });
-    await expect(pending).rejects.toThrow("第一銀行交易明細讀取失敗。");
+    const expectation =
+      expect(pending).rejects.toThrow("第一銀行交易明細讀取失敗。");
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expectation;
     await expect(pending).rejects.toBeInstanceOf(FirstbankConnectionError);
-    expect(postedTransactionQuery(page.frame)).toBe(true);
-    expect(clickedTransactionSearch(page.frame)).toBe(false);
-    expect(page.frame.content).not.toHaveBeenCalled();
-    expect(page.frame.waitForNavigation).not.toHaveBeenCalled();
+    expect(clickedTransactionSearch(page.frame)).toBe(true);
+    expect(postedTransactionQuery(page.frame)).toBe(false);
   });
 });

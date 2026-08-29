@@ -34,6 +34,10 @@ const LOGIN_RESULT_ATTEMPTS = 30;
 const LOGIN_RESULT_POLL_MS = 500;
 const FRAME_TIMEOUT_MS = 15_000;
 const FRAME_READ_RETRY_MS = 250;
+// 010103 may replace and detach its iframe in Browser Rendering. Probe only
+// briefly before using the response body already captured from the same click.
+const RESULT_FRAME_WAIT_MS = 2_000;
+const FRAME_PROBE_TIMEOUT_MS = 1_000;
 const CARD_RESPONSE_TIMEOUT_MS = 10_000;
 const SESSION_RELEASE_TIMEOUT_MS = 2_000;
 const SESSION_RELEASE_POLL_MS = 100;
@@ -58,13 +62,13 @@ type CaptchaImage = {
 
 type CardPayloadKey = "cardBill" | "recentPayments" | "cardUnbilled";
 
-type TransactionQueryPost = {
-  action: string;
-  method: string;
-  body: string;
-};
-
 type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>>;
+
+type TransactionResponseCapture = {
+  armed: boolean;
+  html?: string;
+  pending: Set<Promise<void>>;
+};
 
 type BrowserResponse = {
   url(): string;
@@ -781,7 +785,23 @@ async function collectFirstbankPayloads(
   const frame = await waitForAuthenticatedFrame(page);
   const captured: CapturedCardResponses = {};
   const responseTasks: Promise<void>[] = [];
+  const transactionResponse: TransactionResponseCapture = {
+    armed: false,
+    pending: new Set(),
+  };
   const onResponse = (response: BrowserResponse) => {
+    if (
+      transactionResponse.armed &&
+      isTransactionResultResponse(response.url())
+    ) {
+      let task: Promise<void>;
+      task = captureTransactionResponse(response, transactionResponse).finally(
+        () => transactionResponse.pending.delete(task),
+      );
+      transactionResponse.pending.add(task);
+      void task.catch(() => undefined);
+      return;
+    }
     const key = cardResponseKey(response.url());
     if (!key) return;
     const task = captureCardResponse(response, key, captured);
@@ -797,8 +817,12 @@ async function collectFirstbankPayloads(
 
     await navigateFrame(frame, TRANSACTION_URL);
     const queryFrame = await waitForLiveTransactionQueryFrame(page, frame);
-    const transactionHistoryHtml = await submitTransactionQuery(queryFrame);
-    const cardFrame = pickLiveFrame(page, queryFrame) ?? queryFrame;
+    const transactionHistoryHtml = await submitTransactionQuery(
+      page,
+      queryFrame,
+      transactionResponse,
+    );
+    const cardFrame = pickLiveFrame(page, frame) ?? queryFrame;
 
     await collectCardPayload(cardFrame, "F1632", 1, "cardBill", captured);
     await collectCardPayload(cardFrame, "F1633", 2, "recentPayments", captured);
@@ -948,19 +972,51 @@ function cardResponseKey(url: string): CardPayloadKey | undefined {
   return undefined;
 }
 
-async function submitTransactionQuery(frame: Frame) {
+async function captureTransactionResponse(
+  response: BrowserResponse,
+  capture: TransactionResponseCapture,
+) {
+  try {
+    const html = transactionHistoryFromHtml(await response.text());
+    capture.html ??= html;
+  } catch {
+    // Invalid 010103 bodies do not mask a later live frame or valid response.
+  }
+}
+
+async function submitTransactionQuery(
+  page: Page,
+  frame: Frame,
+  transactionResponse: TransactionResponseCapture,
+) {
   await dismissBankNotice(frame);
   await fillTransactionDateRange(frame);
   await waitForQueryAccountOptions(frame);
   await selectQueryAccount(frame);
-  const queryPost = await captureTransactionQueryPost(frame);
-  if (!queryPost) {
-    throw new FirstbankConnectionError("第一銀行交易明細查詢表單格式已變更。");
+  transactionResponse.armed = true;
+  await clickTransactionSearch(frame);
+
+  const resultFrame = await waitForLiveTransactionResultFrame(
+    page,
+    transactionResponse,
+  );
+  if (resultFrame) {
+    try {
+      return await serializeFirstbankTables(resultFrame);
+    } catch (error) {
+      if (!isTransactionHistoryReadError(error)) throw error;
+    }
   }
-  // Same pattern as deposit overview: keep the live 0101 document and POST
-  // its form via fetch. Clicking #searchBtn navigates 0101 → 010103 and
-  // Cloudflare Browser Rendering drops the iframe.
-  return postTransactionQuery(frame, queryPost);
+
+  if (transactionResponse.html) return transactionResponse.html;
+  if (transactionResponse.pending.size > 0) {
+    await withActionTimeout(
+      Promise.allSettled(transactionResponse.pending),
+      FRAME_PROBE_TIMEOUT_MS,
+    ).catch(() => undefined);
+    if (transactionResponse.html) return transactionResponse.html;
+  }
+  throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
 }
 
 async function waitForDepositOverview(frame: Frame) {
@@ -1024,6 +1080,31 @@ async function hasTransactionSearchControl(frame: Frame) {
   } catch {
     return false;
   }
+}
+
+async function waitForLiveTransactionResultFrame(
+  page: Page,
+  transactionResponse: TransactionResponseCapture,
+) {
+  const deadline = Date.now() + RESULT_FRAME_WAIT_MS;
+  while (Date.now() < deadline) {
+    const result = await findLiveTransactionResultFrame(page);
+    if (result) return result;
+    if (transactionResponse.html) return undefined;
+    await delay(FRAME_READ_RETRY_MS);
+  }
+  return findLiveTransactionResultFrame(page);
+}
+
+async function findLiveTransactionResultFrame(page: Page) {
+  for (const frame of liveFrames(page)) {
+    if (!isTransactionResultResponse(frame.url())) continue;
+    await dismissBankNotice(frame, FRAME_PROBE_TIMEOUT_MS);
+    if (await hasTransactionResultHeader(frame, FRAME_PROBE_TIMEOUT_MS)) {
+      return frame;
+    }
+  }
+  return undefined;
 }
 
 async function fillTransactionDateRange(frame: Frame) {
@@ -1112,7 +1193,32 @@ async function selectQueryAccount(frame: Frame, dryRun = false) {
   }
 }
 
-async function dismissBankNotice(frame: Frame) {
+async function clickTransactionSearch(frame: Frame) {
+  let submitted = false;
+  try {
+    submitted = Boolean(
+      await withActionTimeout(
+        frame.evaluate(() => {
+          const searchBtn = document.querySelector<HTMLElement>(
+            "#searchBtn, input[name=showList]",
+          );
+          if (!searchBtn) return false;
+          searchBtn.click();
+          return true;
+        }),
+      ),
+    );
+  } catch (error) {
+    if (!isRecoverableFrameError(error)) throw error;
+    // The native click can destroy the iframe execution context immediately.
+    submitted = true;
+  }
+  if (!submitted) {
+    throw new FirstbankConnectionError("第一銀行交易明細查詢按鈕格式已變更。");
+  }
+}
+
+async function dismissBankNotice(frame: Frame, timeoutMs = ACTION_TIMEOUT_MS) {
   try {
     await withActionTimeout(
       frame.evaluate(() => {
@@ -1132,9 +1238,34 @@ async function dismissBankNotice(frame: Frame) {
         match?.click();
         return Boolean(match);
       }),
+      timeoutMs,
     );
   } catch {
     // Notice may already be gone after navigation.
+  }
+}
+
+async function hasTransactionResultHeader(
+  frame: Frame,
+  timeoutMs = ACTION_TIMEOUT_MS,
+) {
+  try {
+    return Boolean(
+      await withActionTimeout(
+        frame.evaluate(() => {
+          const rows = Array.from(document.querySelectorAll("tr"));
+          return rows.some((row) => {
+            const text = (row.innerText || "").replace(/\s+/g, " ");
+            return (
+              /交易日期|交易日/.test(text) && /支出|存入|交易金額/.test(text)
+            );
+          });
+        }),
+        timeoutMs,
+      ),
+    );
+  } catch {
+    return false;
   }
 }
 
@@ -1184,100 +1315,44 @@ async function fetchFrameResource(frame: Frame, path: string): Promise<string> {
   throw new FirstbankConnectionError("第一銀行存款總覽讀取失敗。");
 }
 
-async function captureTransactionQueryPost(
-  frame: Frame,
-): Promise<TransactionQueryPost | undefined> {
-  try {
-    const value = await withActionTimeout(
-      frame.evaluate(() => {
-        const form = document.querySelector("form");
-        if (!form) return null;
-        const action = new URL(
-          form.getAttribute("action") || form.action || "",
-          window.location.href,
-        ).href;
-        const method = (
-          form.getAttribute("method") ||
-          form.method ||
-          "POST"
-        ).toUpperCase();
-        const params = new URLSearchParams();
-        const formData = new FormData(form);
-        for (const [name, fieldValue] of formData.entries()) {
-          params.append(name, String(fieldValue));
-        }
-        const searchBtn = document.querySelector<HTMLInputElement>(
-          "#searchBtn, input[name=showList]",
-        );
-        if (searchBtn?.name && !params.has(searchBtn.name)) {
-          params.append(searchBtn.name, searchBtn.value ?? "");
-        }
-        return { action, method, body: params.toString() };
-      }),
-    );
-    if (
-      isRecord(value) &&
-      typeof value.action === "string" &&
-      isFirstbankAction(value.action) &&
-      typeof value.method === "string" &&
-      typeof value.body === "string"
-    ) {
-      return {
-        action: value.action,
-        method: value.method,
-        body: value.body,
-      };
-    }
-  } catch (error) {
-    if (!isRecoverableFrameError(error)) throw error;
-  }
-  return undefined;
-}
+async function serializeFirstbankTables(frame: Frame): Promise<string> {
+  const serialized = await withActionTimeout(
+    frame.evaluate(() => {
+      const escape = (value: string) =>
+        value
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      return Array.from(document.querySelectorAll("table"))
+        .map((table) => {
+          const rows = Array.from(table.rows);
+          if (rows.length === 0) return "";
+          const rowHtml = rows
+            .map((row) => {
+              const className = row.getAttribute("class");
+              const rowAttributes = className
+                ? ` class="${escape(className)}"`
+                : "";
+              const cells = Array.from(row.cells)
+                .map((cell) => {
+                  const text = (cell.innerText || cell.textContent || "")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                  return `<td>${escape(text)}</td>`;
+                })
+                .join("");
+              return `<tr${rowAttributes}>${cells}</tr>`;
+            })
+            .join("");
+          return `<table>${rowHtml}</table>`;
+        })
+        .filter(Boolean)
+        .join("\n");
+    }),
+  ).catch(() => "");
 
-async function postTransactionQuery(
-  frame: Frame,
-  payload: TransactionQueryPost,
-) {
-  try {
-    const value = await withActionTimeout(
-      frame.evaluate(async (payload: TransactionQueryPost) => {
-        try {
-          const method =
-            payload.method.toUpperCase() === "GET" ? "GET" : "POST";
-          const action =
-            method === "GET" && payload.body
-              ? `${payload.action}${payload.action.includes("?") ? "&" : "?"}${payload.body}`
-              : payload.action;
-          const response = await fetch(action, {
-            method,
-            credentials: "same-origin",
-            headers: {
-              Accept: "text/html, application/json",
-              ...(method === "GET"
-                ? {}
-                : { "Content-Type": "application/x-www-form-urlencoded" }),
-            },
-            body: method === "GET" ? undefined : payload.body,
-          });
-          return {
-            ok: response.ok,
-            status: response.status,
-            text: await response.text(),
-          };
-        } catch {
-          return { ok: false, status: 0, text: "" };
-        }
-      }, payload),
-    );
-    if (
-      isRecord(value) &&
-      value.ok === true &&
-      typeof value.text === "string"
-    ) {
-      return transactionHistoryFromHtml(value.text);
-    }
-  } catch (error) {
-    if (!isRecoverableFrameError(error)) throw error;
+  if (typeof serialized === "string" && serialized.trim()) {
+    return assertSerializedTransactionTables(serialized);
   }
   throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
 }
@@ -1637,12 +1712,23 @@ function pickLiveFrame(page: Page, preferred?: Frame) {
   return liveFrames(page)[0];
 }
 
-function isFirstbankAction(url: string) {
+function isTransactionResultResponse(url: string) {
   try {
-    return new URL(url).origin === ORIGIN;
+    const parsed = new URL(url);
+    return (
+      parsed.origin === ORIGIN &&
+      parsed.pathname.toLowerCase() === "/netbank/2/010103.html"
+    );
   } catch {
     return false;
   }
+}
+
+function isTransactionHistoryReadError(error: unknown) {
+  return (
+    error instanceof FirstbankConnectionError &&
+    error.message === "第一銀行交易明細讀取失敗。"
+  );
 }
 
 function transactionHistoryFromHtml(html: string) {
