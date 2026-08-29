@@ -1,5 +1,6 @@
 import puppeteer, {
   type Browser,
+  type CDPSession,
   type CookieParam,
   type Dialog,
   type Frame,
@@ -42,6 +43,7 @@ const CARD_RESPONSE_TIMEOUT_MS = 10_000;
 const SESSION_RELEASE_TIMEOUT_MS = 2_000;
 const SESSION_RELEASE_POLL_MS = 100;
 const MAX_SERIALIZED_TABLE_BYTES = 512 * 1024;
+const TRANSACTION_DOCUMENT_BUFFER_BYTES = MAX_SERIALIZED_TABLE_BYTES * 2;
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -67,7 +69,18 @@ type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>>;
 type TransactionResponseCapture = {
   armed: boolean;
   html?: string;
+  requestIds: Set<string>;
   pending: Set<Promise<void>>;
+};
+
+type TransactionDocumentResponseEvent = {
+  requestId: string;
+  type: string;
+  response: { url: string };
+};
+
+type TransactionLoadingEvent = {
+  requestId: string;
 };
 
 type BrowserResponse = {
@@ -787,8 +800,50 @@ async function collectFirstbankPayloads(
   const responseTasks: Promise<void>[] = [];
   const transactionResponse: TransactionResponseCapture = {
     armed: false,
+    requestIds: new Set(),
     pending: new Set(),
   };
+  const cdp = await page.createCDPSession();
+  try {
+    await cdp.send("Network.enable", {
+      maxTotalBufferSize: TRANSACTION_DOCUMENT_BUFFER_BYTES,
+      maxResourceBufferSize: TRANSACTION_DOCUMENT_BUFFER_BYTES,
+    });
+  } catch (error) {
+    await cdp.detach().catch(() => undefined);
+    throw error;
+  }
+  const onTransactionDocumentResponse = (
+    event: TransactionDocumentResponseEvent,
+  ) => {
+    if (
+      transactionResponse.armed &&
+      event.type === "Document" &&
+      isTransactionResultResponse(event.response.url)
+    ) {
+      transactionResponse.requestIds.add(event.requestId);
+    }
+  };
+  const onTransactionDocumentLoaded = (event: TransactionLoadingEvent) => {
+    if (!transactionResponse.requestIds.has(event.requestId)) return;
+    let task: Promise<void>;
+    task = captureTransactionDocument(
+      cdp,
+      event.requestId,
+      transactionResponse,
+    ).finally(() => {
+      transactionResponse.requestIds.delete(event.requestId);
+      transactionResponse.pending.delete(task);
+    });
+    transactionResponse.pending.add(task);
+    void task.catch(() => undefined);
+  };
+  const onTransactionDocumentFailed = (event: TransactionLoadingEvent) => {
+    transactionResponse.requestIds.delete(event.requestId);
+  };
+  cdp.on("Network.responseReceived", onTransactionDocumentResponse);
+  cdp.on("Network.loadingFinished", onTransactionDocumentLoaded);
+  cdp.on("Network.loadingFailed", onTransactionDocumentFailed);
   const onResponse = (response: BrowserResponse) => {
     if (
       transactionResponse.armed &&
@@ -838,6 +893,10 @@ async function collectFirstbankPayloads(
     } as unknown as FirstbankPayloads;
   } finally {
     page.off("response", onResponse);
+    cdp.off("Network.responseReceived", onTransactionDocumentResponse);
+    cdp.off("Network.loadingFinished", onTransactionDocumentLoaded);
+    cdp.off("Network.loadingFailed", onTransactionDocumentFailed);
+    await cdp.detach().catch(() => undefined);
   }
 }
 
@@ -972,6 +1031,23 @@ function cardResponseKey(url: string): CardPayloadKey | undefined {
   return undefined;
 }
 
+async function captureTransactionDocument(
+  cdp: CDPSession,
+  requestId: string,
+  capture: TransactionResponseCapture,
+) {
+  try {
+    const response = await cdp.send("Network.getResponseBody", { requestId });
+    const body = response.base64Encoded
+      ? decodeBase64Text(response.body)
+      : response.body;
+    const html = transactionHistoryFromHtml(body);
+    capture.html ??= html;
+  } catch {
+    // Invalid or unavailable 010103 bodies do not mask a later live frame.
+  }
+}
+
 async function captureTransactionResponse(
   response: BrowserResponse,
   capture: TransactionResponseCapture,
@@ -980,7 +1056,7 @@ async function captureTransactionResponse(
     const html = transactionHistoryFromHtml(await response.text());
     capture.html ??= html;
   } catch {
-    // Invalid 010103 bodies do not mask a later live frame or valid response.
+    // Invalid 010103 bodies do not mask a later CDP capture or live frame.
   }
 }
 
@@ -1010,11 +1086,19 @@ async function submitTransactionQuery(
 
   if (transactionResponse.html) return transactionResponse.html;
   if (transactionResponse.pending.size > 0) {
+    const tasks = Array.from(transactionResponse.pending);
     await withActionTimeout(
-      Promise.allSettled(transactionResponse.pending),
+      Promise.allSettled(tasks),
       FRAME_PROBE_TIMEOUT_MS,
     ).catch(() => undefined);
     if (transactionResponse.html) return transactionResponse.html;
+  }
+  if (transactionResponse.requestIds.size > 0) {
+    const deadline = Date.now() + FRAME_PROBE_TIMEOUT_MS;
+    while (transactionResponse.requestIds.size > 0 && Date.now() < deadline) {
+      await delay(FRAME_READ_RETRY_MS);
+      if (transactionResponse.html) return transactionResponse.html;
+    }
   }
   throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
 }
@@ -1783,6 +1867,15 @@ function bytesToBase64(bytes: Uint8Array | string) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
+}
+
+function decodeBase64Text(value: string) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 function toArrayBuffer(bytes: Uint8Array | string) {
