@@ -35,9 +35,10 @@ const LOGIN_RESULT_ATTEMPTS = 30;
 const LOGIN_RESULT_POLL_MS = 500;
 const FRAME_TIMEOUT_MS = 15_000;
 const FRAME_READ_RETRY_MS = 250;
-// 010103 may replace and detach its iframe in Browser Rendering. Probe only
-// briefly before using the response body already captured from the same click.
-const RESULT_FRAME_WAIT_MS = 2_000;
+// 010103 may replace and detach its iframe in Browser Rendering. Arm a
+// document-body waiter before submit and keep CDP listeners attached for
+// this window so a delayed responseReceived/loadingFinished can still settle.
+const RESULT_CAPTURE_WAIT_MS = 10_000;
 const FRAME_PROBE_TIMEOUT_MS = 1_000;
 const CARD_RESPONSE_TIMEOUT_MS = 10_000;
 const SESSION_RELEASE_TIMEOUT_MS = 2_000;
@@ -66,17 +67,25 @@ type CardPayloadKey = "cardBill" | "recentPayments" | "cardUnbilled";
 
 type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>>;
 
+type TransactionDocumentMeta = {
+  path: string;
+  status?: number;
+};
+
 type TransactionResponseCapture = {
   armed: boolean;
   html?: string;
   requestIds: Set<string>;
+  documentMeta: Map<string, TransactionDocumentMeta>;
   pending: Set<Promise<void>>;
+  documentBody: Promise<string>;
+  settleDocumentBody: (html: string) => void;
 };
 
 type TransactionDocumentResponseEvent = {
   requestId: string;
   type: string;
-  response: { url: string };
+  response: { url: string; status?: number };
 };
 
 type TransactionLoadingEvent = {
@@ -85,6 +94,7 @@ type TransactionLoadingEvent = {
 
 type BrowserResponse = {
   url(): string;
+  status(): number;
   json(): Promise<unknown>;
   text(): Promise<string>;
 };
@@ -798,11 +808,7 @@ async function collectFirstbankPayloads(
   const frame = await waitForAuthenticatedFrame(page);
   const captured: CapturedCardResponses = {};
   const responseTasks: Promise<void>[] = [];
-  const transactionResponse: TransactionResponseCapture = {
-    armed: false,
-    requestIds: new Set(),
-    pending: new Set(),
-  };
+  const transactionResponse = createTransactionResponseCapture();
   const cdp = await page.createCDPSession();
   try {
     await cdp.send("Network.enable", {
@@ -821,18 +827,25 @@ async function collectFirstbankPayloads(
       event.type === "Document" &&
       isTransactionResultResponse(event.response.url)
     ) {
+      const path = urlPathname(event.response.url);
+      const status = event.response.status;
+      logFirstbankStage("010103-cdp-response", { path, status });
       transactionResponse.requestIds.add(event.requestId);
+      transactionResponse.documentMeta.set(event.requestId, { path, status });
     }
   };
   const onTransactionDocumentLoaded = (event: TransactionLoadingEvent) => {
     if (!transactionResponse.requestIds.has(event.requestId)) return;
+    const meta = transactionResponse.documentMeta.get(event.requestId);
     let task: Promise<void>;
     task = captureTransactionDocument(
       cdp,
       event.requestId,
       transactionResponse,
+      meta,
     ).finally(() => {
       transactionResponse.requestIds.delete(event.requestId);
+      transactionResponse.documentMeta.delete(event.requestId);
       transactionResponse.pending.delete(task);
     });
     transactionResponse.pending.add(task);
@@ -840,6 +853,7 @@ async function collectFirstbankPayloads(
   };
   const onTransactionDocumentFailed = (event: TransactionLoadingEvent) => {
     transactionResponse.requestIds.delete(event.requestId);
+    transactionResponse.documentMeta.delete(event.requestId);
   };
   cdp.on("Network.responseReceived", onTransactionDocumentResponse);
   cdp.on("Network.loadingFinished", onTransactionDocumentLoaded);
@@ -849,6 +863,10 @@ async function collectFirstbankPayloads(
       transactionResponse.armed &&
       isTransactionResultResponse(response.url())
     ) {
+      logFirstbankStage("010103-http-response", {
+        path: urlPathname(response.url()),
+        status: httpStatus(response),
+      });
       let task: Promise<void>;
       task = captureTransactionResponse(response, transactionResponse).finally(
         () => transactionResponse.pending.delete(task),
@@ -1031,18 +1049,44 @@ function cardResponseKey(url: string): CardPayloadKey | undefined {
   return undefined;
 }
 
+function createTransactionResponseCapture(): TransactionResponseCapture {
+  let resolveDocumentBody = (_html: string) => {};
+  const documentBody = new Promise<string>((resolve) => {
+    resolveDocumentBody = resolve;
+  });
+  const capture: TransactionResponseCapture = {
+    armed: false,
+    requestIds: new Set(),
+    documentMeta: new Map(),
+    pending: new Set(),
+    documentBody,
+    settleDocumentBody(html: string) {
+      capture.html ??= html;
+      resolveDocumentBody(html);
+    },
+  };
+  return capture;
+}
+
 async function captureTransactionDocument(
   cdp: CDPSession,
   requestId: string,
   capture: TransactionResponseCapture,
+  meta?: TransactionDocumentMeta,
 ) {
   try {
     const response = await cdp.send("Network.getResponseBody", { requestId });
     const body = response.base64Encoded
       ? decodeBase64Text(response.body)
       : response.body;
+    logFirstbankStage("010103-cdp-body", {
+      path: meta?.path,
+      status: meta?.status,
+      bodyLength: body.length,
+      hasTxnDateHeader: hasTransactionDateHeader(body),
+    });
     const html = transactionHistoryFromHtml(body);
-    capture.html ??= html;
+    capture.settleDocumentBody(html);
   } catch {
     // Invalid or unavailable 010103 bodies do not mask a later live frame.
   }
@@ -1052,9 +1096,18 @@ async function captureTransactionResponse(
   response: BrowserResponse,
   capture: TransactionResponseCapture,
 ) {
+  const path = urlPathname(response.url());
+  const status = httpStatus(response);
   try {
-    const html = transactionHistoryFromHtml(await response.text());
-    capture.html ??= html;
+    const body = await response.text();
+    logFirstbankStage("010103-http-body", {
+      path,
+      status,
+      bodyLength: body.length,
+      hasTxnDateHeader: hasTransactionDateHeader(body),
+    });
+    const html = transactionHistoryFromHtml(body);
+    capture.settleDocumentBody(html);
   } catch {
     // Invalid 010103 bodies do not mask a later CDP capture or live frame.
   }
@@ -1070,36 +1123,54 @@ async function submitTransactionQuery(
   await waitForQueryAccountOptions(frame);
   await selectQueryAccount(frame);
   transactionResponse.armed = true;
+  logFirstbankStage("0101-query-submit", {
+    path: urlPathname(TRANSACTION_URL),
+  });
   await clickTransactionSearch(frame);
+  return waitForTransactionHistory(page, transactionResponse);
+}
 
-  const resultFrame = await waitForLiveTransactionResultFrame(
-    page,
-    transactionResponse,
-  );
-  if (resultFrame) {
-    try {
-      return await serializeFirstbankTables(resultFrame);
-    } catch (error) {
-      if (!isTransactionHistoryReadError(error)) throw error;
+async function waitForTransactionHistory(
+  page: Page,
+  capture: TransactionResponseCapture,
+) {
+  const deadline = Date.now() + RESULT_CAPTURE_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (capture.html) return capture.html;
+    const resultFrame = await findLiveTransactionResultFrame(page);
+    if (resultFrame) {
+      try {
+        const html = await serializeFirstbankTables(resultFrame);
+        logFirstbankStage("010103-live-frame", {
+          path: urlPathname(resultFrame.url()),
+          bodyLength: html.length,
+          hasTxnDateHeader: hasTransactionDateHeader(html),
+        });
+        return html;
+      } catch (error) {
+        if (!isTransactionHistoryReadError(error)) throw error;
+      }
     }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const arrived = await Promise.race([
+      capture.documentBody.then(() => true),
+      delay(Math.min(FRAME_READ_RETRY_MS, remaining)).then(() => false),
+    ]);
+    if (arrived && capture.html) return capture.html;
   }
 
-  if (transactionResponse.html) return transactionResponse.html;
-  if (transactionResponse.pending.size > 0) {
-    const tasks = Array.from(transactionResponse.pending);
+  if (capture.pending.size > 0) {
     await withActionTimeout(
-      Promise.allSettled(tasks),
+      Promise.allSettled(Array.from(capture.pending)),
       FRAME_PROBE_TIMEOUT_MS,
     ).catch(() => undefined);
-    if (transactionResponse.html) return transactionResponse.html;
   }
-  if (transactionResponse.requestIds.size > 0) {
-    const deadline = Date.now() + FRAME_PROBE_TIMEOUT_MS;
-    while (transactionResponse.requestIds.size > 0 && Date.now() < deadline) {
-      await delay(FRAME_READ_RETRY_MS);
-      if (transactionResponse.html) return transactionResponse.html;
-    }
-  }
+  if (capture.html) return capture.html;
+
+  logFirstbankStage("010103-timeout", {
+    path: "/NetBank/2/010103.html",
+  });
   throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
 }
 
@@ -1164,20 +1235,6 @@ async function hasTransactionSearchControl(frame: Frame) {
   } catch {
     return false;
   }
-}
-
-async function waitForLiveTransactionResultFrame(
-  page: Page,
-  transactionResponse: TransactionResponseCapture,
-) {
-  const deadline = Date.now() + RESULT_FRAME_WAIT_MS;
-  while (Date.now() < deadline) {
-    const result = await findLiveTransactionResultFrame(page);
-    if (result) return result;
-    if (transactionResponse.html) return undefined;
-    await delay(FRAME_READ_RETRY_MS);
-  }
-  return findLiveTransactionResultFrame(page);
 }
 
 async function findLiveTransactionResultFrame(page: Page) {
@@ -1806,6 +1863,47 @@ function isTransactionResultResponse(url: string) {
   } catch {
     return false;
   }
+}
+
+function urlPathname(url: string) {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return "(invalid)";
+  }
+}
+
+function httpStatus(response: BrowserResponse) {
+  try {
+    return response.status();
+  } catch {
+    return undefined;
+  }
+}
+
+function hasTransactionDateHeader(html: string) {
+  return /交易日期|交易日/.test(html);
+}
+
+function logFirstbankStage(
+  stage: string,
+  fields: {
+    path?: string;
+    status?: number;
+    bodyLength?: number;
+    hasTxnDateHeader?: boolean;
+  } = {},
+) {
+  const parts = [`[firstbank] ${stage}`];
+  if (fields.path !== undefined) parts.push(`path=${fields.path}`);
+  if (fields.status !== undefined) parts.push(`status=${fields.status}`);
+  if (fields.bodyLength !== undefined) {
+    parts.push(`bodyLength=${fields.bodyLength}`);
+  }
+  if (fields.hasTxnDateHeader !== undefined) {
+    parts.push(`hasTxnDateHeader=${fields.hasTxnDateHeader}`);
+  }
+  console.log(parts.join(" "));
 }
 
 function isTransactionHistoryReadError(error: unknown) {
