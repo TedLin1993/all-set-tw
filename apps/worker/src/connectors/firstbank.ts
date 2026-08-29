@@ -36,8 +36,9 @@ const LOGIN_RESULT_POLL_MS = 500;
 const FRAME_TIMEOUT_MS = 15_000;
 const FRAME_READ_RETRY_MS = 250;
 // 010103 may replace and detach its iframe in Browser Rendering. Arm a
-// document-body waiter before submit and keep CDP listeners attached for
-// this window so a delayed responseReceived/loadingFinished can still settle.
+// document-body waiter before submit, intercept 010103 at Fetch response
+// stage, and keep listeners attached so a delayed or non-Document body
+// can still settle.
 const RESULT_CAPTURE_WAIT_MS = 10_000;
 const FRAME_PROBE_TIMEOUT_MS = 1_000;
 const CARD_RESPONSE_TIMEOUT_MS = 10_000;
@@ -84,12 +85,24 @@ type TransactionResponseCapture = {
 
 type TransactionDocumentResponseEvent = {
   requestId: string;
-  type: string;
+  type?: string;
   response: { url: string; status?: number };
 };
 
 type TransactionLoadingEvent = {
   requestId: string;
+};
+
+type NetworkRequestWillBeSentEvent = {
+  type?: string;
+  request: { url: string };
+};
+
+type FetchRequestPausedEvent = {
+  requestId: string;
+  resourceType?: string;
+  request: { url: string };
+  responseStatusCode?: number;
 };
 
 type BrowserResponse = {
@@ -819,17 +832,57 @@ async function collectFirstbankPayloads(
     await cdp.detach().catch(() => undefined);
     throw error;
   }
+  let fetchEnabled = false;
+  try {
+    await cdp.send("Fetch.enable", {
+      patterns: [
+        {
+          urlPattern: `*://${new URL(ORIGIN).host}/NetBank/2/010103*`,
+          requestStage: "Response",
+        },
+      ],
+    });
+    fetchEnabled = true;
+  } catch {
+    logFirstbankStage("010103-fetch-unavailable", {
+      path: "/NetBank/2/010103.html",
+    });
+  }
+  const onTransactionRequest = (event: NetworkRequestWillBeSentEvent) => {
+    const url = event.request?.url ?? "";
+    if (!isFirstbankUrl(url)) return;
+    const path = urlPathname(url);
+    if (!isNetBankTwoPath(path)) return;
+    logFirstbankStage("0101-cdp-request", {
+      path,
+      resourceType: event.type,
+    });
+  };
   const onTransactionDocumentResponse = (
     event: TransactionDocumentResponseEvent,
   ) => {
+    const url = event.response.url;
+    if (!isFirstbankUrl(url)) return;
+    const path = urlPathname(url);
+    const status = event.response.status;
+    const resourceType = event.type;
+    if (isNetBankTwoPath(path) && isCapturableResourceType(resourceType)) {
+      logFirstbankStage("0101-cdp-response", {
+        path,
+        status,
+        resourceType,
+      });
+    }
     if (
       transactionResponse.armed &&
-      event.type === "Document" &&
-      isTransactionResultResponse(event.response.url)
+      isTransactionResultResponse(url) &&
+      isCapturableResourceType(resourceType)
     ) {
-      const path = urlPathname(event.response.url);
-      const status = event.response.status;
-      logFirstbankStage("010103-cdp-response", { path, status });
+      logFirstbankStage("010103-cdp-response", {
+        path,
+        status,
+        resourceType,
+      });
       transactionResponse.requestIds.add(event.requestId);
       transactionResponse.documentMeta.set(event.requestId, { path, status });
     }
@@ -855,9 +908,19 @@ async function collectFirstbankPayloads(
     transactionResponse.requestIds.delete(event.requestId);
     transactionResponse.documentMeta.delete(event.requestId);
   };
+  const onFetchPaused = (event: FetchRequestPausedEvent) => {
+    let task: Promise<void>;
+    task = captureFetchPausedDocument(cdp, event, transactionResponse).finally(
+      () => transactionResponse.pending.delete(task),
+    );
+    transactionResponse.pending.add(task);
+    void task.catch(() => undefined);
+  };
+  cdp.on("Network.requestWillBeSent", onTransactionRequest);
   cdp.on("Network.responseReceived", onTransactionDocumentResponse);
   cdp.on("Network.loadingFinished", onTransactionDocumentLoaded);
   cdp.on("Network.loadingFailed", onTransactionDocumentFailed);
+  if (fetchEnabled) cdp.on("Fetch.requestPaused", onFetchPaused);
   const onResponse = (response: BrowserResponse) => {
     if (
       transactionResponse.armed &&
@@ -911,9 +974,14 @@ async function collectFirstbankPayloads(
     } as unknown as FirstbankPayloads;
   } finally {
     page.off("response", onResponse);
+    cdp.off("Network.requestWillBeSent", onTransactionRequest);
     cdp.off("Network.responseReceived", onTransactionDocumentResponse);
     cdp.off("Network.loadingFinished", onTransactionDocumentLoaded);
     cdp.off("Network.loadingFailed", onTransactionDocumentFailed);
+    if (fetchEnabled) {
+      cdp.off("Fetch.requestPaused", onFetchPaused);
+      await cdp.send("Fetch.disable").catch(() => undefined);
+    }
     await cdp.detach().catch(() => undefined);
   }
 }
@@ -1079,6 +1147,9 @@ async function captureTransactionDocument(
     const body = response.base64Encoded
       ? decodeBase64Text(response.body)
       : response.body;
+    if (typeof body !== "string") {
+      throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
+    }
     logFirstbankStage("010103-cdp-body", {
       path: meta?.path,
       status: meta?.status,
@@ -1110,6 +1181,48 @@ async function captureTransactionResponse(
     capture.settleDocumentBody(html);
   } catch {
     // Invalid 010103 bodies do not mask a later CDP capture or live frame.
+  }
+}
+
+async function captureFetchPausedDocument(
+  cdp: CDPSession,
+  event: FetchRequestPausedEvent,
+  capture: TransactionResponseCapture,
+) {
+  const url = event.request?.url ?? "";
+  const path = urlPathname(url);
+  const status = event.responseStatusCode;
+  try {
+    if (capture.armed && isTransactionResultResponse(url)) {
+      logFirstbankStage("010103-fetch-response", {
+        path,
+        status,
+        resourceType: event.resourceType,
+      });
+      const response = await cdp.send("Fetch.getResponseBody", {
+        requestId: event.requestId,
+      });
+      const body = response.base64Encoded
+        ? decodeBase64Text(response.body)
+        : response.body;
+      if (typeof body !== "string") {
+        throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
+      }
+      logFirstbankStage("010103-fetch-body", {
+        path,
+        status,
+        bodyLength: body.length,
+        hasTxnDateHeader: hasTransactionDateHeader(body),
+      });
+      const html = transactionHistoryFromHtml(body);
+      capture.settleDocumentBody(html);
+    }
+  } catch {
+    // Invalid or unavailable Fetch bodies do not mask a later live frame.
+  } finally {
+    await cdp
+      .send("Fetch.continueRequest", { requestId: event.requestId })
+      .catch(() => undefined);
   }
 }
 
@@ -1171,6 +1284,11 @@ async function waitForTransactionHistory(
   logFirstbankStage("010103-timeout", {
     path: "/NetBank/2/010103.html",
   });
+  for (const frame of liveFrames(page)) {
+    logFirstbankStage("010103-timeout-frame", {
+      path: framePathname(frame),
+    });
+  }
   throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
 }
 
@@ -1239,8 +1357,15 @@ async function hasTransactionSearchControl(frame: Frame) {
 
 async function findLiveTransactionResultFrame(page: Page) {
   for (const frame of liveFrames(page)) {
-    if (!isTransactionResultResponse(frame.url())) continue;
-    await dismissBankNotice(frame, FRAME_PROBE_TIMEOUT_MS);
+    let isResultUrl = false;
+    try {
+      isResultUrl = isTransactionResultResponse(frame.url());
+    } catch {
+      isResultUrl = false;
+    }
+    if (isResultUrl) {
+      await dismissBankNotice(frame, FRAME_PROBE_TIMEOUT_MS);
+    }
     if (await hasTransactionResultHeader(frame, FRAME_PROBE_TIMEOUT_MS)) {
       return frame;
     }
@@ -1856,12 +1981,36 @@ function pickLiveFrame(page: Page, preferred?: Frame) {
 function isTransactionResultResponse(url: string) {
   try {
     const parsed = new URL(url);
-    return (
-      parsed.origin === ORIGIN &&
-      parsed.pathname.toLowerCase() === "/netbank/2/010103.html"
-    );
+    if (parsed.origin !== ORIGIN) return false;
+    const path = parsed.pathname.toLowerCase().split(";")[0];
+    return /\/netbank\/2\/010103(?:\.html?)?$/.test(path);
   } catch {
     return false;
+  }
+}
+
+function isFirstbankUrl(url: string) {
+  try {
+    return new URL(url).origin === ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+function isNetBankTwoPath(path: string) {
+  return /\/netbank\/2\//i.test(path);
+}
+
+function isCapturableResourceType(type: string | undefined) {
+  if (!type) return true;
+  return /^(document|xhr|fetch|other)$/i.test(type);
+}
+
+function framePathname(frame: Frame) {
+  try {
+    return urlPathname(frame.url());
+  } catch {
+    return "(unavailable)";
   }
 }
 
@@ -1892,6 +2041,7 @@ function logFirstbankStage(
     status?: number;
     bodyLength?: number;
     hasTxnDateHeader?: boolean;
+    resourceType?: string;
   } = {},
 ) {
   const parts = [`[firstbank] ${stage}`];
@@ -1902,6 +2052,9 @@ function logFirstbankStage(
   }
   if (fields.hasTxnDateHeader !== undefined) {
     parts.push(`hasTxnDateHeader=${fields.hasTxnDateHeader}`);
+  }
+  if (fields.resourceType !== undefined) {
+    parts.push(`resourceType=${fields.resourceType}`);
   }
   console.log(parts.join(" "));
 }

@@ -120,7 +120,11 @@ function makePage(options?: {
       .fn()
       .mockImplementation(
         async (method: string, params?: { requestId?: string }) => {
-          if (method === "Network.getResponseBody" && params?.requestId) {
+          if (
+            (method === "Network.getResponseBody" ||
+              method === "Fetch.getResponseBody") &&
+            params?.requestId
+          ) {
             const body = cdpBodies.get(params.requestId);
             if (!body)
               throw new Error("No resource with given identifier found");
@@ -222,19 +226,36 @@ function makePage(options?: {
       body: string,
       base64Encoded = false,
       status = 200,
+      resourceType = "Document",
     ) {
       const requestId = "transaction-document";
       cdpBodies.set(requestId, { body, base64Encoded });
       for (const listener of cdpListeners.get("Network.responseReceived") ?? [])
         listener({
           requestId,
-          type: "Document",
+          type: resourceType,
           response: { url, status },
         });
     },
     emitTransactionDocumentLoaded() {
       for (const listener of cdpListeners.get("Network.loadingFinished") ?? [])
         listener({ requestId: "transaction-document" });
+    },
+    emitFetchPaused(
+      url: string,
+      body: string,
+      base64Encoded = false,
+      status = 200,
+    ) {
+      const requestId = "fetch-transaction-document";
+      cdpBodies.set(requestId, { body, base64Encoded });
+      for (const listener of cdpListeners.get("Fetch.requestPaused") ?? [])
+        listener({
+          requestId,
+          resourceType: "Document",
+          request: { url },
+          responseStatusCode: status,
+        });
     },
     emitTransactionDocument(url: string, body: string, base64Encoded = false) {
       const requestId = "transaction-document";
@@ -311,7 +332,12 @@ function detachQueryFrameAfterSearch(
   responseHtml?: string,
   responseUrl = TRANSACTION_RESULT_URL,
   base64Encoded = false,
-  timing?: { delayMs?: number; loadingFinishedDelayMs?: number },
+  timing?: {
+    delayMs?: number;
+    loadingFinishedDelayMs?: number;
+    fetchDelayMs?: number;
+    resourceType?: string;
+  },
 ) {
   const queryFrame = page.frame;
   const previousEvaluate = queryFrame.evaluate;
@@ -326,26 +352,37 @@ function detachQueryFrameAfterSearch(
         queryFrame.detached = true;
         page.frames.mockImplementation(() => nextFrames);
         if (responseHtml !== undefined) {
-          const delayMs = timing?.delayMs ?? 0;
-          const loadingFinishedDelayMs =
-            timing?.loadingFinishedDelayMs ?? delayMs;
-          if (delayMs <= 0 && loadingFinishedDelayMs <= 0) {
-            page.emitTransactionDocument(
-              responseUrl,
-              responseHtml,
-              base64Encoded,
-            );
-          } else {
+          const fetchDelayMs = timing?.fetchDelayMs;
+          if (fetchDelayMs !== undefined) {
+            setTimeout(() => {
+              page.emitFetchPaused(responseUrl, responseHtml, base64Encoded);
+            }, fetchDelayMs);
+          }
+          if (
+            timing?.delayMs !== undefined ||
+            timing?.loadingFinishedDelayMs !== undefined
+          ) {
+            const delayMs = timing?.delayMs ?? 0;
+            const loadingFinishedDelayMs =
+              timing?.loadingFinishedDelayMs ?? delayMs;
             setTimeout(() => {
               page.emitTransactionDocumentReceived(
                 responseUrl,
                 responseHtml,
                 base64Encoded,
+                200,
+                timing?.resourceType ?? "Document",
               );
             }, delayMs);
             setTimeout(() => {
               page.emitTransactionDocumentLoaded();
             }, loadingFinishedDelayMs);
+          } else if (fetchDelayMs === undefined) {
+            page.emitTransactionDocument(
+              responseUrl,
+              responseHtml,
+              base64Encoded,
+            );
           }
         }
         return true;
@@ -835,5 +872,119 @@ describe("第一銀行交易明細 010103 擷取", () => {
         requestId: "transaction-document",
       },
     );
+  });
+
+  it("結果 frame 帶 jsessionid 時仍序列化交易表", async () => {
+    const page = makePage({ authenticated: true });
+    const resultFrame = makeTransactionResultFrame();
+    resultFrame.url.mockReturnValue(
+      `${TRANSACTION_RESULT_URL};jsessionid=synthetic`,
+    );
+    detachQueryFrameAfterSearch(page, [resultFrame]);
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const result = await createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: -100, description: "測試交易" }),
+      ]),
+    );
+  });
+
+  it("CDP 資源類型為 Other 時仍擷取延遲的 010103", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+      TRANSACTION_RESULT_URL,
+      false,
+      { delayMs: 3_000, resourceType: "Other" },
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    await vi.advanceTimersByTimeAsync(4_000);
+    const result = await pending;
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: -100, description: "測試交易" }),
+      ]),
+    );
+  });
+
+  it("Network 事件缺失時改從 CDP Fetch.requestPaused 擷取 010103", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+      TRANSACTION_RESULT_URL,
+      false,
+      { fetchDelayMs: 3_000 },
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    let settled = false;
+    void pending.finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await pending;
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: -100, description: "測試交易" }),
+      ]),
+    );
+    expect(page.cdpSession.send).toHaveBeenCalledWith("Fetch.enable", {
+      patterns: [
+        {
+          urlPattern: "*://ibank.firstbank.com.tw/NetBank/2/010103*",
+          requestStage: "Response",
+        },
+      ],
+    });
+    expect(page.cdpSession.send).toHaveBeenCalledWith("Fetch.getResponseBody", {
+      requestId: "fetch-transaction-document",
+    });
+    expect(page.cdpSession.send).toHaveBeenCalledWith("Fetch.continueRequest", {
+      requestId: "fetch-transaction-document",
+    });
   });
 });
