@@ -273,6 +273,11 @@ function makePage(options?: {
       for (const listener of listeners.get("dialog") ?? []) listener(dialog);
       return dialog;
     },
+    emitPageError(message: string) {
+      const error = new Error(message);
+      for (const listener of listeners.get("pageerror") ?? []) listener(error);
+      return error;
+    },
     emitCdpLoadingFailed(requestId: string) {
       for (const listener of cdpListeners.get("Network.loadingFailed") ?? [])
         listener({ requestId });
@@ -346,6 +351,14 @@ function makeBrowser(page: ReturnType<typeof makePage>) {
     newPage: vi.fn().mockResolvedValue(page),
     sessionId: vi.fn().mockReturnValue("firstbank-session"),
   };
+}
+
+function fetchedDepositAjax(frame: ReturnType<typeof makeFrame>) {
+  return frame.evaluate.mock.calls.some(
+    ([fn, arg]) =>
+      String(fn).includes("fetch(resourcePath") &&
+      arg === "/NetBank/ajax/acntReview1.html",
+  );
 }
 
 function postedTransactionQuery(frame: ReturnType<typeof makeFrame>) {
@@ -854,14 +867,106 @@ describe("第一銀行交易明細 010103 擷取", () => {
       ).toBe(false);
       expect(staleFrame.click).toHaveBeenCalledTimes(1);
       expect(staleFrame.click).toHaveBeenCalledWith("#btnOpen a");
-      expect(
-        staleFrame.evaluate.mock.calls.some(([fn]) =>
-          String(fn).includes("fetch(resourcePath"),
-        ),
-      ).toBe(false);
+      expect(fetchedDepositAjax(staleFrame)).toBe(false);
+      expect(logs.some((line) => line.includes("deposit-ajax-fallback"))).toBe(
+        false,
+      );
       expect(logs.some((line) => line.includes("deposit-ajax-failed"))).toBe(
         false,
       );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("存款總覽點擊沒有捕捉到 ajax 時改以 in-frame fetch POST 讀取", async () => {
+    vi.useFakeTimers();
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((message) => {
+      logs.push(String(message));
+    });
+    const page = makePage({ authenticated: true });
+    page.frame.click.mockResolvedValue(undefined);
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    try {
+      const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+        ...credentials,
+        sessionCookies: JSON.stringify([
+          {
+            name: "SESSION",
+            value: "encrypted-at-rest",
+            domain: "ibank.firstbank.com.tw",
+          },
+        ]),
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      const result = await pending;
+
+      expect(result.bankAccounts).toHaveLength(1);
+      expect(result.bankTransactions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ amount: -100, description: "測試交易" }),
+        ]),
+      );
+      expect(page.frame.click).toHaveBeenCalledTimes(1);
+      expect(page.frame.click).toHaveBeenCalledWith("#btnOpen a");
+      expect(fetchedDepositAjax(page.frame)).toBe(true);
+      expect(logs.some((line) => line.includes("deposit-ajax-fallback"))).toBe(
+        true,
+      );
+      expect(logs.some((line) => line.includes("deposit-ajax-failed"))).toBe(
+        false,
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("parent.resizeFrame 不是函式時不當成失敗也不當成 0101 錯誤", async () => {
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((message) => {
+      logs.push(String(message));
+    });
+    const page = makePage({ authenticated: true });
+    const originalClick = page.frame.click.getMockImplementation();
+    page.frame.click.mockImplementation(async (selector: string) => {
+      page.emitPageError("parent.resizeFrame is not a function");
+      if (originalClick) return originalClick(selector);
+    });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    try {
+      const result = await createFirstbankConnector(
+        {} as Fetcher,
+        vi.fn(),
+      ).sync({
+        ...credentials,
+        sessionCookies: JSON.stringify([
+          {
+            name: "SESSION",
+            value: "encrypted-at-rest",
+            domain: "ibank.firstbank.com.tw",
+          },
+        ]),
+      });
+
+      expect(result.bankAccounts).toHaveLength(1);
+      expect(logs.some((line) => line.includes("frameset-noise"))).toBe(true);
+      expect(logs.some((line) => line.includes("0101-page-error"))).toBe(false);
+      expect(page.frame.click).toHaveBeenCalledTimes(1);
     } finally {
       logSpy.mockRestore();
     }
@@ -1482,6 +1587,7 @@ describe("第一銀行交易明細 010103 擷取", () => {
         logs.find((line) => line.includes("deposit-ajax path=")),
       ).toContain("status=403 bodyLength=0");
       expect(page.frame.click).toHaveBeenCalledTimes(1);
+      expect(fetchedDepositAjax(page.frame)).toBe(false);
       expect(logs.some((line) => line.includes("collect-start"))).toBe(true);
     } finally {
       logSpy.mockRestore();
@@ -1492,6 +1598,15 @@ describe("第一銀行交易明細 010103 擷取", () => {
     vi.useFakeTimers();
     const page = makePage({ authenticated: true });
     page.frame.click.mockResolvedValue(undefined);
+    const previousEvaluate = page.frame.evaluate;
+    page.frame.evaluate = vi
+      .fn()
+      .mockImplementation(async (fn: unknown, arg?: unknown) => {
+        if (String(fn).includes("fetch(resourcePath")) {
+          return { ok: false, status: 0, text: "" };
+        }
+        return previousEvaluate(fn, arg);
+      });
     const browser = makeBrowser(page);
     puppeteerMock.launch.mockResolvedValue(browser);
 
@@ -1512,6 +1627,7 @@ describe("第一銀行交易明細 010103 擷取", () => {
 
     expect(page.frame.click).toHaveBeenCalledTimes(1);
     expect(page.frame.click).toHaveBeenCalledWith("#btnOpen a");
+    expect(fetchedDepositAjax(page.frame)).toBe(true);
   });
 
   it("交易頁 frame 導覽 replacement 後只在 ready 的 0101 frame 送出一次", async () => {

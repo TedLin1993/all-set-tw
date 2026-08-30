@@ -75,6 +75,7 @@ type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>>;
 type DepositResponseCapture = {
   html?: string;
   observed: boolean;
+  status?: number;
   pending: Set<Promise<void>>;
   responseBody: Promise<string>;
   settleResponseBody: (html: string) => void;
@@ -1033,10 +1034,16 @@ async function collectFirstbankPayloads(
   };
   page.on("dialog", onDialog);
   const onPageError = (error: unknown) => {
-    logFirstbankStage("0101-page-error", {
-      detail: safeDiagnosticText(
-        error instanceof Error ? error.message : String(error),
-      ),
+    const message = error instanceof Error ? error.message : String(error);
+    if (isFramesetParentNoise(message)) {
+      logFirstbankStage("frameset-noise", {
+        detail: "resizeFrame",
+        elapsedMs: elapsedSinceArmed(transactionResponse),
+      });
+      return;
+    }
+    logFirstbankStage("page-error", {
+      detail: safeDiagnosticText(message),
       elapsedMs: elapsedSinceArmed(transactionResponse),
     });
   };
@@ -1302,6 +1309,7 @@ async function captureDepositResponse(
     status,
     bodyLength: body.length,
   });
+  capture.status = status;
   if (
     typeof status === "number" &&
     status >= 200 &&
@@ -1860,8 +1868,16 @@ async function navigateToReadyFrame(
   url: string,
   path: string,
 ) {
-  if (framePathname(frame) !== path) await navigateFrame(frame, url);
-  return waitForReadyFrameByPath(page, path, frame);
+  const target = nestedContentFrame(page, frame);
+  if (framePathname(target) !== path) await navigateFrame(target, url);
+  return waitForReadyFrameByPath(page, path, target);
+}
+
+function nestedContentFrame(page: Page, preferred: Frame) {
+  const main = (page as Page & { mainFrame?: () => Frame }).mainFrame?.();
+  if (!main || preferred !== main) return preferred;
+  const nested = liveFrames(page).find((candidate) => candidate !== main);
+  return nested ?? preferred;
 }
 
 async function waitForReadyFrameByPath(
@@ -1924,13 +1940,77 @@ async function collectDepositOverview(
     ).catch(() => undefined);
   }
   if (capture.html) return capture.html;
+  if (capture.observed) {
+    logFirstbankStage("deposit-ajax-failed", {
+      path: DEPOSIT_AJAX_PATH,
+      status: capture.status,
+      detail: "empty-or-error-response",
+    });
+    // The native handler already issued the bank POST. Never click or POST
+    // again after a captured non-2xx / empty body.
+    throw new FirstbankConnectionError("第一銀行存款總覽讀取失敗。");
+  }
+  logFirstbankStage("deposit-ajax-fallback", {
+    path: DEPOSIT_AJAX_PATH,
+    detail: "missing-listener",
+  });
+  // Click did not surface a capturable page response. Do not click again;
+  // read the same-origin ajax endpoint from inside the live overview frame.
+  const liveFrame = liveDepositOverviewFrame(page, frame);
+  return fetchDepositOverview(liveFrame);
+}
+
+function liveDepositOverviewFrame(page: Page, preferred: Frame) {
+  const path = urlPathname(ACCOUNT_OVERVIEW_URL);
+  const nested = nestedContentFrame(page, preferred);
+  const frames = liveFrames(page);
+  const ready =
+    frames.find((candidate) => framePathname(candidate) === path) ??
+    (frames.includes(nested) ? nested : undefined) ??
+    (frames.includes(preferred) ? preferred : undefined) ??
+    frames[0];
+  if (!ready) {
+    throw new FirstbankConnectionError("第一銀行存款總覽讀取失敗。");
+  }
+  return ready;
+}
+
+async function fetchDepositOverview(frame: Frame): Promise<string> {
+  try {
+    const value = await withActionTimeout(
+      frame.evaluate(async (resourcePath) => {
+        try {
+          const response = await fetch(resourcePath, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { Accept: "text/html, application/json" },
+          });
+          return {
+            ok: response.ok,
+            status: response.status,
+            text: await response.text(),
+          };
+        } catch {
+          return { ok: false, status: 0, text: "" };
+        }
+      }, DEPOSIT_AJAX_PATH),
+    );
+    if (isRecord(value) && typeof value.status === "number") {
+      const body = typeof value.text === "string" ? value.text : "";
+      logFirstbankStage("deposit-ajax", {
+        path: DEPOSIT_AJAX_PATH,
+        status: value.status,
+        bodyLength: body.length,
+      });
+      if (value.ok === true && body.trim()) return body;
+    }
+  } catch (error) {
+    if (!isRecoverableFrameError(error)) throw error;
+  }
   logFirstbankStage("deposit-ajax-failed", {
     path: DEPOSIT_AJAX_PATH,
-    detail: "missing-response",
+    detail: "fallback-fetch",
   });
-  // The click already dispatched the bank-owned POST. Never click again on a
-  // timeout: Puppeteer cannot cancel the in-page AJAX and a retry could issue
-  // a duplicate financial request.
   throw new FirstbankConnectionError("第一銀行存款總覽讀取失敗。");
 }
 
@@ -2475,6 +2555,10 @@ function httpStatus(response: BrowserResponse) {
   } catch {
     return undefined;
   }
+}
+
+function isFramesetParentNoise(message: string) {
+  return /resizeFrame is not a function/i.test(message);
 }
 
 function hasTransactionDateHeader(html: string) {
