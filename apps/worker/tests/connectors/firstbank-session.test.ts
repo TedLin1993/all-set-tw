@@ -21,6 +21,8 @@ import {
 const LOGIN_URL = "https://ibank.firstbank.com.tw/NetBank/index103.html";
 const LOGIN_LANDING_URL = "https://ibank.firstbank.com.tw/NetBank/login.html";
 const FRAME_URL = "https://ibank.firstbank.com.tw/NetBank/frame.html";
+const ACCOUNT_OVERVIEW_URL =
+  "https://ibank.firstbank.com.tw/NetBank/1/acntReviewAll.html";
 
 const credentials = {
   userId: "A123456789",
@@ -69,9 +71,12 @@ function makeFrame(options?: { authenticated?: boolean }) {
     goto: vi.fn().mockImplementation(async (url: string) => {
       currentUrl = url;
     }),
+    click: vi.fn().mockResolvedValue(undefined),
     waitForNavigation: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn().mockImplementation(async (fn: unknown, arg?: unknown) => {
       const source = String(fn);
+      if (source.includes("document.readyState")) return true;
+      if (source.includes("depositTriggerSelector")) return "#btnOpen a";
       if (source.includes("fetch(resourcePath")) {
         return { ok: true, status: 200, text: depositTables };
       }
@@ -86,7 +91,11 @@ function makeFrame(options?: { authenticated?: boolean }) {
           ? transactionTables
           : depositTables;
       }
-      if (source.includes('querySelectorAll("select")')) return true;
+      if (
+        source.includes("acnt") ||
+        source.includes('querySelectorAll("select")')
+      )
+        return true;
       if (source.includes("searchBtn")) return true;
       if (source.includes("帳面餘額") || source.includes("可用餘額"))
         return true;
@@ -143,6 +152,9 @@ function makePage(options?: {
     .fn()
     .mockImplementation(async (fn: unknown, arg?: unknown) => {
       const source = String(fn);
+      if (source.includes("depositTriggerSelector")) {
+        return originalFrameEvaluate(fn, arg);
+      }
       if (source.includes("#btnOpen") || source.includes("#tFunc")) {
         return authenticated;
       }
@@ -242,6 +254,18 @@ function makePage(options?: {
           response: { url, status },
         });
     },
+    dialogs: [] as Array<{ accept: ReturnType<typeof vi.fn> }>,
+    emitDialog(message: string, type = "confirm") {
+      const dialog = {
+        type: () => type,
+        message: () => message,
+        accept: vi.fn().mockResolvedValue(undefined),
+        dismiss: vi.fn().mockResolvedValue(undefined),
+      };
+      page.dialogs.push(dialog);
+      for (const listener of listeners.get("dialog") ?? []) listener(dialog);
+      return dialog;
+    },
     emitCdpLoadingFailed(requestId: string) {
       for (const listener of cdpListeners.get("Network.loadingFailed") ?? [])
         listener({ requestId });
@@ -296,6 +320,14 @@ function makePage(options?: {
     },
     cdpSession,
   };
+  frame.click.mockImplementation(async (selector: string) => {
+    if (selector === "#btnOpen a") {
+      page.emitResponse(
+        "https://ibank.firstbank.com.tw/NetBank/ajax/acntReview1.html",
+        depositTables,
+      );
+    }
+  });
   return page;
 }
 
@@ -325,6 +357,12 @@ function clickedTransactionSearch(frame: ReturnType<typeof makeFrame>) {
       source.includes(".click()")
     );
   });
+}
+
+function probedTransactionHeader(frame: ReturnType<typeof makeFrame>) {
+  return frame.evaluate.mock.calls.some(([fn]) =>
+    String(fn).includes("交易日期"),
+  );
 }
 
 function directlySubmitsForm(frame: ReturnType<typeof makeFrame>) {
@@ -361,6 +399,59 @@ function makeEmptyLiveFrame() {
   return frame;
 }
 
+function mockQueryAccountSelect(
+  frame: ReturnType<typeof makeFrame>,
+  values: Array<{ text: string; value: string; selected?: boolean }>,
+) {
+  const options = values.map((value) => ({
+    ...value,
+    selected: Boolean(value.selected),
+  }));
+  let selectedValue =
+    options.find((option) => option.selected)?.value ?? options[0]?.value ?? "";
+  const dispatchEvent = vi.fn();
+  const select = {
+    options,
+    get selectedIndex() {
+      return options.findIndex((option) => option.selected);
+    },
+    get value() {
+      return selectedValue;
+    },
+    set value(value: string) {
+      selectedValue = value;
+      for (const option of options) option.selected = option.value === value;
+    },
+    dispatchEvent,
+  };
+  const previousEvaluate = frame.evaluate;
+  frame.evaluate = vi
+    .fn()
+    .mockImplementation(async (fn: unknown, arg?: unknown) => {
+      if (!String(fn).includes("acnt")) {
+        return previousEvaluate(fn, arg);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(
+        globalThis,
+        "document",
+      );
+      Object.defineProperty(globalThis, "document", {
+        configurable: true,
+        value: { querySelector: () => select },
+      });
+      try {
+        return (fn as (shouldSelect: boolean) => unknown)(Boolean(arg));
+      } finally {
+        if (descriptor) {
+          Object.defineProperty(globalThis, "document", descriptor);
+        } else {
+          delete (globalThis as { document?: unknown }).document;
+        }
+      }
+    });
+  return { dispatchEvent, options, select };
+}
+
 function detachQueryFrameAfterSearch(
   page: ReturnType<typeof makePage>,
   nextFrames: Array<ReturnType<typeof makeFrame>>,
@@ -373,9 +464,12 @@ function detachQueryFrameAfterSearch(
     fetchDelayMs?: number;
     resourceType?: string;
     verification?: "response" | "pending" | "failed";
+    verificationDelayMs?: number;
+    dialogMessage?: string;
+    queryFrame?: ReturnType<typeof makeFrame>;
   },
 ) {
-  const queryFrame = page.frame;
+  const queryFrame = timing?.queryFrame ?? page.frame;
   const previousEvaluate = queryFrame.evaluate;
   queryFrame.evaluate = vi
     .fn()
@@ -390,15 +484,21 @@ function detachQueryFrameAfterSearch(
         setTimeout(() => {
           const verification = timing?.verification ?? "response";
           page.emitCdpRequest(VERIFY_DV_URL, "verify-dv");
-          if (verification === "pending") return;
-          if (verification === "failed") {
-            page.emitCdpLoadingFailed("verify-dv");
-            return;
+          if (timing?.dialogMessage !== undefined) {
+            page.emitDialog(timing.dialogMessage);
           }
-          page.emitCdpResponse(VERIFY_DV_URL, "verify-dv");
-          queryFrame.detached = true;
-          page.frames.mockImplementation(() => nextFrames);
-          if (responseHtml !== undefined) {
+          if (verification === "pending") return;
+          // The bank only submits the query once verifyDV settles, so every
+          // later emission is scheduled relative to that verification.
+          setTimeout(() => {
+            if (verification === "failed") {
+              page.emitCdpLoadingFailed("verify-dv");
+              return;
+            }
+            page.emitCdpResponse(VERIFY_DV_URL, "verify-dv");
+            queryFrame.detached = true;
+            page.frames.mockImplementation(() => nextFrames);
+            if (responseHtml === undefined) return;
             const fetchDelayMs = timing?.fetchDelayMs;
             if (fetchDelayMs !== undefined) {
               setTimeout(() => {
@@ -431,7 +531,7 @@ function detachQueryFrameAfterSearch(
                 base64Encoded,
               );
             }
-          }
+          }, timing?.verificationDelayMs ?? 0);
         }, 0);
         return true;
       }
@@ -527,6 +627,11 @@ describe("第一銀行 browser session lifecycle", () => {
 
   it("submits a four-to-eight character CAPTCHA and closes the browser after sync", async () => {
     const page = makePage();
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+    );
     const browser = makeBrowser(page);
     puppeteerMock.sessions.mockResolvedValue([
       { sessionId: "firstbank-session", startTime: Date.now() },
@@ -565,6 +670,11 @@ describe("第一銀行 browser session lifecycle", () => {
 
   it("restores valid cookies without invoking OCR", async () => {
     const page = makePage({ authenticated: true });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+    );
     const browser = makeBrowser(page);
     puppeteerMock.launch.mockResolvedValue(browser);
     const recognize = vi.fn();
@@ -654,6 +764,189 @@ describe("第一銀行 browser session lifecycle", () => {
 });
 
 describe("第一銀行交易明細 010103 擷取", () => {
+  it("存款總覽依 Recorder 點擊銀行原生 handler 且不注入 fetch", async () => {
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((message) => {
+      logs.push(String(message));
+    });
+    const page = makePage({ authenticated: true });
+    const staleFrame = page.frame;
+    staleFrame.setUrl(ACCOUNT_OVERVIEW_URL);
+    page.goto.mockImplementation(async () => {
+      staleFrame.setUrl(ACCOUNT_OVERVIEW_URL);
+    });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    try {
+      const result = await createFirstbankConnector(
+        {} as Fetcher,
+        vi.fn(),
+      ).sync({
+        ...credentials,
+        sessionCookies: JSON.stringify([
+          {
+            name: "SESSION",
+            value: "encrypted-at-rest",
+            domain: "ibank.firstbank.com.tw",
+          },
+        ]),
+      });
+
+      expect(result.bankTransactions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ amount: -100, description: "測試交易" }),
+        ]),
+      );
+      expect(
+        staleFrame.goto.mock.calls.some(
+          ([url]) => url === ACCOUNT_OVERVIEW_URL,
+        ),
+      ).toBe(false);
+      expect(staleFrame.click).toHaveBeenCalledTimes(1);
+      expect(staleFrame.click).toHaveBeenCalledWith("#btnOpen a");
+      expect(
+        staleFrame.evaluate.mock.calls.some(([fn]) =>
+          String(fn).includes("fetch(resourcePath"),
+        ),
+      ).toBe(false);
+      expect(logs.some((line) => line.includes("deposit-ajax-failed"))).toBe(
+        false,
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("存款總覽 frame replacement 後只在不同且 ready 的 frame 點擊一次", async () => {
+    const page = makePage({ authenticated: true });
+    const staleFrame = page.frame;
+    const replacementFrame = makeFrame({ authenticated: true });
+    let currentFrames = [staleFrame];
+    page.frames.mockImplementation(() => currentFrames);
+    const previousEvaluate = staleFrame.evaluate;
+    staleFrame.evaluate = vi
+      .fn()
+      .mockImplementation(async (fn: unknown, arg?: unknown) => {
+        if (
+          staleFrame.url() === ACCOUNT_OVERVIEW_URL &&
+          String(fn).includes("document.readyState")
+        ) {
+          staleFrame.detached = true;
+          replacementFrame.setUrl(ACCOUNT_OVERVIEW_URL);
+          currentFrames = [replacementFrame];
+          throw new Error("waitForFunction failed: frame got detached");
+        }
+        return previousEvaluate(fn, arg);
+      });
+    replacementFrame.click.mockImplementation(async (selector: string) => {
+      if (selector === "#btnOpen a") {
+        page.emitResponse(
+          "https://ibank.firstbank.com.tw/NetBank/ajax/acntReview1.html",
+          depositTables,
+        );
+      }
+    });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+      TRANSACTION_RESULT_URL,
+      false,
+      { queryFrame: replacementFrame },
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const result = await createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+
+    expect(result.bankAccounts).toHaveLength(1);
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: -100, description: "測試交易" }),
+      ]),
+    );
+    expect(staleFrame.click).not.toHaveBeenCalled();
+    expect(replacementFrame.click).toHaveBeenCalledTimes(1);
+    expect(replacementFrame.click).toHaveBeenCalledWith("#btnOpen a");
+  });
+
+  it("英文 placeholder value 0 不會被選成查詢帳號", async () => {
+    const page = makePage({ authenticated: true });
+    const accountSelect = mockQueryAccountSelect(page.frame, [
+      { text: "--Please select--", value: "0", selected: true },
+      { text: "masked-account", value: "24657009679" },
+    ]);
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const result = await createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: -100, description: "測試交易" }),
+      ]),
+    );
+    expect(accountSelect.select.value).toBe("24657009679");
+    expect(accountSelect.options[0]?.selected).toBe(false);
+    expect(accountSelect.options[1]?.selected).toBe(true);
+    expect(accountSelect.dispatchEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("只有 placeholder 時不送出交易查詢", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    mockQueryAccountSelect(page.frame, [
+      { text: "--Please select--", value: "0", selected: true },
+    ]);
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    const expectation =
+      expect(pending).rejects.toThrow("第一銀行交易明細查詢帳號無法選取。");
+    await vi.advanceTimersByTimeAsync(11_000);
+    await expectation;
+    expect(clickedTransactionSearch(page.frame)).toBe(false);
+  });
+
   it("點擊 searchBtn 後序列化仍存活的 010103 frame", async () => {
     const page = makePage({ authenticated: true });
     const resultFrame = makeTransactionResultFrame();
@@ -844,13 +1137,323 @@ describe("第一銀行交易明細 010103 擷取", () => {
     });
     const expectation =
       expect(pending).rejects.toThrow("第一銀行交易明細前置驗證沒有完成。");
-    await vi.advanceTimersByTimeAsync(11_000);
+    await vi.advanceTimersByTimeAsync(31_000);
     await expectation;
     expect(clickedTransactionSearch(page.frame)).toBe(true);
     expect(page.cdpSession.send).not.toHaveBeenCalledWith(
       "Network.getResponseBody",
       expect.anything(),
     );
+  });
+
+  it("verifyDV 延遲回應時延長等待並擷取 010103", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+      TRANSACTION_RESULT_URL,
+      false,
+      { verificationDelayMs: 15_000, delayMs: 1_000 },
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    let settled = false;
+    void pending.finally(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(settled).toBe(false);
+    // A blocked query frame must not be probed with Runtime.evaluate while the
+    // bank's verifyDV request is still in flight.
+    expect(probedTransactionHeader(page.frame)).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    const result = await pending;
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: -100, description: "測試交易" }),
+      ]),
+    );
+    expect(page.cdpSession.send).toHaveBeenCalledWith(
+      "Network.getResponseBody",
+      { requestId: "transaction-document" },
+    );
+  });
+
+  it("查詢跳出原生對話框時自動接受並遮罩訊息數字", async () => {
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((message) => {
+      logs.push(String(message));
+    });
+    const page = makePage({ authenticated: true });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+      TRANSACTION_RESULT_URL,
+      false,
+      { dialogMessage: "查詢區間 20260101 至 20260131 帳號 123456789012" },
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    try {
+      const result = await createFirstbankConnector(
+        {} as Fetcher,
+        vi.fn(),
+      ).sync({
+        ...credentials,
+        sessionCookies: JSON.stringify([
+          {
+            name: "SESSION",
+            value: "encrypted-at-rest",
+            domain: "ibank.firstbank.com.tw",
+          },
+        ]),
+      });
+
+      expect(result.bankTransactions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ amount: -100, description: "測試交易" }),
+        ]),
+      );
+      expect(page.dialogs).toHaveLength(1);
+      expect(page.dialogs[0]?.accept).toHaveBeenCalledOnce();
+      const dialogLine = logs.find((line) => line.includes("0101-dialog"));
+      expect(dialogLine).toContain(
+        "detail=confirm:查詢區間 ######## 至 ######## 帳號 ############",
+      );
+      expect(dialogLine).not.toContain("123456789012");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("存款總覽 AJAX 非 2xx 時記錄狀態並回報讀取失敗", async () => {
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((message) => {
+      logs.push(String(message));
+    });
+    const page = makePage({ authenticated: true });
+    page.frame.click.mockImplementation(async (selector: string) => {
+      if (selector === "#btnOpen a") {
+        const response = {
+          url: () =>
+            "https://ibank.firstbank.com.tw/NetBank/ajax/acntReview1.html",
+          status: () => 403,
+          json: vi.fn().mockRejectedValue(new Error("not json")),
+          text: vi.fn().mockResolvedValue(""),
+        };
+        const pageListeners = page.on.mock.calls.find(
+          ([event]) => event === "response",
+        )?.[1] as Listener | undefined;
+        pageListeners?.(response);
+      }
+    });
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    try {
+      await expect(
+        createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+          ...credentials,
+          sessionCookies: JSON.stringify([
+            {
+              name: "SESSION",
+              value: "encrypted-at-rest",
+              domain: "ibank.firstbank.com.tw",
+            },
+          ]),
+        }),
+      ).rejects.toThrow("第一銀行存款總覽讀取失敗。");
+
+      expect(
+        logs.find((line) => line.includes("deposit-ajax path=")),
+      ).toContain("status=403 bodyLength=0");
+      expect(page.frame.click).toHaveBeenCalledTimes(1);
+      expect(logs.some((line) => line.includes("collect-start"))).toBe(true);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("存款總覽回應逾時後不會再次點擊銀行 handler", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    page.frame.click.mockResolvedValue(undefined);
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    const expectation =
+      expect(pending).rejects.toThrow("第一銀行存款總覽讀取失敗。");
+    await vi.advanceTimersByTimeAsync(25_000);
+    await expectation;
+
+    expect(page.frame.click).toHaveBeenCalledTimes(1);
+    expect(page.frame.click).toHaveBeenCalledWith("#btnOpen a");
+  });
+
+  it("交易頁 frame 導覽 replacement 後只在 ready 的 0101 frame 送出一次", async () => {
+    const page = makePage({ authenticated: true });
+    const overviewFrame = page.frame;
+    overviewFrame.setUrl(ACCOUNT_OVERVIEW_URL);
+    const queryFrame = makeFrame({ authenticated: true });
+    queryFrame.setUrl(TRANSACTION_QUERY_URL);
+    const notReadyQueryFrame = makeFrame({ authenticated: true });
+    notReadyQueryFrame.setUrl(TRANSACTION_QUERY_URL);
+    notReadyQueryFrame.evaluate.mockImplementation(async (fn: unknown) => {
+      if (String(fn).includes("document.readyState")) return false;
+      return undefined;
+    });
+    const rootFrame = makeFrame({ authenticated: true });
+    rootFrame.setUrl(FRAME_URL);
+    overviewFrame.goto.mockImplementation(async (url: string) => {
+      overviewFrame.setUrl(url);
+      if (url === TRANSACTION_QUERY_URL) {
+        overviewFrame.detached = true;
+        page.frames.mockImplementation(() => [
+          rootFrame,
+          notReadyQueryFrame,
+          queryFrame,
+        ]);
+        throw new Error("Navigating frame was detached");
+      }
+    });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+      TRANSACTION_RESULT_URL,
+      false,
+      { queryFrame },
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const result = await createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: -100, description: "測試交易" }),
+      ]),
+    );
+    expect(clickedTransactionSearch(overviewFrame)).toBe(false);
+    expect(clickedTransactionSearch(rootFrame)).toBe(false);
+    expect(clickedTransactionSearch(notReadyQueryFrame)).toBe(false);
+    expect(clickedTransactionSearch(queryFrame)).toBe(true);
+  });
+
+  it("找不到 ready 的 0101 replacement 時不會把 root frame 當查詢頁", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    const overviewFrame = page.frame;
+    overviewFrame.setUrl(ACCOUNT_OVERVIEW_URL);
+    const rootFrame = makeFrame({ authenticated: true });
+    rootFrame.setUrl(FRAME_URL);
+    const notReadyQueryFrame = makeFrame({ authenticated: true });
+    notReadyQueryFrame.setUrl(TRANSACTION_QUERY_URL);
+    notReadyQueryFrame.evaluate.mockImplementation(async (fn: unknown) => {
+      if (String(fn).includes("document.readyState")) return false;
+      return undefined;
+    });
+    overviewFrame.goto.mockImplementation(async (url: string) => {
+      overviewFrame.setUrl(url);
+      if (url === TRANSACTION_QUERY_URL) {
+        overviewFrame.detached = true;
+        page.frames.mockImplementation(() => [rootFrame, notReadyQueryFrame]);
+        throw new Error("Waiting failed: Frame detached");
+      }
+    });
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    const expectation = expect(pending).rejects.toThrow(
+      "第一銀行交易明細查詢頁面尚未載入完成。",
+    );
+    await vi.advanceTimersByTimeAsync(11_000);
+    await expectation;
+
+    expect(clickedTransactionSearch(overviewFrame)).toBe(false);
+    expect(clickedTransactionSearch(rootFrame)).toBe(false);
+    expect(clickedTransactionSearch(notReadyQueryFrame)).toBe(false);
+  });
+
+  it("本次 verifyDV 完成前不會採用既有的舊 010103 frame", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    const staleResultFrame = makeTransactionResultFrame();
+    const queryFrame = page.frame;
+    page.frames.mockImplementation(() => [queryFrame, staleResultFrame]);
+    detachQueryFrameAfterSearch(
+      page,
+      [staleResultFrame],
+      undefined,
+      TRANSACTION_RESULT_URL,
+      false,
+      { verification: "pending" },
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    const expectation =
+      expect(pending).rejects.toThrow("第一銀行交易明細前置驗證沒有完成。");
+    await vi.advanceTimersByTimeAsync(31_000);
+    await expectation;
+
+    expect(probedTransactionHeader(staleResultFrame)).toBe(false);
   });
 
   it("verifyDV loadingFailed 時回報前置驗證未完成", async () => {
