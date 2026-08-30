@@ -826,12 +826,12 @@ describe("第一銀行 browser session lifecycle", () => {
           String(fn).includes("firstbank-locale-chgLanguage"),
         ),
       ).toBe(true);
+      expect(page.waitForNavigation).not.toHaveBeenCalled();
       expect(
-        page.goto.mock.calls.some(
-          ([url]) =>
-            typeof url === "string" && url.includes("/NetBank/index103.html"),
+        page.goto.mock.calls.filter(([url]) =>
+          String(url).includes("/NetBank/index103.html"),
         ),
-      ).toBe(false);
+      ).toHaveLength(1);
       expect(logs.some((line) => line.includes("locale-chgLanguage"))).toBe(
         true,
       );

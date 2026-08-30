@@ -251,7 +251,7 @@ const englishBookParsed = parseFirstbankData(
   now,
 );
 
-assert.equal(englishParsed.bankAccounts.length, 2);
+assert.equal(englishParsed.bankAccounts.length, 1);
 assert.equal(
   englishParsed.bankAccounts.find(
     (account) => account.accountType === "savings",
@@ -281,7 +281,7 @@ assert.equal(
 );
 const englishSerialized = JSON.stringify(englishParsed);
 assert.doesNotMatch(englishSerialized, new RegExp(accountNumber));
-assert.match(englishSerialized, /8765/);
+assert.doesNotMatch(englishSerialized, /8765/);
 
 assert.deepEqual(
   parseFirstbankData({
