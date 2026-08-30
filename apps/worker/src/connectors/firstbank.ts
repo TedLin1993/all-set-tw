@@ -38,8 +38,9 @@ const FRAME_READ_RETRY_MS = 250;
 // 010103 may replace and detach its iframe in Browser Rendering. Arm a
 // document-body waiter before submit, intercept 010103 at Fetch response
 // stage, and keep listeners attached so a delayed or non-Document body
-// can still settle. The bank's search handler first runs a blocking verifyDV
-// XHR, so the result budget restarts once that verification settles.
+// can still settle. If the bank's search handler emits verifyDV, the result
+// budget restarts once that verification settles; missing verifyDV CDP
+// events must not block a new live result frame or already-captured HTML.
 const RESULT_CAPTURE_WAIT_MS = 10_000;
 const RESULT_CAPTURE_MAX_WAIT_MS = 30_000;
 const DEPOSIT_CAPTURE_WAIT_MS = 15_000;
@@ -1473,33 +1474,29 @@ async function waitForTransactionHistory(
     const remaining =
       transactionCaptureDeadline(capture, startedAt) - Date.now();
     if (remaining <= 0) break;
-    // Settle the search handler's own requests before touching the page: the
-    // result cannot exist in the same tick as the submit, and the first probe
-    // must not run before verifyDV is registered.
-    const arrived = await Promise.race([
+    // Give the queued search click a tick to emit CDP events before probing.
+    await Promise.race([
       capture.documentBody.then(() => true),
       delay(Math.min(FRAME_READ_RETRY_MS, remaining)).then(() => false),
     ]);
     const arrivedHistory = readyTransactionHistory(capture);
-    if (arrived && arrivedHistory) return arrivedHistory;
-    // The search handler blocks the query frame's renderer on verifyDV, so
-    // Runtime.evaluate probes cannot run and only queue behind it. Rely on the
-    // CDP and HTTP listeners until that verification settles.
-    if (
-      !capture.verificationRequested ||
-      !capture.verificationResponded ||
-      capture.verificationFailed ||
-      capture.verificationRequestIds.size > 0
-    ) {
-      continue;
-    }
+    if (arrivedHistory) return arrivedHistory;
+    // verifyDV, when observed and still in flight, blocks the query frame's
+    // renderer; Runtime.evaluate only queues behind it. Skip probes until it
+    // settles. If verifyDV was never observed, still serialize a newly
+    // appeared live result frame — local Chromium often never surfaces that
+    // CDP event.
+    if (isVerificationInFlight(capture)) continue;
     const resultFrame = await findLiveTransactionResultFrame(
       page,
       capture.existingResultFrames,
     );
     if (!resultFrame) continue;
     try {
-      const html = await serializeFirstbankTables(resultFrame);
+      const html = await serializeFirstbankTables(
+        resultFrame,
+        FRAME_PROBE_TIMEOUT_MS,
+      );
       logFirstbankStage("010103-live-frame", {
         path: urlPathname(resultFrame.url()),
         bodyLength: html.length,
@@ -1548,16 +1545,16 @@ async function waitForTransactionHistory(
 }
 
 function readyTransactionHistory(capture: TransactionResponseCapture) {
-  if (!capture.html) return undefined;
-  if (!capture.verificationRequested) return capture.html;
-  if (
-    capture.verificationResponded &&
-    !capture.verificationFailed &&
-    capture.verificationRequestIds.size === 0
-  ) {
-    return capture.html;
-  }
-  return undefined;
+  // Already-captured 010103 HTML is the fallback path. Do not wait for a
+  // verifyDV CDP event that local Chromium may never emit.
+  return capture.html;
+}
+
+function isVerificationInFlight(capture: TransactionResponseCapture) {
+  return (
+    capture.verificationRequested &&
+    (!capture.verificationResponded || capture.verificationRequestIds.size > 0)
+  );
 }
 
 function transactionCaptureDeadline(
@@ -2002,7 +1999,10 @@ async function findDepositTrigger(frame: Frame) {
   }
 }
 
-async function serializeFirstbankTables(frame: Frame): Promise<string> {
+async function serializeFirstbankTables(
+  frame: Frame,
+  timeoutMs = ACTION_TIMEOUT_MS,
+): Promise<string> {
   const serialized = await withActionTimeout(
     frame.evaluate(() => {
       const escape = (value: string) =>
@@ -2036,6 +2036,7 @@ async function serializeFirstbankTables(frame: Frame): Promise<string> {
         .filter(Boolean)
         .join("\n");
     }),
+    timeoutMs,
   ).catch(() => "");
 
   if (typeof serialized === "string" && serialized.trim()) {
