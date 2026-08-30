@@ -19,6 +19,8 @@ const ACCOUNT_OVERVIEW_URL = `${ORIGIN}/NetBank/1/acntReviewAll.html`;
 const HOME_URL = `${ORIGIN}/NetBank/1/01.jsp`;
 const DEPOSIT_AJAX_PATH = "/NetBank/ajax/acntReview1.html";
 const TRANSACTION_URL = `${ORIGIN}/NetBank/2/0101.html`;
+const CHANGE_LANGUAGE_PATH = "/NetBank/chgLanguage.html";
+const ACCEPT_LANGUAGE = "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7";
 const CAPTCHA_SELECTOR = 'img[src*="code_verify1.jpg"]';
 const CAPTCHA_DIGIT_MIN = 4;
 const CAPTCHA_DIGIT_MAX = 8;
@@ -283,6 +285,7 @@ export function createFirstbankConnector(
         }
         authenticated = true;
 
+        await ensureTraditionalChineseUi(page);
         const payloads = await collectFirstbankPayloads(page);
         const data = parseFirstbankData(payloads);
         const dataWithOptionalRecords = data as typeof data & {
@@ -432,6 +435,7 @@ async function openLoginAndCaptureCaptcha(
   config: FirstbankBrowserConfig,
 ): Promise<CaptchaImage> {
   await gotoAllowingTimeout(page, LOGIN_URL);
+  await switchLoginPageToTraditionalChinese(page);
   await openLoginAndFill(page, config);
 
   try {
@@ -1835,10 +1839,15 @@ async function hasTransactionResultHeader(
         frame.evaluate(() => {
           const rows = Array.from(document.querySelectorAll("tr"));
           return rows.some((row) => {
-            const text = (row.innerText || "").replace(/\s+/g, " ");
-            return (
-              /交易日期|交易日/.test(text) && /支出|存入|交易金額/.test(text)
-            );
+            const text = (row.innerText || "").replace(/\s+/g, "");
+            const hasDate =
+              /交易日期|交易日/.test(text) ||
+              /transactiondate/i.test(text) ||
+              /date/i.test(text);
+            const hasAmount =
+              /支出|存入|交易金額/.test(text) ||
+              /withdrawal|deposit|debit|credit/i.test(text);
+            return Boolean(hasDate && hasAmount);
           });
         }),
         timeoutMs,
@@ -2299,7 +2308,123 @@ async function closeFirstbankBrowser(browser: Browser) {
 async function configurePage(page: Page) {
   await page.setViewport({ width: 1280, height: 800 });
   await page.setUserAgent(USER_AGENT);
+  await page.setExtraHTTPHeaders({
+    "Accept-Language": ACCEPT_LANGUAGE,
+  });
   page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+}
+
+function localeEvaluateTargets(page: Page): Array<Page | Frame> {
+  const frames = liveFrames(page);
+  return frames.length > 0 ? frames : [page];
+}
+
+/**
+ * 實際英文登入頁（index103.html）的語系控制為
+ * `<a href="#" onclick="ajaxSetLocale('zh_TW');">中文</a>`。
+ * `ajaxSetLocale` 定義於 `/NetBank/include/common_js.jsp`，會 POST
+ * `/NetBank/chgLanguage.html`（`setLocale=`），成功後 reload `index103.html`。
+ * 未登入的 frame.html / 01.jsp 沒有語系選單；銀行 FAQ 說明畫面語言依瀏覽器
+ * Accept-Language（zh-TW）。登入後若找不到該 onclick，不杜撰 selector。
+ */
+async function hasProvenChineseLocaleLink(target: Page | Frame) {
+  try {
+    return Boolean(
+      await withActionTimeout(
+        target.evaluate(() =>
+          Array.from(document.querySelectorAll("a[onclick]")).some((element) =>
+            (element.getAttribute("onclick") || "").includes(
+              "ajaxSetLocale('zh_TW')",
+            ),
+          ),
+        ),
+      ),
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function clickProvenChineseLocaleLink(target: Page | Frame) {
+  try {
+    return Boolean(
+      await withActionTimeout(
+        target.evaluate(() => {
+          const link = Array.from(
+            document.querySelectorAll<HTMLAnchorElement>("a[onclick]"),
+          ).find((element) =>
+            (element.getAttribute("onclick") || "").includes(
+              "ajaxSetLocale('zh_TW')",
+            ),
+          );
+          if (!link) return false;
+          link.click();
+          return true;
+        }),
+      ),
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function postChangeLanguageWithoutNavigation(target: Page | Frame) {
+  try {
+    const result = await withActionTimeout(
+      target.evaluate(async () => {
+        // firstbank-locale-chgLanguage: same path/body as ajaxSetLocale('zh_TW').
+        const response = await fetch("/NetBank/chgLanguage.html", {
+          method: "POST",
+          credentials: "same-origin",
+          redirect: "manual",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: "setLocale=zh_TW",
+        });
+        return { status: response.status };
+      }),
+    );
+    return isRecord(result) && typeof result.status === "number"
+      ? result.status
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function switchLoginPageToTraditionalChinese(page: Page) {
+  for (const target of localeEvaluateTargets(page)) {
+    if (!(await clickProvenChineseLocaleLink(target))) continue;
+    logFirstbankStage("locale-zh-link-clicked", {
+      path: urlPathname(LOGIN_URL),
+      detail: "ajaxSetLocale(zh_TW)",
+    });
+    await page
+      .waitForNavigation({
+        waitUntil: "domcontentloaded",
+        timeout: NAVIGATION_TIMEOUT_MS,
+      })
+      .catch(() => undefined);
+    return;
+  }
+}
+
+async function ensureTraditionalChineseUi(page: Page) {
+  for (const target of localeEvaluateTargets(page)) {
+    if (!(await hasProvenChineseLocaleLink(target))) continue;
+    const status = await postChangeLanguageWithoutNavigation(target);
+    logFirstbankStage("locale-chgLanguage", {
+      path: CHANGE_LANGUAGE_PATH,
+      status,
+      detail: "setLocale=zh_TW",
+    });
+    return;
+  }
+  logFirstbankStage("locale-control-absent", {
+    path: urlPathname(HOME_URL),
+    detail: "no ajaxSetLocale(zh_TW) on frameset/home",
+  });
 }
 
 async function fillInput(page: Page, selector: string, value: string) {
@@ -2561,8 +2686,32 @@ function isFramesetParentNoise(message: string) {
   return /resizeFrame is not a function/i.test(message);
 }
 
+function compactHtmlText(html: string) {
+  return html.replace(/<[^>]+>/g, "").replace(/\s+/g, "");
+}
+
+function hasTransactionDateSignal(text: string) {
+  return (
+    /交易日期|交易日/.test(text) ||
+    /transactiondate/i.test(text) ||
+    /date/i.test(text)
+  );
+}
+
+function hasTransactionAmountSignal(text: string) {
+  return (
+    /支出|存入|交易金額/.test(text) ||
+    /withdrawal|deposit|debit|credit/i.test(text)
+  );
+}
+
+function hasTransactionTableSignals(html: string) {
+  const text = compactHtmlText(html);
+  return hasTransactionDateSignal(text) && hasTransactionAmountSignal(text);
+}
+
 function hasTransactionDateHeader(html: string) {
-  return /交易日期|交易日/.test(html);
+  return hasTransactionDateSignal(compactHtmlText(html));
 }
 
 function logFirstbankStage(
@@ -2655,7 +2804,7 @@ function assertSerializedTransactionTables(html: string) {
       "第一銀行交易明細資料量超過單次同步上限。",
     );
   }
-  if (!/交易日期|交易日/.test(html) || !/支出|存入|交易金額/.test(html)) {
+  if (!hasTransactionTableSignals(html)) {
     throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
   }
   return html;

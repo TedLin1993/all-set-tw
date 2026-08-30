@@ -37,10 +37,29 @@ const depositTables = `
   </table>
 `;
 
+const englishDepositTables = `
+  <table>
+    <tr class="ResultHeader">
+      <td>Account and Nickname</td><td>Currency</td><td>Ledger Balance</td>
+      <td>Available Balance</td>
+    </tr>
+    <tr class="ResultContent">
+      <td>123456789012</td><td>NTD</td><td>100,000</td><td>90,000</td>
+    </tr>
+  </table>
+`;
+
 const transactionTables = `
   <table>
     <tr class="ResultHeader"><td>交易日期</td><td>支出</td><td>摘要</td></tr>
     <tr class="ResultContent"><td>2026/08/20</td><td>100</td><td>測試交易</td></tr>
+  </table>
+`;
+
+const englishTransactionTables = `
+  <table>
+    <tr class="ResultHeader"><td>Date</td><td>Withdrawal</td><td>Summary</td></tr>
+    <tr class="ResultContent"><td>2026/08/20</td><td>100</td><td>Test txn</td></tr>
   </table>
 `;
 
@@ -214,6 +233,7 @@ function makePage(options?: {
     }),
     setCookie: vi.fn().mockResolvedValue(undefined),
     setDefaultNavigationTimeout: vi.fn(),
+    setExtraHTTPHeaders: vi.fn().mockResolvedValue(undefined),
     setUserAgent: vi.fn().mockResolvedValue(undefined),
     setViewport: vi.fn().mockResolvedValue(undefined),
     mouse: {
@@ -751,9 +771,128 @@ describe("第一銀行 browser session lifecycle", () => {
     });
 
     expect(page.setCookie).toHaveBeenCalledOnce();
+    expect(page.setExtraHTTPHeaders).toHaveBeenCalledWith({
+      "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+    });
     expect(recognize).not.toHaveBeenCalled();
     expect(result.bankAccounts).toHaveLength(1);
     expect(browser.close).toHaveBeenCalledOnce();
+  });
+
+  it("登入後若頁面有 ajaxSetLocale(zh_TW) 則 POST chgLanguage 且不導回登入頁", async () => {
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((message) => {
+      logs.push(String(message));
+    });
+    const page = makePage({ authenticated: true });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+    );
+    const previousEvaluate = page.frame.evaluate;
+    page.frame.evaluate = vi
+      .fn()
+      .mockImplementation(async (fn: unknown, arg?: unknown) => {
+        const source = String(fn);
+        if (
+          source.includes("ajaxSetLocale('zh_TW')") &&
+          !source.includes(".click()")
+        ) {
+          return true;
+        }
+        if (source.includes("firstbank-locale-chgLanguage")) {
+          return { status: 302 };
+        }
+        return previousEvaluate(fn, arg);
+      });
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    try {
+      await createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+        ...credentials,
+        sessionCookies: JSON.stringify([
+          {
+            name: "SESSION",
+            value: "encrypted-at-rest",
+            domain: "ibank.firstbank.com.tw",
+          },
+        ]),
+      });
+
+      expect(
+        page.frame.evaluate.mock.calls.some(([fn]) =>
+          String(fn).includes("firstbank-locale-chgLanguage"),
+        ),
+      ).toBe(true);
+      expect(
+        page.goto.mock.calls.some(
+          ([url]) =>
+            typeof url === "string" && url.includes("/NetBank/index103.html"),
+        ),
+      ).toBe(false);
+      expect(logs.some((line) => line.includes("locale-chgLanguage"))).toBe(
+        true,
+      );
+      expect(logs.some((line) => line.includes("locale-control-absent"))).toBe(
+        false,
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("英文存款總覽與 010103 表頭仍可解析", async () => {
+    const page = makePage({ authenticated: true });
+    page.frame.click.mockImplementation(async (selector: string) => {
+      if (selector === "#btnOpen a") {
+        page.emitResponse(
+          "https://ibank.firstbank.com.tw/NetBank/ajax/acntReview1.html",
+          englishDepositTables,
+        );
+      }
+    });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeTransactionResultFrame(englishTransactionTables)],
+      englishTransactionTables,
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const result = await createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+
+    expect(result.bankAccounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceId: expect.stringMatching(/^bank:firstbank:/),
+        }),
+      ]),
+    );
+    expect(result.bankBalanceSnapshots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          balance: 100000,
+          availableBalance: 90000,
+          currency: "TWD",
+        }),
+      ]),
+    );
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: -100, description: "Test txn" }),
+      ]),
+    );
   });
 
   it("limits automatic OCR to three attempts and rejects malformed answers", async () => {

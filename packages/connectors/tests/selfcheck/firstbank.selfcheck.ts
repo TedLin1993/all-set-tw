@@ -198,6 +198,91 @@ assert.doesNotMatch(serialized, new RegExp(accountNumber));
 assert.doesNotMatch(serialized, /synthetic-password/);
 assert.match(serialized, /8765/);
 
+const englishDepositOverviewHtml = `
+  <table>
+    <tr class="ResultHeader">
+      <td>Branch</td><td>Account<br>Type</td><td>Account<br>and Nickname</td>
+      <td>Currency</td><td>Ledger<br>Balance</td><td>Available<br>Balance</td><td>Other</td>
+    </tr>
+    <tr class="ResultContent">
+      <td>Synthetic Branch</td><td>iLEO Account</td><td>${accountNumber}<br>Daily deposit</td>
+      <td>New Taiwan Dollar</td><td>12,345</td><td>11,000</td><td>-</td>
+    </tr>
+    <tr class="ResultContent">
+      <td>Synthetic Branch</td><td>VISA Debit Card</td><td>4321********8765</td>
+      <td>-</td><td>-</td><td>-</td><td>-</td>
+    </tr>
+  </table>
+`;
+
+const englishBookBalanceOverviewHtml = englishDepositOverviewHtml
+  .replace("Account<br>and Nickname", "Account / nickname")
+  .replace("Ledger<br>Balance", "Book<br>Balance")
+  .replace("Available<br>Balance", "Available")
+  .replace("New Taiwan Dollar", "NTD");
+
+const englishTransactionHistoryHtml = `
+  <div>Account No.: ${accountNumber}</div>
+  <table>
+    <tr class="ResultHeader">
+      <td>Date</td><td>Type</td><td>Withdrawal</td>
+      <td>Deposit</td><td>Balance</td><td>Status</td><td>Memo</td><td>Summary</td>
+    </tr>
+    <tr class="ResultContent">
+      <td>2026/08/20 09:10:11</td><td>Payment</td><td>345</td><td>0</td>
+      <td>12,000</td><td>Normal</td><td>Synthetic shop</td><td>Shopping</td>
+    </tr>
+    <tr class="ResultContent">
+      <td>2026/08/21 10:20:30</td><td>Incoming transfer</td><td>0</td><td>2,000</td>
+      <td>14,000</td><td>Processing</td><td>Synthetic credit</td><td>Payroll</td>
+    </tr>
+  </table>
+`;
+
+const englishParsed = parseFirstbankData(
+  {
+    depositOverviewHtml: englishDepositOverviewHtml,
+    transactionHistoryHtml: englishTransactionHistoryHtml,
+  },
+  now,
+);
+const englishBookParsed = parseFirstbankData(
+  { depositOverviewHtml: englishBookBalanceOverviewHtml },
+  now,
+);
+
+assert.equal(englishParsed.bankAccounts.length, 2);
+assert.equal(
+  englishParsed.bankAccounts.find(
+    (account) => account.accountType === "savings",
+  )?.accountName,
+  "Daily deposit",
+);
+assert.equal(englishParsed.bankBalanceSnapshots[0]?.balance, 12345);
+assert.equal(englishParsed.bankBalanceSnapshots[0]?.availableBalance, 11000);
+assert.equal(englishParsed.bankBalanceSnapshots[0]?.currency, "TWD");
+assert.equal(englishBookParsed.bankBalanceSnapshots[0]?.balance, 12345);
+assert.equal(
+  englishBookParsed.bankBalanceSnapshots[0]?.availableBalance,
+  11000,
+);
+assert.equal(englishParsed.bankTransactions.length, 2);
+assert.equal(
+  englishParsed.bankTransactions.find(
+    (transaction) => transaction.description === "Shopping",
+  )?.amount,
+  -345,
+);
+assert.equal(
+  englishParsed.bankTransactions.find(
+    (transaction) => transaction.description === "Payroll",
+  )?.amount,
+  2000,
+);
+const englishSerialized = JSON.stringify(englishParsed);
+assert.doesNotMatch(englishSerialized, new RegExp(accountNumber));
+assert.match(englishSerialized, /8765/);
+
 assert.deepEqual(
   parseFirstbankData({
     depositOverviewHtml: "<p>查無資料</p>",
