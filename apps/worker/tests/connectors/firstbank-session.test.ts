@@ -75,6 +75,94 @@ const TRANSACTION_RESULT_URL =
 const TRANSACTION_QUERY_URL =
   "https://ibank.firstbank.com.tw/NetBank/2/0101.html";
 const VERIFY_DV_URL = "https://ibank.firstbank.com.tw/NetBank/2/verifyDV.html";
+const DEPOSIT_AJAX_URL =
+  "https://ibank.firstbank.com.tw/NetBank/ajax/acntReview1.html";
+const HOME_URL = "https://ibank.firstbank.com.tw/NetBank/1/01.jsp";
+const CARD_BRIDGE_URL =
+  "https://ibank.firstbank.com.tw/NetBank/ajax/frameFirstCard.html";
+const CARD_BILL_URL =
+  "https://ccard.firstbank.com.tw/cmsweb/Detail/sendCMSQRY0014";
+const CARD_PAYMENT_URL =
+  "https://ccard.firstbank.com.tw/cmsweb/Detail/sendCMSQRY0006";
+const CARD_UNBILLED_URL =
+  "https://ccard.firstbank.com.tw/cmsweb/Detail/sendCMSQRY0008";
+
+const emptyCardPayloads = {
+  F1632: {
+    url: CARD_BILL_URL,
+    payload: {
+      HEAD: { MSGID: "CMSQRY0014", RETURNCODE: "0000" },
+      CONTENT: { BillRecords: [] },
+    },
+  },
+  F1633: {
+    url: CARD_PAYMENT_URL,
+    payload: {
+      HEAD: { MSGID: "CMSQRY0006", RETURNCODE: "0000" },
+      CONTENT: { Records: [] },
+    },
+  },
+  F1634: {
+    url: CARD_UNBILLED_URL,
+    payload: {
+      HEAD: { MSGID: "CMSQRY0008", RETURNCODE: "0000" },
+      CONTENT: { Records: [] },
+    },
+  },
+} as const;
+
+const cardBillPayload = {
+  HEAD: { MSGID: "CMSQRY0014", RETURNCODE: "0000" },
+  CONTENT: {
+    BillRecords: [
+      {
+        BillDate: "2026/08/03",
+        PayEndDate: "2026/08/18",
+        TotalAmount: "1,234",
+        MinAmount: "500",
+        CreditAmount: "50,000",
+        Records: [
+          {
+            CardNo: "************1234",
+            TransDate: "2026/07/20",
+            AcctDate: "2026/07/22",
+            TransDetail: "測試信用卡消費",
+            AcctAmount: "1,234",
+          },
+        ],
+      },
+    ],
+  },
+};
+
+const recentPaymentPayloads = [
+  {
+    HEAD: { MSGID: "CMSQRY0006", RETURNCODE: "0000" },
+    CONTENT: {
+      Records: [
+        {
+          PayDate: "20260818",
+          Amount: "500",
+          Currency: "TWD",
+          Memo: "測試最近一筆繳款",
+        },
+      ],
+    },
+  },
+  {
+    HEAD: { MSGID: "CMSQRY0006", RETURNCODE: "0000" },
+    CONTENT: {
+      Records: [
+        {
+          PayDate: "20260819",
+          Amount: "25",
+          Currency: "USD",
+          Memo: "測試未出帳繳款",
+        },
+      ],
+    },
+  },
+] as const;
 
 function base64Text(value: string) {
   const bytes = new TextEncoder().encode(value);
@@ -417,7 +505,7 @@ function directlySubmitsForm(frame: ReturnType<typeof makeFrame>) {
 
 function makeTransactionResultFrame(html = transactionTables) {
   const frame = makeFrame({ authenticated: true });
-  frame.url.mockReturnValue(TRANSACTION_RESULT_URL);
+  frame.setUrl(TRANSACTION_RESULT_URL);
   frame.evaluate.mockImplementation(async (fn: unknown) => {
     const source = String(fn);
     if (source.includes("document.readyState")) return true;
@@ -432,9 +520,10 @@ function makeTransactionResultFrame(html = transactionTables) {
 
 function makeEmptyLiveFrame() {
   const frame = makeFrame({ authenticated: true });
-  frame.url.mockReturnValue(TRANSACTION_QUERY_URL);
+  frame.setUrl(TRANSACTION_QUERY_URL);
   frame.evaluate.mockImplementation(async (fn: unknown) => {
     const source = String(fn);
+    if (source.includes("document.readyState")) return true;
     if (source.includes("#btnOpen") || source.includes("#tFunc")) return true;
     if (source.includes("交易日期")) return false;
     if (source.includes('querySelectorAll("table")')) return "";
@@ -515,8 +604,11 @@ function detachQueryFrameAfterSearch(
     emitResultRequest?: boolean;
     replaceDelayMs?: number;
     replaceWith?: Array<ReturnType<typeof makeFrame>>;
+    keepQueryFrameLive?: boolean;
+    staleQueryUrl?: string;
   },
 ) {
+  installCardFlow(page, [...nextFrames, ...(timing?.replaceWith ?? [])]);
   const queryFrame = timing?.queryFrame ?? page.frame;
   const previousEvaluate = queryFrame.evaluate;
   queryFrame.evaluate = vi
@@ -547,7 +639,10 @@ function detachQueryFrameAfterSearch(
             if (verification !== "none") {
               page.emitCdpResponse(VERIFY_DV_URL, "verify-dv");
             }
-            queryFrame.detached = true;
+            queryFrame.detached = !timing?.keepQueryFrameLive;
+            if (timing?.staleQueryUrl) {
+              queryFrame.setUrl(timing.staleQueryUrl);
+            }
             page.frames.mockImplementation(() => nextFrames);
             if (timing?.emitResultRequest) {
               page.emitCdpRequest(
@@ -614,6 +709,48 @@ function detachQueryFrameAfterSearch(
       }
       return previousEvaluate(fn, arg);
     });
+}
+
+function installCardFlow(
+  page: ReturnType<typeof makePage>,
+  frames: Array<ReturnType<typeof makeFrame>>,
+) {
+  for (const frame of new Set(frames)) {
+    const previousEvaluate = frame.evaluate;
+    frame.evaluate = vi
+      .fn()
+      .mockImplementation(async (fn: unknown, arg?: unknown) => {
+        const source = String(fn);
+        if (isCardFunctionProbe(source)) {
+          return ["F1632", "F1633", "F1634"];
+        }
+        if (
+          source.includes("cardDataFunc") &&
+          source.includes("link.closest")
+        ) {
+          return true;
+        }
+        return previousEvaluate(fn, arg);
+      });
+    const previousClick = frame.click;
+    frame.click = vi.fn().mockImplementation(async (selector: string) => {
+      const match = selector.match(/a\[data-func="(F163[234])"\]/);
+      if (!match) return previousClick(selector);
+      const dataFunc = match[1] as keyof typeof emptyCardPayloads;
+      const response = emptyCardPayloads[dataFunc];
+      frame.setUrl(`${CARD_BRIDGE_URL}?func=${dataFunc.slice(-1)}`);
+      page.emitResponse(response.url, response.payload);
+    });
+  }
+}
+
+function isCardFunctionProbe(source: string) {
+  return (
+    source.includes('"F1632"') &&
+    source.includes('"F1633"') &&
+    source.includes('"F1634"') &&
+    source.includes("querySelector")
+  );
 }
 
 beforeEach(() => {
@@ -959,6 +1096,210 @@ describe("第一銀行 browser session lifecycle", () => {
   });
 });
 
+describe("第一銀行信用卡 Browser Run 擷取", () => {
+  it("總覽頁找不到 Recorder 的三個信用卡入口時不再誤報同步成功", async () => {
+    vi.useFakeTimers();
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((message) => {
+      logs.push(String(message));
+    });
+    const page = makePage({ authenticated: true });
+    const cardFrame = makeEmptyLiveFrame();
+    detachQueryFrameAfterSearch(page, [cardFrame], transactionTables);
+    const previousEvaluate = cardFrame.evaluate;
+    cardFrame.evaluate = vi
+      .fn()
+      .mockImplementation(async (fn: unknown, arg?: unknown) => {
+        if (isCardFunctionProbe(String(fn))) return [];
+        return previousEvaluate(fn, arg);
+      });
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    try {
+      const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+        ...credentials,
+        sessionCookies: JSON.stringify([
+          {
+            name: "SESSION",
+            value: "encrypted-at-rest",
+            domain: "ibank.firstbank.com.tw",
+          },
+        ]),
+      });
+      const expectation =
+        expect(pending).rejects.toThrow("第一銀行信用卡功能入口讀取失敗。");
+      await vi.advanceTimersByTimeAsync(12_000);
+      await expectation;
+
+      expect(
+        cardFrame.click.mock.calls.some(([selector]) =>
+          String(selector).includes("data-func"),
+        ),
+      ).toBe(false);
+      expect(logs.join("\n")).toContain(
+        "card-function-timeout path=/NetBank/1/01.jsp detail=F1632,F1633,F1634",
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("排除主 frameset 並等待超過舊 10 秒門檻的帳單回應", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    const mainFrame = makeFrame({ authenticated: true });
+    mainFrame.setUrl(FRAME_URL);
+    const staleOverviewFrame = page.frame;
+    const cardFrame = makeTransactionResultFrame();
+    Object.assign(mainFrame, {
+      childFrames: vi.fn().mockReturnValue([staleOverviewFrame, cardFrame]),
+    });
+    Object.assign(page, { mainFrame: vi.fn().mockReturnValue(mainFrame) });
+    detachQueryFrameAfterSearch(
+      page,
+      [mainFrame, staleOverviewFrame, cardFrame],
+      transactionTables,
+      TRANSACTION_RESULT_URL,
+      false,
+      {
+        keepQueryFrameLive: true,
+        staleQueryUrl: ACCOUNT_OVERVIEW_URL,
+      },
+    );
+    const previousGoto = cardFrame.goto;
+    const navigatedFunctions: string[] = [];
+    let activeNavigationTimer: ReturnType<typeof setTimeout> | undefined;
+    let activeResponseTimer: ReturnType<typeof setTimeout> | undefined;
+    cardFrame.goto = vi.fn().mockImplementation(async (url: string) => {
+      if (url === HOME_URL && activeNavigationTimer !== undefined) {
+        clearTimeout(activeNavigationTimer);
+        activeNavigationTimer = undefined;
+      }
+      if (url === HOME_URL && activeResponseTimer !== undefined) {
+        clearTimeout(activeResponseTimer);
+        activeResponseTimer = undefined;
+      }
+      await previousGoto(url);
+    });
+    cardFrame.click = vi.fn().mockImplementation(async (selector: string) => {
+      const match = selector.match(/a\[data-func="(F163[234])"\]/);
+      if (!match) return;
+      const dataFunc = match[1] as keyof typeof emptyCardPayloads;
+      const response = emptyCardPayloads[dataFunc];
+      const payload = dataFunc === "F1632" ? cardBillPayload : response.payload;
+      activeNavigationTimer = setTimeout(() => {
+        activeNavigationTimer = undefined;
+        navigatedFunctions.push(dataFunc);
+        cardFrame.setUrl(`${CARD_BRIDGE_URL}?func=${dataFunc.slice(-1)}`);
+      }, 0);
+      activeResponseTimer = setTimeout(
+        () => {
+          activeResponseTimer = undefined;
+          if (dataFunc === "F1633") {
+            for (const recentPayment of recentPaymentPayloads) {
+              page.emitResponse(response.url, recentPayment);
+            }
+          } else {
+            page.emitResponse(response.url, payload);
+          }
+        },
+        dataFunc === "F1632" ? 12_000 : 250,
+      );
+    });
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    const result = await pending;
+
+    expect(result.creditCardBills).toEqual([
+      expect.objectContaining({ statementAmount: 1234 }),
+    ]);
+    expect(result.bankAccounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ accountType: "credit" }),
+      ]),
+    );
+    expect(result.bankTransactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ description: "測試最近一筆繳款" }),
+        expect.objectContaining({ description: "測試未出帳繳款" }),
+      ]),
+    );
+    expect(mainFrame.goto).not.toHaveBeenCalledWith(
+      HOME_URL,
+      expect.anything(),
+    );
+    expect(staleOverviewFrame.goto).not.toHaveBeenCalledWith(
+      HOME_URL,
+      expect.anything(),
+    );
+    expect(navigatedFunctions).toEqual(["F1632", "F1633", "F1634"]);
+    expect(cardFrame.click).toHaveBeenCalledWith('a[data-func="F1632"]');
+    expect(cardFrame.click).toHaveBeenCalledWith('a[data-func="F1633"]');
+    expect(cardFrame.click).toHaveBeenCalledWith('a[data-func="F1634"]');
+  });
+
+  it("信用卡入口已點擊但任一預期 API 未回應時同步失敗", async () => {
+    vi.useFakeTimers();
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((message) => {
+      logs.push(String(message));
+    });
+    const page = makePage({ authenticated: true });
+    const cardFrame = makeEmptyLiveFrame();
+    detachQueryFrameAfterSearch(page, [cardFrame], transactionTables);
+    cardFrame.click = vi.fn().mockImplementation(async (selector: string) => {
+      const match = selector.match(/a\[data-func="(F163[234])"\]/);
+      if (!match) return;
+      const dataFunc = match[1] as keyof typeof emptyCardPayloads;
+      cardFrame.setUrl(`${CARD_BRIDGE_URL}?func=${dataFunc.slice(-1)}`);
+      if (dataFunc === "F1632") {
+        page.emitResponse(CARD_BILL_URL, cardBillPayload);
+      }
+    });
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    try {
+      const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+        ...credentials,
+        sessionCookies: JSON.stringify([
+          {
+            name: "SESSION",
+            value: "encrypted-at-rest",
+            domain: "ibank.firstbank.com.tw",
+          },
+        ]),
+      });
+      const expectation =
+        expect(pending).rejects.toThrow("第一銀行信用卡資料讀取失敗。");
+      await vi.advanceTimersByTimeAsync(35_000);
+      await expectation;
+
+      expect(cardFrame.click).toHaveBeenCalledWith('a[data-func="F1632"]');
+      expect(cardFrame.click).toHaveBeenCalledWith('a[data-func="F1633"]');
+      expect(cardFrame.click).not.toHaveBeenCalledWith('a[data-func="F1634"]');
+      expect(logs.join("\n")).toContain(
+        "card-query-timeout path=/NetBank/ajax/frameFirstCard.html elapsedMs=31000 detail=recentPayments",
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+});
+
 describe("第一銀行交易明細 010103 擷取", () => {
   it("存款總覽依 Recorder 點擊銀行原生 handler 且不注入 fetch", async () => {
     const logs: string[] = [];
@@ -1045,7 +1386,15 @@ describe("第一銀行交易明細 010103 擷取", () => {
           },
         ]),
       });
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(page.frame.click).toHaveBeenCalledTimes(1);
+      expect(fetchedDepositAjax(page.frame)).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(page.frame.click).toHaveBeenCalledTimes(1);
+      expect(fetchedDepositAjax(page.frame)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(5_000);
       const result = await pending;
 
       expect(result.bankAccounts).toHaveLength(1);
@@ -1066,6 +1415,86 @@ describe("第一銀行交易明細 010103 擷取", () => {
     } finally {
       logSpy.mockRestore();
     }
+  });
+
+  it("CDP 已觀測到存款 POST 時等待原回應而不發 fallback POST", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    page.frame.click.mockImplementation(async (selector: string) => {
+      if (selector !== "#btnOpen a") return;
+      page.emitCdpRequest(DEPOSIT_AJAX_URL, "deposit-request");
+      setTimeout(() => {
+        page.emitResponse(DEPOSIT_AJAX_URL, depositTables);
+      }, 3_000);
+    });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(page.frame.click).toHaveBeenCalledTimes(1);
+    expect(fetchedDepositAjax(page.frame)).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(3_500);
+    const result = await pending;
+    expect(result.bankAccounts).toHaveLength(1);
+    expect(page.frame.click).toHaveBeenCalledTimes(1);
+    expect(fetchedDepositAjax(page.frame)).toBe(false);
+  });
+
+  it("CDP 存款 POST 沒有回應時最多等待五秒才發 fallback POST", async () => {
+    vi.useFakeTimers();
+    const page = makePage({ authenticated: true });
+    page.frame.click.mockImplementation(async (selector: string) => {
+      if (selector === "#btnOpen a") {
+        page.emitCdpRequest(DEPOSIT_AJAX_URL, "deposit-request");
+      }
+    });
+    detachQueryFrameAfterSearch(
+      page,
+      [makeEmptyLiveFrame()],
+      transactionTables,
+    );
+    const browser = makeBrowser(page);
+    puppeteerMock.launch.mockResolvedValue(browser);
+
+    const pending = createFirstbankConnector({} as Fetcher, vi.fn()).sync({
+      ...credentials,
+      sessionCookies: JSON.stringify([
+        {
+          name: "SESSION",
+          value: "encrypted-at-rest",
+          domain: "ibank.firstbank.com.tw",
+        },
+      ]),
+    });
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(page.frame.click).toHaveBeenCalledTimes(1);
+    expect(fetchedDepositAjax(page.frame)).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(page.frame.click).toHaveBeenCalledTimes(1);
+    expect(fetchedDepositAjax(page.frame)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    const result = await pending;
+    expect(result.bankAccounts).toHaveLength(1);
   });
 
   it("parent.resizeFrame 不是函式時不當成失敗也不當成 0101 錯誤", async () => {
@@ -1344,6 +1773,7 @@ describe("第一銀行交易明細 010103 擷取", () => {
       false,
       { verification: "none", emitResultRequest: true },
     );
+    installCardFlow(page, [liveFrame]);
     const browser = makeBrowser(page);
     puppeteerMock.launch.mockResolvedValue(browser);
 
@@ -2070,9 +2500,7 @@ describe("第一銀行交易明細 010103 擷取", () => {
   it("結果 frame 帶 jsessionid 時仍序列化交易表", async () => {
     const page = makePage({ authenticated: true });
     const resultFrame = makeTransactionResultFrame();
-    resultFrame.url.mockReturnValue(
-      `${TRANSACTION_RESULT_URL};jsessionid=synthetic`,
-    );
+    resultFrame.setUrl(`${TRANSACTION_RESULT_URL};jsessionid=synthetic`);
     detachQueryFrameAfterSearch(page, [resultFrame]);
     const browser = makeBrowser(page);
     puppeteerMock.launch.mockResolvedValue(browser);

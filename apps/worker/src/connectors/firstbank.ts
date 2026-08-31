@@ -45,9 +45,19 @@ const FRAME_READ_RETRY_MS = 250;
 // events must not block a new live result frame or already-captured HTML.
 const RESULT_CAPTURE_WAIT_MS = 10_000;
 const RESULT_CAPTURE_MAX_WAIT_MS = 30_000;
-const DEPOSIT_CAPTURE_WAIT_MS = 15_000;
+// Once CDP confirms the native read-only POST was dispatched, allow a wider
+// response window without retaining the old 15-second idle penalty.
+const DEPOSIT_CAPTURE_WAIT_MS = 5_000;
+// Recorder HAR: acntReview1 completes in about 0.85s. If neither CDP sees the
+// native POST nor the page receives its response within this grace window,
+// stop idling and use the already-tested same-origin fallback fetch.
+const DEPOSIT_REQUEST_GRACE_MS = 2_000;
 const FRAME_PROBE_TIMEOUT_MS = 1_000;
-const CARD_RESPONSE_TIMEOUT_MS = 10_000;
+// The recorder's first billing query takes a little over 11 seconds from the
+// First Bank bridge page to CMSQRY0014. Browser Rendering is slower than the
+// local recorder, so keep enough headroom and fail closed if a dispatched card
+// query never produces its expected response.
+const CARD_RESPONSE_TIMEOUT_MS = 30_000;
 const SESSION_RELEASE_TIMEOUT_MS = 2_000;
 const SESSION_RELEASE_POLL_MS = 100;
 const MAX_SERIALIZED_TABLE_BYTES = 512 * 1024;
@@ -77,8 +87,11 @@ type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>>;
 type DepositResponseCapture = {
   html?: string;
   observed: boolean;
+  requested: boolean;
   status?: number;
   pending: Set<Promise<void>>;
+  requestObserved: Promise<void>;
+  settleRequestObserved: () => void;
   responseBody: Promise<string>;
   settleResponseBody: (html: string) => void;
 };
@@ -878,6 +891,13 @@ async function collectFirstbankPayloads(
   const onTransactionRequest = (event: NetworkRequestWillBeSentEvent) => {
     const url = event.request?.url ?? "";
     if (!isFirstbankUrl(url)) return;
+    if (isDepositOverviewResponse(url)) {
+      depositResponse.settleRequestObserved();
+      logFirstbankStage("deposit-cdp-request", {
+        path: DEPOSIT_AJAX_PATH,
+        resourceType: event.type,
+      });
+    }
     const path = urlPathname(url);
     if (isCapturableResourceType(event.type)) {
       transactionResponse.inFlight.set(event.requestId, {
@@ -1017,6 +1037,11 @@ async function collectFirstbankPayloads(
     }
     const key = cardResponseKey(response.url());
     if (!key) return;
+    logFirstbankStage("card-http-response", {
+      path: urlPathname(response.url()),
+      status: httpStatus(response),
+      detail: key,
+    });
     const task = captureCardResponse(response, key, captured);
     responseTasks.push(task);
     void task.catch(() => undefined);
@@ -1086,11 +1111,8 @@ async function collectFirstbankPayloads(
       queryFrame,
       transactionResponse,
     );
-    const cardFrame = pickLiveFrame(page, depositFrame) ?? queryFrame;
-
-    await collectCardPayload(cardFrame, "F1632", 1, "cardBill", captured);
-    await collectCardPayload(cardFrame, "F1633", 2, "recentPayments", captured);
-    await collectCardPayload(cardFrame, "F1634", 3, "cardUnbilled", captured);
+    const cardFrame = pickCardNavigationFrame(page, depositFrame) ?? queryFrame;
+    await collectCardPayloads(page, cardFrame, captured);
     await Promise.allSettled(responseTasks);
 
     return {
@@ -1122,39 +1144,97 @@ async function collectFirstbankPayloads(
   }
 }
 
+const CARD_QUERIES = [
+  { dataFunc: "F1632", func: 1, key: "cardBill" },
+  { dataFunc: "F1633", func: 2, key: "recentPayments" },
+  { dataFunc: "F1634", func: 3, key: "cardUnbilled" },
+] as const satisfies ReadonlyArray<{
+  dataFunc: string;
+  func: number;
+  key: CardPayloadKey;
+}>;
+
+async function collectCardPayloads(
+  page: Page,
+  preferred: Frame,
+  captured: CapturedCardResponses,
+) {
+  let frame = preferred;
+  for (const query of CARD_QUERIES) {
+    frame = await collectCardPayload(
+      page,
+      frame,
+      query.dataFunc,
+      query.func,
+      query.key,
+      captured,
+    );
+  }
+}
+
 async function collectCardPayload(
-  frame: Frame,
+  page: Page,
+  preferred: Frame,
   dataFunc: string,
   func: number,
   key: CardPayloadKey,
   captured: CapturedCardResponses,
 ) {
-  if (Object.prototype.hasOwnProperty.call(captured, key)) return;
-  await navigateFrame(frame, HOME_URL);
+  if (Object.prototype.hasOwnProperty.call(captured, key)) return preferred;
+  const startedAt = Date.now();
+  const frame = await waitForCardHomeFunctions(page, preferred);
+  logFirstbankStage("card-query-start", {
+    path: framePathname(frame),
+    detail: key,
+  });
   const opened = await openCardFunction(frame, dataFunc);
-  if (!opened) return;
-  await delay(FRAME_READ_RETRY_MS * 4);
-  if (await isServiceOverview(frame)) {
-    await navigateFrame(
-      frame,
-      `${ORIGIN}/NetBank/ajax/frameFirstCard.html?func=${func}`,
-    );
+  if (!opened) {
+    throw new FirstbankConnectionError("第一銀行信用卡功能入口讀取失敗。");
   }
-  if (await isServiceOverview(frame)) return;
+  logFirstbankStage("card-click", {
+    path: framePathname(frame),
+    detail: key,
+  });
+  if (!Object.prototype.hasOwnProperty.call(captured, key)) {
+    await delay(FRAME_READ_RETRY_MS * 4);
+    if (await isServiceOverview(frame)) {
+      logFirstbankStage("card-bridge-fallback", {
+        path: `/NetBank/ajax/frameFirstCard.html?func=${func}`,
+        detail: key,
+      });
+      await navigateFrame(
+        frame,
+        `${ORIGIN}/NetBank/ajax/frameFirstCard.html?func=${func}`,
+      );
+    }
+  }
   try {
     await waitForCardResponse(captured, key);
   } catch (error) {
     if (!(error instanceof FirstbankActionTimeoutError)) throw error;
+    logFirstbankStage("card-query-timeout", {
+      path: framePathname(frame),
+      elapsedMs: Date.now() - startedAt,
+      detail: key,
+    });
+    throw new FirstbankConnectionError("第一銀行信用卡資料讀取失敗。");
   }
+  logFirstbankStage("card-query-complete", {
+    path: framePathname(frame),
+    elapsedMs: Date.now() - startedAt,
+    detail: key,
+  });
+  return pickCardNavigationFrame(page, frame) ?? frame;
 }
 
 async function openCardFunction(frame: Frame, dataFunc: string) {
+  let prepared = false;
   try {
-    return Boolean(
+    prepared = Boolean(
       await withActionTimeout(
-        frame.evaluate((func) => {
+        frame.evaluate((cardDataFunc) => {
           const link = document.querySelector<HTMLAnchorElement>(
-            `a[data-func="${func}"]`,
+            `a[data-func="${cardDataFunc}"]`,
           );
           if (!link) return false;
           const collapse = link.closest("li.collapse");
@@ -1162,13 +1242,109 @@ async function openCardFunction(frame: Frame, dataFunc: string) {
           const panel = collapse?.querySelector<HTMLElement>(":scope > .panel");
           heading?.click();
           if (panel) panel.style.display = "block";
-          link.click();
           return true;
         }, dataFunc),
       ),
     );
   } catch {
     return false;
+  }
+  if (!prepared) return false;
+  try {
+    await withActionTimeout(frame.click(`a[data-func="${dataFunc}"]`));
+    return true;
+  } catch (error) {
+    if (
+      error instanceof FirstbankActionTimeoutError ||
+      isRecoverableFrameError(error)
+    ) {
+      // A native click may navigate or replace the card frame before the
+      // Runtime call settles. The response listener remains attached.
+      return true;
+    }
+    return false;
+  }
+}
+
+async function navigateToCardHome(page: Page, preferred: Frame) {
+  const homePath = urlPathname(HOME_URL);
+  const target = await waitForCardNavigationFrame(page, preferred);
+  logFirstbankStage("card-navigation-frame", {
+    path: framePathname(target),
+  });
+  if (framePathname(target) !== homePath) await navigateFrame(target, HOME_URL);
+  return waitForReadyFrameByPath(
+    page,
+    homePath,
+    target,
+    "第一銀行信用卡功能頁面尚未載入完成。",
+  );
+}
+
+async function waitForCardNavigationFrame(page: Page, preferred: Frame) {
+  const deadline = Date.now() + ACTION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const frame = pickCardNavigationFrame(page, preferred);
+    if (frame) return frame;
+    await delay(FRAME_READ_RETRY_MS);
+  }
+  throw new FirstbankConnectionError("第一銀行信用卡功能頁面尚未載入完成。");
+}
+
+async function waitForCardHomeFunctions(page: Page, preferred: Frame) {
+  const homePath = urlPathname(HOME_URL);
+  let frame = await navigateToCardHome(page, preferred);
+  const deadline = Date.now() + ACTION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const main = (page as Page & { mainFrame?: () => Frame }).mainFrame?.();
+    const candidates = liveFrames(page).filter(
+      (candidate) =>
+        candidate !== main && framePathname(candidate) === homePath,
+    );
+    for (const candidate of candidates) {
+      const availableFunctions = await findCardFunctions(candidate);
+      if (
+        CARD_QUERIES.every(({ dataFunc }) =>
+          availableFunctions.includes(dataFunc),
+        )
+      ) {
+        logFirstbankStage("card-home-ready", {
+          path: framePathname(candidate),
+          detail: "F1632,F1633,F1634",
+        });
+        return candidate;
+      }
+      frame = candidate;
+    }
+    await delay(FRAME_READ_RETRY_MS);
+  }
+  const availableFunctions = await findCardFunctions(frame);
+  const missingFunctions = CARD_QUERIES.filter(
+    ({ dataFunc }) => !availableFunctions.includes(dataFunc),
+  )
+    .map(({ dataFunc }) => dataFunc)
+    .join(",");
+  logFirstbankStage("card-function-timeout", {
+    path: framePathname(frame),
+    detail: missingFunctions || "unknown",
+  });
+  throw new FirstbankConnectionError("第一銀行信用卡功能入口讀取失敗。");
+}
+
+async function findCardFunctions(frame: Frame) {
+  try {
+    const functions = await withActionTimeout(
+      frame.evaluate(() =>
+        ["F1632", "F1633", "F1634"].filter((cardDataFunc) =>
+          Boolean(document.querySelector(`a[data-func="${cardDataFunc}"]`)),
+        ),
+      ),
+    );
+    return Array.isArray(functions)
+      ? functions.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
   }
 }
 
@@ -1233,17 +1409,55 @@ async function captureCardResponse(
   captured: CapturedCardResponses,
 ) {
   try {
-    captured[key] = await response.json();
+    storeCardResponse(captured, key, await response.json());
     return;
   } catch {
     try {
       const text = await response.text();
-      captured[key] = JSON.parse(text) as unknown;
+      storeCardResponse(captured, key, JSON.parse(text) as unknown);
     } catch {
       // A matching non-JSON response is ignored; parser must not receive an
       // invented payload that could look like a successful empty sync.
     }
   }
+}
+
+function storeCardResponse(
+  captured: CapturedCardResponses,
+  key: CardPayloadKey,
+  payload: unknown,
+) {
+  const previous = captured[key];
+  captured[key] =
+    key === "recentPayments" && previous !== undefined
+      ? mergeRecentPaymentResponses(previous, payload)
+      : payload;
+}
+
+function mergeRecentPaymentResponses(previous: unknown, next: unknown) {
+  if (!isRecord(previous) || !isRecord(next)) return next;
+  const previousContent = isRecord(previous.CONTENT)
+    ? previous.CONTENT
+    : isRecord(previous.content)
+      ? previous.content
+      : undefined;
+  const nextContent = isRecord(next.CONTENT)
+    ? next.CONTENT
+    : isRecord(next.content)
+      ? next.content
+      : undefined;
+  const previousRecords = previousContent?.Records ?? previousContent?.records;
+  const nextRecords = nextContent?.Records ?? nextContent?.records;
+  if (!Array.isArray(previousRecords) || !Array.isArray(nextRecords)) {
+    return next;
+  }
+  return {
+    ...next,
+    CONTENT: {
+      ...nextContent,
+      Records: [...previousRecords, ...nextRecords],
+    },
+  };
 }
 
 function cardResponseKey(url: string): CardPayloadKey | undefined {
@@ -1280,12 +1494,22 @@ function createTransactionResponseCapture(): TransactionResponseCapture {
 
 function createDepositResponseCapture(): DepositResponseCapture {
   let resolveResponseBody = (_html: string) => {};
+  let resolveRequestObserved = () => {};
   const responseBody = new Promise<string>((resolve) => {
     resolveResponseBody = resolve;
   });
+  const requestObserved = new Promise<void>((resolve) => {
+    resolveRequestObserved = resolve;
+  });
   const capture: DepositResponseCapture = {
     observed: false,
+    requested: false,
     pending: new Set(),
+    requestObserved,
+    settleRequestObserved() {
+      capture.requested = true;
+      resolveRequestObserved();
+    },
     responseBody,
     settleResponseBody(html: string) {
       capture.html = html;
@@ -1892,19 +2116,24 @@ function nestedContentFrame(page: Page, preferred: Frame) {
 async function waitForReadyFrameByPath(
   page: Page,
   path: string,
-  _preferred?: Frame,
+  preferred?: Frame,
+  errorMessage = "第一銀行存款總覽頁面尚未載入完成。",
 ) {
   const deadline = Date.now() + ACTION_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const candidates = liveFrames(page).filter(
+    const matchingFrames = liveFrames(page).filter(
       (candidate) => framePathname(candidate) === path,
     );
+    const candidates =
+      preferred && matchingFrames.includes(preferred)
+        ? [preferred, ...matchingFrames.filter((frame) => frame !== preferred)]
+        : matchingFrames;
     for (const candidate of candidates) {
       if (await isFrameDocumentReady(candidate)) return candidate;
     }
     await delay(FRAME_READ_RETRY_MS);
   }
-  throw new FirstbankConnectionError("第一銀行存款總覽頁面尚未載入完成。");
+  throw new FirstbankConnectionError(errorMessage);
 }
 
 async function isFrameDocumentReady(frame: Frame) {
@@ -1937,10 +2166,20 @@ async function collectDepositOverview(
       throw new FirstbankConnectionError("第一銀行存款總覽按鈕格式已變更。");
     }
   }
-  const html = await withActionTimeout(
-    capture.responseBody,
-    DEPOSIT_CAPTURE_WAIT_MS,
-  ).catch(() => "");
+  const firstSignal = await Promise.race([
+    capture.responseBody.then((html) => ({ type: "response" as const, html })),
+    capture.requestObserved.then(() => ({ type: "request" as const })),
+    delay(DEPOSIT_REQUEST_GRACE_MS).then(() => ({ type: "timeout" as const })),
+  ]);
+  const html =
+    firstSignal.type === "response"
+      ? firstSignal.html
+      : firstSignal.type === "request"
+        ? await withActionTimeout(
+            capture.responseBody,
+            DEPOSIT_CAPTURE_WAIT_MS,
+          ).catch(() => "")
+        : "";
   if (html) return html;
   if (capture.pending.size > 0) {
     await withActionTimeout(
@@ -1961,7 +2200,7 @@ async function collectDepositOverview(
   }
   logFirstbankStage("deposit-ajax-fallback", {
     path: DEPOSIT_AJAX_PATH,
-    detail: "missing-listener",
+    detail: capture.requested ? "missing-response" : "missing-request",
   });
   // Click did not surface a capturable page response. Do not click again;
   // read the same-origin ajax endpoint from inside the live overview frame.
@@ -2603,6 +2842,34 @@ function pickLiveFrame(page: Page, preferred?: Frame) {
     return preferred;
   }
   return liveFrames(page)[0];
+}
+
+function pickCardNavigationFrame(page: Page, preferred?: Frame) {
+  const main = (page as Page & { mainFrame?: () => Frame }).mainFrame?.();
+  const directChildren = (
+    main as (Frame & { childFrames?: () => Frame[] }) | undefined
+  )?.childFrames?.();
+  const live = liveFrames(page).filter((frame) => frame !== main);
+  const frames =
+    directChildren && directChildren.length > 0
+      ? directChildren.filter((frame) => live.includes(frame))
+      : live;
+  const byPath = (pattern: RegExp) =>
+    frames.find((frame) => pattern.test(framePathname(frame)));
+  return (
+    byPath(/^\/NetBank\/1\/01\.jsp$/i) ??
+    byPath(/^\/NetBank\/2\/010103(?:\.html?)?$/i) ??
+    byPath(/^\/NetBank\/2\/0101(?:\.html?)?$/i) ??
+    (preferred &&
+    frames.includes(preferred) &&
+    !/^\/NetBank\/1\/acntReviewAll\.html$/i.test(framePathname(preferred))
+      ? preferred
+      : undefined) ??
+    frames.find((frame) =>
+      /^\/NetBank\/(?:1|2|ajax)\//i.test(framePathname(frame)),
+    ) ??
+    frames[0]
+  );
 }
 
 function isTransactionResultResponse(url: string) {
