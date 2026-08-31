@@ -273,10 +273,31 @@ function parseDepositOverviewHtml(
 
 function parseDepositHeader(cells: string[]): DepositHeader | undefined {
   const labels = cells.map(normalizeLabel);
-  const account = findHeaderIndex(labels, [/帳號.*暱稱/, /帳號/, /帳戶號碼/]);
-  const currency = findHeaderIndex(labels, [/幣別/]);
-  const balance = findHeaderIndex(labels, [/帳面餘額/, /存款餘額/, /^餘額$/]);
-  const availableBalance = findHeaderIndex(labels, [/可用餘額/, /可動用/]);
+  // 英文 iBank 存款表頭：Account / nickname、Currency、Ledger/Book balance、
+  // Available。不可只用 /account/，否則會誤把 Account Type 當帳號欄。
+  const account = findHeaderIndex(labels, [
+    /帳號.*暱稱/,
+    /帳號/,
+    /帳戶號碼/,
+    /account(?:and)?nickname/,
+    /account(?:no|number|num)(?:and)?nickname/,
+    /^account(?:no|number|num)?$/,
+  ]);
+  const currency = findHeaderIndex(labels, [/幣別/, /^currency$/, /^ccy$/]);
+  const balance = findHeaderIndex(labels, [
+    /帳面餘額/,
+    /存款餘額/,
+    /^餘額$/,
+    /ledger(?:book)?balance/,
+    /bookbalance/,
+    /depositbalance/,
+    /^balance$/,
+  ]);
+  const availableBalance = findHeaderIndex(labels, [
+    /可用餘額/,
+    /可動用/,
+    /^available(?:balance)?$/,
+  ]);
   if (
     account === undefined ||
     currency === undefined ||
@@ -285,7 +306,13 @@ function parseDepositHeader(cells: string[]): DepositHeader | undefined {
     return undefined;
   }
   return {
-    accountType: findHeaderIndex(labels, [/帳戶類別/, /帳戶類型/, /帳別/]),
+    accountType: findHeaderIndex(labels, [
+      /帳戶類別/,
+      /帳戶類型/,
+      /帳別/,
+      /^accounttype$/,
+      /accountcategory/,
+    ]),
     account,
     currency,
     balance,
@@ -443,11 +470,37 @@ function parseTransactionHeader(
   cells: string[],
 ): TransactionHeader | undefined {
   const labels = cells.map(normalizeLabel);
-  const date = findHeaderIndex(labels, [/交易日期/, /交易日/, /^日期$/]);
+  const date = findHeaderIndex(labels, [
+    /交易日期/,
+    /交易日/,
+    /^日期$/,
+    /transactiondate/,
+    /txndate/,
+    /^date$/,
+  ]);
   if (date === undefined) return undefined;
-  const debit = findHeaderIndex(labels, [/支出金額/, /^支出$/, /提款/, /扣款/]);
-  const credit = findHeaderIndex(labels, [/存入金額/, /^存入$/, /存款/]);
-  const amount = findHeaderIndex(labels, [/交易金額/, /^金額$/]);
+  const debit = findHeaderIndex(labels, [
+    /支出金額/,
+    /^支出$/,
+    /提款/,
+    /扣款/,
+    /^withdrawal(?:amount)?$/,
+    /^debit(?:amount)?$/,
+    /^withdraw(?:amount)?$/,
+  ]);
+  const credit = findHeaderIndex(labels, [
+    /存入金額/,
+    /^存入$/,
+    /存款/,
+    /^deposit(?:amount)?$/,
+    /^credit(?:amount)?$/,
+  ]);
+  const amount = findHeaderIndex(labels, [
+    /交易金額/,
+    /^金額$/,
+    /transactionamount/,
+    /^amount$/,
+  ]);
   if (debit === undefined && credit === undefined && amount === undefined) {
     return undefined;
   }
@@ -456,12 +509,34 @@ function parseTransactionHeader(
     debit,
     credit,
     amount,
-    balance: findHeaderIndex(labels, [/餘額/, /結餘/]),
-    currency: findHeaderIndex(labels, [/幣別/]),
-    type: findHeaderIndex(labels, [/交易類別/, /^類別$/, /交易種類/]),
-    status: findHeaderIndex(labels, [/交易狀態/, /^狀態$/]),
-    memo: findHeaderIndex(labels, [/備註/, /說明/]),
-    summary: findHeaderIndex(labels, [/摘要/, /明細/]),
+    balance: findHeaderIndex(labels, [
+      /餘額/,
+      /結餘/,
+      /^balance$/,
+      /endingbalance/,
+    ]),
+    currency: findHeaderIndex(labels, [/幣別/, /^currency$/, /^ccy$/]),
+    type: findHeaderIndex(labels, [
+      /交易類別/,
+      /^類別$/,
+      /交易種類/,
+      /transactiontype/,
+      /txtype/,
+    ]),
+    status: findHeaderIndex(labels, [/交易狀態/, /^狀態$/, /^status$/]),
+    memo: findHeaderIndex(labels, [
+      /備註/,
+      /說明/,
+      /^memo$/,
+      /^remarks?$/,
+      /^description$/,
+    ]),
+    summary: findHeaderIndex(labels, [
+      /摘要/,
+      /明細/,
+      /^summary$/,
+      /^particulars?$/,
+    ]),
   };
 }
 
@@ -513,7 +588,7 @@ function parseTransactionRow(
     postedDate: date.date,
     authorizedAt: date.dateTime,
     description,
-    status: /待處理|處理中|未入帳|圈存|pending/i.test(statusText)
+    status: /待處理|處理中|未入帳|圈存|pending|processing/i.test(statusText)
       ? "pending"
       : "posted",
   };
@@ -1099,9 +1174,10 @@ function extractHtmlRows(html: string): HtmlRow[] {
 }
 
 function findPageAccountIdentity(text: string) {
-  const accountLabel = /(?:帳號|帳戶|賬號)\s*[：:]?\s*([^\s，,；;|<]+)/i.exec(
-    text,
-  );
+  const accountLabel =
+    /(?:帳號|帳戶|賬號|account(?:\s*(?:no\.?|number))?)\s*[：:]?\s*([^\s，,；;|<]+)/i.exec(
+      text,
+    );
   return accountLabel?.[1]
     ? extractAccountIdentity(accountLabel[1])?.token
     : undefined;
@@ -1120,7 +1196,10 @@ function extractAccountIdentity(value: unknown) {
   const nickname = text
     .replace(candidate, " ")
     .replace(/[()（）【】\[\]：:|]/g, " ")
-    .replace(/帳號與暱稱|帳號|暱稱/g, " ")
+    .replace(
+      /帳號與暱稱|帳號|暱稱|account\s*and\s*nickname|account\s*\/?\s*nickname|nickname|account(?:\s*(?:no\.?|number))?/gi,
+      " ",
+    )
     .replace(/\s+/g, " ")
     .trim();
   return {
@@ -1151,12 +1230,14 @@ function normalizeCurrency(value: unknown): string | undefined {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const text = String(value).trim().toUpperCase();
   if (!text || isDash(text)) return undefined;
-  if (/新臺?幣|臺幣|台幣|NTD?|NT\$/.test(text)) return TWD;
-  if (/美金|美元/.test(text)) return "USD";
-  if (/日圓|日元/.test(text)) return "JPY";
-  if (/歐元/.test(text)) return "EUR";
-  if (/英鎊/.test(text)) return "GBP";
-  if (/港幣|港元/.test(text)) return "HKD";
+  if (/新臺?幣|臺幣|台幣|NTD?|NT\$|NEW\s*TAIWAN\s*DOLLAR/.test(text)) {
+    return TWD;
+  }
+  if (/美金|美元|US\s*DOLLAR/.test(text)) return "USD";
+  if (/日圓|日元|JAPANESE\s*YEN/.test(text)) return "JPY";
+  if (/歐元|EURO/.test(text)) return "EUR";
+  if (/英鎊|POUND\s*STERLING/.test(text)) return "GBP";
+  if (/港幣|港元|HONG\s*KONG\s*DOLLAR/.test(text)) return "HKD";
   const code = text.match(/\b[A-Z]{3}\b/)?.[0] ?? text;
   return SUPPORTED_CURRENCIES.has(code) ? code : undefined;
 }
@@ -1305,7 +1386,9 @@ function isCardSummary(value: string) {
 }
 
 function isNoDataText(value: string) {
-  return /查無(?:資料|符合)|無符合資料|沒有資料|no\s+data/i.test(value);
+  return /查無(?:資料|符合)|無符合資料|沒有資料|no\s+data|no\s+records?/i.test(
+    value,
+  );
 }
 
 function isDash(value: unknown) {

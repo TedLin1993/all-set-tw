@@ -19,6 +19,8 @@ const ACCOUNT_OVERVIEW_URL = `${ORIGIN}/NetBank/1/acntReviewAll.html`;
 const HOME_URL = `${ORIGIN}/NetBank/1/01.jsp`;
 const DEPOSIT_AJAX_PATH = "/NetBank/ajax/acntReview1.html";
 const TRANSACTION_URL = `${ORIGIN}/NetBank/2/0101.html`;
+const CHANGE_LANGUAGE_PATH = "/NetBank/chgLanguage.html";
+const ACCEPT_LANGUAGE = "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7";
 const CAPTCHA_SELECTOR = 'img[src*="code_verify1.jpg"]';
 const CAPTCHA_DIGIT_MIN = 4;
 const CAPTCHA_DIGIT_MAX = 8;
@@ -36,11 +38,26 @@ const LOGIN_RESULT_POLL_MS = 500;
 const FRAME_TIMEOUT_MS = 15_000;
 const FRAME_READ_RETRY_MS = 250;
 // 010103 may replace and detach its iframe in Browser Rendering. Arm a
-// document-body waiter before submit and keep CDP listeners attached for
-// this window so a delayed responseReceived/loadingFinished can still settle.
+// document-body waiter before submit, intercept 010103 at Fetch response
+// stage, and keep listeners attached so a delayed or non-Document body
+// can still settle. If the bank's search handler emits verifyDV, the result
+// budget restarts once that verification settles; missing verifyDV CDP
+// events must not block a new live result frame or already-captured HTML.
 const RESULT_CAPTURE_WAIT_MS = 10_000;
+const RESULT_CAPTURE_MAX_WAIT_MS = 30_000;
+// Once CDP confirms the native read-only POST was dispatched, allow a wider
+// response window without retaining the old 15-second idle penalty.
+const DEPOSIT_CAPTURE_WAIT_MS = 5_000;
+// Recorder HAR: acntReview1 completes in about 0.85s. If neither CDP sees the
+// native POST nor the page receives its response within this grace window,
+// stop idling and use the already-tested same-origin fallback fetch.
+const DEPOSIT_REQUEST_GRACE_MS = 2_000;
 const FRAME_PROBE_TIMEOUT_MS = 1_000;
-const CARD_RESPONSE_TIMEOUT_MS = 10_000;
+// The recorder's first billing query takes a little over 11 seconds from the
+// First Bank bridge page to CMSQRY0014. Browser Rendering is slower than the
+// local recorder, so keep enough headroom and fail closed if a dispatched card
+// query never produces its expected response.
+const CARD_RESPONSE_TIMEOUT_MS = 30_000;
 const SESSION_RELEASE_TIMEOUT_MS = 2_000;
 const SESSION_RELEASE_POLL_MS = 100;
 const MAX_SERIALIZED_TABLE_BYTES = 512 * 1024;
@@ -67,6 +84,18 @@ type CardPayloadKey = "cardBill" | "recentPayments" | "cardUnbilled";
 
 type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>>;
 
+type DepositResponseCapture = {
+  html?: string;
+  observed: boolean;
+  requested: boolean;
+  status?: number;
+  pending: Set<Promise<void>>;
+  requestObserved: Promise<void>;
+  settleRequestObserved: () => void;
+  responseBody: Promise<string>;
+  settleResponseBody: (html: string) => void;
+};
+
 type TransactionDocumentMeta = {
   path: string;
   status?: number;
@@ -74,9 +103,17 @@ type TransactionDocumentMeta = {
 
 type TransactionResponseCapture = {
   armed: boolean;
+  armedAt?: number;
+  existingResultFrames: Set<Frame>;
   html?: string;
+  verificationRequested: boolean;
+  verificationResponded: boolean;
+  verificationFailed: boolean;
+  verificationSettledAt?: number;
+  verificationRequestIds: Set<string>;
   requestIds: Set<string>;
   documentMeta: Map<string, TransactionDocumentMeta>;
+  inFlight: Map<string, { path: string; startedAt: number }>;
   pending: Set<Promise<void>>;
   documentBody: Promise<string>;
   settleDocumentBody: (html: string) => void;
@@ -84,12 +121,25 @@ type TransactionResponseCapture = {
 
 type TransactionDocumentResponseEvent = {
   requestId: string;
-  type: string;
+  type?: string;
   response: { url: string; status?: number };
 };
 
 type TransactionLoadingEvent = {
   requestId: string;
+};
+
+type NetworkRequestWillBeSentEvent = {
+  requestId: string;
+  type?: string;
+  request: { url: string };
+};
+
+type FetchRequestPausedEvent = {
+  requestId: string;
+  resourceType?: string;
+  request: { url: string };
+  responseStatusCode?: number;
 };
 
 type BrowserResponse = {
@@ -248,6 +298,7 @@ export function createFirstbankConnector(
         }
         authenticated = true;
 
+        await ensureTraditionalChineseUi(page);
         const payloads = await collectFirstbankPayloads(page);
         const data = parseFirstbankData(payloads);
         const dataWithOptionalRecords = data as typeof data & {
@@ -397,6 +448,7 @@ async function openLoginAndCaptureCaptcha(
   config: FirstbankBrowserConfig,
 ): Promise<CaptchaImage> {
   await gotoAllowingTimeout(page, LOGIN_URL);
+  await switchLoginPageToTraditionalChinese(page);
   await openLoginAndFill(page, config);
 
   try {
@@ -808,6 +860,7 @@ async function collectFirstbankPayloads(
   const frame = await waitForAuthenticatedFrame(page);
   const captured: CapturedCardResponses = {};
   const responseTasks: Promise<void>[] = [];
+  const depositResponse = createDepositResponseCapture();
   const transactionResponse = createTransactionResponseCapture();
   const cdp = await page.createCDPSession();
   try {
@@ -819,22 +872,99 @@ async function collectFirstbankPayloads(
     await cdp.detach().catch(() => undefined);
     throw error;
   }
+  let fetchEnabled = false;
+  try {
+    await cdp.send("Fetch.enable", {
+      patterns: [
+        {
+          urlPattern: `*://${new URL(ORIGIN).host}/NetBank/2/010103*`,
+          requestStage: "Response",
+        },
+      ],
+    });
+    fetchEnabled = true;
+  } catch {
+    logFirstbankStage("010103-fetch-unavailable", {
+      path: "/NetBank/2/010103.html",
+    });
+  }
+  const onTransactionRequest = (event: NetworkRequestWillBeSentEvent) => {
+    const url = event.request?.url ?? "";
+    if (!isFirstbankUrl(url)) return;
+    if (isDepositOverviewResponse(url)) {
+      depositResponse.settleRequestObserved();
+      logFirstbankStage("deposit-cdp-request", {
+        path: DEPOSIT_AJAX_PATH,
+        resourceType: event.type,
+      });
+    }
+    const path = urlPathname(url);
+    if (isCapturableResourceType(event.type)) {
+      transactionResponse.inFlight.set(event.requestId, {
+        path,
+        startedAt: Date.now(),
+      });
+    }
+    if (!isNetBankTwoPath(path)) return;
+    logFirstbankStage("0101-cdp-request", {
+      path,
+      resourceType: event.type,
+    });
+    if (transactionResponse.armed && isTransactionVerificationResponse(url)) {
+      transactionResponse.verificationRequested = true;
+      transactionResponse.verificationRequestIds.add(event.requestId);
+    }
+  };
   const onTransactionDocumentResponse = (
     event: TransactionDocumentResponseEvent,
   ) => {
+    const url = event.response.url;
+    if (!isFirstbankUrl(url)) return;
+    transactionResponse.inFlight.delete(event.requestId);
+    const path = urlPathname(url);
+    const status = event.response.status;
+    const resourceType = event.type;
+    if (isNetBankTwoPath(path) && isCapturableResourceType(resourceType)) {
+      logFirstbankStage("0101-cdp-response", {
+        path,
+        status,
+        resourceType,
+      });
+    }
     if (
       transactionResponse.armed &&
-      event.type === "Document" &&
-      isTransactionResultResponse(event.response.url)
+      isTransactionVerificationResponse(url) &&
+      transactionResponse.verificationRequestIds.delete(event.requestId)
     ) {
-      const path = urlPathname(event.response.url);
-      const status = event.response.status;
-      logFirstbankStage("010103-cdp-response", { path, status });
+      transactionResponse.verificationResponded = true;
+      transactionResponse.verificationSettledAt = Date.now();
+      if (typeof status === "number" && (status < 200 || status >= 400)) {
+        transactionResponse.verificationFailed = true;
+      }
+      logFirstbankStage("0101-verification-response", {
+        path,
+        status,
+        resourceType,
+        elapsedMs: elapsedSinceArmed(transactionResponse),
+      });
+    }
+    if (
+      transactionResponse.armed &&
+      isTransactionResultResponse(url) &&
+      isCapturableResourceType(resourceType)
+    ) {
+      logFirstbankStage("010103-cdp-response", {
+        path,
+        status,
+        resourceType,
+        elapsedMs: elapsedSinceArmed(transactionResponse),
+      });
       transactionResponse.requestIds.add(event.requestId);
       transactionResponse.documentMeta.set(event.requestId, { path, status });
     }
   };
   const onTransactionDocumentLoaded = (event: TransactionLoadingEvent) => {
+    transactionResponse.inFlight.delete(event.requestId);
     if (!transactionResponse.requestIds.has(event.requestId)) return;
     const meta = transactionResponse.documentMeta.get(event.requestId);
     let task: Promise<void>;
@@ -852,13 +982,42 @@ async function collectFirstbankPayloads(
     void task.catch(() => undefined);
   };
   const onTransactionDocumentFailed = (event: TransactionLoadingEvent) => {
+    transactionResponse.inFlight.delete(event.requestId);
+    if (transactionResponse.verificationRequestIds.delete(event.requestId)) {
+      transactionResponse.verificationFailed = true;
+      transactionResponse.verificationSettledAt = Date.now();
+      logFirstbankStage("0101-verification-failed", {
+        path: "/NetBank/2/verifyDV.html",
+        elapsedMs: elapsedSinceArmed(transactionResponse),
+      });
+    }
     transactionResponse.requestIds.delete(event.requestId);
     transactionResponse.documentMeta.delete(event.requestId);
   };
+  const onFetchPaused = (event: FetchRequestPausedEvent) => {
+    let task: Promise<void>;
+    task = captureFetchPausedDocument(cdp, event, transactionResponse).finally(
+      () => transactionResponse.pending.delete(task),
+    );
+    transactionResponse.pending.add(task);
+    void task.catch(() => undefined);
+  };
+  cdp.on("Network.requestWillBeSent", onTransactionRequest);
   cdp.on("Network.responseReceived", onTransactionDocumentResponse);
   cdp.on("Network.loadingFinished", onTransactionDocumentLoaded);
   cdp.on("Network.loadingFailed", onTransactionDocumentFailed);
+  if (fetchEnabled) cdp.on("Fetch.requestPaused", onFetchPaused);
   const onResponse = (response: BrowserResponse) => {
+    if (isDepositOverviewResponse(response.url())) {
+      depositResponse.observed = true;
+      let task: Promise<void>;
+      task = captureDepositResponse(response, depositResponse).finally(() =>
+        depositResponse.pending.delete(task),
+      );
+      depositResponse.pending.add(task);
+      void task.catch(() => undefined);
+      return;
+    }
     if (
       transactionResponse.armed &&
       isTransactionResultResponse(response.url())
@@ -866,6 +1025,7 @@ async function collectFirstbankPayloads(
       logFirstbankStage("010103-http-response", {
         path: urlPathname(response.url()),
         status: httpStatus(response),
+        elapsedMs: elapsedSinceArmed(transactionResponse),
       });
       let task: Promise<void>;
       task = captureTransactionResponse(response, transactionResponse).finally(
@@ -877,80 +1037,204 @@ async function collectFirstbankPayloads(
     }
     const key = cardResponseKey(response.url());
     if (!key) return;
+    logFirstbankStage("card-http-response", {
+      path: urlPathname(response.url()),
+      status: httpStatus(response),
+      detail: key,
+    });
     const task = captureCardResponse(response, key, captured);
     responseTasks.push(task);
     void task.catch(() => undefined);
   };
   page.on("response", onResponse);
+  // A native confirm/alert raised by the bank's own handlers freezes the
+  // renderer until it is answered, which stalls every in-flight request and
+  // every CDP event for that frame. Keep one accepting listener attached for
+  // the whole collection so the query can never wedge behind a dialog.
+  const onDialog = (dialog: Dialog) => {
+    logFirstbankStage("0101-dialog", {
+      detail: describeDialog(dialog),
+      elapsedMs: elapsedSinceArmed(transactionResponse),
+    });
+    void dialog
+      .accept()
+      .catch(() => dialog.dismiss().catch(() => undefined))
+      .catch(() => undefined);
+  };
+  page.on("dialog", onDialog);
+  const onPageError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isFramesetParentNoise(message)) {
+      logFirstbankStage("frameset-noise", {
+        detail: "resizeFrame",
+        elapsedMs: elapsedSinceArmed(transactionResponse),
+      });
+      return;
+    }
+    logFirstbankStage("page-error", {
+      detail: safeDiagnosticText(message),
+      elapsedMs: elapsedSinceArmed(transactionResponse),
+    });
+  };
+  page.on("pageerror", onPageError);
 
   try {
-    await navigateFrame(frame, ACCOUNT_OVERVIEW_URL);
-    const depositAjax = await fetchFrameResource(frame, DEPOSIT_AJAX_PATH);
-    await waitForDepositOverview(frame);
+    logFirstbankStage("collect-start", { path: framePathname(frame) });
+    const overviewPath = urlPathname(ACCOUNT_OVERVIEW_URL);
+    const overviewFrame = await navigateToReadyFrame(
+      page,
+      frame,
+      ACCOUNT_OVERVIEW_URL,
+      overviewPath,
+    );
+    logFirstbankStage("overview-frame", {
+      path: framePathname(overviewFrame),
+    });
+    const depositOverviewHtml = await collectDepositOverview(
+      page,
+      overviewFrame,
+      depositResponse,
+    );
+    const depositFrame = await waitForReadyFrameByPath(
+      page,
+      overviewPath,
+      overviewFrame,
+    );
 
-    await navigateFrame(frame, TRANSACTION_URL);
-    const queryFrame = await waitForLiveTransactionQueryFrame(page, frame);
+    await navigateFrame(depositFrame, TRANSACTION_URL);
+    const queryFrame = await waitForLiveTransactionQueryFrame(
+      page,
+      depositFrame,
+    );
     const transactionHistoryHtml = await submitTransactionQuery(
       page,
       queryFrame,
       transactionResponse,
     );
-    const cardFrame = pickLiveFrame(page, frame) ?? queryFrame;
-
-    await collectCardPayload(cardFrame, "F1632", 1, "cardBill", captured);
-    await collectCardPayload(cardFrame, "F1633", 2, "recentPayments", captured);
-    await collectCardPayload(cardFrame, "F1634", 3, "cardUnbilled", captured);
+    const cardFrame = pickCardNavigationFrame(page, depositFrame) ?? queryFrame;
+    await collectCardPayloads(page, cardFrame, captured);
     await Promise.allSettled(responseTasks);
 
     return {
-      depositOverviewHtml: depositAjax,
+      depositOverviewHtml,
       transactionHistoryHtml,
       cardBill: captured.cardBill,
       cardUnbilled: captured.cardUnbilled,
       recentPayments: captured.recentPayments,
     } as unknown as FirstbankPayloads;
   } finally {
+    if (transactionResponse.pending.size > 0) {
+      await withActionTimeout(
+        Promise.allSettled(Array.from(transactionResponse.pending)),
+        RESULT_CAPTURE_WAIT_MS,
+      ).catch(() => undefined);
+    }
     page.off("response", onResponse);
+    page.off("dialog", onDialog);
+    page.off("pageerror", onPageError);
+    cdp.off("Network.requestWillBeSent", onTransactionRequest);
     cdp.off("Network.responseReceived", onTransactionDocumentResponse);
     cdp.off("Network.loadingFinished", onTransactionDocumentLoaded);
     cdp.off("Network.loadingFailed", onTransactionDocumentFailed);
+    if (fetchEnabled) {
+      cdp.off("Fetch.requestPaused", onFetchPaused);
+      await cdp.send("Fetch.disable").catch(() => undefined);
+    }
     await cdp.detach().catch(() => undefined);
   }
 }
 
+const CARD_QUERIES = [
+  { dataFunc: "F1632", func: 1, key: "cardBill" },
+  { dataFunc: "F1633", func: 2, key: "recentPayments" },
+  { dataFunc: "F1634", func: 3, key: "cardUnbilled" },
+] as const satisfies ReadonlyArray<{
+  dataFunc: string;
+  func: number;
+  key: CardPayloadKey;
+}>;
+
+async function collectCardPayloads(
+  page: Page,
+  preferred: Frame,
+  captured: CapturedCardResponses,
+) {
+  let frame = preferred;
+  for (const query of CARD_QUERIES) {
+    frame = await collectCardPayload(
+      page,
+      frame,
+      query.dataFunc,
+      query.func,
+      query.key,
+      captured,
+    );
+  }
+}
+
 async function collectCardPayload(
-  frame: Frame,
+  page: Page,
+  preferred: Frame,
   dataFunc: string,
   func: number,
   key: CardPayloadKey,
   captured: CapturedCardResponses,
 ) {
-  if (Object.prototype.hasOwnProperty.call(captured, key)) return;
-  await navigateFrame(frame, HOME_URL);
+  if (Object.prototype.hasOwnProperty.call(captured, key)) return preferred;
+  const startedAt = Date.now();
+  const frame = await waitForCardHomeFunctions(page, preferred);
+  logFirstbankStage("card-query-start", {
+    path: framePathname(frame),
+    detail: key,
+  });
   const opened = await openCardFunction(frame, dataFunc);
-  if (!opened) return;
-  await delay(FRAME_READ_RETRY_MS * 4);
-  if (await isServiceOverview(frame)) {
-    await navigateFrame(
-      frame,
-      `${ORIGIN}/NetBank/ajax/frameFirstCard.html?func=${func}`,
-    );
+  if (!opened) {
+    throw new FirstbankConnectionError("第一銀行信用卡功能入口讀取失敗。");
   }
-  if (await isServiceOverview(frame)) return;
+  logFirstbankStage("card-click", {
+    path: framePathname(frame),
+    detail: key,
+  });
+  if (!Object.prototype.hasOwnProperty.call(captured, key)) {
+    await delay(FRAME_READ_RETRY_MS * 4);
+    if (await isServiceOverview(frame)) {
+      logFirstbankStage("card-bridge-fallback", {
+        path: `/NetBank/ajax/frameFirstCard.html?func=${func}`,
+        detail: key,
+      });
+      await navigateFrame(
+        frame,
+        `${ORIGIN}/NetBank/ajax/frameFirstCard.html?func=${func}`,
+      );
+    }
+  }
   try {
     await waitForCardResponse(captured, key);
   } catch (error) {
     if (!(error instanceof FirstbankActionTimeoutError)) throw error;
+    logFirstbankStage("card-query-timeout", {
+      path: framePathname(frame),
+      elapsedMs: Date.now() - startedAt,
+      detail: key,
+    });
+    throw new FirstbankConnectionError("第一銀行信用卡資料讀取失敗。");
   }
+  logFirstbankStage("card-query-complete", {
+    path: framePathname(frame),
+    elapsedMs: Date.now() - startedAt,
+    detail: key,
+  });
+  return pickCardNavigationFrame(page, frame) ?? frame;
 }
 
 async function openCardFunction(frame: Frame, dataFunc: string) {
+  let prepared = false;
   try {
-    return Boolean(
+    prepared = Boolean(
       await withActionTimeout(
-        frame.evaluate((func) => {
+        frame.evaluate((cardDataFunc) => {
           const link = document.querySelector<HTMLAnchorElement>(
-            `a[data-func="${func}"]`,
+            `a[data-func="${cardDataFunc}"]`,
           );
           if (!link) return false;
           const collapse = link.closest("li.collapse");
@@ -958,13 +1242,109 @@ async function openCardFunction(frame: Frame, dataFunc: string) {
           const panel = collapse?.querySelector<HTMLElement>(":scope > .panel");
           heading?.click();
           if (panel) panel.style.display = "block";
-          link.click();
           return true;
         }, dataFunc),
       ),
     );
   } catch {
     return false;
+  }
+  if (!prepared) return false;
+  try {
+    await withActionTimeout(frame.click(`a[data-func="${dataFunc}"]`));
+    return true;
+  } catch (error) {
+    if (
+      error instanceof FirstbankActionTimeoutError ||
+      isRecoverableFrameError(error)
+    ) {
+      // A native click may navigate or replace the card frame before the
+      // Runtime call settles. The response listener remains attached.
+      return true;
+    }
+    return false;
+  }
+}
+
+async function navigateToCardHome(page: Page, preferred: Frame) {
+  const homePath = urlPathname(HOME_URL);
+  const target = await waitForCardNavigationFrame(page, preferred);
+  logFirstbankStage("card-navigation-frame", {
+    path: framePathname(target),
+  });
+  if (framePathname(target) !== homePath) await navigateFrame(target, HOME_URL);
+  return waitForReadyFrameByPath(
+    page,
+    homePath,
+    target,
+    "第一銀行信用卡功能頁面尚未載入完成。",
+  );
+}
+
+async function waitForCardNavigationFrame(page: Page, preferred: Frame) {
+  const deadline = Date.now() + ACTION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const frame = pickCardNavigationFrame(page, preferred);
+    if (frame) return frame;
+    await delay(FRAME_READ_RETRY_MS);
+  }
+  throw new FirstbankConnectionError("第一銀行信用卡功能頁面尚未載入完成。");
+}
+
+async function waitForCardHomeFunctions(page: Page, preferred: Frame) {
+  const homePath = urlPathname(HOME_URL);
+  let frame = await navigateToCardHome(page, preferred);
+  const deadline = Date.now() + ACTION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const main = (page as Page & { mainFrame?: () => Frame }).mainFrame?.();
+    const candidates = liveFrames(page).filter(
+      (candidate) =>
+        candidate !== main && framePathname(candidate) === homePath,
+    );
+    for (const candidate of candidates) {
+      const availableFunctions = await findCardFunctions(candidate);
+      if (
+        CARD_QUERIES.every(({ dataFunc }) =>
+          availableFunctions.includes(dataFunc),
+        )
+      ) {
+        logFirstbankStage("card-home-ready", {
+          path: framePathname(candidate),
+          detail: "F1632,F1633,F1634",
+        });
+        return candidate;
+      }
+      frame = candidate;
+    }
+    await delay(FRAME_READ_RETRY_MS);
+  }
+  const availableFunctions = await findCardFunctions(frame);
+  const missingFunctions = CARD_QUERIES.filter(
+    ({ dataFunc }) => !availableFunctions.includes(dataFunc),
+  )
+    .map(({ dataFunc }) => dataFunc)
+    .join(",");
+  logFirstbankStage("card-function-timeout", {
+    path: framePathname(frame),
+    detail: missingFunctions || "unknown",
+  });
+  throw new FirstbankConnectionError("第一銀行信用卡功能入口讀取失敗。");
+}
+
+async function findCardFunctions(frame: Frame) {
+  try {
+    const functions = await withActionTimeout(
+      frame.evaluate(() =>
+        ["F1632", "F1633", "F1634"].filter((cardDataFunc) =>
+          Boolean(document.querySelector(`a[data-func="${cardDataFunc}"]`)),
+        ),
+      ),
+    );
+    return Array.isArray(functions)
+      ? functions.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
   }
 }
 
@@ -1029,17 +1409,55 @@ async function captureCardResponse(
   captured: CapturedCardResponses,
 ) {
   try {
-    captured[key] = await response.json();
+    storeCardResponse(captured, key, await response.json());
     return;
   } catch {
     try {
       const text = await response.text();
-      captured[key] = JSON.parse(text) as unknown;
+      storeCardResponse(captured, key, JSON.parse(text) as unknown);
     } catch {
       // A matching non-JSON response is ignored; parser must not receive an
       // invented payload that could look like a successful empty sync.
     }
   }
+}
+
+function storeCardResponse(
+  captured: CapturedCardResponses,
+  key: CardPayloadKey,
+  payload: unknown,
+) {
+  const previous = captured[key];
+  captured[key] =
+    key === "recentPayments" && previous !== undefined
+      ? mergeRecentPaymentResponses(previous, payload)
+      : payload;
+}
+
+function mergeRecentPaymentResponses(previous: unknown, next: unknown) {
+  if (!isRecord(previous) || !isRecord(next)) return next;
+  const previousContent = isRecord(previous.CONTENT)
+    ? previous.CONTENT
+    : isRecord(previous.content)
+      ? previous.content
+      : undefined;
+  const nextContent = isRecord(next.CONTENT)
+    ? next.CONTENT
+    : isRecord(next.content)
+      ? next.content
+      : undefined;
+  const previousRecords = previousContent?.Records ?? previousContent?.records;
+  const nextRecords = nextContent?.Records ?? nextContent?.records;
+  if (!Array.isArray(previousRecords) || !Array.isArray(nextRecords)) {
+    return next;
+  }
+  return {
+    ...next,
+    CONTENT: {
+      ...nextContent,
+      Records: [...previousRecords, ...nextRecords],
+    },
+  };
 }
 
 function cardResponseKey(url: string): CardPayloadKey | undefined {
@@ -1056,8 +1474,14 @@ function createTransactionResponseCapture(): TransactionResponseCapture {
   });
   const capture: TransactionResponseCapture = {
     armed: false,
+    existingResultFrames: new Set(),
+    verificationRequested: false,
+    verificationResponded: false,
+    verificationFailed: false,
+    verificationRequestIds: new Set(),
     requestIds: new Set(),
     documentMeta: new Map(),
+    inFlight: new Map(),
     pending: new Set(),
     documentBody,
     settleDocumentBody(html: string) {
@@ -1066,6 +1490,64 @@ function createTransactionResponseCapture(): TransactionResponseCapture {
     },
   };
   return capture;
+}
+
+function createDepositResponseCapture(): DepositResponseCapture {
+  let resolveResponseBody = (_html: string) => {};
+  let resolveRequestObserved = () => {};
+  const responseBody = new Promise<string>((resolve) => {
+    resolveResponseBody = resolve;
+  });
+  const requestObserved = new Promise<void>((resolve) => {
+    resolveRequestObserved = resolve;
+  });
+  const capture: DepositResponseCapture = {
+    observed: false,
+    requested: false,
+    pending: new Set(),
+    requestObserved,
+    settleRequestObserved() {
+      capture.requested = true;
+      resolveRequestObserved();
+    },
+    responseBody,
+    settleResponseBody(html: string) {
+      capture.html = html;
+      resolveResponseBody(html);
+    },
+  };
+  return capture;
+}
+
+async function captureDepositResponse(
+  response: BrowserResponse,
+  capture: DepositResponseCapture,
+) {
+  const path = urlPathname(response.url());
+  const status = httpStatus(response);
+  let body = "";
+  try {
+    body = await response.text();
+  } catch {
+    // The waiter is still settled so a failed body read cannot trigger the
+    // bank's request a second time.
+  }
+  logFirstbankStage("deposit-ajax", {
+    path,
+    status,
+    bodyLength: body.length,
+  });
+  capture.status = status;
+  if (
+    typeof status === "number" &&
+    status >= 200 &&
+    status < 400 &&
+    body.trim()
+  ) {
+    capture.settleResponseBody(body);
+    return;
+  }
+  capture.settleResponseBody("");
 }
 
 async function captureTransactionDocument(
@@ -1079,6 +1561,9 @@ async function captureTransactionDocument(
     const body = response.base64Encoded
       ? decodeBase64Text(response.body)
       : response.body;
+    if (typeof body !== "string") {
+      throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
+    }
     logFirstbankStage("010103-cdp-body", {
       path: meta?.path,
       status: meta?.status,
@@ -1113,20 +1598,101 @@ async function captureTransactionResponse(
   }
 }
 
+async function captureFetchPausedDocument(
+  cdp: CDPSession,
+  event: FetchRequestPausedEvent,
+  capture: TransactionResponseCapture,
+) {
+  const url = event.request?.url ?? "";
+  const path = urlPathname(url);
+  const status = event.responseStatusCode;
+  let capturedHtml: string | undefined;
+  try {
+    if (capture.armed && isTransactionResultResponse(url)) {
+      logFirstbankStage("010103-fetch-response", {
+        path,
+        status,
+        resourceType: event.resourceType,
+      });
+      const response = await cdp.send("Fetch.getResponseBody", {
+        requestId: event.requestId,
+      });
+      const body = response.base64Encoded
+        ? decodeBase64Text(response.body)
+        : response.body;
+      if (typeof body !== "string") {
+        throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
+      }
+      logFirstbankStage("010103-fetch-body", {
+        path,
+        status,
+        bodyLength: body.length,
+        hasTxnDateHeader: hasTransactionDateHeader(body),
+      });
+      capturedHtml = transactionHistoryFromHtml(body);
+    }
+  } catch {
+    // Invalid or unavailable Fetch bodies do not mask a later live frame.
+  } finally {
+    await cdp
+      .send("Fetch.continueRequest", { requestId: event.requestId })
+      .catch(() => undefined);
+  }
+  if (capturedHtml !== undefined) capture.settleDocumentBody(capturedHtml);
+}
+
 async function submitTransactionQuery(
   page: Page,
   frame: Frame,
   transactionResponse: TransactionResponseCapture,
 ) {
-  await dismissBankNotice(frame);
-  await fillTransactionDateRange(frame);
-  await waitForQueryAccountOptions(frame);
-  await selectQueryAccount(frame);
+  const deadline = Date.now() + ACTION_TIMEOUT_MS;
+  let queryFrame = frame;
+  for (;;) {
+    queryFrame = await waitForLiveTransactionQueryFrame(
+      page,
+      queryFrame,
+      deadline,
+    );
+    await dismissBankNotice(queryFrame);
+    await fillTransactionDateRange(queryFrame);
+    const accountFrame = await waitForQueryAccountOptions(
+      page,
+      queryFrame,
+      deadline,
+    );
+    if (accountFrame !== queryFrame) {
+      queryFrame = accountFrame;
+      continue;
+    }
+    if (!(await selectQueryAccount(queryFrame))) {
+      const replacement = await findLiveTransactionQueryFrame(page, queryFrame);
+      if (replacement && replacement !== queryFrame) {
+        queryFrame = replacement;
+        continue;
+      }
+      throw new FirstbankConnectionError("第一銀行交易明細查詢帳號無法選取。");
+    }
+    const clickFrame = await waitForLiveTransactionQueryFrame(
+      page,
+      queryFrame,
+      deadline,
+    );
+    if (clickFrame !== queryFrame) {
+      queryFrame = clickFrame;
+      continue;
+    }
+    break;
+  }
+  transactionResponse.existingResultFrames = new Set(
+    liveFrames(page).filter((candidate) => isTransactionResultFrame(candidate)),
+  );
   transactionResponse.armed = true;
+  transactionResponse.armedAt = Date.now();
   logFirstbankStage("0101-query-submit", {
     path: urlPathname(TRANSACTION_URL),
   });
-  await clickTransactionSearch(frame);
+  await clickTransactionSearch(queryFrame);
   return waitForTransactionHistory(page, transactionResponse);
 }
 
@@ -1134,90 +1700,140 @@ async function waitForTransactionHistory(
   page: Page,
   capture: TransactionResponseCapture,
 ) {
-  const deadline = Date.now() + RESULT_CAPTURE_WAIT_MS;
-  while (Date.now() < deadline) {
-    if (capture.html) return capture.html;
-    const resultFrame = await findLiveTransactionResultFrame(page);
-    if (resultFrame) {
-      try {
-        const html = await serializeFirstbankTables(resultFrame);
-        logFirstbankStage("010103-live-frame", {
-          path: urlPathname(resultFrame.url()),
-          bodyLength: html.length,
-          hasTxnDateHeader: hasTransactionDateHeader(html),
-        });
-        return html;
-      } catch (error) {
-        if (!isTransactionHistoryReadError(error)) throw error;
-      }
+  const startedAt = Date.now();
+  for (;;) {
+    const captured = readyTransactionHistory(capture);
+    if (captured) return captured;
+    if (capture.verificationFailed) {
+      throw new FirstbankConnectionError("第一銀行交易明細前置驗證沒有完成。");
     }
-    const remaining = deadline - Date.now();
+    const remaining =
+      transactionCaptureDeadline(capture, startedAt) - Date.now();
     if (remaining <= 0) break;
-    const arrived = await Promise.race([
+    // Give the queued search click a tick to emit CDP events before probing.
+    await Promise.race([
       capture.documentBody.then(() => true),
       delay(Math.min(FRAME_READ_RETRY_MS, remaining)).then(() => false),
     ]);
-    if (arrived && capture.html) return capture.html;
+    const arrivedHistory = readyTransactionHistory(capture);
+    if (arrivedHistory) return arrivedHistory;
+    // verifyDV, when observed and still in flight, blocks the query frame's
+    // renderer; Runtime.evaluate only queues behind it. Skip probes until it
+    // settles. If verifyDV was never observed, still serialize a newly
+    // appeared live result frame — local Chromium often never surfaces that
+    // CDP event.
+    if (isVerificationInFlight(capture)) continue;
+    const resultFrame = await findLiveTransactionResultFrame(
+      page,
+      capture.existingResultFrames,
+    );
+    if (!resultFrame) continue;
+    try {
+      const html = await serializeFirstbankTables(
+        resultFrame,
+        FRAME_PROBE_TIMEOUT_MS,
+      );
+      logFirstbankStage("010103-live-frame", {
+        path: urlPathname(resultFrame.url()),
+        bodyLength: html.length,
+        hasTxnDateHeader: hasTransactionDateHeader(html),
+        elapsedMs: elapsedSinceArmed(capture),
+      });
+      return html;
+    } catch (error) {
+      if (!isTransactionHistoryReadError(error)) throw error;
+    }
   }
 
   if (capture.pending.size > 0) {
     await withActionTimeout(
       Promise.allSettled(Array.from(capture.pending)),
-      FRAME_PROBE_TIMEOUT_MS,
+      RESULT_CAPTURE_WAIT_MS,
     ).catch(() => undefined);
   }
-  if (capture.html) return capture.html;
+  const captured = readyTransactionHistory(capture);
+  if (captured) return captured;
 
   logFirstbankStage("010103-timeout", {
     path: "/NetBank/2/010103.html",
+    elapsedMs: elapsedSinceArmed(capture),
   });
+  for (const frame of liveFrames(page)) {
+    logFirstbankStage("010103-timeout-frame", {
+      path: framePathname(frame),
+    });
+  }
+  for (const entry of capture.inFlight.values()) {
+    logFirstbankStage("010103-timeout-inflight", {
+      path: entry.path,
+      elapsedMs: Date.now() - entry.startedAt,
+    });
+  }
+  if (
+    capture.verificationRequested &&
+    (!capture.verificationResponded ||
+      capture.verificationFailed ||
+      capture.verificationRequestIds.size > 0)
+  ) {
+    throw new FirstbankConnectionError("第一銀行交易明細前置驗證沒有完成。");
+  }
   throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
 }
 
-async function waitForDepositOverview(frame: Frame) {
-  const deadline = Date.now() + ACTION_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (await hasDepositOverview(frame)) return;
-    await delay(FRAME_READ_RETRY_MS);
-  }
+function readyTransactionHistory(capture: TransactionResponseCapture) {
+  // Already-captured 010103 HTML is the fallback path. Do not wait for a
+  // verifyDV CDP event that local Chromium may never emit.
+  return capture.html;
 }
 
-async function hasDepositOverview(frame: Frame) {
-  try {
-    return Boolean(
-      await withActionTimeout(
-        frame.evaluate(() => {
-          const text = (document.body?.innerText ?? "").replace(/\s+/g, " ");
-          return /帳號/.test(text) && /帳面餘額|可用餘額|存款餘額/.test(text);
-        }),
-      ),
-    );
-  } catch {
-    return false;
-  }
+function isVerificationInFlight(capture: TransactionResponseCapture) {
+  return (
+    capture.verificationRequested &&
+    (!capture.verificationResponded || capture.verificationRequestIds.size > 0)
+  );
 }
 
-async function waitForLiveTransactionQueryFrame(page: Page, preferred?: Frame) {
-  const deadline = Date.now() + ACTION_TIMEOUT_MS;
+function transactionCaptureDeadline(
+  capture: TransactionResponseCapture,
+  startedAt: number,
+) {
+  const hardDeadline = startedAt + RESULT_CAPTURE_MAX_WAIT_MS;
+  if (capture.verificationRequestIds.size > 0) return hardDeadline;
+  const settledAt = capture.verificationSettledAt ?? startedAt;
+  return Math.min(
+    Math.max(settledAt, startedAt) + RESULT_CAPTURE_WAIT_MS,
+    hardDeadline,
+  );
+}
+
+async function waitForLiveTransactionQueryFrame(
+  page: Page,
+  preferred?: Frame,
+  deadline = Date.now() + ACTION_TIMEOUT_MS,
+) {
   while (Date.now() < deadline) {
-    const found = await findLiveTransactionQueryFrame(page);
+    const found = await findLiveTransactionQueryFrame(page, preferred);
     if (found) return found;
     await delay(FRAME_READ_RETRY_MS);
   }
-  const found = await findLiveTransactionQueryFrame(page);
+  const found = await findLiveTransactionQueryFrame(page, preferred);
   if (found) return found;
-  if (
-    preferred &&
-    !isDetachedFrame(preferred) &&
-    liveFrames(page).includes(preferred)
-  ) {
-    return preferred;
-  }
-  return waitForAuthenticatedFrame(page);
+  throw new FirstbankConnectionError("第一銀行交易明細查詢頁面尚未載入完成。");
 }
 
-async function findLiveTransactionQueryFrame(page: Page) {
-  for (const frame of liveFrames(page)) {
+async function findLiveTransactionQueryFrame(page: Page, preferred?: Frame) {
+  const queryPath = urlPathname(TRANSACTION_URL);
+  const frames = liveFrames(page);
+  const preferredIsLive = preferred !== undefined && frames.includes(preferred);
+  const candidates = preferredIsLive
+    ? framePathname(preferred) === queryPath
+      ? [preferred]
+      : []
+    : frames.filter(
+        (frame) => frame !== preferred && framePathname(frame) === queryPath,
+      );
+  for (const frame of candidates) {
+    if (!(await isFrameDocumentReady(frame))) continue;
     if (await hasTransactionSearchControl(frame)) return frame;
   }
   return undefined;
@@ -1230,6 +1846,7 @@ async function hasTransactionSearchControl(frame: Frame) {
         frame.evaluate(() =>
           Boolean(document.querySelector("#searchBtn, input[name=showList]")),
         ),
+        FRAME_PROBE_TIMEOUT_MS,
       ),
     );
   } catch {
@@ -1237,15 +1854,34 @@ async function hasTransactionSearchControl(frame: Frame) {
   }
 }
 
-async function findLiveTransactionResultFrame(page: Page) {
+async function findLiveTransactionResultFrame(
+  page: Page,
+  excludedFrames: ReadonlySet<Frame>,
+) {
   for (const frame of liveFrames(page)) {
-    if (!isTransactionResultResponse(frame.url())) continue;
-    await dismissBankNotice(frame, FRAME_PROBE_TIMEOUT_MS);
+    if (excludedFrames.has(frame)) continue;
+    let isResultUrl = false;
+    try {
+      isResultUrl = isTransactionResultResponse(frame.url());
+    } catch {
+      isResultUrl = false;
+    }
+    if (isResultUrl) {
+      await dismissBankNotice(frame, FRAME_PROBE_TIMEOUT_MS);
+    }
     if (await hasTransactionResultHeader(frame, FRAME_PROBE_TIMEOUT_MS)) {
       return frame;
     }
   }
   return undefined;
+}
+
+function isTransactionResultFrame(frame: Frame) {
+  try {
+    return isTransactionResultResponse(frame.url());
+  } catch {
+    return false;
+  }
 }
 
 async function fillTransactionDateRange(frame: Frame) {
@@ -1292,12 +1928,21 @@ function formatTaipeiDate(ms: number) {
   return `${value("year")}/${value("month")}/${value("day")}`;
 }
 
-async function waitForQueryAccountOptions(frame: Frame) {
-  const deadline = Date.now() + ACTION_TIMEOUT_MS;
+async function waitForQueryAccountOptions(
+  page: Page,
+  preferred: Frame,
+  deadline = Date.now() + ACTION_TIMEOUT_MS,
+) {
   while (Date.now() < deadline) {
-    if (await selectQueryAccount(frame, true)) return;
+    const frame = await findLiveTransactionQueryFrame(page, preferred);
+    if (!frame) {
+      await delay(FRAME_READ_RETRY_MS);
+      continue;
+    }
+    if (await selectQueryAccount(frame, true)) return frame;
     await delay(FRAME_READ_RETRY_MS);
   }
+  throw new FirstbankConnectionError("第一銀行交易明細查詢帳號無法選取。");
 }
 
 async function selectQueryAccount(frame: Frame, dryRun = false) {
@@ -1305,16 +1950,29 @@ async function selectQueryAccount(frame: Frame, dryRun = false) {
     return Boolean(
       await withActionTimeout(
         frame.evaluate((shouldSelect) => {
+          type QueryAccountSelect = {
+            options: ArrayLike<{
+              selected: boolean;
+              text: string;
+              value: string;
+            }>;
+            selectedIndex: number;
+            value: string;
+            dispatchEvent: (event: Event) => boolean;
+          };
           const isPlaceholder = (text: string, value: string) => {
             const normalized = text.replace(/\s+/g, "");
-            return !value.trim() || /請選擇|選擇帳號|^-+$/.test(normalized);
+            return (
+              !value.trim() ||
+              value.trim() === "0" ||
+              /請選擇|選擇帳號|pleaseselect|selectaccount|^-+$/i.test(
+                normalized,
+              )
+            );
           };
-          const select = Array.from(document.querySelectorAll("select")).find(
-            (candidate) =>
-              Array.from(candidate.options).some(
-                (option) => !isPlaceholder(option.text, option.value),
-              ),
-          );
+          const select = document.querySelector(
+            'select[name="acnt"]',
+          ) as QueryAccountSelect | null;
           if (!select) return false;
           const option = Array.from(select.options).find(
             (candidate) => !isPlaceholder(candidate.text, candidate.value),
@@ -1325,7 +1983,12 @@ async function selectQueryAccount(frame: Frame, dryRun = false) {
           option.selected = true;
           select.dispatchEvent(new Event("input", { bubbles: true }));
           select.dispatchEvent(new Event("change", { bubbles: true }));
-          return select.value === option.value;
+          const selected = select.options[select.selectedIndex];
+          return (
+            select.value === option.value &&
+            selected !== undefined &&
+            !isPlaceholder(selected.text, selected.value)
+          );
         }, !dryRun),
       ),
     );
@@ -1344,14 +2007,18 @@ async function clickTransactionSearch(frame: Frame) {
             "#searchBtn, input[name=showList]",
           );
           if (!searchBtn) return false;
-          searchBtn.click();
+          // First Bank's click handler performs a synchronous verifyDV XHR.
+          // Let Runtime.evaluate return before that handler starts so Browser
+          // Run can continue delivering the response and navigation events.
+          setTimeout(() => searchBtn.click(), 0);
           return true;
         }),
       ),
     );
   } catch (error) {
     if (!isRecoverableFrameError(error)) throw error;
-    // The native click can destroy the iframe execution context immediately.
+    // The queued click can navigate or replace the iframe immediately after
+    // Runtime.evaluate returns. Network listeners remain armed above.
     submitted = true;
   }
   if (!submitted) {
@@ -1396,10 +2063,15 @@ async function hasTransactionResultHeader(
         frame.evaluate(() => {
           const rows = Array.from(document.querySelectorAll("tr"));
           return rows.some((row) => {
-            const text = (row.innerText || "").replace(/\s+/g, " ");
-            return (
-              /交易日期|交易日/.test(text) && /支出|存入|交易金額/.test(text)
-            );
+            const text = (row.innerText || "").replace(/\s+/g, "");
+            const hasDate =
+              /交易日期|交易日/.test(text) ||
+              /transactiondate/i.test(text) ||
+              /date/i.test(text);
+            const hasAmount =
+              /支出|存入|交易金額/.test(text) ||
+              /withdrawal|deposit|debit|credit/i.test(text);
+            return Boolean(hasDate && hasAmount);
           });
         }),
         timeoutMs,
@@ -1423,7 +2095,135 @@ async function navigateFrame(frame: Frame, url: string) {
   }
 }
 
-async function fetchFrameResource(frame: Frame, path: string): Promise<string> {
+async function navigateToReadyFrame(
+  page: Page,
+  frame: Frame,
+  url: string,
+  path: string,
+) {
+  const target = nestedContentFrame(page, frame);
+  if (framePathname(target) !== path) await navigateFrame(target, url);
+  return waitForReadyFrameByPath(page, path, target);
+}
+
+function nestedContentFrame(page: Page, preferred: Frame) {
+  const main = (page as Page & { mainFrame?: () => Frame }).mainFrame?.();
+  if (!main || preferred !== main) return preferred;
+  const nested = liveFrames(page).find((candidate) => candidate !== main);
+  return nested ?? preferred;
+}
+
+async function waitForReadyFrameByPath(
+  page: Page,
+  path: string,
+  preferred?: Frame,
+  errorMessage = "第一銀行存款總覽頁面尚未載入完成。",
+) {
+  const deadline = Date.now() + ACTION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const matchingFrames = liveFrames(page).filter(
+      (candidate) => framePathname(candidate) === path,
+    );
+    const candidates =
+      preferred && matchingFrames.includes(preferred)
+        ? [preferred, ...matchingFrames.filter((frame) => frame !== preferred)]
+        : matchingFrames;
+    for (const candidate of candidates) {
+      if (await isFrameDocumentReady(candidate)) return candidate;
+    }
+    await delay(FRAME_READ_RETRY_MS);
+  }
+  throw new FirstbankConnectionError(errorMessage);
+}
+
+async function isFrameDocumentReady(frame: Frame) {
+  try {
+    return Boolean(
+      await withActionTimeout(
+        frame.evaluate(() =>
+          Boolean(
+            document.body &&
+            (document.readyState === "interactive" ||
+              document.readyState === "complete"),
+          ),
+        ),
+        FRAME_PROBE_TIMEOUT_MS,
+      ),
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function collectDepositOverview(
+  page: Page,
+  frame: Frame,
+  capture: DepositResponseCapture,
+) {
+  if (!capture.observed) {
+    const triggered = await triggerDepositOverview(page, frame);
+    if (!triggered) {
+      throw new FirstbankConnectionError("第一銀行存款總覽按鈕格式已變更。");
+    }
+  }
+  const firstSignal = await Promise.race([
+    capture.responseBody.then((html) => ({ type: "response" as const, html })),
+    capture.requestObserved.then(() => ({ type: "request" as const })),
+    delay(DEPOSIT_REQUEST_GRACE_MS).then(() => ({ type: "timeout" as const })),
+  ]);
+  const html =
+    firstSignal.type === "response"
+      ? firstSignal.html
+      : firstSignal.type === "request"
+        ? await withActionTimeout(
+            capture.responseBody,
+            DEPOSIT_CAPTURE_WAIT_MS,
+          ).catch(() => "")
+        : "";
+  if (html) return html;
+  if (capture.pending.size > 0) {
+    await withActionTimeout(
+      Promise.allSettled(Array.from(capture.pending)),
+      FRAME_PROBE_TIMEOUT_MS,
+    ).catch(() => undefined);
+  }
+  if (capture.html) return capture.html;
+  if (capture.observed) {
+    logFirstbankStage("deposit-ajax-failed", {
+      path: DEPOSIT_AJAX_PATH,
+      status: capture.status,
+      detail: "empty-or-error-response",
+    });
+    // The native handler already issued the bank POST. Never click or POST
+    // again after a captured non-2xx / empty body.
+    throw new FirstbankConnectionError("第一銀行存款總覽讀取失敗。");
+  }
+  logFirstbankStage("deposit-ajax-fallback", {
+    path: DEPOSIT_AJAX_PATH,
+    detail: capture.requested ? "missing-response" : "missing-request",
+  });
+  // Click did not surface a capturable page response. Do not click again;
+  // read the same-origin ajax endpoint from inside the live overview frame.
+  const liveFrame = liveDepositOverviewFrame(page, frame);
+  return fetchDepositOverview(liveFrame);
+}
+
+function liveDepositOverviewFrame(page: Page, preferred: Frame) {
+  const path = urlPathname(ACCOUNT_OVERVIEW_URL);
+  const nested = nestedContentFrame(page, preferred);
+  const frames = liveFrames(page);
+  const ready =
+    frames.find((candidate) => framePathname(candidate) === path) ??
+    (frames.includes(nested) ? nested : undefined) ??
+    (frames.includes(preferred) ? preferred : undefined) ??
+    frames[0];
+  if (!ready) {
+    throw new FirstbankConnectionError("第一銀行存款總覽讀取失敗。");
+  }
+  return ready;
+}
+
+async function fetchDepositOverview(frame: Frame): Promise<string> {
   try {
     const value = await withActionTimeout(
       frame.evaluate(async (resourcePath) => {
@@ -1441,22 +2241,96 @@ async function fetchFrameResource(frame: Frame, path: string): Promise<string> {
         } catch {
           return { ok: false, status: 0, text: "" };
         }
-      }, path),
+      }, DEPOSIT_AJAX_PATH),
     );
-    if (
-      isRecord(value) &&
-      value.ok === true &&
-      typeof value.text === "string"
-    ) {
-      return value.text;
+    if (isRecord(value) && typeof value.status === "number") {
+      const body = typeof value.text === "string" ? value.text : "";
+      logFirstbankStage("deposit-ajax", {
+        path: DEPOSIT_AJAX_PATH,
+        status: value.status,
+        bodyLength: body.length,
+      });
+      if (value.ok === true && body.trim()) return body;
     }
   } catch (error) {
     if (!isRecoverableFrameError(error)) throw error;
   }
+  logFirstbankStage("deposit-ajax-failed", {
+    path: DEPOSIT_AJAX_PATH,
+    detail: "fallback-fetch",
+  });
   throw new FirstbankConnectionError("第一銀行存款總覽讀取失敗。");
 }
 
-async function serializeFirstbankTables(frame: Frame): Promise<string> {
+async function triggerDepositOverview(page: Page, preferred: Frame) {
+  const deadline = Date.now() + ACTION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const frames = liveFrames(page);
+    const preferredIsLive = frames.includes(preferred);
+    const candidates = preferredIsLive
+      ? framePathname(preferred) === urlPathname(ACCOUNT_OVERVIEW_URL)
+        ? [preferred]
+        : []
+      : frames.filter(
+          (candidate) =>
+            candidate !== preferred &&
+            framePathname(candidate) === urlPathname(ACCOUNT_OVERVIEW_URL),
+        );
+    for (const frame of candidates) {
+      if (!(await isFrameDocumentReady(frame))) continue;
+      const selector = await findDepositTrigger(frame);
+      if (selector === undefined) continue;
+      try {
+        await withActionTimeout(frame.click(selector));
+        return true;
+      } catch (error) {
+        if (isRecoverableFrameError(error)) {
+          // The original click may already be executing in the page. Listeners
+          // are armed before it, so wait for that one response instead of
+          // re-clicking on either this frame or a replacement.
+          return true;
+        }
+        throw error;
+      }
+    }
+    await delay(FRAME_READ_RETRY_MS);
+  }
+  return false;
+}
+
+async function findDepositTrigger(frame: Frame) {
+  try {
+    const selector = await withActionTimeout(
+      frame.evaluate(() => {
+        const isVisible = (element: Element | null) => {
+          if (!(element instanceof HTMLElement)) return false;
+          const style = window.getComputedStyle(element);
+          return style.display !== "none" && style.visibility !== "hidden";
+        };
+        const depositTriggerSelector = "#btnOpen a";
+        if (isVisible(document.querySelector(depositTriggerSelector))) {
+          return depositTriggerSelector;
+        }
+        const typeSelector =
+          '#overview-account a[onclick*="chgAcntReviewType(\'1\')"], a[href="#tab1"]';
+        return isVisible(document.querySelector(typeSelector))
+          ? typeSelector
+          : undefined;
+      }),
+      FRAME_PROBE_TIMEOUT_MS,
+    );
+    return typeof selector === "string" ? selector : undefined;
+  } catch {
+    // A read-only selector probe can be retried on a replacement frame because
+    // no bank request has been dispatched yet.
+    return undefined;
+  }
+}
+
+async function serializeFirstbankTables(
+  frame: Frame,
+  timeoutMs = ACTION_TIMEOUT_MS,
+): Promise<string> {
   const serialized = await withActionTimeout(
     frame.evaluate(() => {
       const escape = (value: string) =>
@@ -1490,6 +2364,7 @@ async function serializeFirstbankTables(frame: Frame): Promise<string> {
         .filter(Boolean)
         .join("\n");
     }),
+    timeoutMs,
   ).catch(() => "");
 
   if (typeof serialized === "string" && serialized.trim()) {
@@ -1672,7 +2547,123 @@ async function closeFirstbankBrowser(browser: Browser) {
 async function configurePage(page: Page) {
   await page.setViewport({ width: 1280, height: 800 });
   await page.setUserAgent(USER_AGENT);
+  await page.setExtraHTTPHeaders({
+    "Accept-Language": ACCEPT_LANGUAGE,
+  });
   page.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
+}
+
+function localeEvaluateTargets(page: Page): Array<Page | Frame> {
+  const frames = liveFrames(page);
+  return frames.length > 0 ? frames : [page];
+}
+
+/**
+ * 實際英文登入頁（index103.html）的語系控制為
+ * `<a href="#" onclick="ajaxSetLocale('zh_TW');">中文</a>`。
+ * `ajaxSetLocale` 定義於 `/NetBank/include/common_js.jsp`，會 POST
+ * `/NetBank/chgLanguage.html`（`setLocale=`），成功後 reload `index103.html`。
+ * 未登入的 frame.html / 01.jsp 沒有語系選單；銀行 FAQ 說明畫面語言依瀏覽器
+ * Accept-Language（zh-TW）。登入後若找不到該 onclick，不杜撰 selector。
+ */
+async function hasProvenChineseLocaleLink(target: Page | Frame) {
+  try {
+    return Boolean(
+      await withActionTimeout(
+        target.evaluate(() =>
+          Array.from(document.querySelectorAll("a[onclick]")).some((element) =>
+            (element.getAttribute("onclick") || "").includes(
+              "ajaxSetLocale('zh_TW')",
+            ),
+          ),
+        ),
+      ),
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function clickProvenChineseLocaleLink(target: Page | Frame) {
+  try {
+    return Boolean(
+      await withActionTimeout(
+        target.evaluate(() => {
+          const link = Array.from(
+            document.querySelectorAll<HTMLAnchorElement>("a[onclick]"),
+          ).find((element) =>
+            (element.getAttribute("onclick") || "").includes(
+              "ajaxSetLocale('zh_TW')",
+            ),
+          );
+          if (!link) return false;
+          link.click();
+          return true;
+        }),
+      ),
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function postChangeLanguageWithoutNavigation(target: Page | Frame) {
+  try {
+    const result = await withActionTimeout(
+      target.evaluate(async () => {
+        // firstbank-locale-chgLanguage: same path/body as ajaxSetLocale('zh_TW').
+        const response = await fetch("/NetBank/chgLanguage.html", {
+          method: "POST",
+          credentials: "same-origin",
+          redirect: "manual",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: "setLocale=zh_TW",
+        });
+        return { status: response.status };
+      }),
+    );
+    return isRecord(result) && typeof result.status === "number"
+      ? result.status
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function switchLoginPageToTraditionalChinese(page: Page) {
+  for (const target of localeEvaluateTargets(page)) {
+    if (!(await clickProvenChineseLocaleLink(target))) continue;
+    logFirstbankStage("locale-zh-link-clicked", {
+      path: urlPathname(LOGIN_URL),
+      detail: "ajaxSetLocale(zh_TW)",
+    });
+    await page
+      .waitForNavigation({
+        waitUntil: "domcontentloaded",
+        timeout: NAVIGATION_TIMEOUT_MS,
+      })
+      .catch(() => undefined);
+    return;
+  }
+}
+
+async function ensureTraditionalChineseUi(page: Page) {
+  for (const target of localeEvaluateTargets(page)) {
+    if (!(await hasProvenChineseLocaleLink(target))) continue;
+    const status = await postChangeLanguageWithoutNavigation(target);
+    logFirstbankStage("locale-chgLanguage", {
+      path: CHANGE_LANGUAGE_PATH,
+      status,
+      detail: "setLocale=zh_TW",
+    });
+    return;
+  }
+  logFirstbankStage("locale-control-absent", {
+    path: urlPathname(HOME_URL),
+    detail: "no ajaxSetLocale(zh_TW) on frameset/home",
+  });
 }
 
 async function fillInput(page: Page, selector: string, value: string) {
@@ -1811,7 +2802,7 @@ function isRecoverableFrameError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return (
     error instanceof FirstbankActionTimeoutError ||
-    /Execution context was destroyed|Cannot find context|detached Frame|Target closed|Navigation timeout of \d+ ms exceeded|timed out.*protocolTimeout|Runtime\.callFunctionOn timed out/i.test(
+    /Execution context was destroyed|Cannot find context|Navigating frame was detached|Waiting failed: Frame detached|frame got detached|detached frame|Target closed|Navigation timeout of \d+ ms exceeded|timed out.*protocolTimeout|Runtime\.callFunctionOn timed out/i.test(
       message,
     )
   );
@@ -1853,21 +2844,98 @@ function pickLiveFrame(page: Page, preferred?: Frame) {
   return liveFrames(page)[0];
 }
 
+function pickCardNavigationFrame(page: Page, preferred?: Frame) {
+  const main = (page as Page & { mainFrame?: () => Frame }).mainFrame?.();
+  const directChildren = (
+    main as (Frame & { childFrames?: () => Frame[] }) | undefined
+  )?.childFrames?.();
+  const live = liveFrames(page).filter((frame) => frame !== main);
+  const frames =
+    directChildren && directChildren.length > 0
+      ? directChildren.filter((frame) => live.includes(frame))
+      : live;
+  const byPath = (pattern: RegExp) =>
+    frames.find((frame) => pattern.test(framePathname(frame)));
+  return (
+    byPath(/^\/NetBank\/1\/01\.jsp$/i) ??
+    byPath(/^\/NetBank\/2\/010103(?:\.html?)?$/i) ??
+    byPath(/^\/NetBank\/2\/0101(?:\.html?)?$/i) ??
+    (preferred &&
+    frames.includes(preferred) &&
+    !/^\/NetBank\/1\/acntReviewAll\.html$/i.test(framePathname(preferred))
+      ? preferred
+      : undefined) ??
+    frames.find((frame) =>
+      /^\/NetBank\/(?:1|2|ajax)\//i.test(framePathname(frame)),
+    ) ??
+    frames[0]
+  );
+}
+
 function isTransactionResultResponse(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== ORIGIN) return false;
+    const path = parsed.pathname.toLowerCase().split(";")[0];
+    return /\/netbank\/2\/010103(?:\.html?)?$/.test(path);
+  } catch {
+    return false;
+  }
+}
+
+function isDepositOverviewResponse(url: string) {
   try {
     const parsed = new URL(url);
     return (
       parsed.origin === ORIGIN &&
-      parsed.pathname.toLowerCase() === "/netbank/2/010103.html"
+      parsed.pathname.toLowerCase().split(";")[0] ===
+        DEPOSIT_AJAX_PATH.toLowerCase()
     );
   } catch {
     return false;
   }
 }
 
+function isTransactionVerificationResponse(url: string) {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.origin === ORIGIN &&
+      parsed.pathname.toLowerCase().split(";")[0] === "/netbank/2/verifydv.html"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isFirstbankUrl(url: string) {
+  try {
+    return new URL(url).origin === ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+function isNetBankTwoPath(path: string) {
+  return /\/netbank\/2\//i.test(path);
+}
+
+function isCapturableResourceType(type: string | undefined) {
+  if (!type) return true;
+  return /^(document|xhr|fetch|other)$/i.test(type);
+}
+
+function framePathname(frame: Frame) {
+  try {
+    return urlPathname(frame.url());
+  } catch {
+    return "(unavailable)";
+  }
+}
+
 function urlPathname(url: string) {
   try {
-    return new URL(url).pathname;
+    return new URL(url).pathname.split(";")[0];
   } catch {
     return "(invalid)";
   }
@@ -1881,8 +2949,36 @@ function httpStatus(response: BrowserResponse) {
   }
 }
 
+function isFramesetParentNoise(message: string) {
+  return /resizeFrame is not a function/i.test(message);
+}
+
+function compactHtmlText(html: string) {
+  return html.replace(/<[^>]+>/g, "").replace(/\s+/g, "");
+}
+
+function hasTransactionDateSignal(text: string) {
+  return (
+    /交易日期|交易日/.test(text) ||
+    /transactiondate/i.test(text) ||
+    /date/i.test(text)
+  );
+}
+
+function hasTransactionAmountSignal(text: string) {
+  return (
+    /支出|存入|交易金額/.test(text) ||
+    /withdrawal|deposit|debit|credit/i.test(text)
+  );
+}
+
+function hasTransactionTableSignals(html: string) {
+  const text = compactHtmlText(html);
+  return hasTransactionDateSignal(text) && hasTransactionAmountSignal(text);
+}
+
 function hasTransactionDateHeader(html: string) {
-  return /交易日期|交易日/.test(html);
+  return hasTransactionDateSignal(compactHtmlText(html));
 }
 
 function logFirstbankStage(
@@ -1892,6 +2988,9 @@ function logFirstbankStage(
     status?: number;
     bodyLength?: number;
     hasTxnDateHeader?: boolean;
+    resourceType?: string;
+    elapsedMs?: number;
+    detail?: string;
   } = {},
 ) {
   const parts = [`[firstbank] ${stage}`];
@@ -1903,7 +3002,46 @@ function logFirstbankStage(
   if (fields.hasTxnDateHeader !== undefined) {
     parts.push(`hasTxnDateHeader=${fields.hasTxnDateHeader}`);
   }
+  if (fields.resourceType !== undefined) {
+    parts.push(`resourceType=${fields.resourceType}`);
+  }
+  if (fields.elapsedMs !== undefined) {
+    parts.push(`elapsedMs=${fields.elapsedMs}`);
+  }
+  if (fields.detail !== undefined) parts.push(`detail=${fields.detail}`);
   console.log(parts.join(" "));
+}
+
+function elapsedSinceArmed(capture: TransactionResponseCapture) {
+  if (capture.armedAt === undefined) return undefined;
+  return Date.now() - capture.armedAt;
+}
+
+function describeDialog(dialog: Dialog) {
+  let type = "unknown";
+  let message = "";
+  try {
+    type = dialog.type();
+  } catch {
+    type = "unknown";
+  }
+  try {
+    message = dialog.message();
+  } catch {
+    message = "";
+  }
+  return `${type}:${safeDiagnosticText(message)}`;
+}
+
+// Dialog and page error text can quote balances or account numbers, so every
+// digit is masked and token/URL-shaped content is redacted before the message
+// reaches the logs.
+function safeDiagnosticText(value: string) {
+  return safeErrorMessage(maskDigits(value)).slice(0, 120);
+}
+
+function maskDigits(value: string) {
+  return value.replace(/\d/g, "#").replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
 function isTransactionHistoryReadError(error: unknown) {
@@ -1933,7 +3071,7 @@ function assertSerializedTransactionTables(html: string) {
       "第一銀行交易明細資料量超過單次同步上限。",
     );
   }
-  if (!/交易日期|交易日/.test(html) || !/支出|存入|交易金額/.test(html)) {
+  if (!hasTransactionTableSignals(html)) {
     throw new FirstbankConnectionError("第一銀行交易明細讀取失敗。");
   }
   return html;
