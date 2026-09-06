@@ -63,7 +63,15 @@ test.beforeEach(async ({ page }) => {
         { id: "fee", label: "手續費", sortOrder: 11, isSystem: true },
         { id: "insurance", label: "保險", sortOrder: 12, isSystem: true },
         { id: "tax", label: "稅務", sortOrder: 13, isSystem: true },
-        { id: "other", label: "未分類", sortOrder: 14, isSystem: true },
+        { id: "software", label: "軟體服務", sortOrder: 14, isSystem: true },
+        { id: "utilities", label: "生活繳費", sortOrder: 15, isSystem: true },
+        {
+          id: "other-income",
+          label: "其他收入",
+          sortOrder: 16,
+          isSystem: true,
+        },
+        { id: "other", label: "未分類", sortOrder: 17, isSystem: true },
       ];
     else if (path === "/api/classification/rules") body = [];
     else if (path.includes("/connectors/") && path.endsWith("/settings"))

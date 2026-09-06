@@ -17,6 +17,7 @@ export type ClassifiedTransaction = {
   description?: string | null;
   counterparty?: string | null;
   sourceId: string;
+  amount?: number;
 };
 
 export function matchesClassificationRule(
@@ -95,6 +96,15 @@ export async function resolveClassifications(
     let matched: ClassificationResult | undefined;
     for (const rule of rules) {
       if (rule.target_type && rule.target_type !== "bank_transaction") continue;
+      if (
+        rule.id === "system:bank:other-income-keywords" &&
+        !(
+          typeof transaction.amount === "number" &&
+          Number.isFinite(transaction.amount) &&
+          transaction.amount > 0
+        )
+      )
+        continue;
       if (!matchesClassificationRule(rule, transaction)) continue;
       matched = {
         categoryId: rule.category_id,
