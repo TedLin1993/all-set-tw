@@ -8,10 +8,10 @@
 
 ## 目錄
 
-- Tables：24
-- Explicit indexes：32
+- Tables：28
+- Explicit indexes：40
 - Other objects：0
-- Migrations：25
+- Migrations：38
 
 ## Tables
 
@@ -20,12 +20,14 @@
 | [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 14 | 1 | 1 |
 | [`bank_balance_snapshots`](#bank_balance_snapshots) | 帳戶在特定時間點的餘額快照，供資產總值與歷史圖表計算。 | 15 | 1 | 2 |
 | [`bank_transaction_preferences`](#bank_transaction_preferences) | 使用者對銀行交易計算方式的個別偏好。 | 4 | 0 | 1 |
-| [`bank_transactions`](#bank_transactions) | 銀行帳戶、信用卡與其他存款型連接器同步回來的交易明細。 | 15 | 1 | 4 |
+| [`bank_transactions`](#bank_transactions) | 銀行帳戶、信用卡與其他存款型連接器同步回來的交易明細。 | 15 | 1 | 5 |
 | [`classification_categories`](#classification_categories) | 交易與發票使用的分類字典，包含系統預設分類與使用者分類。 | 6 | 0 | 1 |
 | [`classification_overrides`](#classification_overrides) | 使用者對單筆目標資料指定的分類覆寫。 | 6 | 1 | 1 |
 | [`classification_rules`](#classification_rules) | 以文字條件自動判斷交易或其他資料分類的規則。 | 14 | 1 | 2 |
 | [`connector_settings`](#connector_settings) | 每個外部金融資料連接器的認證設定、公開設定與同步游標。 | 7 | 0 | 0 |
 | [`credit_card_bills`](#credit_card_bills) | 信用卡依帳單週期整理的帳單主檔。 | 15 | 1 | 2 |
+| [`einvoice_sync_run_items`](#einvoice_sync_run_items) | 電子發票持久化同步中，每張發票的明細擷取工作與待寫入資料。 | 17 | 1 | 1 |
+| [`einvoice_sync_runs`](#einvoice_sync_runs) | 電子發票跨 Queue invocation 執行的持久化同步記錄。 | 21 | 2 | 2 |
 | [`exchange_rates`](#exchange_rates) | 將外幣換算為新台幣時使用的最新匯率。 | 3 | 0 | 0 |
 | [`investment_positions`](#investment_positions) | 投資帳戶在特定日期的持倉與資產市值快照。 | 14 | 0 | 4 |
 | [`investment_transactions`](#investment_transactions) | 投資帳戶的買賣、配息或其他證券交易明細。 | 22 | 0 | 3 |
@@ -36,11 +38,13 @@
 | [`net_worth_history`](#net_worth_history) | 按日期保存的淨資產或資產類別歷史數值，用於圖表與歷史查詢。 | 6 | 0 | 2 |
 | [`notification_preferences`](#notification_preferences) | 此單一部署的同步推播偏好設定。 | 5 | 0 | 0 |
 | [`push_subscriptions`](#push_subscriptions) | 瀏覽器 Web Push 裝置訂閱資料。 | 6 | 0 | 0 |
-| [`scheduled_sync_batch_results`](#scheduled_sync_batch_results) | 預設排程同步批次中各工作的完成結果。 | 8 | 1 | 0 |
+| [`scheduled_sync_batch_results`](#scheduled_sync_batch_results) | 預設排程同步批次中各工作的完成結果。 | 9 | 1 | 0 |
 | [`scheduled_sync_batches`](#scheduled_sync_batches) | 追蹤預設排程中需彙總推播的一輪同步工作。 | 12 | 0 | 2 |
 | [`sync_jobs`](#sync_jobs) | 每個連接器與同步範圍的排程、鎖定狀態與最近執行結果。 | 19 | 0 | 1 |
 | [`sync_schedule_settings`](#sync_schedule_settings) | 所有使用 inherit 模式之同步工作的全域預設排程。 | 6 | 0 | 0 |
 | [`sync_write_staging`](#sync_write_staging) | 同步流程寫入正式資料表前的暫存資料。 | 5 | 0 | 1 |
+| [`tdcc_sync_run_items`](#tdcc_sync_run_items) | 集保持久化同步中，依帳戶、任務與分頁拆分的工作及取得結果。 | 18 | 1 | 2 |
+| [`tdcc_sync_runs`](#tdcc_sync_runs) | 集保 e 存摺跨 Queue invocation 執行的持久化同步記錄與接續狀態。 | 25 | 2 | 2 |
 
 ### `bank_accounts`
 
@@ -234,6 +238,7 @@ CREATE TABLE bank_transaction_preferences (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
+| `idx_bank_transactions_transaction_day` | 否 | 否 | — | `CREATE INDEX idx_bank_transactions_transaction_day<br>  ON bank_transactions (<br>    CASE<br>      WHEN length(authorized_at) > 10<br>        THEN COALESCE(<br>          date(authorized_at, '+8 hours'),<br>          substr(authorized_at, 1, 10)<br>        )<br>      ELSE substr(COALESCE(authorized_at, posted_date), 1, 10)<br>    END<br>  )` |
 | `idx_bank_transactions_status` | 否 | 否 | `connector_id`, `account_id`, `status` | `CREATE INDEX idx_bank_transactions_status<br>  ON bank_transactions (connector_id, account_id, status)` |
 | `idx_bank_transactions_effective_updated` | 否 | 否 | `effective_date`, `updated_at`, `id` | `CREATE INDEX idx_bank_transactions_effective_updated<br>  ON bank_transactions (effective_date DESC, updated_at DESC, id DESC)` |
 | `idx_bank_transactions_posted_date` | 否 | 否 | `posted_date` | `CREATE INDEX idx_bank_transactions_posted_date<br>  ON bank_transactions (posted_date)` |
@@ -497,6 +502,146 @@ CREATE TABLE "credit_card_bills" (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (connector_id, account_id, billing_period)
+)
+```
+
+### `einvoice_sync_run_items`
+
+> 用途：電子發票持久化同步中，每張發票的明細擷取工作與待寫入資料。
+> 注意：同一 run_id 與 invoice_source_id 只保留一筆工作；以租約防止重複處理，全部完成後才將資料寫入正式發票表。
+
+#### Columns
+
+| 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
+| ---: | --- | --- | --- | :---: | --- | ---: | --- |
+| 1 | `id` | 發票同步項目的識別碼。 | TEXT | YES | — | 1 | — |
+| 2 | `run_id` | 所屬 einvoice_sync_runs 執行記錄；刪除執行記錄時一併刪除項目。 | TEXT | NO | — | — | — |
+| 3 | `invoice_source_id` | 外部來源的發票識別碼，用於同一輪同步內去重。 | TEXT | NO | — | — | — |
+| 4 | `header_json` | 取得發票清單時保存的發票表頭 JSON。 | TEXT | NO | — | — | — |
+| 5 | `normalized_invoice_json` | 待寫入正式 invoices 表的正規化發票 JSON。 | TEXT | NO | — | — | — |
+| 6 | `detail_key` | 明細擷取工作的識別鍵。 | TEXT | YES | — | — | — |
+| 7 | `detail_metadata_json` | 呼叫發票明細 API 所需的工作參數 JSON。 | TEXT | YES | — | — | — |
+| 8 | `detail_items_json` | 已擷取、待寫入正式明細表的發票品項 JSON。 | TEXT | YES | — | — | — |
+| 9 | `line_item_count` | 此發票已取得的品項明細筆數。 | INTEGER | NO | 0 | — | — |
+| 10 | `status` | 工作狀態：pending 待處理、processing 處理中、done 已完成。 | TEXT | NO | — | — | — |
+| 11 | `attempt_count` | 此項目被領取處理的累計次數。 | INTEGER | NO | 0 | — | — |
+| 12 | `last_error` | 此項目最近一次處理失敗的錯誤訊息。 | TEXT | YES | — | — | — |
+| 13 | `lease_token` | 領取此項目的租約識別碼，用於確認完成或重試操作的擁有權。 | TEXT | YES | — | — | — |
+| 14 | `lease_expires_at` | 項目租約到期時間，逾期後可重新領取。 | TEXT | YES | — | — | — |
+| 15 | `created_at` | 項目首次建立的時間。 | TEXT | NO | — | — | — |
+| 16 | `updated_at` | 項目最後更新的時間。 | TEXT | NO | — | — | — |
+| 17 | `completed_at` | 項目完成明細擷取的時間。 | TEXT | YES | — | — | — |
+
+#### Foreign keys
+
+| 欄位 | 參照表 | 參照欄位 | ON UPDATE | ON DELETE |
+| --- | --- | --- | --- | --- |
+| `run_id` | `einvoice_sync_runs` | `id` | NO ACTION | CASCADE |
+
+#### Indexes
+
+| Index | Unique | Partial | 欄位 | 定義 |
+| --- | :---: | :---: | --- | --- |
+| `idx_einvoice_sync_run_items_claim` | 否 | 否 | `run_id`, `status`, `lease_expires_at`, `created_at` | `CREATE INDEX idx_einvoice_sync_run_items_claim<br>  ON einvoice_sync_run_items (run_id, status, lease_expires_at, created_at)` |
+
+#### DDL
+
+```sql
+CREATE TABLE einvoice_sync_run_items (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES einvoice_sync_runs(id) ON DELETE CASCADE,
+  invoice_source_id TEXT NOT NULL,
+  header_json TEXT NOT NULL,
+  normalized_invoice_json TEXT NOT NULL,
+  detail_key TEXT,
+  detail_metadata_json TEXT,
+  detail_items_json TEXT,
+  line_item_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'done')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  lease_token TEXT,
+  lease_expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+  UNIQUE (run_id, invoice_source_id)
+)
+```
+
+### `einvoice_sync_runs`
+
+> 用途：電子發票跨 Queue invocation 執行的持久化同步記錄。
+> 注意：同一連接器同時只允許一筆有效執行；以 chunk 租約協調分批明細擷取，promoted_at 標示正式資料已寫入，讓重送可安全接續結案。
+
+#### Columns
+
+| 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
+| ---: | --- | --- | --- | :---: | --- | ---: | --- |
+| 1 | `id` | 此次電子發票同步執行的識別碼。 | TEXT | YES | — | 1 | — |
+| 2 | `connector_id` | 連接器識別碼，固定為 einvoice。 | TEXT | NO | 'einvoice' | — | — |
+| 3 | `trigger` | 啟動來源：manual 手動同步或 scheduled 排程同步。 | TEXT | NO | — | — | — |
+| 4 | `sync_job_id` | 對應的 sync_jobs 工作；工作刪除時設為 NULL。 | TEXT | YES | — | — | — |
+| 5 | `scheduled_batch_id` | 所屬排程同步批次；手動同步或批次刪除時為 NULL。 | TEXT | YES | — | — | — |
+| 6 | `settings_version` | 此次執行使用的連接器設定更新時間，用於檢查設定版本是否仍一致。 | TEXT | YES | — | — | — |
+| 7 | `status` | 同步狀態：queued、initializing、processing、completed、failed 或 needs_user_action。 | TEXT | NO | — | — | — |
+| 8 | `total_item_count` | 此次執行包含的發票工作總數。 | INTEGER | NO | 0 | — | — |
+| 9 | `pending_item_count` | 尚待處理的發票工作數。 | INTEGER | NO | 0 | — | — |
+| 10 | `processing_item_count` | 已領取且正在處理的發票工作數。 | INTEGER | NO | 0 | — | — |
+| 11 | `done_item_count` | 已完成的發票工作數。 | INTEGER | NO | 0 | — | — |
+| 12 | `line_item_count` | 已完成發票工作的品項明細總數。 | INTEGER | NO | 0 | — | — |
+| 13 | `new_invoice_count` | 寫入正式表時真正新增的發票筆數，不包含更新既有發票。 | INTEGER | NO | 0 | — | — |
+| 14 | `session_refresh_count` | 此次執行因 session 失效而重新初始化的累計次數。 | INTEGER | NO | 0 | — | — |
+| 15 | `last_error` | 此次執行最近一次失敗或需要使用者處理的錯誤訊息。 | TEXT | YES | — | — | — |
+| 16 | `chunk_lease_owner` | 目前取得分批處理租約的執行者識別碼。 | TEXT | YES | — | — | — |
+| 17 | `chunk_lease_expires_at` | 分批處理租約到期時間。 | TEXT | YES | — | — | — |
+| 18 | `created_at` | 同步執行記錄建立的時間。 | TEXT | NO | — | — | — |
+| 19 | `updated_at` | 同步執行記錄最後更新的時間。 | TEXT | NO | — | — | — |
+| 20 | `promoted_at` | 暫存發票與明細成功寫入正式表的時間。 | TEXT | YES | — | — | — |
+| 21 | `completed_at` | 此次同步成功、失敗或需要使用者處理而結案的時間。 | TEXT | YES | — | — | — |
+
+#### Foreign keys
+
+| 欄位 | 參照表 | 參照欄位 | ON UPDATE | ON DELETE |
+| --- | --- | --- | --- | --- |
+| `scheduled_batch_id` | `scheduled_sync_batches` | `id` | NO ACTION | SET NULL |
+| `sync_job_id` | `sync_jobs` | `id` | NO ACTION | SET NULL |
+
+#### Indexes
+
+| Index | Unique | Partial | 欄位 | 定義 |
+| --- | :---: | :---: | --- | --- |
+| `idx_einvoice_sync_runs_completed` | 否 | 否 | `completed_at` | `CREATE INDEX idx_einvoice_sync_runs_completed<br>  ON einvoice_sync_runs (completed_at DESC)` |
+| `idx_einvoice_sync_runs_one_active` | 是 | 是 | `connector_id` | `CREATE UNIQUE INDEX idx_einvoice_sync_runs_one_active<br>  ON einvoice_sync_runs (connector_id)<br>  WHERE status IN ('queued', 'initializing', 'processing')` |
+
+#### DDL
+
+```sql
+CREATE TABLE einvoice_sync_runs (
+  id TEXT PRIMARY KEY,
+  connector_id TEXT NOT NULL DEFAULT 'einvoice'
+    CHECK (connector_id = 'einvoice'),
+  trigger TEXT NOT NULL CHECK (trigger IN ('manual', 'scheduled')),
+  sync_job_id TEXT REFERENCES sync_jobs(id) ON DELETE SET NULL,
+  scheduled_batch_id TEXT REFERENCES scheduled_sync_batches(id) ON DELETE SET NULL,
+  settings_version TEXT,
+  status TEXT NOT NULL CHECK (status IN (
+    'queued', 'initializing', 'processing', 'completed', 'failed', 'needs_user_action'
+  )),
+  total_item_count INTEGER NOT NULL DEFAULT 0,
+  pending_item_count INTEGER NOT NULL DEFAULT 0,
+  processing_item_count INTEGER NOT NULL DEFAULT 0,
+  done_item_count INTEGER NOT NULL DEFAULT 0,
+  line_item_count INTEGER NOT NULL DEFAULT 0,
+  new_invoice_count INTEGER NOT NULL DEFAULT 0,
+  session_refresh_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  chunk_lease_owner TEXT,
+  chunk_lease_expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  promoted_at TEXT,
+  completed_at TEXT
 )
 ```
 
@@ -976,6 +1121,7 @@ CREATE TABLE push_subscriptions (
 | 6 | `new_invoices` | 此次工作真正新增的電子發票筆數，不包含更新既有發票。 | INTEGER | NO | 0 | — | — |
 | 7 | `new_bank_transactions` | 此次工作真正新增的銀行或信用卡交易筆數，不包含更新既有交易。 | INTEGER | NO | 0 | — | — |
 | 8 | `new_investment_transactions` | 此次工作真正新增的投資交易筆數，不包含更新既有交易。 | INTEGER | NO | 0 | — | — |
+| 9 | `recovered_at` | 後續手動同步成功補救此排程來源的時間；NULL 表示尚未補救。 | TEXT | YES | — | — | — |
 
 #### Foreign keys
 
@@ -995,7 +1141,7 @@ CREATE TABLE scheduled_sync_batch_results (
   job_id TEXT NOT NULL,
   connector_id TEXT NOT NULL,
   status TEXT CHECK (status IN ('success', 'failed', 'needs_user_action')),
-  completed_at TEXT, new_invoices INTEGER NOT NULL DEFAULT 0, new_bank_transactions INTEGER NOT NULL DEFAULT 0, new_investment_transactions INTEGER NOT NULL DEFAULT 0,
+  completed_at TEXT, new_invoices INTEGER NOT NULL DEFAULT 0, new_bank_transactions INTEGER NOT NULL DEFAULT 0, new_investment_transactions INTEGER NOT NULL DEFAULT 0, recovered_at TEXT,
   PRIMARY KEY (batch_id, job_id),
   FOREIGN KEY (batch_id) REFERENCES scheduled_sync_batches(id) ON DELETE CASCADE
 )
@@ -1185,6 +1331,166 @@ CREATE TABLE sync_write_staging (
 )
 ```
 
+### `tdcc_sync_run_items`
+
+> 用途：集保持久化同步中，依帳戶、任務與分頁拆分的工作及取得結果。
+> 注意：以 run_id、task_type、task_key 與 page_cursor 唯一識別工作；透過項目租約支援 Queue 重送與分頁接續。
+
+#### Columns
+
+| 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
+| ---: | --- | --- | --- | :---: | --- | ---: | --- |
+| 1 | `id` | 集保同步工作項目的識別碼。 | TEXT | YES | — | 1 | — |
+| 2 | `run_id` | 所屬 tdcc_sync_runs 執行記錄；刪除執行記錄時一併刪除項目。 | TEXT | NO | — | — | — |
+| 3 | `task_type` | 此項目負責的資料擷取任務類型，目前為 bank_page 或 trade_page。 | TEXT | NO | — | — | — |
+| 4 | `task_key` | 同一任務類型內用於區分工作範圍的識別鍵。 | TEXT | NO | '' | — | — |
+| 5 | `account_id` | 此項目對應的帳戶識別碼；非帳戶層級工作可為 NULL。 | TEXT | YES | — | — | — |
+| 6 | `page_cursor` | 此次分頁請求的游標；未使用游標時為空字串。 | TEXT | NO | '' | — | — |
+| 7 | `next_page_cursor` | 外部來源回報的下一頁游標。 | TEXT | YES | — | — | — |
+| 8 | `page_number` | 此工作在同一任務分頁中的頁次，從 0 起算。 | INTEGER | NO | 0 | — | — |
+| 9 | `task_json` | 執行此項目所需的任務參數 JSON。 | TEXT | NO | '{}' | — | — |
+| 10 | `payload_json` | 此項目已取得、供後續彙整與正式寫入使用的結果 JSON。 | TEXT | YES | — | — | — |
+| 11 | `status` | 工作狀態：pending 待處理、processing 處理中、done 已完成或 failed 失敗。 | TEXT | NO | 'pending' | — | — |
+| 12 | `attempt_count` | 此項目被領取處理的累計次數。 | INTEGER | NO | 0 | — | — |
+| 13 | `last_error` | 此項目最近一次處理失敗的錯誤訊息。 | TEXT | YES | — | — | — |
+| 14 | `lease_token` | 領取此項目的租約識別碼，用於確認更新操作的擁有權。 | TEXT | YES | — | — | — |
+| 15 | `lease_expires_at` | 項目租約到期時間，逾期後可重新領取。 | TEXT | YES | — | — | — |
+| 16 | `created_at` | 項目首次建立的時間。 | TEXT | NO | — | — | — |
+| 17 | `updated_at` | 項目最後更新的時間。 | TEXT | NO | — | — | — |
+| 18 | `completed_at` | 項目完成或失敗結案的時間。 | TEXT | YES | — | — | — |
+
+#### Foreign keys
+
+| 欄位 | 參照表 | 參照欄位 | ON UPDATE | ON DELETE |
+| --- | --- | --- | --- | --- |
+| `run_id` | `tdcc_sync_runs` | `id` | NO ACTION | CASCADE |
+
+#### Indexes
+
+| Index | Unique | Partial | 欄位 | 定義 |
+| --- | :---: | :---: | --- | --- |
+| `idx_tdcc_sync_run_items_account` | 否 | 否 | `run_id`, `account_id`, `task_type`, `page_number` | `CREATE INDEX idx_tdcc_sync_run_items_account<br>  ON tdcc_sync_run_items (run_id, account_id, task_type, page_number)` |
+| `idx_tdcc_sync_run_items_claim` | 否 | 否 | `run_id`, `status`, `lease_expires_at`, `created_at` | `CREATE INDEX idx_tdcc_sync_run_items_claim<br>  ON tdcc_sync_run_items (run_id, status, lease_expires_at, created_at)` |
+
+#### DDL
+
+```sql
+CREATE TABLE tdcc_sync_run_items (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES tdcc_sync_runs(id) ON DELETE CASCADE,
+  task_type TEXT NOT NULL,
+  task_key TEXT NOT NULL DEFAULT '',
+  account_id TEXT,
+  page_cursor TEXT NOT NULL DEFAULT '',
+  next_page_cursor TEXT,
+  page_number INTEGER NOT NULL DEFAULT 0,
+  task_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(task_json)),
+  payload_json TEXT CHECK (payload_json IS NULL OR json_valid(payload_json)),
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'processing', 'done', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  lease_token TEXT,
+  lease_expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+  UNIQUE (run_id, task_type, task_key, page_cursor)
+)
+```
+
+### `tdcc_sync_runs`
+
+> 用途：集保 e 存摺跨 Queue invocation 執行的持久化同步記錄與接續狀態。
+> 注意：不同同步 scope 共用同一連接器的有效執行限制；敏感認證與 session 分別加密保存，promoted_at 用於避免重送時重複寫入正式資料。
+
+#### Columns
+
+| 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
+| ---: | --- | --- | --- | :---: | --- | ---: | --- |
+| 1 | `id` | 此次集保同步執行的識別碼。 | TEXT | YES | — | 1 | — |
+| 2 | `connector_id` | 連接器識別碼，固定為 tdcc。 | TEXT | NO | 'tdcc' | — | — |
+| 3 | `trigger` | 啟動來源：manual 手動同步或 scheduled 排程同步。 | TEXT | NO | — | — | — |
+| 4 | `scope` | 同步範圍：all 全部、investments 持倉、bank 銀行資料或 trades 投資交易。 | TEXT | NO | 'all' | — | — |
+| 5 | `sync_job_id` | 對應的 sync_jobs 工作；工作刪除時設為 NULL。 | TEXT | YES | — | — | — |
+| 6 | `scheduled_batch_id` | 所屬排程同步批次；手動同步或批次刪除時為 NULL。 | TEXT | YES | — | — | — |
+| 7 | `settings_version` | 此次執行使用的連接器設定更新時間，用於檢查設定版本是否仍一致。 | TEXT | YES | — | — | — |
+| 8 | `phase` | 目前同步階段：initialize、snapshot、positions、bank、investments、trades、promote 或 finalize。 | TEXT | NO | 'initialize' | — | — |
+| 9 | `status` | 同步狀態：queued、initializing、processing、promoting、completed、failed 或 needs_user_action。 | TEXT | NO | 'queued' | — | — |
+| 10 | `encrypted_config` | 此次執行保存的加密認證設定。 | TEXT | YES | — | — | — |
+| 11 | `encrypted_session` | 此次執行保存的加密外部連線 session。 | TEXT | YES | — | — | — |
+| 12 | `session_json` | 舊版原型保留的 session JSON 相容欄位；僅在缺少 encrypted_session 時讀取，現行寫入使用 encrypted_session，不保存明文 token。 | TEXT | YES | — | — | — |
+| 13 | `total_item_count` | 此次執行已建立的工作項目總數。 | INTEGER | NO | 0 | — | — |
+| 14 | `pending_item_count` | 尚待處理的工作項目數。 | INTEGER | NO | 0 | — | — |
+| 15 | `processing_item_count` | 已領取且正在處理的工作項目數。 | INTEGER | NO | 0 | — | — |
+| 16 | `done_item_count` | 已完成的工作項目數。 | INTEGER | NO | 0 | — | — |
+| 17 | `failed_item_count` | 已標記失敗的工作項目數。 | INTEGER | NO | 0 | — | — |
+| 18 | `session_refresh_count` | 此次執行重新建立 session 的累計次數。 | INTEGER | NO | 0 | — | — |
+| 19 | `last_error` | 此次執行最近一次失敗或需要使用者處理的錯誤訊息。 | TEXT | YES | — | — | — |
+| 20 | `lease_owner` | 目前取得同步執行租約的執行者識別碼。 | TEXT | YES | — | — | — |
+| 21 | `lease_expires_at` | 同步執行租約到期時間。 | TEXT | YES | — | — | — |
+| 22 | `created_at` | 同步執行記錄建立的時間。 | TEXT | NO | — | — | — |
+| 23 | `updated_at` | 同步執行記錄最後更新的時間。 | TEXT | NO | — | — | — |
+| 24 | `promoted_at` | 暫存結果成功寫入正式金融資料表的時間。 | TEXT | YES | — | — | — |
+| 25 | `completed_at` | 此次同步成功、失敗或需要使用者處理而結案的時間。 | TEXT | YES | — | — | — |
+
+#### Foreign keys
+
+| 欄位 | 參照表 | 參照欄位 | ON UPDATE | ON DELETE |
+| --- | --- | --- | --- | --- |
+| `scheduled_batch_id` | `scheduled_sync_batches` | `id` | NO ACTION | SET NULL |
+| `sync_job_id` | `sync_jobs` | `id` | NO ACTION | SET NULL |
+
+#### Indexes
+
+| Index | Unique | Partial | 欄位 | 定義 |
+| --- | :---: | :---: | --- | --- |
+| `idx_tdcc_sync_runs_completed` | 否 | 否 | `completed_at` | `CREATE INDEX idx_tdcc_sync_runs_completed<br>  ON tdcc_sync_runs (completed_at DESC)` |
+| `idx_tdcc_sync_runs_one_active` | 是 | 是 | `connector_id` | `CREATE UNIQUE INDEX idx_tdcc_sync_runs_one_active<br>  ON tdcc_sync_runs (connector_id)<br>  WHERE status IN ('queued', 'initializing', 'processing', 'promoting')` |
+
+#### DDL
+
+```sql
+CREATE TABLE tdcc_sync_runs (
+  id TEXT PRIMARY KEY,
+  connector_id TEXT NOT NULL DEFAULT 'tdcc'
+    CHECK (connector_id = 'tdcc'),
+  trigger TEXT NOT NULL CHECK (trigger IN ('manual', 'scheduled')),
+  scope TEXT NOT NULL DEFAULT 'all'
+    CHECK (scope IN ('all', 'investments', 'bank', 'trades')),
+  sync_job_id TEXT REFERENCES sync_jobs(id) ON DELETE SET NULL,
+  scheduled_batch_id TEXT REFERENCES scheduled_sync_batches(id) ON DELETE SET NULL,
+  settings_version TEXT,
+  phase TEXT NOT NULL DEFAULT 'initialize'
+    CHECK (phase IN (
+      'initialize', 'snapshot', 'positions', 'bank', 'investments',
+      'trades', 'promote', 'finalize'
+    )),
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN (
+    'queued', 'initializing', 'processing', 'promoting',
+    'completed', 'failed', 'needs_user_action'
+  )),
+
+
+  encrypted_config TEXT,
+  encrypted_session TEXT,
+  session_json TEXT CHECK (session_json IS NULL OR json_valid(session_json)),
+  total_item_count INTEGER NOT NULL DEFAULT 0,
+  pending_item_count INTEGER NOT NULL DEFAULT 0,
+  processing_item_count INTEGER NOT NULL DEFAULT 0,
+  done_item_count INTEGER NOT NULL DEFAULT 0,
+  failed_item_count INTEGER NOT NULL DEFAULT 0,
+  session_refresh_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  lease_owner TEXT,
+  lease_expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  promoted_at TEXT,
+  completed_at TEXT
+)
+```
+
 ## Other database objects
 
 目前沒有 view 或 trigger。
@@ -1218,6 +1524,19 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0025_bank_time_deposit.sql`](../packages/db/migrations/0025_bank_time_deposit.sql)
 - [`0026_obank_sync_job.sql`](../packages/db/migrations/0026_obank_sync_job.sql)
 - [`0027_scheduled_sync_reports.sql`](../packages/db/migrations/0027_scheduled_sync_reports.sql)
+- [`0028_einvoice_durable_runs.sql`](../packages/db/migrations/0028_einvoice_durable_runs.sql)
+- [`0029_scheduled_sync_manual_recovery.sql`](../packages/db/migrations/0029_scheduled_sync_manual_recovery.sql)
+- [`0030_hncb_sync_job.sql`](../packages/db/migrations/0030_hncb_sync_job.sql)
+- [`0031_tdcc_durable_runs.sql`](../packages/db/migrations/0031_tdcc_durable_runs.sql)
+- [`0032_tdcc_bank_transaction_identity_cleanup.sql`](../packages/db/migrations/0032_tdcc_bank_transaction_identity_cleanup.sql)
+- [`0033_tdcc_stale_identity_cleanup.sql`](../packages/db/migrations/0033_tdcc_stale_identity_cleanup.sql)
+- [`0034_skbank_sync_job.sql`](../packages/db/migrations/0034_skbank_sync_job.sql)
+- [`0035_tdcc_late_identity_reconciliation.sql`](../packages/db/migrations/0035_tdcc_late_identity_reconciliation.sql)
+- [`0036_firstbank_sync_job.sql`](../packages/db/migrations/0036_firstbank_sync_job.sql)
+- [`0037_activity_time_precision.sql`](../packages/db/migrations/0037_activity_time_precision.sql)
+- [`0038_add_default_classification_categories.sql`](../packages/db/migrations/0038_add_default_classification_categories.sql)
+- [`0039_add_default_classification_rules.sql`](../packages/db/migrations/0039_add_default_classification_rules.sql)
+- [`0040_bank_transaction_day_index.sql`](../packages/db/migrations/0040_bank_transaction_day_index.sql)
 
 ## 程式碼導覽
 

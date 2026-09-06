@@ -17,7 +17,7 @@
     manualAssetsQuery,
     netWorthHistoryQuery,
   } from "@/data/assets/queries";
-  import { bankQuery, bankRangeQuery } from "@/data/bank/queries";
+  import { bankRangeQuery } from "@/data/bank/queries";
   import { syncJobsQuery } from "@/data/connectors/queries";
   import type { ConnectorId } from "@/data/connectors/types";
   import { latestSyncReportQuery } from "@/data/sync-reports/queries";
@@ -62,7 +62,6 @@
     navigate: (view: View, connectorId?: ConnectorId) => void;
   } = $props();
 
-  const bank = createQuery(bankQuery(() => api));
   const monthKey = new Date().toISOString().slice(0, 7);
   const currentMonthRange = { from: monthKey, to: monthKey };
   const monthlyBank = createQuery(bankRangeQuery(() => api, currentMonthRange));
@@ -79,7 +78,9 @@
   const latestSyncReport = createQuery(latestSyncReportQuery(() => api));
   const history = createQuery(netWorthHistoryQuery(() => api));
 
-  const bankData = $derived($bank.data ?? { accounts: [], transactions: [] });
+  const bankData = $derived(
+    $monthlyBank.data ?? { accounts: [], transactions: [] },
+  );
   const rateValues = $derived(rateMap($rates.data));
   const toTwd = (value: number, currency: string) =>
     currency === "TWD" ? value : value * (rateValues[currency] ?? 0);
@@ -255,16 +256,14 @@
       : [],
   );
   const loading = $derived(
-    $bank.isPending ||
-      $monthlyBank.isPending ||
+    $monthlyBank.isPending ||
       $monthlyInvoices.isPending ||
       $invoiceMappings.isPending ||
       $investments.isPending ||
       $manualAssets.isPending,
   );
   const failed = $derived(
-    $bank.isError ||
-      $monthlyBank.isError ||
+    $monthlyBank.isError ||
       $monthlyInvoices.isError ||
       $invoiceMappings.isError ||
       $investments.isError ||

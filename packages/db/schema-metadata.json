@@ -149,6 +149,56 @@
         "updated_at": "帳單最後更新的時間。"
       }
     },
+    "einvoice_sync_run_items": {
+      "description": "電子發票持久化同步中，每張發票的明細擷取工作與待寫入資料。",
+      "notes": "同一 run_id 與 invoice_source_id 只保留一筆工作；以租約防止重複處理，全部完成後才將資料寫入正式發票表。",
+      "columns": {
+        "id": "發票同步項目的識別碼。",
+        "run_id": "所屬 einvoice_sync_runs 執行記錄；刪除執行記錄時一併刪除項目。",
+        "invoice_source_id": "外部來源的發票識別碼，用於同一輪同步內去重。",
+        "header_json": "取得發票清單時保存的發票表頭 JSON。",
+        "normalized_invoice_json": "待寫入正式 invoices 表的正規化發票 JSON。",
+        "detail_key": "明細擷取工作的識別鍵。",
+        "detail_metadata_json": "呼叫發票明細 API 所需的工作參數 JSON。",
+        "detail_items_json": "已擷取、待寫入正式明細表的發票品項 JSON。",
+        "line_item_count": "此發票已取得的品項明細筆數。",
+        "status": "工作狀態：pending 待處理、processing 處理中、done 已完成。",
+        "attempt_count": "此項目被領取處理的累計次數。",
+        "last_error": "此項目最近一次處理失敗的錯誤訊息。",
+        "lease_token": "領取此項目的租約識別碼，用於確認完成或重試操作的擁有權。",
+        "lease_expires_at": "項目租約到期時間，逾期後可重新領取。",
+        "created_at": "項目首次建立的時間。",
+        "updated_at": "項目最後更新的時間。",
+        "completed_at": "項目完成明細擷取的時間。"
+      }
+    },
+    "einvoice_sync_runs": {
+      "description": "電子發票跨 Queue invocation 執行的持久化同步記錄。",
+      "notes": "同一連接器同時只允許一筆有效執行；以 chunk 租約協調分批明細擷取，promoted_at 標示正式資料已寫入，讓重送可安全接續結案。",
+      "columns": {
+        "id": "此次電子發票同步執行的識別碼。",
+        "connector_id": "連接器識別碼，固定為 einvoice。",
+        "trigger": "啟動來源：manual 手動同步或 scheduled 排程同步。",
+        "sync_job_id": "對應的 sync_jobs 工作；工作刪除時設為 NULL。",
+        "scheduled_batch_id": "所屬排程同步批次；手動同步或批次刪除時為 NULL。",
+        "settings_version": "此次執行使用的連接器設定更新時間，用於檢查設定版本是否仍一致。",
+        "status": "同步狀態：queued、initializing、processing、completed、failed 或 needs_user_action。",
+        "total_item_count": "此次執行包含的發票工作總數。",
+        "pending_item_count": "尚待處理的發票工作數。",
+        "processing_item_count": "已領取且正在處理的發票工作數。",
+        "done_item_count": "已完成的發票工作數。",
+        "line_item_count": "已完成發票工作的品項明細總數。",
+        "new_invoice_count": "寫入正式表時真正新增的發票筆數，不包含更新既有發票。",
+        "session_refresh_count": "此次執行因 session 失效而重新初始化的累計次數。",
+        "last_error": "此次執行最近一次失敗或需要使用者處理的錯誤訊息。",
+        "chunk_lease_owner": "目前取得分批處理租約的執行者識別碼。",
+        "chunk_lease_expires_at": "分批處理租約到期時間。",
+        "created_at": "同步執行記錄建立的時間。",
+        "updated_at": "同步執行記錄最後更新的時間。",
+        "promoted_at": "暫存發票與明細成功寫入正式表的時間。",
+        "completed_at": "此次同步成功、失敗或需要使用者處理而結案的時間。"
+      }
+    },
     "exchange_rates": {
       "description": "將外幣換算為新台幣時使用的最新匯率。",
       "notes": "net_worth 計算會使用 rate_to_twd；找不到非 TWD 匯率時不會硬算。",
@@ -377,6 +427,61 @@
         "record_key": "該實體在此次同步中的去重與覆寫鍵。",
         "payload": "待寫入正式表的正規化 JSON 資料。",
         "created_at": "暫存資料建立的時間。"
+      }
+    },
+    "tdcc_sync_run_items": {
+      "description": "集保持久化同步中，依帳戶、任務與分頁拆分的工作及取得結果。",
+      "notes": "以 run_id、task_type、task_key 與 page_cursor 唯一識別工作；透過項目租約支援 Queue 重送與分頁接續。",
+      "columns": {
+        "id": "集保同步工作項目的識別碼。",
+        "run_id": "所屬 tdcc_sync_runs 執行記錄；刪除執行記錄時一併刪除項目。",
+        "task_type": "此項目負責的資料擷取任務類型，目前為 bank_page 或 trade_page。",
+        "task_key": "同一任務類型內用於區分工作範圍的識別鍵。",
+        "account_id": "此項目對應的帳戶識別碼；非帳戶層級工作可為 NULL。",
+        "page_cursor": "此次分頁請求的游標；未使用游標時為空字串。",
+        "next_page_cursor": "外部來源回報的下一頁游標。",
+        "page_number": "此工作在同一任務分頁中的頁次，從 0 起算。",
+        "task_json": "執行此項目所需的任務參數 JSON。",
+        "payload_json": "此項目已取得、供後續彙整與正式寫入使用的結果 JSON。",
+        "status": "工作狀態：pending 待處理、processing 處理中、done 已完成或 failed 失敗。",
+        "attempt_count": "此項目被領取處理的累計次數。",
+        "last_error": "此項目最近一次處理失敗的錯誤訊息。",
+        "lease_token": "領取此項目的租約識別碼，用於確認更新操作的擁有權。",
+        "lease_expires_at": "項目租約到期時間，逾期後可重新領取。",
+        "created_at": "項目首次建立的時間。",
+        "updated_at": "項目最後更新的時間。",
+        "completed_at": "項目完成或失敗結案的時間。"
+      }
+    },
+    "tdcc_sync_runs": {
+      "description": "集保 e 存摺跨 Queue invocation 執行的持久化同步記錄與接續狀態。",
+      "notes": "不同同步 scope 共用同一連接器的有效執行限制；敏感認證與 session 分別加密保存，promoted_at 用於避免重送時重複寫入正式資料。",
+      "columns": {
+        "id": "此次集保同步執行的識別碼。",
+        "connector_id": "連接器識別碼，固定為 tdcc。",
+        "trigger": "啟動來源：manual 手動同步或 scheduled 排程同步。",
+        "scope": "同步範圍：all 全部、investments 持倉、bank 銀行資料或 trades 投資交易。",
+        "sync_job_id": "對應的 sync_jobs 工作；工作刪除時設為 NULL。",
+        "scheduled_batch_id": "所屬排程同步批次；手動同步或批次刪除時為 NULL。",
+        "settings_version": "此次執行使用的連接器設定更新時間，用於檢查設定版本是否仍一致。",
+        "phase": "目前同步階段：initialize、snapshot、positions、bank、investments、trades、promote 或 finalize。",
+        "status": "同步狀態：queued、initializing、processing、promoting、completed、failed 或 needs_user_action。",
+        "encrypted_config": "此次執行保存的加密認證設定。",
+        "encrypted_session": "此次執行保存的加密外部連線 session。",
+        "session_json": "舊版原型保留的 session JSON 相容欄位；僅在缺少 encrypted_session 時讀取，現行寫入使用 encrypted_session，不保存明文 token。",
+        "total_item_count": "此次執行已建立的工作項目總數。",
+        "pending_item_count": "尚待處理的工作項目數。",
+        "processing_item_count": "已領取且正在處理的工作項目數。",
+        "done_item_count": "已完成的工作項目數。",
+        "failed_item_count": "已標記失敗的工作項目數。",
+        "session_refresh_count": "此次執行重新建立 session 的累計次數。",
+        "last_error": "此次執行最近一次失敗或需要使用者處理的錯誤訊息。",
+        "lease_owner": "目前取得同步執行租約的執行者識別碼。",
+        "lease_expires_at": "同步執行租約到期時間。",
+        "created_at": "同步執行記錄建立的時間。",
+        "updated_at": "同步執行記錄最後更新的時間。",
+        "promoted_at": "暫存結果成功寫入正式金融資料表的時間。",
+        "completed_at": "此次同步成功、失敗或需要使用者處理而結案的時間。"
       }
     }
   }

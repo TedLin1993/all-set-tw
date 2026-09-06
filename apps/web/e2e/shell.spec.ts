@@ -140,6 +140,41 @@ async function expectSelectedConnectorInView(
   expect(pageWidth.scroll).toBe(pageWidth.client);
 }
 
+test("overview uses one monthly bank request for balances and cash flow", async ({
+  page,
+}) => {
+  const bankRequests: URL[] = [];
+  await page.route("**/api/bank**", async (route) => {
+    bankRequests.push(new URL(route.request().url()));
+    await route.fulfill({
+      json: {
+        accounts: [
+          {
+            id: "overview-account",
+            connectorId: "esun",
+            sourceId: "overview-account",
+            accountType: "savings",
+            balance: 12345,
+            currency: "TWD",
+          },
+        ],
+        transactions: [],
+      },
+    });
+  });
+
+  await page.goto("/#/overview");
+  await expect(
+    page.getByText("NT$12,345", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(page.getByText("載入總覽中")).toHaveCount(0);
+  expect(bankRequests).toHaveLength(1);
+  expect(bankRequests[0].searchParams.get("from")).toMatch(/^\d{4}-\d{2}$/);
+  expect(bankRequests[0].searchParams.get("to")).toBe(
+    bankRequests[0].searchParams.get("from"),
+  );
+});
+
 test("loads the responsive shell and changes primary views", async ({
   page,
 }) => {

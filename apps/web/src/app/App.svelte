@@ -2,12 +2,7 @@
   import { onMount } from "svelte";
   import { Ellipsis, Eye, EyeOff } from "@lucide/svelte";
   import { QueryClientProvider } from "@tanstack/svelte-query";
-  import Activity from "@/features/activity/ActivityPage.svelte";
-  import Assets from "@/features/assets/AssetsPage.svelte";
-  import Investments from "@/features/assets/Investments.svelte";
-  import ManualAssets from "@/features/assets/ManualAssets.svelte";
   import Overview from "@/features/overview/OverviewPage.svelte";
-  import SettingsView from "@/features/settings/SettingsPage.svelte";
   import type { ConnectorId } from "@/data/connectors/types";
   import { createApiClient } from "@/shared/api/client";
   import { swipeBack } from "@/shared/actions/swipe-back";
@@ -31,6 +26,25 @@
   } from "./types";
   import "../styles.css";
 
+  type LazyView = Exclude<View, "overview">;
+  type PageKey =
+    "assets" | "activity" | "investments" | "manual-assets" | "settings";
+  type LazyPageModule =
+    | typeof import("@/features/assets/AssetsPage.svelte")
+    | typeof import("@/features/activity/ActivityPage.svelte")
+    | typeof import("@/features/assets/Investments.svelte")
+    | typeof import("@/features/assets/ManualAssets.svelte")
+    | typeof import("@/features/settings/SettingsPage.svelte");
+
+  const pageLoaders = {
+    assets: () => import("@/features/assets/AssetsPage.svelte"),
+    activity: () => import("@/features/activity/ActivityPage.svelte"),
+    investments: () => import("@/features/assets/Investments.svelte"),
+    "manual-assets": () => import("@/features/assets/ManualAssets.svelte"),
+    settings: () => import("@/features/settings/SettingsPage.svelte"),
+  } satisfies Record<PageKey, () => Promise<LazyPageModule>>;
+  const pagePromises: Partial<Record<PageKey, Promise<LazyPageModule>>> = {};
+
   const api = createApiClient();
   let view = $state<View>("overview");
   let connectorTarget = $state<ConnectorId | null>(null);
@@ -52,6 +66,30 @@
   const mobileSetting = $derived(
     isMobileSetting(view) ? mobileSettingsLabels[view] : undefined,
   );
+
+  function pageKey(next: LazyView): PageKey {
+    if (
+      next === "assets" ||
+      next === "activity" ||
+      next === "investments" ||
+      next === "manual-assets"
+    )
+      return next;
+    return "settings";
+  }
+
+  function getPagePromise(key: PageKey) {
+    return (pagePromises[key] ??= pageLoaders[key]());
+  }
+
+  const pagePromise = $derived.by(() => {
+    if (view === "overview") return Promise.resolve(undefined);
+    return getPagePromise(pageKey(view as LazyView));
+  });
+
+  function retryPage() {
+    window.location.reload();
+  }
 
   const isStandalone = () =>
     document.documentElement.classList.contains("is-standalone");
@@ -238,22 +276,58 @@
       <main
         class="mx-auto max-w-[1440px] px-4 pb-5 pt-0 sm:px-6 md:py-5 xl:px-8 xl:py-6"
       >
-        {#if view === "overview"}<Overview {api} {navigate} />
-        {:else if view === "assets"}<Assets {api} />
-        {:else if view === "activity"}<Activity {api} />
-        {:else if view === "investments"}<Investments {api} />
-        {:else if view === "manual-assets"}<ManualAssets {api} />
-        {:else}<SettingsView
-            {api}
-            demoMode={runtime.demoMode}
-            {connectorTarget}
-            mobileView={view === "more"
-              ? "more"
-              : isMobileSetting(view)
-                ? view
-                : undefined}
-            {navigate}
-          />{/if}
+        {#if view === "overview"}
+          <Overview {api} {navigate} />
+        {:else}
+          {#await pagePromise}
+            <div
+              class="flex min-h-64 items-center justify-center text-sm text-ink/50"
+            >
+              載入頁面中…
+            </div>
+          {:then module}
+            {#if module}
+              {#if view === "assets"}
+                {@const Page =
+                  module.default as typeof import("@/features/assets/AssetsPage.svelte").default}
+                <Page {api} />
+              {:else if view === "activity"}
+                {@const Page =
+                  module.default as typeof import("@/features/activity/ActivityPage.svelte").default}
+                <Page {api} />
+              {:else if view === "investments"}
+                {@const Page =
+                  module.default as typeof import("@/features/assets/Investments.svelte").default}
+                <Page {api} />
+              {:else if view === "manual-assets"}
+                {@const Page =
+                  module.default as typeof import("@/features/assets/ManualAssets.svelte").default}
+                <Page {api} />
+              {:else}
+                {@const Page =
+                  module.default as typeof import("@/features/settings/SettingsPage.svelte").default}
+                <Page
+                  {api}
+                  demoMode={runtime.demoMode}
+                  {connectorTarget}
+                  mobileView={view === "more"
+                    ? "more"
+                    : isMobileSetting(view)
+                      ? view
+                      : undefined}
+                  {navigate}
+                />
+              {/if}
+            {/if}
+          {:catch}
+            <div
+              class="flex min-h-64 flex-col items-center justify-center gap-3"
+            >
+              <p class="text-sm text-coral">頁面載入失敗，請再試一次。</p>
+              <Button variant="outline" onclick={retryPage}>重新載入</Button>
+            </div>
+          {/await}
+        {/if}
       </main>
       <footer
         class="mx-auto hidden max-w-[1440px] border-t border-ink/8 px-4 py-6 sm:px-6 md:block xl:px-8"
