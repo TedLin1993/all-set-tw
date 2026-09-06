@@ -13,6 +13,7 @@ import {
   createTaishinConnector,
   prepareTaishinCaptcha,
   TaishinBrowserCapacityError,
+  TaishinCaptchaRejectedError,
   TaishinConnectionError,
   TaishinCredentialRejectedError,
   TaishinSyncStageError,
@@ -36,6 +37,55 @@ const captchaTarget = {
   digitCount: 6,
 };
 
+const SECRET_PAGE_TEXT = "raw-secret-login-page";
+const SECRET_SESSION_BODY = "raw-secret-session-body";
+const SECRET_ERROR_MESSAGE = "raw-secret-error-message";
+
+const manualUnknownCases = [
+  {
+    name: "HTTP 200 JSON without a session id",
+    response: () => ({
+      ok: true,
+      status: 200,
+      contentType: "application/json",
+      text: JSON.stringify({
+        RESULT: "SUCCESS",
+        diagnostic: SECRET_SESSION_BODY,
+      }),
+      timedOut: false,
+      errorName: "",
+      errorMessage: SECRET_ERROR_MESSAGE,
+    }),
+    sessionCheck: {
+      httpStatus: 200,
+      isJson: true,
+      timedOut: false,
+      validJson: true,
+      hasApiError: false,
+      expired: false,
+      hasSessionId: false,
+    },
+  },
+  {
+    name: "HTTP 503 session check",
+    response: () => ({
+      ok: false,
+      status: 503,
+      contentType: "application/json",
+      text: JSON.stringify({ error: SECRET_SESSION_BODY }),
+      timedOut: false,
+      errorName: "",
+      errorMessage: SECRET_ERROR_MESSAGE,
+    }),
+    sessionCheck: {
+      httpStatus: 503,
+      isJson: true,
+      timedOut: false,
+      checkFailed: true,
+    },
+  },
+] as const;
+
 function page() {
   return {
     $: vi.fn().mockResolvedValue({
@@ -43,6 +93,8 @@ function page() {
     }),
     click: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn(),
+    on: vi.fn(),
+    off: vi.fn(),
     goto: vi.fn().mockResolvedValue(undefined),
     cookies: vi
       .fn()
@@ -622,7 +674,7 @@ describe("Taishin browser session lifecycle", () => {
     expect(browserInstance.disconnect).toHaveBeenCalledOnce();
   });
 
-  it("closes the manual browser when CAPTCHA verification fails", async () => {
+  it("preserves the CAPTCHA page on reconnect and closes it after rejection", async () => {
     const browserPage = page();
     browserPage.evaluate
       .mockResolvedValueOnce(true)
@@ -643,6 +695,10 @@ describe("Taishin browser session lifecycle", () => {
       }),
     ).rejects.toThrow("圖形驗證碼錯誤");
 
+    // Reapplying mobile emulation on a reconnected Page triggers a reload.
+    expect(browserPage.setViewport).not.toHaveBeenCalled();
+    expect(browserPage.setUserAgent).not.toHaveBeenCalled();
+    expect(browserPage.goto).not.toHaveBeenCalled();
     expect(browserInstance.close).toHaveBeenCalledOnce();
     expect(browserInstance.disconnect).not.toHaveBeenCalled();
   });
@@ -694,6 +750,240 @@ describe("Taishin browser session lifecycle", () => {
     expect(loginButton.click).toHaveBeenCalledOnce();
     expect(browserPage.click).not.toHaveBeenCalled();
   });
+
+  it("prioritizes an active popup when rejecting a CAPTCHA", async () => {
+    const browserPage = page();
+    const popup = { innerText: "驗證碼輸入錯誤" };
+    const querySelector = vi.fn().mockReturnValue(popup);
+    const noisyBodyText = `${"x".repeat(2_000)}-footer`;
+    browserPage.evaluate
+      .mockResolvedValueOnce(true)
+      .mockImplementationOnce(async (callback: () => unknown) => {
+        vi.stubGlobal("document", {
+          querySelector,
+          body: { innerText: noisyBodyText },
+        });
+        try {
+          return callback();
+        } finally {
+          vi.unstubAllGlobals();
+        }
+      });
+    const browserInstance = browser(browserPage);
+    puppeteerMock.sessions.mockResolvedValue([
+      { sessionId: "taishin-session", startTime: Date.now() },
+    ]);
+    puppeteerMock.connect.mockResolvedValue(browserInstance);
+
+    await expect(
+      createTaishinConnector({} as Fetcher).sync({
+        ...credentials,
+        browserSessionId: "taishin-session",
+        browserSessionExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        captchaDigitCount: 6,
+        captcha: "123456",
+      }),
+    ).rejects.toBeInstanceOf(TaishinCaptchaRejectedError);
+
+    expect(querySelector).toHaveBeenCalledWith(".js-popup.active ._popup_text");
+    expect(browserPage.evaluate).toHaveBeenCalledTimes(2);
+    expect(browserInstance.close).toHaveBeenCalledOnce();
+  });
+
+  it("records a safe manual login response diagnostic", async () => {
+    const browserPage = page();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    type EventHandler = (payload: unknown) => void | Promise<void>;
+    const handlers = new Map<string, Set<EventHandler>>();
+    browserPage.on.mockImplementation(
+      (event: string, handler: EventHandler) => {
+        const eventHandlers = handlers.get(event) ?? new Set<EventHandler>();
+        eventHandlers.add(handler);
+        handlers.set(event, eventHandlers);
+        return browserPage;
+      },
+    );
+    browserPage.off.mockImplementation(
+      (event: string, handler: EventHandler) => {
+        handlers.get(event)?.delete(handler);
+        return browserPage;
+      },
+    );
+    const emit = async (event: string, payload: unknown) => {
+      await Promise.all(
+        [...(handlers.get(event) ?? [])].map((handler) =>
+          Promise.resolve(handler(payload)),
+        ),
+      );
+    };
+    const loginUrl =
+      "https://my.taishinbank.com.tw/TIBNetBank/svc/web/login/login";
+    const loginRequest = { url: vi.fn().mockReturnValue(loginUrl) };
+    const loginResponse = {
+      url: vi.fn().mockReturnValue(loginUrl),
+      status: vi.fn().mockReturnValue(200),
+      json: vi.fn().mockResolvedValue({
+        RESULT: "FAIL",
+        STATUS: "A",
+        ERRORMSG: "private-body",
+        TOKEN: "secret-token",
+      }),
+    };
+    let clickEvents: Promise<void> | undefined;
+    const loginButton = {
+      tagName: "BUTTON",
+      innerText: "登入網銀",
+      hidden: false,
+      title: "",
+      dataset: {} as Record<string, string>,
+      getAttribute: vi.fn().mockReturnValue(null),
+      getBoundingClientRect: vi
+        .fn()
+        .mockReturnValue({ width: 300, height: 50 }),
+      matches: vi.fn().mockReturnValue(true),
+      click: vi.fn(() => {
+        clickEvents = Promise.all([
+          emit("request", loginRequest),
+          emit("response", loginResponse),
+        ]).then(() => undefined);
+      }),
+    };
+    browserPage.evaluate
+      .mockImplementationOnce(async (callback: () => unknown) => {
+        vi.stubGlobal("document", {
+          querySelectorAll: vi.fn().mockReturnValue([loginButton]),
+        });
+        try {
+          const result = callback();
+          if (clickEvents) await clickEvents;
+          return result;
+        } finally {
+          vi.unstubAllGlobals();
+        }
+      })
+      .mockResolvedValueOnce("驗證碼輸入錯誤");
+    const browserInstance = browser(browserPage);
+    puppeteerMock.sessions.mockResolvedValue([
+      { sessionId: "taishin-session", startTime: Date.now() },
+    ]);
+    puppeteerMock.connect.mockResolvedValue(browserInstance);
+
+    try {
+      await expect(
+        createTaishinConnector({} as Fetcher).sync({
+          ...credentials,
+          browserSessionId: "taishin-session",
+          browserSessionExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          captchaDigitCount: 6,
+          captcha: "123456",
+        }),
+      ).rejects.toBeInstanceOf(TaishinCaptchaRejectedError);
+
+      expect(browserPage.on).toHaveBeenCalledWith(
+        "request",
+        expect.any(Function),
+      );
+      expect(browserPage.on).toHaveBeenCalledWith(
+        "response",
+        expect.any(Function),
+      );
+      expect(browserPage.off).toHaveBeenCalledWith(
+        "request",
+        expect.any(Function),
+      );
+      expect(browserPage.off).toHaveBeenCalledWith(
+        "response",
+        expect.any(Function),
+      );
+      expect(loginRequest.url).toHaveBeenCalledOnce();
+      expect(loginResponse.url).toHaveBeenCalledOnce();
+      expect(loginResponse.status).toHaveBeenCalledOnce();
+      expect(loginResponse.json).toHaveBeenCalledOnce();
+
+      const diagnostic = warn.mock.calls
+        .map(([value]) => JSON.parse(String(value)) as Record<string, unknown>)
+        .find((value) => value.event === "taishin_login_response");
+      expect(diagnostic).toMatchObject({
+        event: "taishin_login_response",
+        mode: "manual",
+        httpStatus: 200,
+        validJson: true,
+        result: "FAIL",
+        status: "A",
+        hasErrorMessage: true,
+      });
+      const serialized = JSON.stringify(warn.mock.calls);
+      for (const secret of [
+        "private-body",
+        "secret-token",
+        credentials.userId,
+        credentials.account,
+        credentials.password,
+        "123456",
+      ]) {
+        expect(serialized).not.toContain(secret);
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each(manualUnknownCases)(
+    "reports a safe manual unknown outcome after ten session checks ($name)",
+    async ({ response, sessionCheck }) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-09-06T12:00:00.000Z"));
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      try {
+        const browserPage = page();
+        browserPage.evaluate
+          .mockResolvedValueOnce(true)
+          .mockImplementation((_callback, input?: { path?: string }) =>
+            Promise.resolve(input?.path ? response() : SECRET_PAGE_TEXT),
+          );
+        const browserInstance = browser(browserPage);
+        puppeteerMock.sessions.mockResolvedValue([
+          { sessionId: "taishin-session", startTime: Date.now() },
+        ]);
+        puppeteerMock.connect.mockResolvedValue(browserInstance);
+
+        const pending = createTaishinConnector({} as Fetcher).sync({
+          ...credentials,
+          browserSessionId: "taishin-session",
+          browserSessionExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          captchaDigitCount: 6,
+          captcha: "123456",
+        });
+        const rejected = expect(pending).rejects.toMatchObject({
+          name: "TaishinLoginOutcomeUnknownError",
+          message:
+            "台新人工驗證已送出，但尚未確認登入成功，請稍後重新取得驗證碼再試。",
+        });
+        await vi.runAllTimersAsync();
+        await rejected;
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        const diagnostic = JSON.parse(String(warn.mock.calls[0]?.[0]));
+        expect(diagnostic).toMatchObject({
+          event: "taishin_login_outcome_unknown",
+          mode: "manual",
+          attempts: 10,
+          elapsedMs: expect.any(Number),
+          sessionChecks: Array.from({ length: 10 }, () => sessionCheck),
+        });
+        const serialized = String(warn.mock.calls[0]?.[0]);
+        expect(serialized).not.toContain(SECRET_PAGE_TEXT);
+        expect(serialized).not.toContain(SECRET_SESSION_BODY);
+        expect(serialized).not.toContain(SECRET_ERROR_MESSAGE);
+        expect(browserInstance.close).toHaveBeenCalledOnce();
+      } finally {
+        warn.mockRestore();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("accepts a valid bank session without relying on account overview text", async () => {
     const browserPage = page();

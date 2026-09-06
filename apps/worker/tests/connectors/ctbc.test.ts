@@ -265,6 +265,69 @@ describe("CTBC mobile API connector", () => {
     });
   });
 
+  it.each([
+    { label: "without a description", response: { sys: "SVC", code: "X999" } },
+    {
+      label: "with a maintenance description",
+      response: {
+        sys: "SVC",
+        code: "X999",
+        desc: "系統維護中，暫停登入服務",
+      },
+    },
+  ])(
+    "treats SVC/X999 login failures as connection errors $label",
+    async ({ response }) => {
+      const responses = [
+        jsonResponse({ access_token: "oauth-token" }),
+        jsonResponse({ statusCode: "0000" }),
+        jsonResponse({
+          success: true,
+          rsData: { seed: "seed" },
+          token: "token",
+        }),
+        jsonResponse(response),
+      ];
+      const fetcher = vi.fn(async () => responses.shift()!) as CtbcFetch;
+
+      await expect(
+        createCtbcConnector(fetcher).sync({
+          userId: "A123456789",
+          account: "bank-user",
+          password: "bank-password",
+        }),
+      ).rejects.toMatchObject({
+        name: "CtbcConnectionError",
+        message: "中國信託資料同步暫時無法完成。",
+      });
+    },
+  );
+
+  it("turns an explicit needOTP flag in a failed response into a user-action error", async () => {
+    const responses = [
+      jsonResponse({ access_token: "oauth-token" }),
+      jsonResponse({ statusCode: "0000" }),
+      jsonResponse({ success: true, rsData: { seed: "seed" }, token: "token" }),
+      jsonResponse({
+        sys: "SVC",
+        code: "X999",
+        rsData: { needOTP: true },
+      }),
+    ];
+    const fetcher = vi.fn(async () => responses.shift()!) as CtbcFetch;
+
+    await expect(
+      createCtbcConnector(fetcher).sync({
+        userId: "A123456789",
+        account: "bank-user",
+        password: "bank-password",
+      }),
+    ).rejects.toMatchObject({
+      name: "CtbcVerificationRequiredError",
+      message: "中國信託登入需要重新驗證，請先至官方 App 完成驗證。",
+    });
+  });
+
   it("logs only safe account diagnostics when deposit initialization fails", async () => {
     const accountId = "123456789012";
     const responses = [
