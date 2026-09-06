@@ -21,7 +21,7 @@ describe("MobileMore", () => {
     });
 
     const connectorCount = connectorDefinitions.length;
-    expect(getByText("0 / 0 已設定來源正常")).toBeInTheDocument();
+    expect(getByText("尚未設定資料來源")).toBeInTheDocument();
     expect(
       getByText(new RegExp(`${connectorCount} 個\\s*›`)),
     ).toBeInTheDocument();

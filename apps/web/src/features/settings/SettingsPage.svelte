@@ -13,6 +13,8 @@
   import {
     getActionableSyncJobs,
     getConfiguredSyncJobs,
+    getHealthySyncJobs,
+    getPendingSyncJobs,
   } from "@/data/connectors/sync-status";
   import { notificationConfigQuery } from "@/data/notifications/queries";
   import type { ConnectorId } from "@/data/connectors/types";
@@ -65,12 +67,17 @@
       ? (connectorTarget ?? null)
       : selectedConnector,
   );
-  const needsAction = $derived(getActionableSyncJobs($jobs.data ?? []).length);
-  const configuredSources = $derived(getConfiguredSyncJobs($jobs.data ?? []));
-  const healthySources = $derived(
-    Math.max(configuredSources.length - needsAction, 0),
+  const syncJobsState = $derived(
+    $jobs.isPending ? "loading" : $jobs.isError ? "error" : "ready",
   );
-  const actionJob = $derived(getActionableSyncJobs($jobs.data ?? []).at(0));
+  const syncJobRows = $derived($jobs.data ?? []);
+  const needsActionJobs = $derived(getActionableSyncJobs(syncJobRows));
+  const pendingSyncJobs = $derived(getPendingSyncJobs(syncJobRows));
+  const configuredSources = $derived(getConfiguredSyncJobs(syncJobRows));
+  const healthySources = $derived(getHealthySyncJobs(syncJobRows));
+  const needsAction = $derived(needsActionJobs.length);
+  const pendingSources = $derived(pendingSyncJobs.length);
+  const actionJob = $derived(needsActionJobs.at(0));
   const actionSource = $derived(
     sources.find((source) => source.id === actionJob?.connectorId),
   );
@@ -127,7 +134,7 @@
   const enabledRuleCount = $derived(
     ($rules.data ?? []).filter((rule) => !rule.isSystem && rule.enabled).length,
   );
-  const recentJobs = $derived(getConfiguredSyncJobs($jobs.data ?? []));
+  const recentJobs = $derived(getConfiguredSyncJobs(syncJobRows));
   const recentSuccessCount = $derived(
     recentJobs.filter((job) => job.lastStatus === "success").length,
   );
@@ -199,6 +206,8 @@
     <MobileMore
       {demoMode}
       jobs={$jobs.data ?? []}
+      jobsLoading={$jobs.isPending}
+      jobsError={$jobs.isError}
       rules={$rules.data ?? []}
       bank={$bank.data ?? { accounts: [], transactions: [] }}
       {navigate}
@@ -417,9 +426,6 @@
             管理自訂分類，也會自動處理帳戶互轉、信用卡年費減免與發票配對。
           </p>
         </div>
-        <span class="rounded-lg bg-steel px-4 py-2 text-sm font-bold text-white"
-          >＋ 新增規則</span
-        >
       </div>
 
       <section
@@ -487,39 +493,81 @@
         class="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]"
       >
         <div
-          class={`min-w-0 rounded-xl border bg-card p-5 shadow-xs ${needsAction ? "border-coral/70 border-l-4" : "border-border"}`}
+          class={`min-w-0 rounded-xl border bg-card p-5 shadow-xs ${needsAction ? "border-coral/70 border-l-4" : pendingSources ? "border-amber-200 border-l-4" : "border-border"}`}
         >
           <div class="flex items-center justify-between gap-3">
             <p
-              class={`text-sm font-semibold ${needsAction ? "text-coral" : "text-moss"}`}
+              class={`text-sm font-semibold ${needsAction ? "text-coral" : pendingSources ? "text-amber-700" : syncJobsState === "error" ? "text-coral" : "text-muted-foreground"}`}
             >
-              {needsAction ? `需要處理 · ${needsAction}` : "資料同步狀態"}
+              {#if syncJobsState === "loading"}
+                同步狀態載入中
+              {:else if syncJobsState === "error"}
+                同步狀態暫時無法取得
+              {:else if needsAction}
+                需要處理 · {needsAction}
+              {:else if pendingSources}
+                等待首次同步 · {pendingSources}
+              {:else if configuredSources.length === 0}
+                尚未設定資料來源
+              {:else}
+                資料同步狀態
+              {/if}
             </p>
-            <span class="text-sm font-semibold text-muted-foreground">
-              {needsAction ? "影響資料更新" : "目前正常"}
+            <span
+              class={`text-sm font-semibold ${needsAction || syncJobsState === "error" ? "text-coral" : pendingSources ? "text-amber-700" : "text-muted-foreground"}`}
+            >
+              {#if syncJobsState === "loading"}
+                載入中…
+              {:else if syncJobsState === "error"}
+                無法載入
+              {:else if needsAction}
+                影響資料更新
+              {:else if pendingSources}
+                等待同步
+              {:else if configuredSources.length === 0}
+                尚未設定
+              {:else}
+                目前正常
+              {/if}
             </span>
           </div>
           <h2 class="mt-2 text-xl font-bold">
-            {#if needsAction}
+            {#if syncJobsState === "loading"}
+              正在載入同步狀態…
+            {:else if syncJobsState === "error"}
+              無法載入同步狀態
+            {:else if needsAction}
               {actionSource?.title ?? "資料來源需要處理"}
+            {:else if pendingSources}
+              {pendingSources} 個資料來源等待首次同步
             {:else if configuredSources.length}
-              {healthySources} / {configuredSources.length} 已設定來源正常
+              {healthySources.length} / {configuredSources.length} 已設定來源正常
             {:else}
               尚未設定資料來源
             {/if}
           </h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            {needsAction
-              ? "完成重新驗證後即可恢復自動同步。"
-              : configuredSources.length
-                ? "所有已設定連接器都能正常同步。"
-                : "設定資料來源後即可開始同步。"}
+            {#if syncJobsState === "loading"}
+              請稍候，正在讀取資料來源狀態。
+            {:else if syncJobsState === "error"}
+              無法確認資料來源狀態，請稍後再試。
+            {:else if needsAction}
+              查看來源的錯誤說明，重試同步或完成必要的驗證。
+            {:else if pendingSources}
+              這些來源尚未完成第一次同步，完成後才會列入正常來源。
+            {:else if configuredSources.length}
+              所有已設定連接器都能正常同步。
+            {:else}
+              設定資料來源後即可開始同步。
+            {/if}
           </p>
-          <button
-            class="mt-4 rounded-lg bg-steel px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-steel/90"
-            onclick={() => navigate("data-sources")}
-            >{needsAction ? "查看連接器" : "管理資料來源"}</button
-          >
+          {#if syncJobsState === "ready"}
+            <button
+              class="mt-4 rounded-lg bg-steel px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-steel/90"
+              onclick={() => navigate("data-sources")}
+              >{needsAction ? "查看連接器" : "管理資料來源"}</button
+            >
+          {/if}
         </div>
 
         <div
@@ -531,17 +579,29 @@
               資料健康度
             </p>
             <span
-              class={`text-sm font-semibold ${needsAction ? "text-coral" : "text-moss"}`}
-              >{needsAction ? "需要處理" : "大致正常"}</span
+              class={`text-sm font-semibold ${needsAction || syncJobsState === "error" ? "text-coral" : pendingSources ? "text-amber-700" : "text-muted-foreground"}`}
+              >{#if syncJobsState === "loading"}載入中…{:else if syncJobsState === "error"}無法載入{:else if needsAction}需要處理{:else if pendingSources}等待首次同步{:else if configuredSources.length === 0}尚未設定{:else}大致正常{/if}</span
             >
           </div>
           <p class="mt-2 text-3xl font-bold">
-            {healthySources} / {configuredSources.length}
+            {#if syncJobsState !== "ready"}
+              —
+            {:else if configuredSources.length === 0}
+              尚未設定
+            {:else}
+              {healthySources.length} / {configuredSources.length}
+            {/if}
           </p>
           <p class="mt-1 text-sm text-muted-foreground">
-            {inheritedJobCount} 個排程啟用 · {latestSuccessAt
-              ? `最近成功 ${formatDateTime(latestSuccessAt)}`
-              : "尚無成功紀錄"}
+            {#if syncJobsState === "loading"}
+              正在讀取資料來源狀態。
+            {:else if syncJobsState === "error"}
+              無法取得資料來源狀態。
+            {:else}
+              {inheritedJobCount} 個排程啟用 · {latestSuccessAt
+                ? `最近成功 ${formatDateTime(latestSuccessAt)}`
+                : "尚無成功紀錄"}
+            {/if}
           </p>
         </div>
       </section>

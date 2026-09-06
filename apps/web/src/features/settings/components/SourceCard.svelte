@@ -10,7 +10,10 @@
   import type { ApiClient } from "@/shared/api/client";
   import { connectorSettingsQuery } from "@/data/connectors/queries";
   import type { ConnectorId, SyncJobRow } from "@/data/connectors/types";
-  import { getSyncSourceStatus } from "@/data/connectors/sync-status";
+  import {
+    getSyncSourceStatus,
+    getSyncSourceStatusLabel,
+  } from "@/data/connectors/sync-status";
   import { formatDateTime } from "@/shared/format/financial";
   let {
     api,
@@ -98,14 +101,7 @@
         ? "destructive"
         : sourceStatus === "healthy"
           ? "success"
-          : "secondary"}
-      >{needsAction
-        ? "需要處理"
-        : sourceStatus === "healthy"
-          ? "正常"
-          : sourceStatus === "not_synced"
-            ? "尚未同步"
-            : "未設定"}</Badge
+          : "secondary"}>{getSyncSourceStatusLabel(sourceStatus)}</Badge
     >
     {#if compactCard}<span
         aria-hidden="true"
@@ -132,14 +128,9 @@
           class="shrink-0 whitespace-nowrap text-sm"
           variant={needsAction
             ? "destructive"
-            : sourceStatus !== "unconfigured"
+            : sourceStatus === "healthy"
               ? "success"
-              : "secondary"}
-          >{needsAction
-            ? "需要處理"
-            : sourceStatus !== "unconfigured"
-              ? "已設定"
-              : "未設定"}</Badge
+              : "secondary"}>{getSyncSourceStatusLabel(sourceStatus)}</Badge
         >
       </div>
       <div

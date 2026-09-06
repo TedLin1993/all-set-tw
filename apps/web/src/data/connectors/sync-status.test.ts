@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   getActionableSyncJobs,
   getConfiguredSyncJobs,
+  getHealthySyncJobs,
+  getPendingSyncJobs,
   getSyncSourceStatus,
+  getSyncSourceStatusLabel,
   isActionableSyncJob,
 } from "./sync-status";
 import type { SyncJobRow } from "./types";
@@ -60,6 +63,26 @@ describe("sync source status", () => {
     ]);
     expect(getSyncSourceStatus(configured)).toBe("healthy");
     expect(getSyncSourceStatus(unconfigured)).toBe("unconfigured");
+  });
+
+  it("keeps configured sources without a successful run out of the healthy count", () => {
+    const pending = job({ configured: true });
+    const healthy = job({
+      id: "sinopac:all",
+      connectorId: "sinopac",
+      configured: true,
+      lastSuccessAt: "2026-08-01T00:00:00.000Z",
+    });
+
+    expect(getSyncSourceStatus(pending)).toBe("not_synced");
+    expect(getSyncSourceStatusLabel("not_synced")).toBe("等待首次同步");
+    expect(getHealthySyncJobs([pending, healthy])).toEqual([healthy]);
+    expect(getPendingSyncJobs([pending, healthy])).toEqual([pending]);
+  });
+
+  it("does not treat an empty source list as a healthy source", () => {
+    expect(getHealthySyncJobs([])).toEqual([]);
+    expect(getPendingSyncJobs([])).toEqual([]);
   });
 
   it("counts at most the all-scope job for each configured source", () => {

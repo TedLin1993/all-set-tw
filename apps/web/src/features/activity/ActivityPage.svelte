@@ -79,6 +79,7 @@
     invoiceTransactionCandidates,
     matchInvoicesToTransactions,
   } from "@/data/activity/matching";
+  import { getActivityDataStatus } from "./model/load-status";
   import {
     formatCompactTwd,
     formatCurrency,
@@ -142,6 +143,33 @@
   ];
   const categoryOptions = $derived(
     $categoryRows.data?.length ? $categoryRows.data : fallbackCategories,
+  );
+  const activityDataStatus = $derived(
+    getActivityDataStatus([
+      {
+        label: "銀行與信用卡",
+        isError: $bank.isError,
+      },
+      {
+        label: "發票",
+        isError: $invoices.isError,
+      },
+      {
+        label: "發票配對",
+        isError: $invoiceMappings.isError,
+      },
+      {
+        label: "投資活動",
+        isError: $trades.isError,
+      },
+    ]),
+  );
+  const activitySummaryIncomplete = $derived(activityDataStatus.hasFailure);
+  const activityRetryPending = $derived(
+    $bank.isFetching ||
+      $invoices.isFetching ||
+      $invoiceMappings.isFetching ||
+      $trades.isFetching,
   );
   const categories = $derived(
     Object.fromEntries(
@@ -501,6 +529,12 @@
     selectedMonth = month;
     selectedCategory = null;
   }
+  function retryActivityData() {
+    if ($bank.isError) void $bank.refetch();
+    if ($invoices.isError) void $invoices.refetch();
+    if ($invoiceMappings.isError) void $invoiceMappings.refetch();
+    if ($trades.isError) void $trades.refetch();
+  }
   function sourceLabel(item: ActivityItem) {
     const label = {
       bank: "銀行",
@@ -647,6 +681,28 @@
     body="正在整理銀行、投資與發票資料。"
   />{:else}
   <div class="grid min-w-0 max-w-full gap-5 overflow-x-clip">
+    {#if activityDataStatus.hasFailure}
+      <div
+        class="flex flex-col gap-3 rounded-xl border border-coral/25 bg-coral/5 px-4 py-3 text-sm text-ink sm:flex-row sm:items-center sm:justify-between"
+        role="alert"
+      >
+        <div class="min-w-0">
+          <p class="font-semibold text-coral">部分資料載入失敗</p>
+          <p class="mt-1 text-xs text-ink/65">
+            {activityDataStatus.failedLabels.join(
+              "、",
+            )}目前無法取得；以下仍顯示已成功載入的資料。
+          </p>
+        </div>
+        <Button
+          class="h-11 shrink-0"
+          variant="outline"
+          disabled={activityRetryPending}
+          onclick={retryActivityData}
+          >{activityRetryPending ? "重試中…" : "重試活動資料"}</Button
+        >
+      </div>
+    {/if}
     <div
       class="hidden min-w-0 grid-cols-2 gap-3 md:grid md:grid-cols-4 md:gap-4"
     >
@@ -656,9 +712,15 @@
             {selectedMonthLabel}收入
           </p>
           <p class="mt-2 truncate text-2xl font-bold text-moss">
-            +{formatCurrency(incomeTotal)}
+            {activitySummaryIncomplete
+              ? "—"
+              : `+${formatCurrency(incomeTotal)}`}
           </p>
-          <p class="mt-1 text-xs text-ink/45">銀行與信用卡活動</p></CardContent
+          <p class="mt-1 text-xs text-ink/45">
+            {activitySummaryIncomplete
+              ? "資料尚未完整載入"
+              : "銀行與信用卡活動"}
+          </p></CardContent
         ></Card
       >
       <Card
@@ -667,10 +729,14 @@
             {selectedMonthLabel}支出
           </p>
           <p class="mt-2 truncate text-2xl font-bold text-coral">
-            −{formatCurrency(expenseTotal)}
+            {activitySummaryIncomplete
+              ? "—"
+              : `−${formatCurrency(expenseTotal)}`}
           </p>
           <p class="mt-1 text-xs text-ink/45">
-            含未配對發票，不計入已排除活動
+            {activitySummaryIncomplete
+              ? "資料尚未完整載入"
+              : "含未配對發票，不計入已排除活動"}
           </p></CardContent
         ></Card
       >
@@ -682,16 +748,24 @@
           <p
             class={`mt-2 truncate text-2xl font-bold ${incomeTotal >= expenseTotal ? "text-moss" : "text-coral"}`}
           >
-            {formatCurrency(incomeTotal - expenseTotal)}
+            {activitySummaryIncomplete
+              ? "—"
+              : formatCurrency(incomeTotal - expenseTotal)}
           </p>
-          <p class="mt-1 text-xs text-ink/45">收入 − 支出</p></CardContent
+          <p class="mt-1 text-xs text-ink/45">
+            {activitySummaryIncomplete ? "資料尚未完整載入" : "收入 − 支出"}
+          </p></CardContent
         ></Card
       >
       <Card
         ><CardContent class="p-5"
           ><p class="text-xs font-semibold text-ink/50">待分類</p>
-          <p class="mt-2 text-2xl font-bold">{pendingCount} 筆</p>
-          <p class="mt-1 text-xs text-ink/45">銀行交易</p></CardContent
+          <p class="mt-2 text-2xl font-bold">
+            {activitySummaryIncomplete ? "—" : `${pendingCount} 筆`}
+          </p>
+          <p class="mt-1 text-xs text-ink/45">
+            {activitySummaryIncomplete ? "資料尚未完整載入" : "銀行交易"}
+          </p></CardContent
         ></Card
       >
     </div>
@@ -725,6 +799,7 @@
             ? selectedCategory.category
             : undefined}
           flowSelected={flow === "income" && !selectedCategory}
+          dataIncomplete={activitySummaryIncomplete}
           onSelect={(category) => chooseCategory("income", category)}
           onSelectFlow={() => chooseChartFlow("income")}
         />
@@ -735,6 +810,7 @@
             ? selectedCategory.category
             : undefined}
           flowSelected={flow === "expense" && !selectedCategory}
+          dataIncomplete={activitySummaryIncomplete}
           onSelect={(category) => chooseCategory("expense", category)}
           onSelectFlow={() => chooseChartFlow("expense")}
         />
@@ -747,42 +823,50 @@
         <Badge variant="secondary">6 個月　收入／支出</Badge></CardHeader
       >
       <CardContent>
-        <div class="grid grid-cols-6 gap-3">
-          {#each cashFlow as point (point.month)}
-            <button
-              aria-pressed={selectedMonth === point.month}
-              class={`grid min-w-0 rounded-xl px-2 pb-2 pt-3 transition ${selectedMonth === point.month ? "bg-steel/10 ring-2 ring-steel/30" : "hover:bg-paper"}`}
-              onclick={() => chooseMonth(point.month)}
-            >
-              <div class="flex h-28 items-end justify-center gap-2">
-                <span
-                  class="w-1/3 rounded-t-lg bg-emerald-700"
-                  style={`height:${Math.max(8, (point.income / maxCashFlow) * 100)}%`}
-                ></span><span
-                  class="w-1/3 rounded-t-lg bg-coral"
-                  style={`height:${Math.max(8, (point.expense / maxCashFlow) * 100)}%`}
-                ></span>
-              </div>
-              <span class="mt-2 text-xs font-semibold"
-                >{Number(point.month.slice(5))} 月</span
-              ><span class="mt-1 truncate text-[10px] text-moss"
-                >+{formatCompactTwd(point.income)}</span
-              ><span class="truncate text-[10px] text-coral"
-                >−{formatCompactTwd(point.expense)}</span
-              >
-            </button>
-          {/each}
-        </div>
-        <div class="mt-3 flex items-center justify-between text-xs text-ink/45">
-          <span
-            ><span class="text-emerald-700">■</span> 收入　<span
-              class="text-coral">■</span
-            > 支出</span
-          ><button
-            class="font-semibold text-steel"
-            onclick={() => chooseMonth(currentMonth)}>回到本月</button
+        {#if activitySummaryIncomplete}
+          <div
+            class="rounded-xl bg-amber-50 p-6 text-center text-sm text-amber-900"
           >
-        </div>
+            活動資料尚未完整載入，現金流趨勢暫不計算。
+          </div>
+        {:else}<div class="grid grid-cols-6 gap-3">
+            {#each cashFlow as point (point.month)}
+              <button
+                aria-pressed={selectedMonth === point.month}
+                class={`grid min-w-0 rounded-xl px-2 pb-2 pt-3 transition ${selectedMonth === point.month ? "bg-steel/10 ring-2 ring-steel/30" : "hover:bg-paper"}`}
+                onclick={() => chooseMonth(point.month)}
+              >
+                <div class="flex h-28 items-end justify-center gap-2">
+                  <span
+                    class="w-1/3 rounded-t-lg bg-emerald-700"
+                    style={`height:${Math.max(8, (point.income / maxCashFlow) * 100)}%`}
+                  ></span><span
+                    class="w-1/3 rounded-t-lg bg-coral"
+                    style={`height:${Math.max(8, (point.expense / maxCashFlow) * 100)}%`}
+                  ></span>
+                </div>
+                <span class="mt-2 text-xs font-semibold"
+                  >{Number(point.month.slice(5))} 月</span
+                ><span class="mt-1 truncate text-[10px] text-moss"
+                  >+{formatCompactTwd(point.income)}</span
+                ><span class="truncate text-[10px] text-coral"
+                  >−{formatCompactTwd(point.expense)}</span
+                >
+              </button>
+            {/each}
+          </div>
+          <div
+            class="mt-3 flex items-center justify-between text-xs text-ink/45"
+          >
+            <span
+              ><span class="text-emerald-700">■</span> 收入　<span
+                class="text-coral">■</span
+              > 支出</span
+            ><button
+              class="font-semibold text-steel"
+              onclick={() => chooseMonth(currentMonth)}>回到本月</button
+            >
+          </div>{/if}
       </CardContent>
     </Card>
 
@@ -848,7 +932,9 @@
           {#if filteredGroups.length === 0}<p
               class="p-8 text-center text-sm text-ink/50"
             >
-              沒有符合條件的活動。
+              {activityDataStatus.hasFailure
+                ? "部分資料目前無法顯示，請重試後再查看。"
+                : "沒有符合條件的活動。"}
             </p>{:else}{#each filteredGroups as group (group.dateKey)}<div
                 class="flex items-center justify-between bg-paper px-4 py-2.5 text-xs"
               >
@@ -905,7 +991,9 @@
           {#if filteredGroups.length === 0}<p
               class="p-8 text-center text-sm text-ink/50"
             >
-              沒有符合條件的活動。
+              {activityDataStatus.hasFailure
+                ? "部分資料目前無法顯示，請重試後再查看。"
+                : "沒有符合條件的活動。"}
             </p>{:else}<table
               class="w-full min-w-[760px] table-fixed text-left text-sm"
             >

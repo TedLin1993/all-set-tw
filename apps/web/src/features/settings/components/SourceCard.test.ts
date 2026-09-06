@@ -67,4 +67,31 @@ describe("SourceCard", () => {
     ).toBeInTheDocument();
     expect(getByText("需要處理")).toBeInTheDocument();
   });
+
+  it("labels a configured source without a successful run as waiting", () => {
+    const { getByText } = renderSourceCard({
+      id: "sinopac:all",
+      connectorId: "sinopac",
+      configured: true,
+      scope: "all",
+      enabled: true,
+      intervalMinutes: 1440,
+      nextRunAt: "2026-08-22T02:00:00.000Z",
+      scheduleMode: "inherit",
+      preferredTime: "02:00",
+      preferredWeekday: 1,
+      lockedUntil: null,
+      lockedBy: null,
+      lockTrigger: null,
+      lockScope: null,
+      lastRunAt: null,
+      lastSuccessAt: null,
+      lastStatus: null,
+      lastError: null,
+      updatedAt: "2026-08-21T22:00:00.000Z",
+      running: false,
+    });
+
+    expect(getByText("等待首次同步")).toBeInTheDocument();
+  });
 });
