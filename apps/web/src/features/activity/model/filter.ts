@@ -1,4 +1,5 @@
 import { activityCashFlow, type ActivityFlow } from "./chart";
+import { activityDateKey } from "./list";
 import type { ActivityItem } from "./types";
 
 export type ActivityFlowFilter = "all" | ActivityFlow;
@@ -41,7 +42,7 @@ export function filterActivities(
         itemFlow === filters.category.flow);
 
     return (
-      item.date.startsWith(filters.month) &&
+      activityDateKey(item).startsWith(filters.month) &&
       matchesFlow &&
       matchesSource &&
       matchesSearch &&

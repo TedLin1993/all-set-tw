@@ -165,7 +165,9 @@ function expenseDay(transaction: BankTransactionRow) {
     transaction.currency !== "TWD"
   )
     return undefined;
-  return dayNumber(transaction.authorizedAt ?? transaction.postedDate);
+  return transaction.authorizedAt
+    ? dayNumber(transaction.authorizedAt)
+    : dateOnlyNumber(transaction.postedDate);
 }
 
 function dayNumber(value?: string) {
@@ -183,6 +185,15 @@ function dayNumber(value?: string) {
       86_400_000
     );
   }
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return undefined;
+  return (
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) /
+    86_400_000
+  );
+}
+
+function dateOnlyNumber(value?: string) {
   const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!match) return undefined;
   return (

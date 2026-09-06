@@ -414,6 +414,15 @@ assert.equal(foreignParsed.bankAccounts[3]?.accountType, "time_deposit");
 assert.match(foreignParsed.bankAccounts[2]?.sourceId ?? "", /:USD$/);
 assert.equal(foreignParsed.bankTransactions[0]?.amount, -12.34);
 assert.equal(foreignParsed.bankTransactions[0]?.postedDate, "2022-07-18");
+assert.equal(
+  foreignParsed.bankTransactions[0]?.authorizedAt,
+  "2022-07-18T10:28:20+08:00",
+);
+assert.equal(
+  (foreignParsed.bankTransactions[0]?.raw as { transactionDateTime?: string })
+    .transactionDateTime,
+  "2022-07-18T10:28:20",
+);
 assert.doesNotMatch(
   JSON.stringify(foreignParsed),
   /7000000000001234|7000000000005678|InwardAccountNumber/,

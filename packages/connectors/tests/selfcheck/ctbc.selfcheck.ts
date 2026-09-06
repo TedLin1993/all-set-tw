@@ -41,7 +41,7 @@ const payloads = {
         {
           sourceAccountId: "123456789012",
           acctId: "987654321000",
-          trnDtFull: "2026/07/20",
+          trnDtFull: "2026/07/20 11:22:33",
           memo1: "薪資入帳",
           crAmt: "25,000",
           dbAmt: "0",
@@ -183,6 +183,41 @@ assert.equal(result.bankTransactions[2]?.amount, -350);
 assert.equal(result.bankTransactions[3]?.amount, 120);
 assert.equal(result.bankTransactions[4]?.amount, -500);
 assert.equal(result.bankTransactions[4]?.status, "posted");
+assert.equal(result.bankTransactions[0]?.postedDate, "2026-07-20");
+assert.equal(
+  result.bankTransactions[0]?.authorizedAt,
+  "2026-07-20T11:22:33+08:00",
+);
+assert.equal(
+  result.bankTransactions[2]?.authorizedAt,
+  "2026-07-08T12:00:00+08:00",
+);
+const utcMillisPayloads = {
+  ...payloads,
+  realtime: {
+    ...payloads.realtime,
+    rsData: {
+      ...payloads.realtime.rsData,
+      allItems: payloads.realtime.rsData.allItems.map((item, index) =>
+        index === 0
+          ? { ...item, txnDateTime: "2026-07-08T12:00:00.000Z" }
+          : item,
+      ),
+    },
+  },
+};
+const utcMillisResult = parseCtbcData(
+  utcMillisPayloads,
+  new Date("2026-07-29T00:00:00.000Z"),
+);
+assert.equal(
+  utcMillisResult.bankTransactions[2]?.authorizedAt,
+  "2026-07-08T12:00:00.000Z",
+);
+assert.equal(
+  utcMillisResult.bankTransactions[2]?.sourceId,
+  result.bankTransactions[2]?.sourceId,
+);
 assert.equal(result.bankTransactions[5]?.amount, -500);
 assert.equal(result.bankTransactions[5]?.status, "pending");
 assert.notEqual(

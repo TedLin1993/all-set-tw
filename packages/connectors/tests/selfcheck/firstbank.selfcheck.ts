@@ -166,9 +166,21 @@ assert.equal(
 );
 assert.equal(
   parsed.bankTransactions.find(
+    (transaction) => transaction.description === "購物",
+  )?.authorizedAt,
+  "2026-08-20T09:10:11+08:00",
+);
+assert.equal(
+  parsed.bankTransactions.find(
     (transaction) => transaction.description === "薪資",
   )?.amount,
   2000,
+);
+assert.equal(
+  parsed.bankTransactions.find(
+    (transaction) => transaction.description === "薪資",
+  )?.authorizedAt,
+  "2026-08-21T10:20:30+08:00",
 );
 assert.equal(
   parsed.bankTransactions.find((transaction) =>
@@ -176,6 +188,30 @@ assert.equal(
   )?.amount,
   -200,
 );
+assert.equal(
+  parsed.bankTransactions.find((transaction) =>
+    transaction.description.includes("待入帳"),
+  )?.authorizedAt,
+  "2026-08-25",
+);
+const utcMillisParsed = parseFirstbankData(
+  {
+    ...payloads,
+    transactionHistoryHtml: transactionHistoryHtml.replace(
+      "2026/08/20 09:10:11",
+      "2026-08-20T09:10:11.000Z",
+    ),
+  },
+  now,
+);
+const originalShopping = parsed.bankTransactions.find(
+  (transaction) => transaction.description === "購物",
+);
+const utcMillisShopping = utcMillisParsed.bankTransactions.find(
+  (transaction) => transaction.description === "購物",
+);
+assert.equal(utcMillisShopping?.authorizedAt, "2026-08-20T09:10:11.000Z");
+assert.equal(utcMillisShopping?.sourceId, originalShopping?.sourceId);
 assert.equal(parsed.creditCardBills.length, 1);
 assert.deepEqual(parsed.creditCardBills[0], {
   ...parsed.creditCardBills[0],

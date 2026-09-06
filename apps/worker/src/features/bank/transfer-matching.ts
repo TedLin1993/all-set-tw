@@ -65,7 +65,13 @@ export function findAutomaticTransferPairs(
 export function getAutomaticTransferDay(
   transaction: Pick<TransferMatchTransaction, "authorizedAt" | "postedDate">,
 ) {
-  return storedFinancialDay(transaction.authorizedAt ?? transaction.postedDate);
+  const { authorizedAt, postedDate } = transaction;
+  if (authorizedAt && /(?:Z|[+-]\d{2}:\d{2})$/.test(authorizedAt)) {
+    const parsed = Date.parse(authorizedAt);
+    if (Number.isFinite(parsed))
+      return new Date(parsed + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+  return storedFinancialDay(authorizedAt ?? postedDate);
 }
 
 export function findAutomaticTransferTransactionIds(
@@ -134,10 +140,7 @@ function storedFinancialDay(value?: string | null) {
   if (!value) return undefined;
 
   const dateOnly = value.trim().match(/^\d{4}-\d{2}-\d{2}/)?.[0];
-  // Bank connectors store the financial date in the timestamp prefix, and
-  // Activity groups rows by that same prefix. Do not reinterpret it through
-  // the runtime timezone: TDCC timestamps can represent a Taiwan local time
-  // while carrying a UTC-looking suffix.
+  // Date-only authorizations and legacy posting dates retain their calendar day.
   if (dateOnly) return dateOnly;
 
   const parsed = new Date(value);

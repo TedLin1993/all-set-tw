@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import {
   createTdccConnector,
+  normalizeTdccBankAuthorizedAt,
   parseTdccTradePageItems,
   parseTdccConfig,
   TdccOtpExpiredError,
@@ -15,6 +16,15 @@ import {
 } from "../../src/tdcc-epassbook-client";
 
 const calls: string[] = [];
+assert.equal(
+  normalizeTdccBankAuthorizedAt("2026-07-01T00:00:00"),
+  "2026-07-01T00:00:00+08:00",
+);
+assert.equal(
+  normalizeTdccBankAuthorizedAt("1970-01-01T00:00:00"),
+  "1970-01-01",
+);
+assert.equal(normalizeTdccBankAuthorizedAt("2026-07-01"), "2026-07-01");
 const tspPageTokens: string[] = [];
 let mode:
   | "flag_otp"

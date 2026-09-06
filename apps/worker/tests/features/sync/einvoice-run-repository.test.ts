@@ -882,6 +882,41 @@ describe("durable e-invoice sync runs", () => {
     });
   });
 
+  it("retains a known invoice time when a refreshed header contains only its Taipei date", async () => {
+    const { database, db } = createDb();
+    insertEinvoiceSettings(database);
+    database.exec(`INSERT INTO invoices
+      (id, connector_id, source_id, invoice_date, amount, created_at, updated_at)
+      VALUES ('invoice-time', 'einvoice', 'invoice-time', '2026-07-31T16:00:00.000Z', 80, 'old', 'old')`);
+    const run = await createProcessingEinvoiceRun(database, db, {
+      runId: "run-time",
+      settingsVersion: "version-1",
+      items: [
+        {
+          invoiceSourceId: "invoice-time",
+          header: header("time"),
+          normalizedInvoice: {
+            sourceId: "invoice-time",
+            invoiceDate: "2026-08-01",
+            amount: 80,
+          },
+          detailItems: [],
+        },
+      ],
+    });
+    await promoteEinvoiceRunRecords(db, {
+      runId: run.id,
+      expectedSettingsUpdatedAt: "version-1",
+      cursor: "cursor-time",
+      now: "2026-08-12T01:00:00.000Z",
+    });
+    expect(
+      database.prepare("SELECT id, invoice_date FROM invoices").all(),
+    ).toEqual([
+      { id: "invoice-time", invoice_date: "2026-07-31T16:00:00.000Z" },
+    ]);
+  });
+
   it("promotes completed invoices and lines with stable records and makes replay a no-op", async () => {
     const { database, db } = createDb();
     insertEinvoiceSettings(database);

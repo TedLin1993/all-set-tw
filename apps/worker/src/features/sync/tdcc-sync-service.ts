@@ -4,6 +4,7 @@ import {
   ensureTdccSession,
   initializeTdccSnapshot,
   normalizeBankTransactionDetails,
+  normalizeTdccBankAuthorizedAt,
   normalizeTdccSnapshot,
   parseTdccConfig,
   parseTdccTradePageItems,
@@ -756,6 +757,7 @@ async function bankTransactionsFromRun(env: Env, run: TdccRunRow) {
     accountId: string;
     sourceId: string;
     postedDate?: string;
+    authorizedAt?: string;
     amount: number;
     currency: string;
     description?: string;
@@ -784,6 +786,7 @@ async function bankTransactionsFromRun(env: Env, run: TdccRunRow) {
         accountId,
         sourceId: transaction.txnId,
         postedDate: transaction.occurredAt,
+        authorizedAt: normalizeTdccBankAuthorizedAt(transaction.occurredAt),
         amount: Number.isFinite(amount) ? amount : 0,
         currency: task.currency,
         ...(transaction.memo ? { description: transaction.memo } : {}),

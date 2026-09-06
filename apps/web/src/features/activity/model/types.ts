@@ -2,6 +2,8 @@ export interface ActivityItem {
   id: string;
   source: "bank" | "card" | "investment" | "invoice";
   date: string;
+  /** Only true when the selected source value contains a reliable timestamp. */
+  dateHasTime?: boolean;
   title: string;
   subtitle: string;
   institutionName?: string;

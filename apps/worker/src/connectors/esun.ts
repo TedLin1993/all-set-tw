@@ -572,10 +572,14 @@ export function normalizeEsunTimelineTransactions(
 
       for (const txn of month.txnList ?? []) {
         const lifecycle = txn.acfg?.trim() ?? "";
-        const authorizedAt = normalizeEsunMonthDay(
+        // Keep the legacy normalized value in the identity key.  The public
+        // authorizedAt value may now be date-only, but changing this key
+        // would turn every existing card transaction into a new row.
+        const identityAuthorizedAt = normalizeEsunMonthDay(
           year,
           txn.consumerDt ?? txn.postingDt ?? "",
         );
+        const authorizedAt = identityAuthorizedAt.slice(0, 10);
         const postedDate =
           lifecycle === "未入帳"
             ? undefined
@@ -589,7 +593,7 @@ export function normalizeEsunTimelineTransactions(
         const amount = signedCreditCardAmount(rawAmount, description);
         const accountId = creditCardSourceId(txn.cardNo);
         const sourceKey = [
-          authorizedAt,
+          identityAuthorizedAt,
           accountId,
           description,
           rawAmount,
@@ -825,7 +829,7 @@ async function scrapeDepositAccounts(
     console.log(
       `[esun debug] tw account ${maskAccountNumber(account)}: fetched ${rows.length} transaction rows`,
     );
-    appendDepositTransactions(bankTransactions, rows, accountId, currency);
+    appendEsunDepositTransactions(bankTransactions, rows, accountId, currency);
     newWatermarks[account] = watermarks[account];
   }
 
@@ -876,7 +880,7 @@ async function scrapeDepositAccounts(
     );
     for (const detail of rows) {
       const currency = detail.displayCurrency?.trim() || primaryCurrency;
-      appendDepositTransactions(
+      appendEsunDepositTransactions(
         bankTransactions,
         [detail],
         depositSourceId(account, currency),
@@ -960,7 +964,7 @@ async function fetchAccountTransactionPages(
   return rows;
 }
 
-function appendDepositTransactions(
+export function appendEsunDepositTransactions(
   target: Scraped["bankTransactions"],
   rows: EsunTxDetailRow[],
   accountId: string,
@@ -970,6 +974,10 @@ function appendDepositTransactions(
 
   for (const detail of rows) {
     const postedDate = normalizeEsunTxDateTime(detail.txDate, detail.txTime);
+    const authorizedAt = normalizeEsunAuthorizedAt(
+      detail.txDate,
+      detail.txTime,
+    );
     const isCredit = detail.showCrFlag !== "hide";
     const amount = parseTwd(detail.amt ?? "0") * (isCredit ? 1 : -1);
     const description = detail.chc?.trim() || "玉山銀行交易";
@@ -990,6 +998,7 @@ function appendDepositTransactions(
       accountId,
       sourceId: `${sourceKey}:${occurrence}`,
       postedDate,
+      authorizedAt,
       amount,
       currency: detail.displayCurrency?.trim() || defaultCurrency,
       description,
@@ -1014,6 +1023,49 @@ function normalizeEsunTxDateTime(
   const date = txDate?.trim().replace(/\//g, "-") || "";
   const time = txTime?.trim() || "00:00:00";
   return `${date}T${time}.000Z`;
+}
+
+/**
+ * Normalizes the source's local Taiwan transaction time for display.
+ *
+ * `postedDate` and its source key intentionally keep the legacy `.000Z`
+ * representation above so a parser precision upgrade cannot create rows.
+ * A missing or malformed time therefore remains a date-only authorizedAt.
+ */
+export function normalizeEsunAuthorizedAt(
+  txDate: string | null | undefined,
+  txTime: string | null | undefined,
+): string | undefined {
+  const date = normalizeEsunDate(txDate);
+  if (!date) return undefined;
+
+  const time = txTime?.trim();
+  if (!time) return date;
+
+  const match = time.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/);
+  if (!match) return date;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3] ?? "0");
+  if (hours > 23 || minutes > 59 || seconds > 59) {
+    return date;
+  }
+
+  const fraction = match[4] ? `.${match[4].padEnd(3, "0")}` : "";
+  return `${date}T${String(hours).padStart(2, "0")}:${match[2]}:${String(seconds).padStart(2, "0")}${fraction}+08:00`;
+}
+
+function normalizeEsunDate(
+  value: string | null | undefined,
+): string | undefined {
+  const date = value?.trim().replace(/\//g, "-") ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined;
+  const parsed = new Date(`${date}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) &&
+    parsed.toISOString().startsWith(date)
+    ? date
+    : undefined;
 }
 
 function parseTwd(text: string): number {

@@ -1194,8 +1194,23 @@ function parseSinoCardTransactions(
 
   const postedTransactions = assignSinoCardSourceIds(posted);
   const pendingTransactions = assignSinoCardSourceIds(pending);
+  const postedByMatchKey = groupSinoCardTransactions(postedTransactions);
+  const pendingByMatchKey = groupSinoCardTransactions(pendingTransactions);
+  const upgradedPostedTransactions = postedTransactions.map((transaction) => {
+    const postedMatches = postedByMatchKey.get(transaction.matchKey) ?? [];
+    const pendingMatches = pendingByMatchKey.get(transaction.matchKey) ?? [];
+    const pendingAuthorizedAt = pendingMatches[0]?.authorizedAt;
+    if (
+      postedMatches.length === 1 &&
+      pendingMatches.length === 1 &&
+      pendingAuthorizedAt?.includes("T")
+    ) {
+      return { ...transaction, authorizedAt: pendingAuthorizedAt };
+    }
+    return transaction;
+  });
   const postedCounts = new Map<string, number>();
-  for (const transaction of postedTransactions) {
+  for (const transaction of upgradedPostedTransactions) {
     postedCounts.set(
       transaction.matchKey,
       (postedCounts.get(transaction.matchKey) ?? 0) + 1,
@@ -1208,9 +1223,21 @@ function parseSinoCardTransactions(
     return occurrence > (postedCounts.get(transaction.matchKey) ?? 0);
   });
 
-  return [...postedTransactions, ...unmatchedPending].map(
+  return [...upgradedPostedTransactions, ...unmatchedPending].map(
     ({ matchKey: _matchKey, ...transaction }) => transaction,
   );
+}
+
+function groupSinoCardTransactions(
+  transactions: SinoCardTransactionCandidate[],
+) {
+  const grouped = new Map<string, SinoCardTransactionCandidate[]>();
+  for (const transaction of transactions) {
+    const group = grouped.get(transaction.matchKey) ?? [];
+    group.push(transaction);
+    grouped.set(transaction.matchKey, group);
+  }
+  return grouped;
 }
 
 function sinoCardResultRecords(payload: unknown, key: "Items" | "Detail") {

@@ -104,4 +104,19 @@ describe("activity filters", () => {
       }),
     ).toEqual([matchedCardInvoice]);
   });
+
+  it("filters by the Taipei date when a timestamp crosses UTC midnight", () => {
+    const taipeiAugust = item("taipei-august", {
+      date: "2026-07-31T16:30:00Z",
+      dateHasTime: true,
+    });
+
+    expect(
+      filterActivities([taipeiAugust], {
+        ...defaultFilters,
+        month: "2026-08",
+      }),
+    ).toEqual([taipeiAugust]);
+    expect(filterActivities([taipeiAugust], defaultFilters)).toEqual([]);
+  });
 });

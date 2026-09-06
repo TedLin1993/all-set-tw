@@ -209,6 +209,7 @@ function parseDepositTransactions(
       const sourceAccountId =
         accountSourceIds.get(accountId) ?? depositSourceId(accountId);
       const postedDate = normalizeDate(value.trnDtFull) ?? undefined;
+      const authorizedAt = normalizeTaipeiDateTime(value.trnDtFull);
       const description =
         optionalString(value.memo1) ||
         optionalString(value.passBookMemo) ||
@@ -229,6 +230,7 @@ function parseDepositTransactions(
           accountId: sourceAccountId,
           sourceId: `ctbc:deposit:tx:${stableHash(sourceKey)}:${occurrence}`,
           postedDate,
+          ...(authorizedAt ? { authorizedAt } : {}),
           amount,
           currency: TWD,
           description,
@@ -411,10 +413,12 @@ function parseRealtimeTransactions(payload: unknown) {
   const items = arrayAt(responseData(payload), "allItems");
   return items.flatMap<CtbcCardTransactionCandidate>((value) => {
     if (!isRecord(value)) return [];
-    const authorizedAt =
+    const transactionDate =
       normalizeDate(value.txnDate) ?? normalizeDate(value.txnDateTime);
+    const authorizedAt =
+      normalizeTaipeiDateTime(value.txnDateTime) ?? transactionDate;
     const rawAmount = numberValue(value.txnAmt);
-    if (!authorizedAt || rawAmount == null || rawAmount === 0) return [];
+    if (!transactionDate || rawAmount == null || rawAmount === 0) return [];
     const description = optionalString(value.merchName) || "中國信託信用卡消費";
     const transactionType = optionalString(value.txnType) ?? "";
     const refund =
@@ -426,7 +430,10 @@ function parseRealtimeTransactions(payload: unknown) {
     const cardLast4 =
       last4(stringValue(value.cardNoSuffixFour)) ??
       last4(stringValue(value.cardNo));
-    const matchKey = [TWD, authorizedAt, amount, cardLast4].join(":");
+    // Keep the established date-only match/source identity.  The realtime
+    // timestamp is display metadata and must not create a second transaction
+    // when the same authorization later appears in the posted feed.
+    const matchKey = [TWD, transactionDate, amount, cardLast4].join(":");
     return [
       {
         accountId: creditCardSourceId(TWD),
@@ -525,7 +532,14 @@ function reconcileCreditCardLifecycle(
     if (candidates.length !== 1) return transaction;
     const candidate = candidates[0]!;
     consumedPending.add(candidate);
-    return { ...transaction, identityKey: candidate.identityKey };
+    return {
+      ...transaction,
+      identityKey: candidate.identityKey,
+      authorizedAt: preferredAuthorizedAt(
+        transaction.authorizedAt,
+        candidate.authorizedAt,
+      ),
+    };
   });
   const all = [
     ...reconciledPosted,
@@ -540,6 +554,20 @@ function reconcileCreditCardLifecycle(
       sourceId: `ctbc:card:tx:${stableHash(identityKey)}:${occurrence}`,
     };
   });
+}
+
+function preferredAuthorizedAt(
+  postedAuthorizedAt: string | undefined,
+  pendingAuthorizedAt: string | undefined,
+) {
+  const postedHasTime = hasTimeComponent(postedAuthorizedAt);
+  const pendingHasTime = hasTimeComponent(pendingAuthorizedAt);
+  if (pendingHasTime && !postedHasTime) return pendingAuthorizedAt;
+  return postedAuthorizedAt;
+}
+
+function hasTimeComponent(value: string | undefined) {
+  return Boolean(value && /T\d{2}:\d{2}(?::\d{2})?/.test(value));
 }
 
 function merchantsMatch(left: string | undefined, right: string | undefined) {
@@ -587,6 +615,7 @@ function sanitizeDepositTransaction(value: JsonRecord, accountId: string) {
   return {
     accountLast4: last4(accountId),
     trnDtFull: normalizeDate(value.trnDtFull),
+    authorizedAt: normalizeTaipeiDateTime(value.trnDtFull),
     memo1: optionalString(value.memo1),
     memo2: optionalString(value.memo2),
     passBookMemo: optionalString(value.passBookMemo),
@@ -704,9 +733,10 @@ function periodFromParts(year: number, month: number) {
 }
 
 function normalizeDate(value: unknown) {
-  const text = stringValue(value).trim().replace(/\./g, "/");
-  const separated = /^(\d{3,4})[/-](\d{1,2})[/-](\d{1,2})/.exec(text);
-  const compact = /^(\d{3,4})(\d{2})(\d{2})$/.exec(text);
+  const text = stringValue(value).trim();
+  const dateText = (text.split(/[T\s]/, 1)[0] ?? "").replace(/\./g, "/");
+  const separated = /^(\d{3,4})[/-](\d{1,2})[/-](\d{1,2})$/.exec(dateText);
+  const compact = /^(\d{3,4})(\d{2})(\d{2})$/.exec(dateText);
   const parts = separated ?? compact;
   if (!parts) return undefined;
   const year =
@@ -725,6 +755,52 @@ function normalizeDate(value: unknown) {
   )
     return undefined;
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Normalize a provider date-time without changing the date-only identity used
+ * by existing CTBC transactions.  CTBC's mobile responses normally omit an
+ * offset and represent Taipei local time; an explicit provider offset is
+ * retained when one is present.
+ */
+function normalizeTaipeiDateTime(value: unknown) {
+  const text = stringValue(value).trim();
+  const time =
+    /^(.+?)[T ](\d{1,2})[:：](\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:\s*(Z|[+-]\d{2}:?\d{2}))?$/.exec(
+      text,
+    );
+  if (!time) return undefined;
+  const date = normalizeDate(time[1]);
+  if (!date) return undefined;
+  const hour = Number(time[2]);
+  const minute = Number(time[3]);
+  const second = Number(time[4] ?? 0);
+  if (hour > 23 || minute > 59 || second > 59) return undefined;
+  const suffix = normalizeOffset(time[6]);
+  if (!suffix) return undefined;
+  const fraction = time[5] ? "." + time[5].slice(0, 3).padEnd(3, "0") : "";
+  return (
+    date +
+    "T" +
+    String(hour).padStart(2, "0") +
+    ":" +
+    String(minute).padStart(2, "0") +
+    ":" +
+    String(second).padStart(2, "0") +
+    fraction +
+    suffix
+  );
+}
+
+function normalizeOffset(value: string | undefined): string | undefined {
+  if (!value) return "+08:00";
+  if (value === "Z") return "Z";
+  const match = /^([+-]\d{2}):?(\d{2})$/.exec(value);
+  if (!match) return undefined;
+  const hours = Number(match[1].slice(1));
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return undefined;
+  return match[1] + ":" + match[2];
 }
 
 function normalizeCurrency(value: unknown) {

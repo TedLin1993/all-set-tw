@@ -296,6 +296,56 @@ async function main() {
       ).length,
     EINVOICE_SYNC_PERIODS,
   );
+  const dateClient = new EInvoiceV2Client({
+    androidId: "synthetic-android-id",
+    fetchImpl: async (input, init) =>
+      String(input).endsWith("/einvoice/carriers/query-invoices-header")
+        ? json({
+            result: 0,
+            payload: {
+              data: [
+                { invNum: "DATE", invDate: "2026/07/01", amount: 1 },
+                { invNum: "LOCAL", invDate: "2026/07/01 00:00:00", amount: 1 },
+                {
+                  invNum: "OBJECT",
+                  invDate: { year: "115", month: "7", date: "1" },
+                  amount: 1,
+                },
+                {
+                  invNum: "EPOCH",
+                  invDate: { time: Date.parse("2026-06-30T16:00:00Z") },
+                  amount: 1,
+                },
+                { invNum: "LATE", invDate: "2026/07/01 23:30:00", amount: 1 },
+              ],
+            },
+          })
+        : fakeFetch(input, init),
+  });
+  const dateHeaders = (
+    await initializeEInvoiceSync(primitiveConfig, { client: dateClient })
+  ).headers.slice(0, 5);
+  assert.deepEqual(
+    dateHeaders.map((header) => header.invoice.invoiceDate),
+    [
+      "2026-07-01",
+      "2026-06-30T16:00:00.000Z",
+      "2026-07-01",
+      "2026-06-30T16:00:00.000Z",
+      "2026-07-01T15:30:00.000Z",
+    ],
+  );
+  assert.equal(
+    dateHeaders[0].sourceId,
+    `DATE:${new Date("2026-07-01T00:00:00").toISOString()}`,
+  );
+  assert.equal(
+    dateHeaders[1].sourceId,
+    `LOCAL:${new Date("2026-07-01T00:00:00").toISOString()}`,
+  );
+  assert.ok(
+    dateHeaders.every((header) => header.detailInvDate === "2026/07/01"),
+  );
   console.log("einvoice-v2.selfcheck: ok");
 }
 

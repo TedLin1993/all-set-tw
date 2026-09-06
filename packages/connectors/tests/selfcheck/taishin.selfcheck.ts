@@ -105,6 +105,15 @@ assert.equal(
   result.bankTransactions.find(({ status }) => status === "pending")?.amount,
   -1404,
 );
+assert.equal(
+  result.bankTransactions.find(
+    (transaction) =>
+      transaction.description === "測試商店" &&
+      transaction.amount === -350 &&
+      transaction.authorizedAt?.includes("12:30:00"),
+  )?.authorizedAt,
+  "2026-07-08T12:30:00+08:00",
+);
 assert.doesNotMatch(JSON.stringify(result), /A123456789|4111111111113108/);
 
 console.log("Taishin connector self-check passed.");
