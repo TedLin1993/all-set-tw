@@ -135,6 +135,9 @@
     { id: "insurance", label: "保險" },
     { id: "fee", label: "手續費" },
     { id: "tax", label: "稅務" },
+    { id: "software", label: "軟體服務" },
+    { id: "utilities", label: "生活繳費" },
+    { id: "other-income", label: "其他收入" },
     { id: "other", label: "未分類" },
   ];
   const categoryOptions = $derived(

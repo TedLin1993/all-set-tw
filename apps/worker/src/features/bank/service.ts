@@ -74,6 +74,7 @@ async function presentBankTransactions(
         description: transaction.description,
         counterparty: transaction.counterparty,
         sourceId: transaction.sourceId,
+        amount: transaction.amount,
       })),
     );
   } catch (error) {
