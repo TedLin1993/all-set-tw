@@ -464,7 +464,7 @@ class CtbcMobileSession {
         statusCode,
       }),
     );
-    if (isLogin || isVerificationResponse(response)) {
+    if (isVerificationResponse(response)) {
       throw new CtbcVerificationRequiredError(
         "中國信託登入需要重新驗證，請先至官方 App 完成驗證。",
       );
@@ -764,12 +764,9 @@ function isVerificationResponse(response: JsonRecord) {
   if (["0526", "2802", "2911", "4002", "4050", "9015", "9030"].includes(code)) {
     return true;
   }
-  const description = stringValue(
-    response.desc || response.message || response.statusMessage,
-  );
-  return /otp|verification|device|login|password|驗證|裝置|登入|密碼/i.test(
-    description,
-  );
+  // Login failures and descriptions mentioning login can also mean maintenance.
+  // Require a verification signal before asking the user to verify in the App.
+  return containsVerificationFlag(responseData(response));
 }
 
 function hasText(value: unknown) {

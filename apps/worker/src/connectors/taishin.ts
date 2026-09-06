@@ -2,6 +2,8 @@ import puppeteer, {
   type Browser,
   type Frame,
   type Page,
+  type HTTPRequest,
+  type HTTPResponse,
 } from "@cloudflare/puppeteer";
 import {
   BANK_SYNC_MONTHS,
@@ -33,6 +35,17 @@ const USER_AGENT =
 
 type JsonRecord = Record<string, unknown>;
 type BrowserPage = Page | Frame;
+type SessionCheckDiagnostic = {
+  result?: string;
+  httpStatus?: number;
+  isJson?: boolean;
+  timedOut?: boolean;
+  validJson?: boolean;
+  hasApiError?: boolean;
+  expired?: boolean;
+  hasSessionId?: boolean;
+  checkFailed?: boolean;
+};
 export type TaishinSyncStage =
   | "acquire_browser"
   | "initialize_browser_page"
@@ -174,7 +187,11 @@ export function createTaishinConnector(
         const pages = await browserInstance.pages();
         page = pages[0] ?? (await browserInstance.newPage());
         stage = "configure_browser_page";
-        await configurePage(page);
+        // Reconnecting creates a new Puppeteer emulation manager. Setting
+        // isMobile again reloads the preserved page and loses the CAPTCHA form.
+        if (!(config.browserSessionId && config.captcha)) {
+          await configurePage(page);
+        }
         let loggedIn = false;
 
         let pageContext: BrowserPage = page;
@@ -190,7 +207,7 @@ export function createTaishinConnector(
           }
           assertCaptcha(config.captcha, config.captchaDigitCount ?? 6);
           pageContext = await findLoginFrame(page);
-          await submitLogin(pageContext, config.captcha);
+          await submitLogin(pageContext, config.captcha, "manual", page);
           loggedIn = true;
         } else if (config.sessionCookies) {
           stage = "restore_session";
@@ -344,7 +361,7 @@ async function loginWithOcr(
         captcha.digitCount,
       );
       assertCaptcha(answer, captcha.digitCount);
-      await submitLogin(frame, answer);
+      await submitLogin(frame, answer, "automatic", page);
       return frame;
     } catch (error) {
       if (error instanceof TaishinCredentialRejectedError) throw error;
@@ -461,16 +478,34 @@ function hasBillPayload(payload: unknown) {
   );
 }
 
-async function hasValidSession(page: BrowserPage) {
+async function hasValidSession(
+  page: BrowserPage,
+  diagnostic?: SessionCheckDiagnostic,
+) {
   try {
-    const payload = await postJson(page, SESSION_CHECK_PATH, {});
-    return (
-      isRecord(payload) &&
-      payload.RESULT !== "EXPIRED" &&
-      typeof payload.DBSESSIONID === "string" &&
-      payload.DBSESSIONID.length > 0
+    const payload = await postJson(
+      page,
+      SESSION_CHECK_PATH,
+      {},
+      REQUIRED_API_TIMEOUT_MS,
+      diagnostic,
     );
+    const expired = isRecord(payload) && payload.RESULT === "EXPIRED";
+    const hasSessionId =
+      isRecord(payload) &&
+      typeof payload.DBSESSIONID === "string" &&
+      payload.DBSESSIONID.length > 0;
+    if (diagnostic) {
+      const result = isRecord(payload) ? payload.RESULT : undefined;
+      Object.assign(diagnostic, {
+        expired,
+        hasSessionId,
+        result: safeLoginCode(result),
+      });
+    }
+    return !expired && hasSessionId;
   } catch {
+    if (diagnostic) diagnostic.checkFailed = true;
     return false;
   }
 }
@@ -480,6 +515,7 @@ async function postJson(
   path: string,
   body?: JsonRecord | string,
   timeoutMs = REQUIRED_API_TIMEOUT_MS,
+  diagnostic?: SessionCheckDiagnostic,
 ) {
   const response = await page.evaluate(
     async (input: {
@@ -537,6 +573,13 @@ async function postJson(
     { path, body, timeoutMs },
   );
   const endpoint = path.split("/").at(-1) ?? path;
+  if (diagnostic) {
+    Object.assign(diagnostic, {
+      httpStatus: response.status,
+      isJson: response.contentType.includes("application/json"),
+      timedOut: response.timedOut === true,
+    });
+  }
   if (response.timedOut) {
     throw new TaishinTransientConnectionError(
       `台新信用卡 API ${endpoint} 請求逾時。`,
@@ -570,6 +613,10 @@ async function postJson(
   }
   try {
     const payload = JSON.parse(response.text) as unknown;
+    if (diagnostic) {
+      diagnostic.validJson = true;
+      diagnostic.hasApiError = isRecord(payload) && Boolean(payload.error);
+    }
     if (isRecord(payload) && Boolean(payload.error)) {
       const endpoint = path.split("/").at(-1) ?? path;
       const detail = summarizeApiError(payload.error);
@@ -580,6 +627,7 @@ async function postJson(
     return payload;
   } catch (error) {
     if (error instanceof TaishinConnectionError) throw error;
+    if (diagnostic) diagnostic.validJson = false;
     throw new TaishinConnectionError("台新信用卡 API 回應格式無效。");
   }
 }
@@ -817,77 +865,159 @@ async function captureCaptcha(page: BrowserPage) {
   return { bytes, digitCount: target.digitCount };
 }
 
-async function submitLogin(page: BrowserPage, captcha: string) {
-  const captchaInput =
-    'input[data-taishin-field="captcha"], input[placeholder*="驗證碼"]';
-  await typeInput(page, captchaInput, captcha);
-  const loginButton = await page.evaluate(() => {
-    const normalize = (value: string | null | undefined) =>
-      value?.replace(/\s+/g, "").trim() ?? "";
-    const candidates = Array.from(
-      document.querySelectorAll<HTMLElement>("body *"),
-    ).filter((element) => {
-      const rect = element.getBoundingClientRect();
-      const label =
-        element.tagName === "INPUT"
-          ? (element as HTMLInputElement).value
-          : element.innerText;
-      return (
-        !element.hidden &&
-        !("disabled" in element && Boolean(element.disabled)) &&
-        element.getAttribute("aria-disabled") !== "true" &&
-        rect.width > 0 &&
-        rect.height > 0 &&
-        [label, element.getAttribute("aria-label"), element.title].some(
-          (value) => normalize(value) === "登入網銀",
-        )
-      );
+async function submitLogin(
+  page: BrowserPage,
+  captcha: string,
+  mode: "manual" | "automatic" = "automatic",
+  networkPage?: Page,
+) {
+  const startedAt = Date.now();
+  const sessionChecks: SessionCheckDiagnostic[] = [];
+  let loginRequestCount = 0;
+  let loginResponseCount = 0;
+  const pendingResponses: Promise<void>[] = [];
+  const isLoginUrl = (url: string) =>
+    url.split("?")[0] ===
+    "https://my.taishinbank.com.tw/TIBNetBank/svc/web/login/login";
+  const onRequest = (request: HTTPRequest) => {
+    if (isLoginUrl(request.url())) loginRequestCount += 1;
+  };
+  const onResponse = (response: HTTPResponse) => {
+    if (!isLoginUrl(response.url())) return;
+    loginResponseCount += 1;
+    pendingResponses.push(logLoginResponse(response, mode));
+  };
+  networkPage?.on("request", onRequest);
+  networkPage?.on("response", onResponse);
+  try {
+    const captchaInput =
+      'input[data-taishin-field="captcha"], input[placeholder*="驗證碼"]';
+    await typeInput(page, captchaInput, captcha);
+    const loginButton = await page.evaluate(() => {
+      const normalize = (value: string | null | undefined) =>
+        value?.replace(/\s+/g, "").trim() ?? "";
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLElement>("body *"),
+      ).filter((element) => {
+        const rect = element.getBoundingClientRect();
+        const label =
+          element.tagName === "INPUT"
+            ? (element as HTMLInputElement).value
+            : element.innerText;
+        return (
+          !element.hidden &&
+          !("disabled" in element && Boolean(element.disabled)) &&
+          element.getAttribute("aria-disabled") !== "true" &&
+          rect.width > 0 &&
+          rect.height > 0 &&
+          [label, element.getAttribute("aria-label"), element.title].some(
+            (value) => normalize(value) === "登入網銀",
+          )
+        );
+      });
+      const target =
+        candidates.find((element) =>
+          element.matches(
+            'button, a, input[type="button"], input[type="submit"], [role="button"], [class*="btn"], [class*="button"]',
+          ),
+        ) ?? candidates.at(-1);
+      if (!target) return false;
+      target.dataset.taishinLogin = "submit";
+      target.click();
+      return true;
     });
-    const target =
-      candidates.find((element) =>
-        element.matches(
-          'button, a, input[type="button"], input[type="submit"], [role="button"], [class*="btn"], [class*="button"]',
-        ),
-      ) ?? candidates.at(-1);
-    if (!target) return false;
-    target.dataset.taishinLogin = "submit";
-    target.click();
-    return true;
-  });
-  if (!loginButton) {
-    throw new TaishinConnectionError("台新登入按鈕結構已變更。");
-  }
+    if (!loginButton) {
+      throw new TaishinConnectionError("台新登入按鈕結構已變更。");
+    }
 
-  for (let attempt = 0; attempt < LOGIN_RESULT_ATTEMPTS; attempt += 1) {
-    const detail = await readLoginDetail(page);
-    if (isCaptchaRejected(detail)) {
-      throw new TaishinCaptchaRejectedError("台新圖形驗證碼錯誤。");
+    for (let attempt = 0; attempt < LOGIN_RESULT_ATTEMPTS; attempt += 1) {
+      const detail = await readLoginDetail(page);
+      if (isCaptchaRejected(detail)) {
+        throw new TaishinCaptchaRejectedError("台新圖形驗證碼錯誤。");
+      }
+      if (isCredentialRejected(detail)) {
+        throw new TaishinCredentialRejectedError(
+          "台新登入資料遭銀行拒絕，請確認設定。",
+        );
+      }
+      if (/USER\s*正在線上.*無法登入/i.test(detail)) {
+        throw new TaishinVerificationRequiredError(
+          "台新網銀已有使用中連線，請先登出後再試。",
+        );
+      }
+      const diagnostic: SessionCheckDiagnostic = {};
+      sessionChecks.push(diagnostic);
+      if (await hasValidSession(page, diagnostic)) return;
+      if (attempt < LOGIN_RESULT_ATTEMPTS - 1) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, LOGIN_RESULT_POLL_MS),
+        );
+      }
     }
-    if (isCredentialRejected(detail)) {
-      throw new TaishinCredentialRejectedError(
-        "台新登入資料遭銀行拒絕，請確認設定。",
-      );
-    }
-    if (/USER\s*正在線上.*無法登入/i.test(detail)) {
-      throw new TaishinVerificationRequiredError(
-        "台新網銀已有使用中連線，請先登出後再試。",
-      );
-    }
-    if (await hasValidSession(page)) return;
-    if (attempt < LOGIN_RESULT_ATTEMPTS - 1) {
-      await new Promise((resolve) => setTimeout(resolve, LOGIN_RESULT_POLL_MS));
-    }
-  }
 
-  throw new TaishinLoginOutcomeUnknownError(
-    "台新銀行登入失敗，請改用人工驗證。",
+    console.warn(
+      JSON.stringify({
+        event: "taishin_login_outcome_unknown",
+        mode,
+        attempts: sessionChecks.length,
+        elapsedMs: Date.now() - startedAt,
+        sessionChecks,
+        loginRequestCount,
+        loginResponseCount,
+      }),
+    );
+    throw new TaishinLoginOutcomeUnknownError(
+      mode === "manual"
+        ? "台新人工驗證已送出，但尚未確認登入成功，請稍後重新取得驗證碼再試。"
+        : "台新自動驗證已送出，但尚未確認登入成功。",
+    );
+  } finally {
+    networkPage?.off("request", onRequest);
+    networkPage?.off("response", onResponse);
+    await Promise.all(pendingResponses);
+  }
+}
+
+function safeLoginCode(value: unknown) {
+  if (typeof value !== "string") return "missing";
+  if (!value) return "empty";
+  return /^[A-Z][A-Z0-9_]{0,23}$/.test(value) || /^[0-9]{1,3}$/.test(value)
+    ? value
+    : "unrecognized";
+}
+
+async function logLoginResponse(
+  response: HTTPResponse,
+  mode: "manual" | "automatic",
+) {
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    // Do not log response bodies or upstream exception messages.
+  }
+  console.warn(
+    JSON.stringify({
+      event: "taishin_login_response",
+      mode,
+      httpStatus: response.status(),
+      validJson: payload !== undefined,
+      result: safeLoginCode(isRecord(payload) ? payload.RESULT : undefined),
+      status: safeLoginCode(isRecord(payload) ? payload.STATUS : undefined),
+      hasErrorMessage: isRecord(payload) && Boolean(payload.ERRORMSG),
+    }),
   );
 }
 
 async function readLoginDetail(page: BrowserPage) {
   return page
     .evaluate(() =>
-      (document.body?.innerText ?? "")
+      (
+        document.querySelector<HTMLElement>(".js-popup.active ._popup_text")
+          ?.innerText ||
+        document.body?.innerText ||
+        ""
+      )
         .replace(/\s+/g, " ")
         .trim()
         .slice(0, 1_000),
