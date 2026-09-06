@@ -217,7 +217,7 @@ describe("invoice transaction matching", () => {
     const nextTaipeiDay = transaction({
       accountType: "credit",
       postedDate: "2026-07-06T16:00:00.000Z",
-      authorizedAt: undefined,
+      authorizedAt: "2026-07-06T16:00:00.000Z",
       amount: 50,
     });
     const targetInvoice = invoice({
@@ -232,6 +232,23 @@ describe("invoice transaction matching", () => {
     expect(
       invoiceTransactionCandidates([nextTaipeiDay], targetInvoice),
     ).toEqual([]);
+  });
+
+  it("uses the posted-date prefix for a legacy transaction without authorization time", () => {
+    const legacy = transaction({
+      accountType: "credit",
+      postedDate: "2026-07-06T16:00:00.000Z",
+      authorizedAt: undefined,
+      amount: 50,
+    });
+    const targetInvoice = invoice({
+      invoiceDate: "2026-07-06T04:39:18.000Z",
+      amount: 50,
+    });
+
+    expect(
+      invoiceTransactionCandidates([legacy], targetInvoice).map(({ id }) => id),
+    ).toEqual(["transaction-1"]);
   });
 
   it("does not match when the amount or date differs", () => {

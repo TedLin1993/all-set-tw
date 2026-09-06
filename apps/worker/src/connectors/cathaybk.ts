@@ -1254,7 +1254,7 @@ async function scrapeDeposits(
       `[cathaybk] account ${maskAccountNumber(acct.acctNo)}: ${details.length} tx (period=${periodLabel(lookbackDays)})`,
     );
 
-    appendDepositTransactions(
+    appendCathayDepositTransactions(
       bankTransactions,
       details,
       sourceId,
@@ -1285,7 +1285,7 @@ async function scrapeDeposits(
   };
 }
 
-function appendDepositTransactions(
+export function appendCathayDepositTransactions(
   target: Scraped["bankTransactions"],
   details: TransferDetail[],
   accountId: string,
@@ -1293,7 +1293,9 @@ function appendDepositTransactions(
 ) {
   const seen = new Map<string, number>();
   for (const d of details) {
-    const date = normalizeDateStr(d.txnDateTime ?? d.accountDate);
+    const sourceDate = d.txnDateTime ?? d.accountDate;
+    const date = normalizeDateStr(sourceDate);
+    const authorizedAt = normalizeCathayAuthorizedAt(sourceDate);
     // incomeAmt = money in (positive), expendAmt = money out (positive value = debit)
     const income = typeof d.incomeAmt === "number" ? d.incomeAmt : 0;
     const expend = typeof d.expendAmt === "number" ? d.expendAmt : 0;
@@ -1308,6 +1310,7 @@ function appendDepositTransactions(
       accountId,
       sourceId: `${key}:${occ}`,
       postedDate: date,
+      authorizedAt,
       amount,
       currency,
       description: desc,
@@ -1585,6 +1588,9 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
       for (const trade of section.tradeData ?? []) {
         if (!trade.amount) continue;
         const date = normalizeDateStr(trade.consumeDate ?? month.billDate);
+        const authorizedAt = normalizeCathayAuthorizedAt(
+          trade.consumeDate ?? month.billDate,
+        );
         const desc = trade.transDesc || "國泰信用卡消費";
         const key = [date, sourceId, trade.amount, desc].join(":");
         const occ = (seen.get(key) ?? 0) + 1;
@@ -1593,6 +1599,7 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
           accountId: sourceId,
           sourceId: `${key}:${occ}`,
           postedDate: date,
+          authorizedAt,
           amount: trade.amount < 0 ? trade.amount : -trade.amount,
           currency: "TWD",
           description: desc,
@@ -1627,4 +1634,64 @@ function normalizeDateStr(value: unknown): string {
   if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s;
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T00:00:00.000Z`;
   return s || new Date().toISOString();
+}
+
+/**
+ * Normalizes a Cathay transaction timestamp for authorizedAt without
+ * inventing midnight for date-only rows.  Timestamps without an explicit
+ * offset are bank-local Taiwan time; timestamps with an offset keep that
+ * offset in canonical ISO form.  Invalid source values return undefined.
+ */
+export function normalizeCathayAuthorizedAt(
+  value: unknown,
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const source = value.trim().replace(/\//g, "-");
+  if (!source) return undefined;
+
+  const match = source.match(
+    /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:?\d{2})?)?$/,
+  );
+  if (!match) return undefined;
+
+  const [, date, hour, minute, second, fraction, zone] = match;
+  if (!isValidCathayDate(date)) return undefined;
+  if (!hour) return date;
+
+  const hours = Number(hour);
+  const minutes = Number(minute);
+  const seconds = Number(second ?? "0");
+  if (hours > 23 || minutes > 59 || seconds > 59) return undefined;
+
+  const normalizedZone = normalizeCathayOffset(zone);
+  if (!normalizedZone) return undefined;
+  const normalizedFraction = fraction
+    ? `.${fraction.slice(0, 3).padEnd(3, "0")}`
+    : "";
+  return `${date}T${hour}:${minute}:${String(seconds).padStart(2, "0")}${normalizedFraction}${normalizedZone}`;
+}
+
+function normalizeCathayOffset(value: string | undefined): string | undefined {
+  if (!value) return "+08:00";
+  if (value === "Z") return value;
+  const match = value.match(/^([+-])(\d{2}):?(\d{2})$/);
+  if (!match) return undefined;
+  const hours = Number(match[2]);
+  const minutes = Number(match[3]);
+  if (hours > 23 || minutes > 59) return undefined;
+  return `${match[1]}${match[2]}:${match[3]}`;
+}
+
+function isValidCathayDate(value: string): boolean {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }

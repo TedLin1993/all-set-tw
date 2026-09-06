@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendEsunDepositTransactions,
   esunCreditBalanceAccountId,
+  normalizeEsunAuthorizedAt,
   normalizeEsunTimelineTransactions,
   type EsunTimelinePage,
   type EsunTimelineTransaction,
@@ -56,7 +58,7 @@ describe("E.SUN credit card timeline normalization", () => {
     expect(rows[0]).toMatchObject({
       amount: -252,
       status: "posted",
-      authorizedAt: "2026-07-05T00:00:00.000Z",
+      authorizedAt: "2026-07-05",
       postedDate: "2026-07-05T00:00:00.000Z",
     });
     expect((rows[0].raw as EsunTimelineTransaction).acfg).toBe("已入帳");
@@ -133,7 +135,7 @@ describe("E.SUN credit card timeline normalization", () => {
         sourceId:
           "2026-07-05T00:00:00.000Z:credit:esun:1204:全支付﹘全聯:252:TWD:1",
         status: "posted",
-        authorizedAt: "2026-07-05T00:00:00.000Z",
+        authorizedAt: "2026-07-05",
         postedDate: "2026-07-07T00:00:00.000Z",
       }),
     ]);
@@ -156,5 +158,42 @@ describe("E.SUN credit card timeline normalization", () => {
       { accountId: "credit:esun:1204", status: "posted" },
       { accountId: "credit:esun:9876", status: "posted" },
     ]);
+  });
+});
+
+describe("E.SUN deposit transaction timestamps", () => {
+  it("adds a Taiwan offset while keeping the legacy source identity", () => {
+    const target: Parameters<typeof appendEsunDepositTransactions>[0] = [];
+
+    appendEsunDepositTransactions(
+      target,
+      [
+        {
+          txDate: "2026/07/05",
+          txTime: "00:00:00",
+          amt: "252",
+          chc: "全支付",
+          balance: "1000",
+          showCrFlag: "show",
+        },
+      ],
+      "bank:esun:1234",
+      "TWD",
+    );
+
+    expect(target[0]).toMatchObject({
+      authorizedAt: "2026-07-05T00:00:00+08:00",
+      postedDate: "2026-07-05T00:00:00.000Z",
+      sourceId: "2026-07-05T00:00:00.000Z:bank:esun:1234:全支付:252:1000:::1",
+    });
+  });
+
+  it("keeps a missing source time at date precision", () => {
+    expect(normalizeEsunAuthorizedAt("2026/07/05", undefined)).toBe(
+      "2026-07-05",
+    );
+    expect(normalizeEsunAuthorizedAt("2026/07/05", "25:00:00")).toBe(
+      "2026-07-05",
+    );
   });
 });

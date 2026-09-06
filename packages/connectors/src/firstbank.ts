@@ -431,7 +431,7 @@ function parseTransactionHistoryHtml(
       }
       const identity = [
         account.sourceId,
-        parsed.authorizedAt,
+        legacyAuthorizedAt(parsed.authorizedAt),
         parsed.amount,
         currency,
         parsed.balance ?? "",
@@ -1292,16 +1292,48 @@ function normalizeDateTime(value: unknown) {
   const text = stripTags(String(value ?? "")).trim();
   const date = normalizeDate(text);
   if (!date) return undefined;
-  const time = /(?:T|\s+)(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?/.exec(text);
+  const time =
+    /^(.+?)[T ](\d{1,2})[:：](\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:\s*(Z|[+-]\d{2}:?\d{2}))?$/.exec(
+      text,
+    );
   if (!time) return { date, dateTime: date };
-  const hour = Number(time[1]);
-  const minute = Number(time[2]);
-  const second = Number(time[3] ?? 0);
+  const datePart = normalizeDate(time[1]);
+  if (!datePart || datePart !== date) return undefined;
+  const hour = Number(time[2]);
+  const minute = Number(time[3]);
+  const second = Number(time[4] ?? 0);
   if (hour > 23 || minute > 59 || second > 59) return undefined;
+  const suffix = normalizeOffset(time[6]);
+  if (!suffix) return undefined;
+  const fraction = time[5] ? "." + time[5].slice(0, 3).padEnd(3, "0") : "";
   return {
     date,
-    dateTime: `${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`,
+    dateTime:
+      date +
+      "T" +
+      String(hour).padStart(2, "0") +
+      ":" +
+      String(minute).padStart(2, "0") +
+      ":" +
+      String(second).padStart(2, "0") +
+      fraction +
+      suffix,
   };
+}
+
+function legacyAuthorizedAt(value: string) {
+  return value.replace(/(?:Z|[+-]\d{2}:?\d{2})$/, "").replace(/\.\d{1,9}$/, "");
+}
+
+function normalizeOffset(value: string | undefined): string | undefined {
+  if (!value) return "+08:00";
+  if (value === "Z") return "Z";
+  const match = /^([+-]\d{2}):?(\d{2})$/.exec(value);
+  if (!match) return undefined;
+  const hours = Number(match[1].slice(1));
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return undefined;
+  return match[1] + ":" + match[2];
 }
 
 function normalizeBillingPeriod(value: unknown): string | undefined {

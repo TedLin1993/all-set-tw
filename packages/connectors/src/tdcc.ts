@@ -597,6 +597,7 @@ async function runTdccLogin(
       accountId,
       sourceId: tx.txnId,
       postedDate: tx.occurredAt,
+      authorizedAt: normalizeTdccBankAuthorizedAt(tx.occurredAt),
       amount: tx.amount,
       currency: entry.currency.toUpperCase(),
       description: tx.memo,
@@ -1296,7 +1297,9 @@ function toBankTransaction(
     accountId: accountSourceId,
     sourceId,
     postedDate,
-    authorizedAt,
+    authorizedAt: movement.authorizedAt
+      ? normalizeTdccBankAuthorizedAt(movement.authorizedAt)
+      : undefined,
     amount,
     currency: movement.currency || "TWD",
     description: movement.description,
@@ -1343,9 +1346,33 @@ function parseOptionalTdccNumber(value: string) {
   return value && Number.isFinite(parsed) ? parsed : undefined;
 }
 
-// ponytail: manual exports use 7-digit ROC dates ("1130615" = 2024/06/15); the
-// live API also returns 8-digit Gregorian dates and 13/14-digit timestamps
-// (ROC/Gregorian year + time-of-day suffix) — same ROC-offset rule throughout.
+export function normalizeTdccBankAuthorizedAt(value: string) {
+  const local = value.trim().replace(/\//g, "-");
+  if (local === "1970-01-01T00:00:00") return "1970-01-01";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(local)) return local;
+  if (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?$/.test(
+      local,
+    )
+  ) {
+    const timestamp = /(?:Z|[+-]\d{2}:\d{2})$/.test(local)
+      ? local
+      : `${local}+08:00`;
+    const day = local.slice(0, 10);
+    const calendarDate = new Date(`${day}T00:00:00Z`);
+    if (
+      Number.isFinite(Date.parse(timestamp)) &&
+      Number(local.slice(11, 13)) < 24 &&
+      Number.isFinite(calendarDate.getTime()) &&
+      calendarDate.toISOString().startsWith(day)
+    )
+      return timestamp;
+    return day;
+  }
+  return normalizeTdccDate(value).slice(0, 10);
+}
+
+// Manual exports use compact ROC dates; preserve the legacy identity conversion.
 function normalizeTdccDate(value: string) {
   const trimmed = value.trim();
 

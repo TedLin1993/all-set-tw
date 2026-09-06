@@ -30,6 +30,7 @@ export {
   ensureTdccSession,
   initializeTdccSnapshot,
   normalizeTdccSnapshot,
+  normalizeTdccBankAuthorizedAt,
   stockAccountsFromPayload,
   parseTdccStockAccounts,
   parseTdccStockHoldings,
@@ -286,7 +287,7 @@ export const einvoiceConnector: Connector<
       records: config.records.map((record) => ({
         sourceId: record.sourceId,
         invoiceNumber: record.invoiceNumber,
-        invoiceDate: record.invoiceDate,
+        invoiceDate: normalizeInvoiceDate(record.invoiceDate),
         sellerName: record.sellerName,
         amount: record.amount,
         raw: record.raw ?? record,
@@ -385,7 +386,7 @@ export async function initializeEInvoiceSync(
         invoice: {
           sourceId,
           invoiceNumber: invoice.invNum || undefined,
-          invoiceDate: normalizeInvoiceDate(invoice.invDate),
+          invoiceDate: invoice.invoiceDate,
           sellerName: invoice.sellerName,
           amount: Math.max(0, Math.trunc(invoice.amount)),
           raw: { invoice, period },
@@ -557,6 +558,7 @@ function getV2Invoices(payload: unknown) {
           `v2-${index}`,
         invNum: firstStringValue(item.invNum, item.invoiceNumber),
         invDate: invoiceDate.iso,
+        invoiceDate: invoiceDate.normalized,
         detailInvDate: invoiceDate.apiDate,
         sellerName:
           firstStringValue(item.sellerName, item.seller, item.sellerNameE) ||
@@ -574,8 +576,15 @@ function getV2Invoices(payload: unknown) {
 
 function parseV2InvoiceDate(value: unknown) {
   if (typeof value === "string" && value.trim()) {
-    const iso = normalizeInvoiceDate(value);
-    return { iso, apiDate: formatTaipeiApiDate(new Date(iso)) };
+    const iso = legacyInvoiceIdentityDate(value);
+    const normalized = normalizeInvoiceDate(value);
+    return {
+      iso,
+      apiDate: /^\d{4}-\d{2}-\d{2}$/.test(normalized)
+        ? normalized.replace(/-/g, "/")
+        : formatTaipeiApiDate(new Date(normalized)),
+      normalized,
+    };
   }
 
   const record =
@@ -585,7 +594,11 @@ function parseV2InvoiceDate(value: unknown) {
   const epoch = Number(record?.time);
   if (Number.isFinite(epoch) && epoch > 0) {
     const date = new Date(epoch);
-    return { iso: date.toISOString(), apiDate: formatTaipeiApiDate(date) };
+    return {
+      iso: date.toISOString(),
+      apiDate: formatTaipeiApiDate(date),
+      normalized: date.toISOString(),
+    };
   }
 
   const rocYear = Number(record?.year);
@@ -598,10 +611,14 @@ function parseV2InvoiceDate(value: unknown) {
   ) {
     const year = rocYear < 1911 ? rocYear + 1911 : rocYear;
     const apiDate = `${year}/${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}`;
-    return { iso: normalizeInvoiceDate(apiDate), apiDate };
+    return {
+      iso: legacyInvoiceIdentityDate(apiDate),
+      apiDate,
+      normalized: normalizeInvoiceDate(apiDate),
+    };
   }
 
-  return { iso: "", apiDate: "" };
+  return { iso: "", apiDate: "", normalized: "" };
 }
 
 function formatTaipeiApiDate(date: Date) {
@@ -697,6 +714,36 @@ function invoiceSourceId(invNum: string, invDate: string, fallback: string) {
 }
 
 function normalizeInvoiceDate(value: string) {
+  const normalized = value
+    .trim()
+    .replace(/\//g, "-")
+    .replace(" ", "T")
+    .replace(
+      /^(\d{4})-(\d{1,2})-(\d{1,2})(?=T|$)/,
+      (_, year: string, month: string, day: string) =>
+        `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`,
+    );
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(normalized)) return normalized;
+  const day = normalized.slice(0, 10);
+  const calendarDate = new Date(`${day}T00:00:00Z`);
+  if (
+    !Number.isFinite(calendarDate.getTime()) ||
+    !calendarDate.toISOString().startsWith(day) ||
+    Number(normalized.slice(11, 13)) >= 24
+  )
+    return day;
+  const timestamp = /(?:Z|[+-]\d{2}:\d{2})$/i.test(normalized)
+    ? normalized
+    : `${normalized}+08:00`;
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime())
+    ? normalized.slice(0, 10)
+    : date.toISOString();
+}
+
+// Keep the original source-id representation even when display dates gain precision.
+function legacyInvoiceIdentityDate(value: string) {
   const normalized = value.trim().replace(/\//g, "-");
   const withTime = /^\d{4}-\d{2}-\d{2}$/.test(normalized)
     ? `${normalized}T00:00:00`

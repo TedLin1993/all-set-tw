@@ -474,6 +474,11 @@ function promotionStatement(
     .join(", ");
   const updates = config.updateColumns
     .map((column) => {
+      if (entityType === "invoice" && column === "invoice_date")
+        return `invoice_date = CASE
+          WHEN length(invoices.invoice_date) > 10 AND length(excluded.invoice_date) = 10
+            AND date(invoices.invoice_date, '+8 hours') = excluded.invoice_date
+          THEN invoices.invoice_date ELSE excluded.invoice_date END`;
       if (entityType === "credit_card_bill") {
         if (column === "paid_amount")
           return "paid_amount = COALESCE(excluded.paid_amount, credit_card_bills.paid_amount)";
@@ -489,8 +494,17 @@ function promotionStatement(
         return "status = CASE WHEN bank_transactions.status = 'posted' OR excluded.status = 'posted' THEN 'posted' ELSE 'pending' END";
       if (column === "authorized_at")
         return `authorized_at = CASE
+          WHEN length(bank_transactions.authorized_at) > 10
+            AND (excluded.authorized_at IS NULL OR (
+              length(excluded.authorized_at) = 10
+              AND date(bank_transactions.authorized_at, '+8 hours') = excluded.authorized_at
+            ))
+            THEN bank_transactions.authorized_at
           WHEN bank_transactions.status = 'pending' AND excluded.status = 'posted'
-            THEN COALESCE(bank_transactions.authorized_at, excluded.authorized_at)
+            THEN CASE WHEN length(excluded.authorized_at) > 10
+              AND length(bank_transactions.authorized_at) <= 10
+              THEN excluded.authorized_at
+              ELSE COALESCE(bank_transactions.authorized_at, excluded.authorized_at) END
           WHEN bank_transactions.status = 'posted' AND excluded.status = 'pending'
             THEN bank_transactions.authorized_at
           ELSE excluded.authorized_at

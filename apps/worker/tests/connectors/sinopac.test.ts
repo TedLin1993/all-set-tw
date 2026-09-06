@@ -395,7 +395,7 @@ describe("sinopac App JSON parser", () => {
     expect(result.bankTransactions).toEqual([
       expect.objectContaining({
         sourceId: "sinopac:card:tx:v2:TWD:2026-07-19:-260:8000:1",
-        authorizedAt: "2026-07-19",
+        authorizedAt: "2026-07-19T18:35:13+08:00",
         postedDate: "2026-07-22",
         description: "連支＊餐廳",
         amount: -260,
@@ -415,6 +415,40 @@ describe("sinopac App JSON parser", () => {
     expect(result.bankTransactions[1]?.raw).toMatchObject({
       CardNo: "************1234",
     });
+  });
+
+  it("does not guess a pending time when a match key has multiple pending rows", () => {
+    const duplicatePendingPayload = structuredClone(sinoCardLatestPayload);
+    duplicatePendingPayload.Result.Items = [
+      duplicatePendingPayload.Result.Items[0],
+      {
+        ...duplicatePendingPayload.Result.Items[0],
+        AuthTime: "19:00:00",
+      },
+    ];
+
+    const result = parseSinopacCardData(
+      {
+        latest: duplicatePendingPayload,
+        outstanding: sinoCardOutstandingPayload,
+        summary: mobileSummaryPayload,
+        bills: mobileBillPayload,
+      },
+      new Date("2026-07-22T12:00:00.000Z"),
+    );
+
+    expect(result.bankTransactions).toEqual([
+      expect.objectContaining({
+        sourceId: "sinopac:card:tx:v2:TWD:2026-07-19:-260:8000:1",
+        authorizedAt: "2026-07-19",
+        status: "posted",
+      }),
+      expect.objectContaining({
+        sourceId: "sinopac:card:tx:v2:TWD:2026-07-19:-260:8000:2",
+        authorizedAt: "2026-07-19T19:00:00+08:00",
+        status: "pending",
+      }),
+    ]);
   });
 
   it("uses the App and SinoCard endpoints without acquiring a browser when session cookies exist", async () => {

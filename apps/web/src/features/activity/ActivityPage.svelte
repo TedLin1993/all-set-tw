@@ -52,9 +52,15 @@
     PendingCategoryUpdate,
   } from "./model/types";
   import {
+    activityDateKey,
     activityStatusLabel,
+    compareActivityItems,
+    currentActivityMonthKey,
+    formatActivityDate,
     formatActivityDateGroup,
+    formatActivityTime,
     groupActivitiesByDate,
+    isActivityDateTime,
   } from "./model/list";
   import {
     filterActivities,
@@ -84,9 +90,13 @@
   import { recentMonthRange, recentMonthKeys } from "@/shared/date-range";
   import { swipeBack } from "@/shared/actions/swipe-back";
   let { api }: { api: ApiClient } = $props();
-  const initialSelectedMonth = new Date().toISOString().slice(0, 7);
+  const initialSelectedMonth = currentActivityMonthKey();
+  // Keep API ranges and month options anchored to the same Taipei month key.
+  const activityMonthAnchor = new Date(
+    `${initialSelectedMonth}-15T12:00:00+08:00`,
+  );
   let selectedMonth = $state(initialSelectedMonth);
-  const activityRange = recentMonthRange(6);
+  const activityRange = recentMonthRange(6, activityMonthAnchor);
   const bank = createQuery(bankRangeQuery(() => api, activityRange));
   const invoices = createQuery(invoicesRangeQuery(() => api, activityRange));
   const invoiceMappings = createQuery(
@@ -178,6 +188,7 @@
           id: t.id,
           source: isCard ? ("card" as const) : ("bank" as const),
           date: t.authorizedAt ?? t.postedDate ?? "",
+          dateHasTime: isActivityDateTime(t.authorizedAt),
           title: t.description ?? t.counterparty ?? "銀行交易",
           subtitle: [
             institutionName,
@@ -208,6 +219,7 @@
           id: i.id,
           source: "invoice" as const,
           date: i.invoiceDate,
+          dateHasTime: isActivityDateTime(i.invoiceDate),
           title: i.sellerName ?? "電子發票",
           subtitle: i.invoiceNumber ?? "",
           institutionName: "電子發票",
@@ -230,6 +242,7 @@
           id: t.id,
           source: "investment" as const,
           date: normalizeFinancialDate(t.tradeDate ?? t.postedDate),
+          dateHasTime: false,
           title: t.name ?? t.symbol ?? "投資交易",
           subtitle: accountName,
           institutionName: "投資",
@@ -240,7 +253,7 @@
           status: "已完成",
         };
       }),
-    ].sort((a, b) => b.date.localeCompare(a.date)),
+    ].sort(compareActivityItems),
   );
   const detailItem = $derived(
     rawItems.find((item) => activityKey(item) === detailKey),
@@ -249,12 +262,12 @@
   const detailInvoice = createQuery(
     toStore(() => invoiceDetailQuery(() => api, detailInvoiceId)),
   );
-  const cashFlowMonths = recentMonthKeys(6);
+  const cashFlowMonths = recentMonthKeys(6, activityMonthAnchor);
   const months = [...cashFlowMonths].reverse();
   const monthlyCalculatedItems = $derived(
     rawItems.filter(
       (item) =>
-        item.date.startsWith(selectedMonth) &&
+        activityDateKey(item).startsWith(selectedMonth) &&
         (item.source === "bank" ||
           item.source === "card" ||
           item.source === "invoice"),
@@ -272,7 +285,7 @@
   const expenseTotal = $derived(
     expenseSlices.reduce((sum, slice) => sum + slice.amount, 0),
   );
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  const currentMonth = currentActivityMonthKey();
   const selectedMonthLabel = $derived(`${Number(selectedMonth.slice(5))} 月`);
   const pendingCount = $derived(
     countPendingActivityItems(rawItems, selectedMonth),
@@ -281,7 +294,7 @@
     cashFlowMonths.map((month) => {
       const items = rawItems.filter(
         (item) =>
-          item.date.startsWith(month) &&
+          activityDateKey(item).startsWith(month) &&
           (item.source === "bank" ||
             item.source === "card" ||
             item.source === "invoice"),
@@ -842,7 +855,8 @@
               </div>
               <div class="divide-y divide-ink/8">
                 {#each group.items as item (item.source + "-" + item.id)}{@const amount =
-                    activityDisplayAmount(item)}
+                    activityDisplayAmount(item)}{@const time =
+                    formatActivityTime(item)}
                   <button
                     aria-label={`查看 ${item.title} 活動詳情`}
                     class={`flex w-full min-w-0 items-center gap-3 px-4 py-3.5 text-left transition hover:bg-paper ${item.excludedFromCalculation ? "bg-ink/[0.025]" : ""}`}
@@ -850,8 +864,13 @@
                   >
                     <div class="min-w-0 flex-1">
                       <p class="truncate text-sm font-semibold">{item.title}</p>
+                      {#if time}<p
+                          class="mt-0.5 text-[11px] font-medium tabular-nums text-ink/45"
+                        >
+                          {time}
+                        </p>{/if}
                       <p
-                        class="mt-1 truncate text-xs font-semibold text-ink/75"
+                        class="mt-0.5 truncate text-xs font-semibold text-ink/75"
                       >
                         {item.institutionName ?? sourceLabel(item)}
                       </p>
@@ -917,7 +936,8 @@
                 >
                 <tbody class="divide-y divide-ink/8"
                   >{#each group.items as item (item.source + "-" + item.id)}{@const amount =
-                      activityDisplayAmount(item)}<tr
+                      activityDisplayAmount(item)}{@const time =
+                      formatActivityTime(item)}<tr
                       aria-label={`查看 ${item.title} 活動詳情`}
                       class={`cursor-pointer transition hover:bg-paper focus-visible:outline-2 focus-visible:outline-steel ${item.excludedFromCalculation ? "bg-ink/[0.025]" : ""}`}
                       onclick={() => openDetail(item)}
@@ -931,6 +951,11 @@
                       tabindex="0"
                       ><td class="min-w-0 px-5 py-3.5"
                         ><p class="truncate font-semibold">{item.title}</p>
+                        {#if time}<p
+                            class="mt-1 text-xs font-medium tabular-nums text-ink/45"
+                          >
+                            {time}
+                          </p>{/if}
                         {#if item.transactionId && item.invoiceId && itemMappingDifference(item) > 0}<Badge
                             variant="secondary"
                             class="mt-1 bg-amber-50 text-amber-800"
@@ -1025,7 +1050,7 @@
                     {detailItem.title}
                   </h3>
                   <p class="mt-1 text-sm text-ink/50">
-                    {formatDate(detailItem.date)}{#if transaction}
+                    {formatActivityDate(detailItem)}{#if transaction}
                       · {mappingAccount(transaction)}
                     {/if}
                   </p>

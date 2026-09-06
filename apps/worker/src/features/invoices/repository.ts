@@ -1,6 +1,10 @@
 import type { ConnectorId } from "@taiwan-fin-hub/core";
 import type { MonthDateRange } from "../../platform/month-range";
 
+const INVOICE_DAY = `CASE WHEN length(invoice_date) > 10
+  THEN COALESCE(date(invoice_date, '+8 hours'), substr(invoice_date, 1, 10))
+  ELSE invoice_date END`;
+
 export type InvoicePageCursor = {
   invoiceDate: string;
   updatedAt: string;
@@ -76,7 +80,7 @@ export async function listInvoicesInRange(
       amount,
       updated_at AS updatedAt
     FROM invoices
-    WHERE invoice_date >= ? AND invoice_date < ?
+    WHERE (${INVOICE_DAY}) >= ? AND (${INVOICE_DAY}) < ?
     ORDER BY invoice_date DESC, updated_at DESC, id DESC`,
     )
     .bind(range.from, range.to)

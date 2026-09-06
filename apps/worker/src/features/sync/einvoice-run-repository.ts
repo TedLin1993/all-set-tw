@@ -726,7 +726,10 @@ export async function promoteEinvoiceRunRecords(
          WHERE source.run_id = ? AND source.status = 'done' AND ${guard}
          ON CONFLICT(connector_id, source_id) DO UPDATE SET
            invoice_number = excluded.invoice_number,
-           invoice_date = excluded.invoice_date,
+           invoice_date = CASE
+             WHEN length(invoices.invoice_date) > 10 AND length(excluded.invoice_date) = 10
+               AND date(invoices.invoice_date, '+8 hours') = excluded.invoice_date
+             THEN invoices.invoice_date ELSE excluded.invoice_date END,
            seller_name = excluded.seller_name,
            amount = excluded.amount,
            raw_payload = excluded.raw_payload,

@@ -13,11 +13,13 @@ import {
   CathayOtpChannelRequiredError,
   CathayOtpRequiredError,
   CathayVerificationRequiredError,
+  appendCathayDepositTransactions,
   captureCathayTrustedState,
   completeCathayTrustedDeviceSetup,
   createCathaybkConnector,
   dismissCathaySystemMessageIfPresent,
   loginCathay,
+  normalizeCathayAuthorizedAt,
   restoreCathayTrustedState,
   sendCathayOtp,
   scrapeCreditCards,
@@ -507,6 +509,43 @@ describe("Cathay credit cards", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("Cathay transaction timestamps", () => {
+  it("uses Taiwan time at true midnight without changing the source identity", () => {
+    const target: Parameters<typeof appendCathayDepositTransactions>[0] = [];
+
+    appendCathayDepositTransactions(
+      target,
+      [
+        {
+          txnDateTime: "2026/07/05T00:00:00",
+          incomeAmt: 252,
+          description: "薪資",
+        },
+      ],
+      "bank:cathaybk:1234",
+      "TWD",
+    );
+
+    expect(target[0]).toMatchObject({
+      authorizedAt: "2026-07-05T00:00:00+08:00",
+      postedDate: "2026-07-05T00:00:00",
+      sourceId: "2026-07-05T00:00:00:bank:cathaybk:1234:252:薪資:1",
+    });
+  });
+
+  it("normalizes offsets and leaves date-only values without fake midnight", () => {
+    expect(normalizeCathayAuthorizedAt("2026/07/05T01:02:03+0800")).toBe(
+      "2026-07-05T01:02:03+08:00",
+    );
+    expect(normalizeCathayAuthorizedAt("2026-07-05T01:02:03Z")).toBe(
+      "2026-07-05T01:02:03Z",
+    );
+    expect(normalizeCathayAuthorizedAt("2026/07/05")).toBe("2026-07-05");
+    expect(normalizeCathayAuthorizedAt("2026-07-05T25:02:03")).toBeUndefined();
+    expect(normalizeCathayAuthorizedAt("2026-02-30T01:02:03")).toBeUndefined();
   });
 });
 

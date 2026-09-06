@@ -122,7 +122,7 @@ describe("automatic bank transfer matching", () => {
     );
   });
 
-  it("uses authorizedAt before postedDate for the stored financial day", () => {
+  it("uses the Taipei authorization day before the posting day", () => {
     const transactions = [
       transaction({
         id: "out",
@@ -140,9 +140,9 @@ describe("automatic bank transfer matching", () => {
       }),
     ];
 
-    expect(getAutomaticTransferDay(transactions[0])).toBe("2026-08-22");
+    expect(getAutomaticTransferDay(transactions[0])).toBe("2026-08-23");
     expect(findAutomaticTransferTransactionIds(transactions)).toEqual(
-      new Set(["in", "out"]),
+      new Set(),
     );
   });
 

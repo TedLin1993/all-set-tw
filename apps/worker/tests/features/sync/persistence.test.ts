@@ -770,6 +770,44 @@ describe("staged sync persistence", () => {
     ).toEqual({ count: 2 });
   });
 
+  it("keeps source time through date-only refreshes and accepts newly available time", async () => {
+    const db = createDb();
+    await persistStagedSyncWrite(db as unknown as D1Database, {
+      records: [
+        bankAccountRecord(0),
+        bankTransactionRecord("purchase-time", "posted", {
+          authorizedAt: "2026-07-05T14:35:00+08:00",
+          postedDate: "2026-07-07",
+        }),
+        bankTransactionRecord("purchase-date", "pending", {
+          authorizedAt: "2026-07-05",
+        }),
+      ],
+    });
+    await persistStagedSyncWrite(db as unknown as D1Database, {
+      records: [
+        bankTransactionRecord("purchase-time", "posted", {
+          authorizedAt: "2026-07-05",
+          postedDate: "2026-07-07",
+        }),
+        bankTransactionRecord("purchase-date", "posted", {
+          authorizedAt: "2026-07-05T00:00:00+08:00",
+          postedDate: "2026-07-07",
+        }),
+      ],
+    });
+    expect(
+      db.database
+        .prepare(
+          "SELECT source_id AS sourceId, authorized_at AS authorizedAt FROM bank_transactions ORDER BY source_id",
+        )
+        .all(),
+    ).toEqual([
+      { sourceId: "purchase-date", authorizedAt: "2026-07-05T00:00:00+08:00" },
+      { sourceId: "purchase-time", authorizedAt: "2026-07-05T14:35:00+08:00" },
+    ]);
+  });
+
   it("preserves confirmed credit card payment data when a later sync omits it", async () => {
     const db = createDb();
 

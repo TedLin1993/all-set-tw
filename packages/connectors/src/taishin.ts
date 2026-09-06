@@ -326,7 +326,10 @@ function mergeTransactionLifecycle(
 ) {
   const pendingByMatchKey = groupByMatchKey(pending);
   const postedByMatchKey = groupByMatchKey(posted);
-  const postedIdentityKeys = new Map<TransactionCandidate, string>();
+  const postedIdentityKeys = new Map<
+    TransactionCandidate,
+    { identityKey: string; authorizedAt?: string }
+  >();
   const consumedPending = new Set<TransactionCandidate>();
 
   for (const [matchKey, postedGroup] of postedByMatchKey) {
@@ -350,7 +353,13 @@ function mergeTransactionLifecycle(
       );
       if (matchingPosted.length !== 1) continue;
 
-      postedIdentityKeys.set(postedTransaction, pendingTransaction.identityKey);
+      postedIdentityKeys.set(postedTransaction, {
+        identityKey: pendingTransaction.identityKey,
+        authorizedAt: preferredAuthorizedAt(
+          postedTransaction.authorizedAt,
+          pendingTransaction.authorizedAt,
+        ),
+      });
       consumedPending.add(pendingTransaction);
     }
   }
@@ -363,7 +372,13 @@ function mergeTransactionLifecycle(
         candidate.identityKey === postedTransaction.identityKey,
     );
     if (!pendingTransaction) continue;
-    postedIdentityKeys.set(postedTransaction, pendingTransaction.identityKey);
+    postedIdentityKeys.set(postedTransaction, {
+      identityKey: pendingTransaction.identityKey,
+      authorizedAt: preferredAuthorizedAt(
+        postedTransaction.authorizedAt,
+        pendingTransaction.authorizedAt,
+      ),
+    });
     consumedPending.add(pendingTransaction);
   }
 
@@ -371,21 +386,44 @@ function mergeTransactionLifecycle(
     ...posted.map((transaction) => ({
       transaction,
       identityKey:
-        postedIdentityKeys.get(transaction) ?? transaction.identityKey,
+        postedIdentityKeys.get(transaction)?.identityKey ??
+        transaction.identityKey,
+      authorizedAt:
+        postedIdentityKeys.get(transaction)?.authorizedAt ??
+        transaction.authorizedAt,
     })),
     ...pending
       .filter((transaction) => !consumedPending.has(transaction))
       .map((transaction) => ({
         transaction,
         identityKey: transaction.identityKey,
+        authorizedAt: transaction.authorizedAt,
       })),
   ];
   const occurrences = new Map<string, number>();
-  return candidates.map(({ transaction, identityKey }) => {
+  return candidates.map(({ transaction, identityKey, authorizedAt }) => {
     const occurrence = (occurrences.get(identityKey) ?? 0) + 1;
     occurrences.set(identityKey, occurrence);
-    return assignSourceId(transaction, identityKey, occurrence);
+    return assignSourceId(
+      { ...transaction, authorizedAt },
+      identityKey,
+      occurrence,
+    );
   });
+}
+
+function preferredAuthorizedAt(
+  postedAuthorizedAt: string | undefined,
+  pendingAuthorizedAt: string | undefined,
+) {
+  const postedHasTime = hasTimeComponent(postedAuthorizedAt);
+  const pendingHasTime = hasTimeComponent(pendingAuthorizedAt);
+  if (pendingHasTime && !postedHasTime) return pendingAuthorizedAt;
+  return postedAuthorizedAt;
+}
+
+function hasTimeComponent(value: string | undefined) {
+  return Boolean(value && /T\d{2}:\d{2}(?::\d{2})?/.test(value));
 }
 
 function assignSourceId(

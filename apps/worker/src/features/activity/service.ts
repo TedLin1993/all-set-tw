@@ -45,7 +45,7 @@ export async function linkInvoiceToTransaction(
 
   const invoiceDay = financialDay(invoice.invoiceDate);
   const transactionDay = financialDay(
-    transaction.authorizedAt ?? transaction.postedDate,
+    transaction.authorizedAt ?? transaction.postedDate?.slice(0, 10),
   );
   if (!invoiceDay || invoiceDay !== transactionDay)
     throw new MappingDateMismatchError();

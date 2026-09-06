@@ -45,7 +45,7 @@ function createDb() {
       {
         id: "transaction-next-taipei-day",
         postedDate: "2026-07-06T16:00:00.000Z",
-        authorizedAt: null,
+        authorizedAt: "2026-07-06T16:00:00.000Z",
         amount: 50,
         currency: "TWD",
         accountType: "credit",

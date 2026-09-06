@@ -299,6 +299,12 @@ function parseSkbankTransactions(
         accountId,
         sourceId: `skbank:${currency === "TWD" ? "deposit" : "foreign"}:tx:${stableHash(sourceIdentity)}`,
         postedDate,
+        // 新光交易明細的時間沒有時區標記，但 API 回傳的是台灣本地時間。
+        // sourceId 仍使用未帶 offset 的既有 identity，避免既有交易重複；
+        // authorizedAt 才保存可供活動排序與顯示的完整時間。
+        ...(transactionTimestamp
+          ? { authorizedAt: `${transactionTimestamp}+08:00` }
+          : {}),
         amount,
         currency,
         description,
@@ -342,6 +348,7 @@ function sanitizeTwdTransaction(
     remark: sanitizeOptionalString(detail.Remark, accountNumber),
     summary: sanitizeOptionalString(detail.Summary, accountNumber),
     transactionDate: normalizeTransactionDate(detail.TransactionDate),
+    transactionDateTime: normalizeTransactionTimestamp(detail.TransactionDate),
   };
 }
 
@@ -358,6 +365,7 @@ function sanitizeForeignTransaction(
     memo: sanitizeOptionalString(detail.Memo, accountNumber),
     summary: sanitizeOptionalString(detail.Summary, accountNumber),
     transactionDate: normalizeTransactionDate(detail.TransactionDate),
+    transactionDateTime: normalizeTransactionTimestamp(detail.TransactionDate),
   };
 }
 

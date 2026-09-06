@@ -47,6 +47,7 @@ export interface Invoice {
   connectorId: string;
   sourceId: string;
   invoiceNumber?: string;
+  /** YYYY-MM-DD when time is unknown; otherwise an ISO timestamp with timezone. */
   invoiceDate: string;
   sellerName?: string;
   amount: number;
@@ -152,6 +153,7 @@ export interface BankTransaction {
   accountId: string;
   sourceId: string;
   postedDate?: string;
+  /** Transaction/authorization date, with a timezone only when source time is known. */
   authorizedAt?: string;
   amount: number;
   currency: string;

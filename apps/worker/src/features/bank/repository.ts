@@ -56,6 +56,11 @@ const BANK_TRANSACTION_SELECT = `SELECT
     LEFT JOIN bank_transaction_preferences preference
       ON preference.transaction_id = txn.id`;
 
+// authorized_at has explicit precision; legacy posted_date is a financial date.
+const BANK_TRANSACTION_DAY = `CASE WHEN length(txn.authorized_at) > 10
+  THEN COALESCE(date(txn.authorized_at, '+8 hours'), substr(txn.authorized_at, 1, 10))
+  ELSE substr(COALESCE(txn.authorized_at, txn.posted_date), 1, 10) END`;
+
 export async function listBankAccounts(db: D1Database) {
   const rows = await db
     .prepare(
@@ -121,8 +126,8 @@ export async function listBankTransactionsInRange(
     .prepare(
       `${BANK_TRANSACTION_SELECT}
        WHERE account.canonical_account_id IS NULL
-         AND COALESCE(txn.authorized_at, txn.posted_date) >= ?
-         AND COALESCE(txn.authorized_at, txn.posted_date) < ?
+         AND (${BANK_TRANSACTION_DAY}) >= ?
+         AND (${BANK_TRANSACTION_DAY}) < ?
        ORDER BY txn.effective_date DESC, txn.updated_at DESC, txn.id DESC`,
     )
     .bind(range.from, range.to)
@@ -158,7 +163,7 @@ export async function listBankTransactionsForTransferMatching(
   const dayClause =
     matchDays.length > 0
       ? `
-         AND substr(COALESCE(txn.authorized_at, txn.posted_date), 1, 10) IN (
+         AND (${BANK_TRANSACTION_DAY}) IN (
            SELECT value FROM json_each(?)
          )`
       : "";
