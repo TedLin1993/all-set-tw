@@ -148,9 +148,9 @@ export function parseFirstbankData(
     : emptyDepositParse();
   const bankTransactions = payloads.transactionHistoryHtml
     ? parseTransactionHistoryHtml(
-      payloads.transactionHistoryHtml,
-      deposits.accounts,
-    )
+        payloads.transactionHistoryHtml,
+        deposits.accounts,
+      )
     : [];
   const cards = parseCreditCards(
     payloads.cardBill,
@@ -545,14 +545,14 @@ function parseTransactionRow(
   header: TransactionHeader,
 ):
   | {
-    amount: number;
-    currency?: string;
-    balance?: number;
-    postedDate: string;
-    authorizedAt: string;
-    description: string;
-    status: "pending" | "posted";
-  }
+      amount: number;
+      currency?: string;
+      balance?: number;
+      postedDate: string;
+      authorizedAt: string;
+      description: string;
+      status: "pending" | "posted";
+    }
   | undefined {
   const date = normalizeDateTime(cells[header.date]);
   if (!date) return undefined;
