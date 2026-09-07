@@ -9,12 +9,17 @@
   import { connectorDefinitions } from "@/data/connectors/definitions";
   import {
     getActionableSyncJobs,
+    getHealthySyncJobs,
+    getPendingSyncJobs,
     getSyncSourceStatus,
+    getSyncSourceStatusLabel,
   } from "@/data/connectors/sync-status";
   import type { ConnectorId, SyncJobRow } from "@/data/connectors/types";
   let {
     demoMode,
     jobs,
+    jobsLoading = false,
+    jobsError = false,
     rules,
     bank,
     navigate,
@@ -23,6 +28,8 @@
     api: ApiClient;
     demoMode: boolean;
     jobs: SyncJobRow[];
+    jobsLoading?: boolean;
+    jobsError?: boolean;
     rules: ClassificationRuleRow[];
     bank: BankData;
     navigate: (view: View) => void;
@@ -36,6 +43,8 @@
     rules.filter((rule) => !rule.isSystem).length,
   );
   const unhealthy = $derived(getActionableSyncJobs(jobs));
+  const healthy = $derived(getHealthySyncJobs(jobs));
+  const pending = $derived(getPendingSyncJobs(jobs));
 </script>
 
 <div class="grid gap-4">
@@ -47,12 +56,27 @@
     ><CardContent class="pt-5"
       ><p class="text-sm font-semibold text-ink/45">資料健康度</p>
       <p class="mt-2 text-2xl font-bold">
-        {Math.max(configuredSources.length - unhealthy.length, 0)} / {configuredSources.length}
-        已設定來源正常
+        {#if jobsLoading}
+          同步狀態載入中…
+        {:else if jobsError}
+          無法載入同步狀態
+        {:else if configuredSources.length === 0}
+          尚未設定資料來源
+        {:else}
+          {healthy.length} / {configuredSources.length} 已設定來源正常
+        {/if}
       </p>
-      {#if unhealthy.length}<p class="mt-2 text-sm font-semibold text-coral">
+      {#if jobsError}
+        <p class="mt-2 text-sm font-semibold text-coral">請稍後再試。</p>
+      {:else if unhealthy.length}
+        <p class="mt-2 text-sm font-semibold text-coral">
           {unhealthy.length} 個來源需要處理
-        </p>{/if}</CardContent
+        </p>
+      {:else if pending.length}
+        <p class="mt-2 text-sm font-semibold text-amber-700">
+          {pending.length} 個來源等待首次同步
+        </p>
+      {/if}</CardContent
     ></Card
   >
   <section>
@@ -136,14 +160,12 @@
             <span class="font-semibold">{source.title}</span><span
               class={getSyncSourceStatus(job) === "needs_action"
                 ? "text-coral"
-                : "text-moss"}
-              >{getSyncSourceStatus(job) === "needs_action"
-                ? "需要處理"
-                : getSyncSourceStatus(job) === "healthy"
-                  ? "正常"
-                  : getSyncSourceStatus(job) === "not_synced"
-                    ? "尚未同步"
-                    : "未設定"}</span
+                : getSyncSourceStatus(job) === "not_synced"
+                  ? "text-amber-700"
+                  : getSyncSourceStatus(job) === "healthy"
+                    ? "text-moss"
+                    : "text-ink/45"}
+              >{getSyncSourceStatusLabel(getSyncSourceStatus(job))}</span
             >
           </button>{/each}
       </div></Card

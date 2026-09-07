@@ -24,6 +24,8 @@
   import {
     getActionableSyncJobs,
     getConfiguredSyncJobs,
+    getHealthySyncJobs,
+    getPendingSyncJobs,
   } from "@/data/connectors/sync-status";
   import { investmentsQuery } from "@/data/investments/queries";
   import {
@@ -155,33 +157,71 @@
   const monthlyIncome = $derived(monthlyTotals.income);
   const monthlyExpense = $derived(monthlyTotals.expense);
   const monthlyNet = $derived(monthlyIncome - monthlyExpense);
-  const unhealthy = $derived(getActionableSyncJobs($jobs.data ?? []));
-  const configuredSyncJobs = $derived(getConfiguredSyncJobs($jobs.data ?? []));
+  const syncJobsReady = $derived($jobs.isSuccess);
+  const syncJobRows = $derived($jobs.data ?? []);
+  const unhealthy = $derived(getActionableSyncJobs(syncJobRows));
+  const pendingSyncJobs = $derived(getPendingSyncJobs(syncJobRows));
+  const configuredSyncJobs = $derived(getConfiguredSyncJobs(syncJobRows));
+  const healthySyncJobs = $derived(getHealthySyncJobs(syncJobRows));
   const staleJobs = $derived(
-    configuredSyncJobs.filter(
-      (job) =>
-        job.enabled &&
-        !job.running &&
-        !unhealthy.some((unhealthyJob) => unhealthyJob.id === job.id) &&
-        (!job.lastSuccessAt ||
-          Date.now() - new Date(job.lastSuccessAt).getTime() >
-            48 * 60 * 60 * 1000),
-    ),
+    syncJobsReady
+      ? configuredSyncJobs.filter(
+          (job) =>
+            job.enabled &&
+            !job.running &&
+            !unhealthy.some((unhealthyJob) => unhealthyJob.id === job.id) &&
+            Boolean(job.lastSuccessAt) &&
+            Date.now() - new Date(job.lastSuccessAt!).getTime() >
+              48 * 60 * 60 * 1000,
+        )
+      : [],
   );
   const sourceCount = $derived(configuredSyncJobs.length);
-  const healthyCount = $derived(Math.max(sourceCount - unhealthy.length, 0));
+  const healthyCount = $derived(healthySyncJobs.length);
   const insights = $derived.by(() => {
     const items: OverviewInsight[] = [];
 
-    if (unhealthy.length > 0) {
+    if (!syncJobsReady) {
+      items.push({
+        id: "sync-status-unavailable",
+        title: $jobs.isError ? "無法載入同步狀態" : "正在載入同步狀態",
+        detail: $jobs.isError
+          ? "目前無法確認資料來源狀態，請稍後再試"
+          : "正在讀取資料來源狀態",
+        tone: $jobs.isError ? "coral" : "steel",
+        icon: "sync",
+        view: "data-sources",
+      });
+    } else if (sourceCount === 0) {
+      items.push({
+        id: "sync-unconfigured",
+        title: "尚未設定資料來源",
+        detail: "前往資料來源設定連接器後即可開始同步",
+        tone: "steel",
+        icon: "sync",
+        view: "data-sources",
+      });
+    } else if (unhealthy.length > 0) {
       items.push({
         id: "sync",
         title: `${unhealthy.length} 個資料來源需要處理`,
-        detail: `目前 ${healthyCount} / ${sourceCount} 個來源正常`,
+        detail: pendingSyncJobs.length
+          ? `目前 ${healthyCount} 個來源正常，${pendingSyncJobs.length} 個等待首次同步`
+          : `目前 ${healthyCount} / ${sourceCount} 個來源正常`,
         tone: "amber",
         icon: "sync",
         view: "data-sources",
         connectorId: unhealthy[0]?.connectorId,
+      });
+    } else if (pendingSyncJobs.length > 0) {
+      items.push({
+        id: "sync-pending",
+        title: `${pendingSyncJobs.length} 個資料來源等待首次同步`,
+        detail: `目前 ${healthyCount} / ${sourceCount} 個來源正常`,
+        tone: "amber",
+        icon: "sync",
+        view: "data-sources",
+        connectorId: pendingSyncJobs[0]?.connectorId,
       });
     }
 

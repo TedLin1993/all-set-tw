@@ -16,6 +16,7 @@
     slices,
     selectedCategory,
     flowSelected,
+    dataIncomplete = false,
     onSelect,
     onSelectFlow,
   }: {
@@ -23,6 +24,7 @@
     slices: ActivityCategorySlice[];
     selectedCategory?: string;
     flowSelected: boolean;
+    dataIncomplete?: boolean;
     onSelect: (category: string) => void;
     onSelectFlow: () => void;
   } = $props();
@@ -63,11 +65,19 @@
     <p
       class={`shrink-0 text-base font-bold tabular-nums sm:text-lg ${flow === "income" ? "text-moss" : "text-coral"}`}
     >
-      {flow === "income" ? "+" : "−"}{formatCurrency(total)}
+      {#if dataIncomplete}—{:else}{flow === "income"
+          ? "+"
+          : "−"}{formatCurrency(total)}{/if}
     </p>
   </CardHeader>
   <CardContent class="pt-2">
-    {#if slices.length === 0}
+    {#if dataIncomplete}
+      <div
+        class="rounded-xl bg-amber-50 p-6 text-center text-sm text-amber-900"
+      >
+        活動資料尚未完整載入，分類比例暫不計算。
+      </div>
+    {:else if slices.length === 0}
       <div class="rounded-xl bg-paper p-6 text-center text-sm text-ink/45">
         此月份沒有{flow === "income" ? "收入" : "支出"}活動
       </div>
