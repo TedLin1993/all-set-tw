@@ -604,3 +604,15 @@ export type ConnectorFormFieldKey<TConnectorId extends ConnectorId> =
 export function isConnectorId(value: string): value is ConnectorId {
   return supportedConnectorIds.includes(value as ConnectorId);
 }
+
+export * from "./activity-types";
+export * from "./activity-list";
+export * from "./activity-flow";
+export * from "./activity-filter";
+export * from "./activity-items";
+export {
+  deduplicateBankTransactions,
+  matchInvoicesToTransactions,
+  invoiceTransactionCandidates,
+  type InvoiceTransactionMatches,
+} from "./activity-matching";

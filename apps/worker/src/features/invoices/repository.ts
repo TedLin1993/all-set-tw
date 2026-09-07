@@ -67,6 +67,7 @@ export async function listInvoices(
 export async function listInvoicesInRange(
   db: D1Database,
   range: MonthDateRange,
+  days?: string[],
 ) {
   const rows = await db
     .prepare(
@@ -80,10 +81,10 @@ export async function listInvoicesInRange(
       amount,
       updated_at AS updatedAt
     FROM invoices
-    WHERE (${INVOICE_DAY}) >= ? AND (${INVOICE_DAY}) < ?
+    WHERE ${days ? `(${INVOICE_DAY}) IN (SELECT value FROM json_each(?))` : `(${INVOICE_DAY}) >= ? AND (${INVOICE_DAY}) < ?`}
     ORDER BY invoice_date DESC, updated_at DESC, id DESC`,
     )
-    .bind(range.from, range.to)
+    .bind(...(days ? [JSON.stringify(days)] : [range.from, range.to]))
     .all<InvoiceRow>();
   return rows.results;
 }

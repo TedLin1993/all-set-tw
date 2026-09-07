@@ -1,6 +1,15 @@
 import type { ActivityItem } from "./types";
 
-export type ActivityFlow = "income" | "expense";
+import {
+  activityDisplayAmount,
+  activityCashFlow,
+  type ActivityFlow,
+} from "@taiwan-fin-hub/core";
+export {
+  activityDisplayAmount,
+  activityCashFlow,
+  type ActivityFlow,
+} from "@taiwan-fin-hub/core";
 
 export interface ActivityCategorySlice {
   category: string;
@@ -19,26 +28,6 @@ export const ACTIVITY_CATEGORY_COLORS = [
   "#a45c78",
   "#68747b",
 ];
-
-export function activityDisplayAmount(item: ActivityItem) {
-  if (item.amount == null) return undefined;
-  return item.source === "invoice" ? -Math.abs(item.amount) : item.amount;
-}
-
-export function activityCashFlow(item: ActivityItem): ActivityFlow | null {
-  if (
-    item.amount == null ||
-    (item.source !== "bank" &&
-      item.source !== "card" &&
-      item.source !== "invoice")
-  )
-    return null;
-  const amount = activityDisplayAmount(item);
-  if (amount == null) return null;
-  if (amount > 0) return "income";
-  if (amount < 0) return "expense";
-  return null;
-}
 
 export function activityCashAmountTwd(
   item: ActivityItem,

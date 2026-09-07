@@ -121,16 +121,16 @@ export async function listBankTransactions(
 export async function listBankTransactionsInRange(
   db: D1Database,
   range: MonthDateRange,
+  days?: string[],
 ) {
   const rows = await db
     .prepare(
       `${BANK_TRANSACTION_SELECT}
        WHERE account.canonical_account_id IS NULL
-         AND (${BANK_TRANSACTION_DAY}) >= ?
-         AND (${BANK_TRANSACTION_DAY}) < ?
+         AND ${days ? `(${BANK_TRANSACTION_DAY}) IN (SELECT value FROM json_each(?))` : `(${BANK_TRANSACTION_DAY}) >= ? AND (${BANK_TRANSACTION_DAY}) < ?`}
        ORDER BY txn.effective_date DESC, txn.updated_at DESC, txn.id DESC`,
     )
-    .bind(range.from, range.to)
+    .bind(...(days ? [JSON.stringify(days)] : [range.from, range.to]))
     .all<BankTransactionPageRow>();
   return rows.results;
 }

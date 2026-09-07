@@ -1,3 +1,4 @@
+import type { ActivityTrade } from "@taiwan-fin-hub/core";
 import type { MonthDateRange } from "../../platform/month-range";
 
 export type InvestmentPageCursor = {
@@ -127,6 +128,7 @@ export async function listInvestmentTransactions(
 export async function listInvestmentTransactionsInRange(
   db: D1Database,
   range: MonthDateRange,
+  days?: string[],
 ) {
   const rows = await db
     .prepare(
@@ -152,12 +154,12 @@ export async function listInvestmentTransactionsInRange(
       effective_date AS effectiveDate,
       updated_at AS updatedAt
     FROM investment_transactions
-    WHERE effective_date >= ? AND effective_date < ?
+    WHERE ${days ? "substr(effective_date, 1, 10) IN (SELECT value FROM json_each(?))" : "effective_date >= ? AND effective_date < ?"}
     ORDER BY effective_date DESC, updated_at DESC, id DESC`,
     )
-    .bind(range.from, range.to)
+    .bind(...(days ? [JSON.stringify(days)] : [range.from, range.to]))
     .all<
-      Record<string, unknown> & {
+      ActivityTrade & {
         id: string;
         effectiveDate: string;
         updatedAt: string;

@@ -120,3 +120,35 @@ describe("activity filters", () => {
     expect(filterActivities([taipeiAugust], defaultFilters)).toEqual([]);
   });
 });
+
+describe("global activity filters", () => {
+  it("searches linked invoice text across years, with inclusive dates and independent filters", () => {
+    const items = [
+      item("linked", {
+        date: "2024-06-15",
+        source: "card",
+        title: "Payment",
+        searchText: "AIRBNB invoice",
+        invoiceId: "i",
+        categoryId: "housing",
+        category: "居住",
+        amount: -100,
+      }),
+      item("later", { date: "2026-08-01", title: "Airbnb", amount: -100 }),
+    ];
+    const filters = { ...defaultFilters, month: "", search: "airbnb" };
+    expect(filterActivities(items, filters).map((i) => i.id)).toEqual([
+      "linked",
+      "later",
+    ]);
+    expect(
+      filterActivities(items, {
+        ...filters,
+        from: "2024-06-15",
+        to: "2024-06-15",
+        source: "invoice",
+        categoryId: "housing",
+      }).map((i) => i.id),
+    ).toEqual(["linked"]);
+  });
+});
