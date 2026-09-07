@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { buildActivityItems } from "@taiwan-fin-hub/core";
+  import { onMount, tick } from "svelte";
   import { toStore } from "svelte/store";
   import {
     createMutation,
+    createInfiniteQuery,
     createQuery,
     useQueryClient,
   } from "@tanstack/svelte-query";
@@ -26,6 +29,9 @@
   import Select from "@/shared/ui/Select.svelte";
   import TabsList from "@/shared/ui/TabsList.svelte";
   import TabsTrigger from "@/shared/ui/TabsTrigger.svelte";
+  import { activitySearchQuery } from "@/data/activity/queries";
+  import ActivitySearchFilters from "./components/ActivitySearchFilters.svelte";
+  import SearchHighlight from "./components/SearchHighlight.svelte";
   import ActivityCategoryChart from "./components/ActivityCategoryChart.svelte";
   import CalculationUpdateDialog from "./components/CalculationUpdateDialog.svelte";
   import CategoryUpdateDialog from "./components/CategoryUpdateDialog.svelte";
@@ -54,13 +60,11 @@
   import {
     activityDateKey,
     activityStatusLabel,
-    compareActivityItems,
     currentActivityMonthKey,
     formatActivityDate,
     formatActivityDateGroup,
     formatActivityTime,
     groupActivitiesByDate,
-    isActivityDateTime,
   } from "./model/list";
   import {
     filterActivities,
@@ -85,7 +89,6 @@
     formatCurrency,
     formatDate,
     formatNumber,
-    normalizeFinancialDate,
     rateMap,
   } from "@/shared/format/financial";
   import { recentMonthRange, recentMonthKeys } from "@/shared/date-range";
@@ -112,6 +115,206 @@
   let flow = $state<ActivityFlowFilter>("all");
   let source = $state<ActivitySourceFilter>("all");
   let search = $state("");
+  let submittedSearch = $state("");
+  let searchTime = $state("all");
+  let searchFrom = $state("");
+  let searchTo = $state("");
+  let searchCategory = $state("");
+  const searching = $derived(Boolean(submittedSearch));
+  const searchDates = $derived.by(() => {
+    if (searchTime === "custom") return { from: searchFrom, to: searchTo };
+    if (searchTime === "year")
+      return {
+        from: `${initialSelectedMonth.slice(0, 4)}-01-01`,
+        to: `${initialSelectedMonth.slice(0, 4)}-12-31`,
+      };
+    if (searchTime === "12months") {
+      const date = new Date(activityMonthAnchor);
+      date.setMonth(date.getMonth() - 11);
+      return {
+        from: `${currentActivityMonthKey(date)}-01`,
+        to: activityDateKey({
+          date: new Date().toISOString(),
+          dateHasTime: true,
+          source: "bank",
+        }),
+      };
+    }
+    return { from: "", to: "" };
+  });
+  const invalidSearchDates = $derived(
+    Boolean(
+      searchDates.from && searchDates.to && searchDates.from > searchDates.to,
+    ),
+  );
+  const searchResults = createInfiniteQuery(
+    toStore(() =>
+      activitySearchQuery(
+        () => api,
+        submittedSearch,
+        searchDates.from,
+        searchDates.to,
+        source,
+        flow,
+        searchCategory,
+      ),
+    ),
+  );
+  // Adjacent result pages can share a day and therefore repeat matching context.
+  function uniqueRows<T extends { id: string }>(rows: T[]): T[] {
+    return [...new Map(rows.map((row) => [row.id, row])).values()];
+  }
+  const bankData = $derived(
+    searching
+      ? {
+          accounts: $searchResults.data?.pages[0]?.bank.accounts ?? [],
+          transactions: uniqueRows(
+            $searchResults.data?.pages.flatMap(
+              (page) => page.bank.transactions,
+            ) ?? [],
+          ),
+        }
+      : $bank.data,
+  );
+  const invoiceData = $derived(
+    searching
+      ? uniqueRows(
+          $searchResults.data?.pages.flatMap((page) => page.invoices) ?? [],
+        )
+      : $invoices.data,
+  );
+  const tradeData = $derived(
+    searching
+      ? uniqueRows(
+          $searchResults.data?.pages.flatMap((page) => page.trades) ?? [],
+        )
+      : $trades.data,
+  );
+  let savedMonthly: {
+    flow: ActivityFlowFilter;
+    source: ActivitySourceFilter;
+    category: ActivityCategoryFilter | null;
+    scroll: number;
+    rootScroll: number;
+  } | null = null;
+  function saveMonthly() {
+    savedMonthly = {
+      flow,
+      source,
+      category: selectedCategory,
+      scroll: window.scrollY,
+      rootScroll: document.getElementById("root")?.scrollTop ?? 0,
+    };
+    flow = "all";
+    source = "all";
+    selectedCategory = null;
+    searchTime = "all";
+    searchFrom = "";
+    searchTo = "";
+    searchCategory = "";
+  }
+  function restoreMonthly() {
+    search = "";
+    submittedSearch = "";
+    detailKey = null;
+    if (savedMonthly) {
+      const saved = savedMonthly;
+      savedMonthly = null;
+      flow = saved.flow;
+      source = saved.source;
+      selectedCategory = saved.category;
+      void tick().then(() => {
+        window.scrollTo({ top: saved.scroll, behavior: "instant" });
+        document
+          .getElementById("root")
+          ?.scrollTo({ top: saved.rootScroll, behavior: "instant" });
+      });
+    }
+  }
+  function submitSearch() {
+    const query = search.trim();
+    if (!query) {
+      clearSearch();
+      return;
+    }
+    if (!searching) {
+      saveMonthly();
+      window.history.pushState(
+        { ...window.history.state, activitySearch: { query } },
+        "",
+      );
+    } else
+      window.history.replaceState(
+        { ...window.history.state, activitySearch: { query } },
+        "",
+      );
+    submittedSearch = query;
+  }
+  function clearSearch() {
+    if (!searching) {
+      search = "";
+      return;
+    }
+    if (searching && window.history.state?.activitySearch)
+      window.history.go(detailKey ? -2 : -1);
+    restoreMonthly();
+  }
+  function changeSearch(event: Event) {
+    search = (event.currentTarget as HTMLInputElement).value;
+    if (!search.trim()) {
+      clearSearch();
+      return;
+    }
+  }
+  function closeDetail() {
+    if (window.history.state?.activityDetail) window.history.back();
+    else detailKey = null;
+  }
+  $effect(() => {
+    if (searching && window.history.state?.activitySearch) {
+      window.history.replaceState(
+        {
+          ...window.history.state,
+          activitySearch: {
+            query: submittedSearch,
+            flow,
+            source,
+            category: searchCategory,
+            time: searchTime,
+            from: searchFrom,
+            to: searchTo,
+          },
+        },
+        "",
+      );
+    }
+  });
+  onMount(() => {
+    const restoreHistory = () => {
+      if (window.location.hash !== "#/activity") return;
+      const state = window.history.state;
+      if (state?.activitySearch?.query) {
+        if (!searching && !savedMonthly) saveMonthly();
+        flow = state.activitySearch.flow ?? "all";
+        source = state.activitySearch.source ?? "all";
+        searchCategory = state.activitySearch.category ?? "";
+        searchTime = state.activitySearch.time ?? "all";
+        searchFrom = state.activitySearch.from ?? "";
+        searchTo = state.activitySearch.to ?? "";
+        search = state.activitySearch.query;
+        submittedSearch = search;
+        detailKey = state.activityDetail ?? null;
+      } else {
+        restoreMonthly();
+        detailKey = state?.activityDetail ?? null;
+      }
+    };
+    restoreHistory();
+    window.addEventListener("popstate", restoreHistory);
+    return () => {
+      window.removeEventListener("popstate", restoreHistory);
+    };
+  });
   let selectedCategory = $state<ActivityCategoryFilter | null>(null);
   let pending = $state<PendingCategoryUpdate | null>(null);
   let pendingCalculation = $state<PendingCalculationUpdate | null>(null);
@@ -145,28 +348,36 @@
     $categoryRows.data?.length ? $categoryRows.data : fallbackCategories,
   );
   const activityDataStatus = $derived(
-    getActivityDataStatus([
-      {
-        label: "銀行與信用卡",
-        isError: $bank.isError,
-      },
-      {
-        label: "發票",
-        isError: $invoices.isError,
-      },
-      {
-        label: "發票配對",
-        isError: $invoiceMappings.isError,
-      },
-      {
-        label: "投資活動",
-        isError: $trades.isError,
-      },
-    ]),
+    getActivityDataStatus(
+      searching
+        ? [
+            { label: "搜尋結果", isError: $searchResults.isError },
+            { label: "發票配對", isError: $invoiceMappings.isError },
+          ]
+        : [
+            {
+              label: "銀行與信用卡",
+              isError: $bank.isError,
+            },
+            {
+              label: "發票",
+              isError: $invoices.isError,
+            },
+            {
+              label: "發票配對",
+              isError: $invoiceMappings.isError,
+            },
+            {
+              label: "投資活動",
+              isError: $trades.isError,
+            },
+          ],
+    ),
   );
   const activitySummaryIncomplete = $derived(activityDataStatus.hasFailure);
   const activityRetryPending = $derived(
-    $bank.isFetching ||
+    $searchResults.isFetching ||
+      $bank.isFetching ||
       $invoices.isFetching ||
       $invoiceMappings.isFetching ||
       $trades.isFetching,
@@ -178,13 +389,11 @@
   );
   const rateValues = $derived(rateMap($rates.data));
   const bankAccounts = $derived(
-    new Map(
-      ($bank.data?.accounts ?? []).map((account) => [account.id, account]),
-    ),
+    new Map((bankData?.accounts ?? []).map((account) => [account.id, account])),
   );
   const activityBankTransactions = $derived(
     deduplicateBankTransactions(
-      ($bank.data?.transactions ?? []).map((transaction) => ({
+      (bankData?.transactions ?? []).map((transaction) => ({
         ...transaction,
         accountType:
           transaction.accountType ??
@@ -195,96 +404,20 @@
   const invoiceMatches = $derived(
     matchInvoicesToTransactions(
       activityBankTransactions,
-      $invoices.data ?? [],
+      invoiceData ?? [],
       $invoiceMappings.data ?? [],
     ),
   );
-  const rawItems = $derived<ActivityItem[]>(
-    [
-      ...activityBankTransactions.map((t) => {
-        const account = bankAccounts.get(t.accountId);
-        const matchedInvoice = invoiceMatches.transactionToInvoice.get(t.id);
-        const isCard =
-          account?.accountType === "credit" || t.accountType === "credit";
-        const institutionName =
-          t.institutionName ??
-          account?.institutionName ??
-          (isCard ? "信用卡" : "銀行");
-        const accountLast4 = t.accountLast4 ?? account?.accountLast4;
-        const accountName =
-          t.accountName ??
-          account?.accountName ??
-          (accountLast4 ? `末四碼 ${accountLast4}` : "");
-        return {
-          id: t.id,
-          source: isCard ? ("card" as const) : ("bank" as const),
-          date: t.authorizedAt ?? t.postedDate ?? "",
-          dateHasTime: isActivityDateTime(t.authorizedAt),
-          title: t.description ?? t.counterparty ?? "銀行交易",
-          subtitle: [
-            institutionName,
-            accountName,
-            matchedInvoice?.invoiceNumber,
-          ]
-            .filter(Boolean)
-            .join(" · "),
-          institutionName,
-          accountName,
-          amount: t.amount,
-          currency: t.currency,
-          category: t.classification?.label ?? "未分類",
-          categoryId: t.classification?.categoryId ?? "other",
-          classificationPattern: t.counterparty ?? t.description,
-          classificationSource: t.classification?.source ?? "fallback",
-          classificationRuleId: t.classification?.ruleId,
-          transactionId: t.id,
-          invoiceId: matchedInvoice?.id,
-          invoiceAmount: matchedInvoice?.amount,
-          excludedFromCalculation: t.excludedFromCalculation,
-          status: t.status,
-        };
-      }),
-      ...($invoices.data ?? [])
-        .filter((i) => !invoiceMatches.invoiceToTransactionId.has(i.id))
-        .map((i) => ({
-          id: i.id,
-          source: "invoice" as const,
-          date: i.invoiceDate,
-          dateHasTime: isActivityDateTime(i.invoiceDate),
-          title: i.sellerName ?? "電子發票",
-          subtitle: i.invoiceNumber ?? "",
-          institutionName: "電子發票",
-          accountName: i.invoiceNumber ?? "",
-          amount: i.amount,
-          currency: "TWD",
-          category: "發票",
-          invoiceId: i.id,
-          invoiceAmount: i.amount,
-          status: "已開立",
-        })),
-      ...($trades.data ?? []).map((t) => {
-        const accountName = [
-          t.transactionName ?? t.transactionCode,
-          t.quantity != null ? `${formatNumber(t.quantity)} 股` : undefined,
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        return {
-          id: t.id,
-          source: "investment" as const,
-          date: normalizeFinancialDate(t.tradeDate ?? t.postedDate),
-          dateHasTime: false,
-          title: t.name ?? t.symbol ?? "投資交易",
-          subtitle: accountName,
-          institutionName: "投資",
-          accountName,
-          amount: t.price === 1 ? undefined : t.amount,
-          currency: t.currency,
-          category: "投資",
-          status: "已完成",
-        };
-      }),
-    ].sort(compareActivityItems),
+  const rawItems = $derived(
+    searching
+      ? ($searchResults.data?.pages.flatMap((page) => page.items) ?? [])
+      : buildActivityItems(
+          activityBankTransactions,
+          invoiceData ?? [],
+          tradeData ?? [],
+          bankAccounts,
+          invoiceMatches,
+        ),
   );
   const detailItem = $derived(
     rawItems.find((item) => activityKey(item) === detailKey),
@@ -352,13 +485,41 @@
   );
   const filtered = $derived(
     filterActivities(rawItems, {
-      month: selectedMonth,
+      month: searching ? "" : selectedMonth,
+      from: searching ? searchDates.from : undefined,
+      to: searching ? searchDates.to : undefined,
+      categoryId: searching ? searchCategory : undefined,
       flow,
       source,
-      search,
+      search: submittedSearch,
       category: selectedCategory,
     }),
   );
+  const fillingSearchBatch = $derived(
+    searching && !invalidSearchDates && $searchResults.isFetching,
+  );
+  let searchSentinel = $state<HTMLDivElement>();
+  $effect(() => {
+    if (
+      !searchSentinel ||
+      !searching ||
+      invalidSearchDates ||
+      !$searchResults.hasNextPage ||
+      $searchResults.isFetching ||
+      $searchResults.isError
+    )
+      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        void $searchResults.fetchNextPage();
+      },
+      { rootMargin: "0px 0px 240px 0px" },
+    );
+    observer.observe(searchSentinel);
+    return () => observer.disconnect();
+  });
   const filteredGroups = $derived(groupActivitiesByDate(filtered));
   const mappingCandidates = $derived.by(() => {
     if (!mappingDialog) return [];
@@ -478,7 +639,7 @@
     onSuccess: (preference) => {
       updateMappingPreference(preference);
       mappingDialog = null;
-      detailKey = null;
+      closeDetail();
       showMappingNotice("已完成配對，活動只顯示一筆");
     },
   });
@@ -490,7 +651,7 @@
     onSuccess: (preference) => {
       updateMappingPreference(preference);
       mappingDialog = null;
-      detailKey = null;
+      closeDetail();
       showMappingNotice("已解除配對，兩筆活動將保持分開");
     },
   });
@@ -530,6 +691,7 @@
     selectedCategory = null;
   }
   function retryActivityData() {
+    if (searching && $searchResults.isError) void $searchResults.refetch();
     if ($bank.isError) void $bank.refetch();
     if ($invoices.isError) void $invoices.refetch();
     if ($invoiceMappings.isError) void $invoiceMappings.refetch();
@@ -551,6 +713,10 @@
   }
   function openDetail(item: ActivityItem) {
     detailKey = activityKey(item);
+    window.history.pushState(
+      { ...window.history.state, activityDetail: detailKey },
+      "",
+    );
   }
   function transactionForItem(item: ActivityItem) {
     return activityBankTransactions.find(
@@ -606,6 +772,7 @@
       ],
     );
     qc.invalidateQueries({ queryKey: queryKeys.invoiceTransactionMappings });
+    qc.invalidateQueries({ queryKey: queryKeys.bank });
   }
   function showMappingNotice(message: string) {
     mappingNotice = message;
@@ -614,9 +781,7 @@
     }, 3500);
   }
   function invoiceForItem(item: ActivityItem) {
-    return ($invoices.data ?? []).find(
-      (invoice) => invoice.id === item.invoiceId,
-    );
+    return (invoiceData ?? []).find((invoice) => invoice.id === item.invoiceId);
   }
   function openMapping(item: ActivityItem) {
     const invoice = invoiceForItem(item);
@@ -676,11 +841,65 @@
   }
 </script>
 
-{#if $bank.isPending || $invoices.isPending || $invoiceMappings.isPending || $trades.isPending}<EmptyState
+{#if !searching && ($bank.isPending || $invoices.isPending || $invoiceMappings.isPending || $trades.isPending)}<EmptyState
     title="載入活動中"
     body="正在整理銀行、投資與發票資料。"
   />{:else}
   <div class="grid min-w-0 max-w-full gap-5 overflow-x-clip">
+    <form
+      class="flex min-w-0 gap-2"
+      role="search"
+      onsubmit={(event) => {
+        event.preventDefault();
+        submitSearch();
+      }}
+    >
+      <div class="relative min-w-0 flex-1">
+        <Search
+          class="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-ink/45"
+        />
+        <Input
+          type="search"
+          aria-label="搜尋所有活動"
+          placeholder="搜尋所有活動"
+          class="h-12 pl-10 pr-12 [&::-webkit-search-cancel-button]:appearance-none"
+          value={search}
+          oninput={changeSearch}
+          oncompositionend={changeSearch}
+          maxlength={200}
+        />
+        {#if search}<button
+            type="button"
+            aria-label="清空搜尋，返回月報"
+            class="absolute right-0 top-0 flex size-12 items-center justify-center text-ink/50"
+            onclick={clearSearch}><X class="size-5" /></button
+          >{/if}
+      </div>
+      <Button type="submit" class="h-12">搜尋</Button>
+    </form>
+    {#if searching}
+      <section class="grid min-w-0 gap-3" aria-label="全歷史搜尋">
+        <h2 class="break-words text-xl font-semibold">
+          搜尋「{submittedSearch}」
+        </h2>
+        <p class="text-xs text-ink/55">所有已同步紀錄 · 日期由新到舊</p>
+        <ActivitySearchFilters
+          bind:time={searchTime}
+          bind:from={searchFrom}
+          bind:to={searchTo}
+          bind:source
+          bind:flow
+          bind:category={searchCategory}
+          categories={categoryOptions}
+        />
+        {#if invalidSearchDates}<p role="alert" class="text-sm text-coral">
+            開始日期不得晚於結束日期。
+          </p>{/if}
+        {#if fillingSearchBatch}<p role="status" class="text-sm text-ink/55">
+            搜尋活動中…
+          </p>{/if}
+      </section>
+    {/if}
     {#if activityDataStatus.hasFailure}
       <div
         class="flex flex-col gap-3 rounded-xl border border-coral/25 bg-coral/5 px-4 py-3 text-sm text-ink sm:flex-row sm:items-center sm:justify-between"
@@ -703,173 +922,174 @@
         >
       </div>
     {/if}
-    <div
-      class="hidden min-w-0 grid-cols-2 gap-3 md:grid md:grid-cols-4 md:gap-4"
-    >
-      <Card
-        ><CardContent class="p-5"
-          ><p class="text-xs font-semibold text-ink/50">
-            {selectedMonthLabel}收入
-          </p>
-          <p class="mt-2 truncate text-2xl font-bold text-moss">
-            {activitySummaryIncomplete
-              ? "—"
-              : `+${formatCurrency(incomeTotal)}`}
-          </p>
-          <p class="mt-1 text-xs text-ink/45">
-            {activitySummaryIncomplete
-              ? "資料尚未完整載入"
-              : "銀行與信用卡活動"}
-          </p></CardContent
-        ></Card
-      >
-      <Card
-        ><CardContent class="p-5"
-          ><p class="text-xs font-semibold text-ink/50">
-            {selectedMonthLabel}支出
-          </p>
-          <p class="mt-2 truncate text-2xl font-bold text-coral">
-            {activitySummaryIncomplete
-              ? "—"
-              : `−${formatCurrency(expenseTotal)}`}
-          </p>
-          <p class="mt-1 text-xs text-ink/45">
-            {activitySummaryIncomplete
-              ? "資料尚未完整載入"
-              : "含未配對發票，不計入已排除活動"}
-          </p></CardContent
-        ></Card
-      >
-      <Card
-        ><CardContent class="p-5"
-          ><p class="text-xs font-semibold text-ink/50">
-            {selectedMonthLabel}淨流入
-          </p>
-          <p
-            class={`mt-2 truncate text-2xl font-bold ${incomeTotal >= expenseTotal ? "text-moss" : "text-coral"}`}
-          >
-            {activitySummaryIncomplete
-              ? "—"
-              : formatCurrency(incomeTotal - expenseTotal)}
-          </p>
-          <p class="mt-1 text-xs text-ink/45">
-            {activitySummaryIncomplete ? "資料尚未完整載入" : "收入 − 支出"}
-          </p></CardContent
-        ></Card
-      >
-      <Card
-        ><CardContent class="p-5"
-          ><p class="text-xs font-semibold text-ink/50">待分類</p>
-          <p class="mt-2 text-2xl font-bold">
-            {activitySummaryIncomplete ? "—" : `${pendingCount} 筆`}
-          </p>
-          <p class="mt-1 text-xs text-ink/45">
-            {activitySummaryIncomplete ? "資料尚未完整載入" : "銀行交易"}
-          </p></CardContent
-        ></Card
-      >
-    </div>
-
-    <section class="grid min-w-0 gap-3">
+    {#if !searching}
       <div
-        class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        class="hidden min-w-0 grid-cols-2 gap-3 md:grid md:grid-cols-4 md:gap-4"
       >
-        <div class="min-w-0">
-          <h2 class="text-lg font-semibold">每月分類比例</h2>
-          <p class="mt-1 text-xs text-ink/45">
-            未配對發票列為支出，已配對發票不重複計算
-          </p>
-        </div>
-        <Select
-          aria-label="選擇活動月份"
-          class="h-11 w-full min-w-0 font-semibold sm:w-auto sm:shrink-0"
-          value={selectedMonth}
-          onchange={(event: Event) =>
-            chooseMonth((event.currentTarget as HTMLSelectElement).value)}
-          >{#each months as month (month)}<option value={month}
-              >{month.slice(0, 4)} 年 {Number(month.slice(5))} 月</option
-            >{/each}</Select
+        <Card
+          ><CardContent class="p-5"
+            ><p class="text-xs font-semibold text-ink/50">
+              {selectedMonthLabel}收入
+            </p>
+            <p class="mt-2 truncate text-2xl font-bold text-moss">
+              {activitySummaryIncomplete
+                ? "—"
+                : `+${formatCurrency(incomeTotal)}`}
+            </p>
+            <p class="mt-1 text-xs text-ink/45">
+              {activitySummaryIncomplete
+                ? "資料尚未完整載入"
+                : "銀行與信用卡活動"}
+            </p></CardContent
+          ></Card
+        >
+        <Card
+          ><CardContent class="p-5"
+            ><p class="text-xs font-semibold text-ink/50">
+              {selectedMonthLabel}支出
+            </p>
+            <p class="mt-2 truncate text-2xl font-bold text-coral">
+              {activitySummaryIncomplete
+                ? "—"
+                : `−${formatCurrency(expenseTotal)}`}
+            </p>
+            <p class="mt-1 text-xs text-ink/45">
+              {activitySummaryIncomplete
+                ? "資料尚未完整載入"
+                : "含未配對發票，不計入已排除活動"}
+            </p></CardContent
+          ></Card
+        >
+        <Card
+          ><CardContent class="p-5"
+            ><p class="text-xs font-semibold text-ink/50">
+              {selectedMonthLabel}淨流入
+            </p>
+            <p
+              class={`mt-2 truncate text-2xl font-bold ${incomeTotal >= expenseTotal ? "text-moss" : "text-coral"}`}
+            >
+              {activitySummaryIncomplete
+                ? "—"
+                : formatCurrency(incomeTotal - expenseTotal)}
+            </p>
+            <p class="mt-1 text-xs text-ink/45">
+              {activitySummaryIncomplete ? "資料尚未完整載入" : "收入 − 支出"}
+            </p></CardContent
+          ></Card
+        >
+        <Card
+          ><CardContent class="p-5"
+            ><p class="text-xs font-semibold text-ink/50">待分類</p>
+            <p class="mt-2 text-2xl font-bold">
+              {activitySummaryIncomplete ? "—" : `${pendingCount} 筆`}
+            </p>
+            <p class="mt-1 text-xs text-ink/45">
+              {activitySummaryIncomplete ? "資料尚未完整載入" : "銀行交易"}
+            </p></CardContent
+          ></Card
         >
       </div>
-      <div class="grid min-w-0 gap-3 lg:grid-cols-2">
-        <ActivityCategoryChart
-          flow="income"
-          slices={incomeSlices}
-          selectedCategory={selectedCategory?.flow === "income"
-            ? selectedCategory.category
-            : undefined}
-          flowSelected={flow === "income" && !selectedCategory}
-          dataIncomplete={activitySummaryIncomplete}
-          onSelect={(category) => chooseCategory("income", category)}
-          onSelectFlow={() => chooseChartFlow("income")}
-        />
-        <ActivityCategoryChart
-          flow="expense"
-          slices={expenseSlices}
-          selectedCategory={selectedCategory?.flow === "expense"
-            ? selectedCategory.category
-            : undefined}
-          flowSelected={flow === "expense" && !selectedCategory}
-          dataIncomplete={activitySummaryIncomplete}
-          onSelect={(category) => chooseCategory("expense", category)}
-          onSelectFlow={() => chooseChartFlow("expense")}
-        />
-      </div>
-    </section>
 
-    <Card class="hidden md:block">
-      <CardHeader class="flex-row items-center justify-between"
-        ><h2 class="text-lg font-semibold">現金流趨勢</h2>
-        <Badge variant="secondary">6 個月　收入／支出</Badge></CardHeader
-      >
-      <CardContent>
-        {#if activitySummaryIncomplete}
-          <div
-            class="rounded-xl bg-amber-50 p-6 text-center text-sm text-amber-900"
-          >
-            活動資料尚未完整載入，現金流趨勢暫不計算。
+      <section class="grid min-w-0 gap-3">
+        <div
+          class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div class="min-w-0">
+            <h2 class="text-lg font-semibold">每月分類比例</h2>
+            <p class="mt-1 text-xs text-ink/45">
+              未配對發票列為支出，已配對發票不重複計算
+            </p>
           </div>
-        {:else}<div class="grid grid-cols-6 gap-3">
-            {#each cashFlow as point (point.month)}
-              <button
-                aria-pressed={selectedMonth === point.month}
-                class={`grid min-w-0 rounded-xl px-2 pb-2 pt-3 transition ${selectedMonth === point.month ? "bg-steel/10 ring-2 ring-steel/30" : "hover:bg-paper"}`}
-                onclick={() => chooseMonth(point.month)}
-              >
-                <div class="flex h-28 items-end justify-center gap-2">
-                  <span
-                    class="w-1/3 rounded-t-lg bg-emerald-700"
-                    style={`height:${Math.max(8, (point.income / maxCashFlow) * 100)}%`}
-                  ></span><span
-                    class="w-1/3 rounded-t-lg bg-coral"
-                    style={`height:${Math.max(8, (point.expense / maxCashFlow) * 100)}%`}
-                  ></span>
-                </div>
-                <span class="mt-2 text-xs font-semibold"
-                  >{Number(point.month.slice(5))} 月</span
-                ><span class="mt-1 truncate text-[10px] text-moss"
-                  >+{formatCompactTwd(point.income)}</span
-                ><span class="truncate text-[10px] text-coral"
-                  >−{formatCompactTwd(point.expense)}</span
-                >
-              </button>
-            {/each}
-          </div>
-          <div
-            class="mt-3 flex items-center justify-between text-xs text-ink/45"
+          <Select
+            aria-label="選擇活動月份"
+            class="h-11 w-full min-w-0 font-semibold sm:w-auto sm:shrink-0"
+            value={selectedMonth}
+            onchange={(event: Event) =>
+              chooseMonth((event.currentTarget as HTMLSelectElement).value)}
+            >{#each months as month (month)}<option value={month}
+                >{month.slice(0, 4)} 年 {Number(month.slice(5))} 月</option
+              >{/each}</Select
           >
-            <span
-              ><span class="text-emerald-700">■</span> 收入　<span
-                class="text-coral">■</span
-              > 支出</span
-            ><button
-              class="font-semibold text-steel"
-              onclick={() => chooseMonth(currentMonth)}>回到本月</button
+        </div>
+        <div class="grid min-w-0 gap-3 lg:grid-cols-2">
+          <ActivityCategoryChart
+            flow="income"
+            slices={incomeSlices}
+            selectedCategory={selectedCategory?.flow === "income"
+              ? selectedCategory.category
+              : undefined}
+            flowSelected={flow === "income" && !selectedCategory}
+            dataIncomplete={activitySummaryIncomplete}
+            onSelect={(category) => chooseCategory("income", category)}
+            onSelectFlow={() => chooseChartFlow("income")}
+          />
+          <ActivityCategoryChart
+            flow="expense"
+            slices={expenseSlices}
+            selectedCategory={selectedCategory?.flow === "expense"
+              ? selectedCategory.category
+              : undefined}
+            flowSelected={flow === "expense" && !selectedCategory}
+            dataIncomplete={activitySummaryIncomplete}
+            onSelect={(category) => chooseCategory("expense", category)}
+            onSelectFlow={() => chooseChartFlow("expense")}
+          />
+        </div>
+      </section>
+
+      <Card class="hidden md:block">
+        <CardHeader class="flex-row items-center justify-between"
+          ><h2 class="text-lg font-semibold">現金流趨勢</h2>
+          <Badge variant="secondary">6 個月　收入／支出</Badge></CardHeader
+        >
+        <CardContent>
+          {#if activitySummaryIncomplete}
+            <div
+              class="rounded-xl bg-amber-50 p-6 text-center text-sm text-amber-900"
             >
-          </div>{/if}
-      </CardContent>
-    </Card>
-
+              活動資料尚未完整載入，現金流趨勢暫不計算。
+            </div>
+          {:else}<div class="grid grid-cols-6 gap-3">
+              {#each cashFlow as point (point.month)}
+                <button
+                  aria-pressed={selectedMonth === point.month}
+                  class={`grid min-w-0 rounded-xl px-2 pb-2 pt-3 transition ${selectedMonth === point.month ? "bg-steel/10 ring-2 ring-steel/30" : "hover:bg-paper"}`}
+                  onclick={() => chooseMonth(point.month)}
+                >
+                  <div class="flex h-28 items-end justify-center gap-2">
+                    <span
+                      class="w-1/3 rounded-t-lg bg-emerald-700"
+                      style={`height:${Math.max(8, (point.income / maxCashFlow) * 100)}%`}
+                    ></span><span
+                      class="w-1/3 rounded-t-lg bg-coral"
+                      style={`height:${Math.max(8, (point.expense / maxCashFlow) * 100)}%`}
+                    ></span>
+                  </div>
+                  <span class="mt-2 text-xs font-semibold"
+                    >{Number(point.month.slice(5))} 月</span
+                  ><span class="mt-1 truncate text-[10px] text-moss"
+                    >+{formatCompactTwd(point.income)}</span
+                  ><span class="truncate text-[10px] text-coral"
+                    >−{formatCompactTwd(point.expense)}</span
+                  >
+                </button>
+              {/each}
+            </div>
+            <div
+              class="mt-3 flex items-center justify-between text-xs text-ink/45"
+            >
+              <span
+                ><span class="text-emerald-700">■</span> 收入　<span
+                  class="text-coral">■</span
+                > 支出</span
+              ><button
+                class="font-semibold text-steel"
+                onclick={() => chooseMonth(currentMonth)}>回到本月</button
+              >
+            </div>{/if}
+        </CardContent>
+      </Card>
+    {/if}
     <Card class="min-w-0 max-w-full overflow-hidden">
       <CardHeader class="min-w-0 gap-3 border-b border-ink/8">
         <div
@@ -877,24 +1097,21 @@
         >
           <div class="min-w-0">
             <h2 class="truncate text-lg font-semibold">
-              {selectedCategory
-                ? `${selectedMonthLabel} · ${selectedCategory.flow === "income" ? "收入" : "支出"} · ${selectedCategory.category}`
-                : flow === "income"
-                  ? `${selectedMonthLabel} · 收入`
-                  : flow === "expense"
-                    ? `${selectedMonthLabel} · 支出`
-                    : "所有活動"}
+              {searching
+                ? `已載入 ${filtered.length} 筆`
+                : selectedCategory
+                  ? `${selectedMonthLabel} · ${selectedCategory.flow === "income" ? "收入" : "支出"} · ${selectedCategory.category}`
+                  : flow === "income"
+                    ? `${selectedMonthLabel} · 收入`
+                    : flow === "expense"
+                      ? `${selectedMonthLabel} · 支出`
+                      : "所有活動"}
             </h2>
-            <p class="text-xs text-ink/45">銀行與帳戶資訊直接顯示於每筆活動</p>
-          </div>
-          <div class="relative md:w-80">
-            <Search
-              class="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground"
-            /><Input
-              class="h-11 pl-9"
-              placeholder="搜尋商家、銀行或分類"
-              bind:value={search}
-            />
+            <p class="text-xs text-ink/45">
+              {searching
+                ? "符合目前搜尋條件的活動"
+                : "銀行與帳戶資訊直接顯示於每筆活動"}
+            </p>
           </div>
         </div>
         {#if selectedCategory}<div
@@ -910,17 +1127,20 @@
               onclick={clearCategoryFilter}>清除分類</button
             >
           </div>{/if}
-        <div class="grid min-w-0 gap-1.5">
-          <span class="text-xs font-semibold text-ink/50">來源</span>
-          <TabsList aria-label="活動來源" class="grid h-auto w-full grid-cols-4"
-            >{#each [{ key: "all", label: "全部" }, { key: "bank", label: "銀行" }, { key: "card", label: "信用卡" }, { key: "invoice", label: "發票" }] as filter (filter.key)}<TabsTrigger
-                class="min-h-9 min-w-0 px-1 text-xs md:text-sm"
-                active={source === filter.key}
-                onclick={() => (source = filter.key as ActivitySourceFilter)}
-                >{filter.label}</TabsTrigger
-              >{/each}</TabsList
-          >
-        </div>
+        {#if !searching}<div class="grid min-w-0 gap-1.5">
+            <span class="text-xs font-semibold text-ink/50">來源</span>
+            <TabsList
+              aria-label="活動來源"
+              class="grid h-auto w-full grid-cols-4"
+              >{#each [{ key: "all", label: "全部" }, { key: "bank", label: "銀行" }, { key: "card", label: "信用卡" }, { key: "invoice", label: "發票" }] as filter (filter.key)}<TabsTrigger
+                  class="min-h-9 min-w-0 px-1 text-xs md:text-sm"
+                  active={source === filter.key}
+                  onclick={() => (source = filter.key as ActivitySourceFilter)}
+                  >{filter.label}</TabsTrigger
+                >{/each}</TabsList
+            >
+          </div>
+        {/if}
         {#if $calculationMutation.isError}<p
             class="text-sm font-medium text-coral"
           >
@@ -932,14 +1152,20 @@
           {#if filteredGroups.length === 0}<p
               class="p-8 text-center text-sm text-ink/50"
             >
-              {activityDataStatus.hasFailure
-                ? "部分資料目前無法顯示，請重試後再查看。"
-                : "沒有符合條件的活動。"}
+              {searching && invalidSearchDates
+                ? "請調整搜尋日期。"
+                : fillingSearchBatch
+                  ? "搜尋活動中…"
+                  : activityDataStatus.hasFailure
+                    ? "部分資料目前無法顯示，請重試後再查看。"
+                    : "沒有符合條件的活動。"}
             </p>{:else}{#each filteredGroups as group (group.dateKey)}<div
                 class="flex items-center justify-between bg-paper px-4 py-2.5 text-xs"
               >
                 <span class="font-semibold text-ink/80"
-                  >{formatActivityDateGroup(group.dateKey)}</span
+                  >{searching
+                    ? `${group.dateKey.slice(0, 4)} 年 `
+                    : ""}{formatActivityDateGroup(group.dateKey)}</span
                 ><span class="text-ink/45">{group.items.length} 筆</span>
               </div>
               <div class="divide-y divide-ink/8">
@@ -952,7 +1178,24 @@
                     onclick={() => openDetail(item)}
                   >
                     <div class="min-w-0 flex-1">
-                      <p class="truncate text-sm font-semibold">{item.title}</p>
+                      <p class="truncate text-sm font-semibold">
+                        <SearchHighlight
+                          text={item.title}
+                          query={submittedSearch}
+                        />
+                      </p>
+                      {#if searching && item.searchText
+                          ?.toLowerCase()
+                          .includes(submittedSearch.toLowerCase()) && !item.title
+                          .toLowerCase()
+                          .includes(submittedSearch.toLowerCase())}
+                        <p class="mt-1 truncate text-xs text-ink/55">
+                          <SearchHighlight
+                            text={item.searchText}
+                            query={submittedSearch}
+                          />
+                        </p>
+                      {/if}
                       {#if time}<p
                           class="mt-0.5 text-[11px] font-medium tabular-nums text-ink/45"
                         >
@@ -991,9 +1234,13 @@
           {#if filteredGroups.length === 0}<p
               class="p-8 text-center text-sm text-ink/50"
             >
-              {activityDataStatus.hasFailure
-                ? "部分資料目前無法顯示，請重試後再查看。"
-                : "沒有符合條件的活動。"}
+              {searching && invalidSearchDates
+                ? "請調整搜尋日期。"
+                : fillingSearchBatch
+                  ? "搜尋活動中…"
+                  : activityDataStatus.hasFailure
+                    ? "部分資料目前無法顯示，請重試後再查看。"
+                    : "沒有符合條件的活動。"}
             </p>{:else}<table
               class="w-full min-w-[760px] table-fixed text-left text-sm"
             >
@@ -1016,7 +1263,9 @@
                 class="flex min-w-[760px] items-center justify-between bg-paper px-5 py-2.5 text-xs"
               >
                 <span class="font-semibold text-ink/80"
-                  >{formatActivityDateGroup(group.dateKey)}</span
+                  >{searching
+                    ? `${group.dateKey.slice(0, 4)} 年 `
+                    : ""}{formatActivityDateGroup(group.dateKey)}</span
                 ><span class="text-ink/45">{group.items.length} 筆</span>
               </div>
               <table class="w-full min-w-[760px] table-fixed text-left text-sm">
@@ -1041,7 +1290,24 @@
                       role="button"
                       tabindex="0"
                       ><td class="min-w-0 px-5 py-3.5"
-                        ><p class="truncate font-semibold">{item.title}</p>
+                        ><p class="truncate font-semibold">
+                          <SearchHighlight
+                            text={item.title}
+                            query={submittedSearch}
+                          />
+                        </p>
+                        {#if searching && item.searchText
+                            ?.toLowerCase()
+                            .includes(submittedSearch.toLowerCase()) && !item.title
+                            .toLowerCase()
+                            .includes(submittedSearch.toLowerCase())}
+                          <p class="mt-1 truncate text-xs text-ink/55">
+                            <SearchHighlight
+                              text={item.searchText}
+                              query={submittedSearch}
+                            />
+                          </p>
+                        {/if}
                         {#if time}<p
                             class="mt-1 text-xs font-medium tabular-nums text-ink/45"
                           >
@@ -1088,6 +1354,26 @@
         </div>
       </CardContent>
     </Card>
+    {#if searching && $searchResults.hasNextPage && !invalidSearchDates}
+      <div
+        bind:this={searchSentinel}
+        data-testid="search-load-more"
+        class="flex min-h-11 justify-center items-center"
+      >
+        {#if $searchResults.isError}
+          <Button
+            variant="outline"
+            class="h-11"
+            disabled={$searchResults.isFetching}
+            onclick={() => $searchResults.fetchNextPage()}>重試載入更多</Button
+          >
+        {:else}
+          <p role="status" class="text-sm text-ink/55">
+            {$searchResults.isFetching ? "載入中…" : "往下捲動載入更多"}
+          </p>
+        {/if}
+      </div>
+    {/if}
     {#if detailItem}
       {@const amount = activityDisplayAmount(detailItem)}
       {@const transaction = transactionForItem(detailItem)}
@@ -1096,7 +1382,7 @@
         <button
           aria-label="關閉活動明細"
           class="absolute inset-0 hidden md:block"
-          onclick={() => (detailKey = null)}
+          onclick={closeDetail}
         ></button>
         <div
           aria-labelledby="activity-detail-title"
@@ -1106,7 +1392,7 @@
           use:swipeBack={{
             enabled:
               document.documentElement.classList.contains("is-standalone"),
-            onBack: () => (detailKey = null),
+            onBack: closeDetail,
           }}
         >
           <header
@@ -1116,7 +1402,7 @@
               <button
                 aria-label="返回活動列表"
                 class="flex size-11 shrink-0 items-center justify-center rounded-full text-ink/60 hover:bg-paper"
-                onclick={() => (detailKey = null)}
+                onclick={closeDetail}
                 ><ArrowLeft class="size-5 md:hidden" /><X
                   class="hidden size-5 md:block"
                 /></button

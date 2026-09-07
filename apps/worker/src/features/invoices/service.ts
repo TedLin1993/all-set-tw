@@ -25,8 +25,12 @@ export async function getInvoicePage(
   };
 }
 
-export async function getInvoicesRange(db: D1Database, range: MonthDateRange) {
-  const rows = await listInvoicesInRange(db, range);
+export async function getInvoicesRange(
+  db: D1Database,
+  range: MonthDateRange,
+  days?: string[],
+) {
+  const rows = await listInvoicesInRange(db, range, days);
   return rows.map(presentInvoiceSummary);
 }
 

@@ -44,10 +44,15 @@ export async function getBankPage(
   };
 }
 
-export async function getBankRange(db: D1Database, range: MonthDateRange) {
+export async function getBankRange(
+  db: D1Database,
+  range: MonthDateRange,
+  days?: string[],
+  accountRows?: Awaited<ReturnType<typeof listBankAccounts>>,
+) {
   const [accounts, transactions] = await Promise.all([
-    listBankAccounts(db),
-    listBankTransactionsInRange(db, range),
+    accountRows ? Promise.resolve(accountRows) : listBankAccounts(db),
+    listBankTransactionsInRange(db, range, days),
   ]);
   return {
     accounts: accounts.map(normalizeBankAccountDisplay),

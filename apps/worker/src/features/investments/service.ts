@@ -43,8 +43,9 @@ export async function getInvestmentTransactionPage(
 export async function getInvestmentTransactionsRange(
   db: D1Database,
   range: MonthDateRange,
+  days?: string[],
 ) {
-  const rows = await listInvestmentTransactionsInRange(db, range);
+  const rows = await listInvestmentTransactionsInRange(db, range, days);
   return rows.map(
     ({
       effectiveDate: _effectiveDate,
