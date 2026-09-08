@@ -72,7 +72,6 @@
     type ActivityFlowFilter,
     type ActivitySourceFilter,
   } from "./model/filter";
-  import { countPendingActivityItems } from "./model/pending";
   import {
     buildActivityCategorySlices,
     activityCashAmountTwd,
@@ -451,9 +450,6 @@
   );
   const currentMonth = currentActivityMonthKey();
   const selectedMonthLabel = $derived(`${Number(selectedMonth.slice(5))} 月`);
-  const pendingCount = $derived(
-    countPendingActivityItems(rawItems, selectedMonth),
-  );
   const cashFlow = $derived(
     cashFlowMonths.map((month) => {
       const items = rawItems.filter(
@@ -924,7 +920,7 @@
     {/if}
     {#if !searching}
       <div
-        class="hidden min-w-0 grid-cols-2 gap-3 md:grid md:grid-cols-4 md:gap-4"
+        class="hidden min-w-0 grid-cols-2 gap-3 md:grid md:grid-cols-3 md:gap-4"
       >
         <Card
           ><CardContent class="p-5"
@@ -974,17 +970,6 @@
             </p>
             <p class="mt-1 text-xs text-ink/45">
               {activitySummaryIncomplete ? "資料尚未完整載入" : "收入 − 支出"}
-            </p></CardContent
-          ></Card
-        >
-        <Card
-          ><CardContent class="p-5"
-            ><p class="text-xs font-semibold text-ink/50">待分類</p>
-            <p class="mt-2 text-2xl font-bold">
-              {activitySummaryIncomplete ? "—" : `${pendingCount} 筆`}
-            </p>
-            <p class="mt-1 text-xs text-ink/45">
-              {activitySummaryIncomplete ? "資料尚未完整載入" : "銀行交易"}
             </p></CardContent
           ></Card
         >
