@@ -44,6 +44,35 @@ describe("O-Bank App API connector", () => {
     );
   });
 
+  it("reads contract dates from the selected detail without replacing the summary identity", () => {
+    const summary = timeDepositResponse();
+    const before = parseObankData({
+      demandDeposits: {},
+      timeDeposits: summary,
+    });
+    const result = parseObankData({
+      demandDeposits: {},
+      timeDeposits: summary,
+      timeDepositDetails: [
+        {
+          rsData: {
+            tdDetail: {
+              tdAccountNumber: "98765432109876",
+              contractDate: "2026/09/07",
+              maturityDate: "2027/06/07",
+            },
+          },
+        },
+      ],
+    });
+    expect(result.bankAccounts[0]).toMatchObject({
+      sourceId: before.bankAccounts[0].sourceId,
+      openedDate: "2026-09-07",
+      maturityDate: "2027-06-07",
+    });
+    expect(result.bankTransactions).toEqual([]);
+  });
+
   it("requires complete credentials without including submitted secrets in errors", () => {
     return expect(
       prepareObankCaptcha({
@@ -59,136 +88,178 @@ describe("O-Bank App API connector", () => {
     );
   });
 
-  it("runs the public bootstrap, RSA login, read-only queries and logout", async () => {
-    const keyPair = forge.pki.rsa.generateKeyPair({ bits: 512, e: 0x10001 });
-    const publicPem = forge.pki.publicKeyToPem(keyPair.publicKey);
-    const calls: Array<{ url: string; body: string; headers: Headers }> = [];
-    const fetcher = vi.fn(async (input: RequestInfo | URL, init = {}) => {
-      const url = String(input);
-      const body = typeof init.body === "string" ? init.body : "";
-      const headers = new Headers(init.headers);
-      calls.push({ url, body, headers });
+  it.each([
+    "complete",
+    "empty",
+    "missing-list",
+    "wrong-detail",
+    "failed-detail",
+  ])(
+    "validates the full read-only query before reporting success: %s",
+    async (scenario) => {
+      const keyPair = forge.pki.rsa.generateKeyPair({ bits: 512, e: 0x10001 });
+      const publicPem = forge.pki.publicKeyToPem(keyPair.publicKey);
+      const calls: Array<{ url: string; body: string; headers: Headers }> = [];
+      const fetcher = vi.fn(async (input: RequestInfo | URL, init = {}) => {
+        const url = String(input);
+        const body = typeof init.body === "string" ? init.body : "";
+        const headers = new Headers(init.headers);
+        calls.push({ url, body, headers });
 
-      if (url.endsWith("/ChannelAdapter/getChannel")) {
-        return jsonResponse({ channel: "IB" });
-      }
-      if (url.endsWith("/oauth/token")) {
-        return jsonResponse({ access_token: "public-test-token" });
-      }
-      if (url.endsWith("/invalidateSession")) {
-        return jsonResponse({ statusCode: "0000" });
-      }
+        if (url.endsWith("/ChannelAdapter/getChannel")) {
+          return jsonResponse({ channel: "IB" });
+        }
+        if (url.endsWith("/oauth/token")) {
+          return jsonResponse({ access_token: "public-test-token" });
+        }
+        if (url.endsWith("/invalidateSession")) {
+          return jsonResponse({ statusCode: "0000" });
+        }
 
-      const procedure = url.split("/").at(-1);
-      const payload = body ? (JSON.parse(body) as unknown[]) : [];
-      if (procedure === "emptyLogin") {
-        return jsonResponse({ authStatus: "required", auth: "true" });
-      }
-      if (procedure === "submitCredentials") {
-        const metadata = payload[0] as { rqData?: { force?: string } };
-        return metadata.rqData?.force === "1"
-          ? jsonResponse({
-              authStatus: "complete",
-              token: "secure-token",
-            })
-          : jsonResponse({
-              authStatus: "required",
-              rsData: { resultType: "3" },
-              token: "duplicate-login-token",
+        const procedure = url.split("/").at(-1);
+        const payload = body ? (JSON.parse(body) as unknown[]) : [];
+        if (procedure === "emptyLogin") {
+          return jsonResponse({ authStatus: "required", auth: "true" });
+        }
+        if (procedure === "submitCredentials") {
+          const metadata = payload[0] as { rqData?: { force?: string } };
+          return metadata.rqData?.force === "1"
+            ? jsonResponse({
+                authStatus: "complete",
+                token: "secure-token",
+              })
+            : jsonResponse({
+                authStatus: "required",
+                rsData: { resultType: "3" },
+                token: "duplicate-login-token",
+              });
+        }
+
+        const resource = String(payload[0] ?? "");
+        if (resource === "common/CMN01003/010") {
+          return jsonResponse({
+            isSuccessful: true,
+            rsData: { params: { e2e: publicPem } },
+          });
+        }
+        if (resource === "common/CMN01001/010") {
+          return jsonResponse({
+            isSuccessful: true,
+            rsData: { img: "data:image/png;base64,AQID" },
+          });
+        }
+        if (
+          resource === "fco/FCO02001/012" ||
+          resource === "common/CMN01004/010"
+        ) {
+          return jsonResponse({ isSuccessful: true, rsData: {} });
+        }
+        if (resource === "common/EndToEnd/020") {
+          return jsonResponse({
+            isSuccessful: true,
+            rsData: { timeFactor: "1700000000000" },
+          });
+        }
+        if (resource === "fao/FAO01012/010") {
+          const metadata = payload[1] as { rqData?: { queryType?: string } };
+          return jsonResponse(
+            metadata.rqData?.queryType === "customDisplay"
+              ? transactionResponse()
+              : demandDepositResponse(),
+          );
+        }
+        if (resource === "fao/FAO01022/020") {
+          const metadata = payload[1] as {
+            rqData?: { tdAccountNumber?: string };
+          };
+          if (scenario === "empty")
+            return jsonResponse({
+              isSuccessful: true,
+              rsData: { repeats: [] },
             });
-      }
-
-      const resource = String(payload[0] ?? "");
-      if (resource === "common/CMN01003/010") {
-        return jsonResponse({
-          isSuccessful: true,
-          rsData: { params: { e2e: publicPem } },
-        });
-      }
-      if (resource === "common/CMN01001/010") {
-        return jsonResponse({
-          isSuccessful: true,
-          rsData: { img: "data:image/png;base64,AQID" },
-        });
-      }
-      if (
-        resource === "fco/FCO02001/012" ||
-        resource === "common/CMN01004/010"
-      ) {
-        return jsonResponse({ isSuccessful: true, rsData: {} });
-      }
-      if (resource === "common/EndToEnd/020") {
-        return jsonResponse({
-          isSuccessful: true,
-          rsData: { timeFactor: "1700000000000" },
-        });
-      }
-      if (resource === "fao/FAO01012/010") {
-        const metadata = payload[1] as { rqData?: { queryType?: string } };
-        return jsonResponse(
-          metadata.rqData?.queryType === "customDisplay"
-            ? transactionResponse()
-            : demandDepositResponse(),
-        );
-      }
-      if (resource === "fao/FAO01022/020") {
-        return jsonResponse(timeDepositResponse());
-      }
-      throw new Error(`Unexpected O-Bank test request: ${url} ${body}`);
-    });
-
-    const connector = createObankConnector(fetcher, async () => "A1b2");
-    const result = await connector.sync(
-      {
-        userId: "A123456789",
-        account: "test-account",
-        password: "test-password",
-      },
-      undefined,
-      { forceLogin: true },
-    );
-
-    expect(result.bankAccounts).toHaveLength(2);
-    expect(result.bankTransactions).toHaveLength(1);
-    expect(calls.some((call) => call.url.endsWith("/invalidateSession"))).toBe(
-      true,
-    );
-    const adapterCalls = calls.filter((call) =>
-      call.url.includes("AuthenticationAdapter"),
-    );
-    expect(
-      adapterCalls.every((call) =>
-        /^[0-9a-f]{32}$/.test(call.headers.get("checksum") ?? ""),
-      ),
-    ).toBe(true);
-    expect(
-      adapterCalls.every((call) =>
-        call.headers.get("authorization")?.startsWith("Bearer "),
-      ),
-    ).toBe(true);
-    expect(calls.map((call) => call.body).join("\n")).not.toContain(
-      "test-password",
-    );
-    expect(calls.map((call) => call.body).join("\n")).not.toContain(
-      "test-account",
-    );
-    await expect(
-      connector.sync({
-        userId: "A123456789",
-        account: "test-account",
-        password: "test-password",
-      }),
-    ).rejects.toBeInstanceOf(ObankMultipleLoginError);
-    const loginForces = calls
-      .filter((call) => call.url.endsWith("/submitCredentials"))
-      .map((call) => {
-        const payload = JSON.parse(call.body) as [
-          { rqData?: { force?: string } },
-        ];
-        return payload[0]?.rqData?.force;
+          if (scenario === "missing-list")
+            return jsonResponse({ isSuccessful: true, rsData: {} });
+          if (metadata.rqData?.tdAccountNumber && scenario === "failed-detail")
+            return jsonResponse({ isSuccessful: false });
+          const response = timeDepositResponse();
+          if (metadata.rqData?.tdAccountNumber && scenario === "wrong-detail")
+            response.rsData.repeats[0].tdDetail.tdAccountNumber = "wrong";
+          return jsonResponse({
+            ...response,
+            rsData: {
+              ...response.rsData,
+              tdDetail: response.rsData.repeats[0].tdDetail,
+            },
+          });
+        }
+        throw new Error(`Unexpected O-Bank test request: ${url} ${body}`);
       });
-    expect(loginForces).toEqual(["0", "1", "0"]);
-  });
+
+      const connector = createObankConnector(fetcher, async () => "A1b2");
+      const pending = connector.sync(
+        {
+          userId: "A123456789",
+          account: "test-account",
+          password: "test-password",
+        },
+        undefined,
+        { forceLogin: true },
+      );
+
+      if (!["complete", "empty"].includes(scenario)) {
+        await expect(pending).rejects.toThrow();
+        return;
+      }
+      const result = await pending;
+      expect(result.timeDepositsComplete).toBe(true);
+      expect(result.bankAccounts).toHaveLength(scenario === "empty" ? 1 : 2);
+      expect(result.bankTransactions).toHaveLength(1);
+      const tdRequests = calls.filter((call) =>
+        call.body.includes("fao/FAO01022/020"),
+      );
+      expect(tdRequests).toHaveLength(scenario === "empty" ? 1 : 2);
+      if (scenario === "complete")
+        expect(tdRequests[1].body).toContain("98765432109876");
+      expect(
+        calls.some((call) => call.url.endsWith("/invalidateSession")),
+      ).toBe(true);
+      const adapterCalls = calls.filter((call) =>
+        call.url.includes("AuthenticationAdapter"),
+      );
+      expect(
+        adapterCalls.every((call) =>
+          /^[0-9a-f]{32}$/.test(call.headers.get("checksum") ?? ""),
+        ),
+      ).toBe(true);
+      expect(
+        adapterCalls.every((call) =>
+          call.headers.get("authorization")?.startsWith("Bearer "),
+        ),
+      ).toBe(true);
+      expect(calls.map((call) => call.body).join("\n")).not.toContain(
+        "test-password",
+      );
+      expect(calls.map((call) => call.body).join("\n")).not.toContain(
+        "test-account",
+      );
+      await expect(
+        connector.sync({
+          userId: "A123456789",
+          account: "test-account",
+          password: "test-password",
+        }),
+      ).rejects.toBeInstanceOf(ObankMultipleLoginError);
+      const loginForces = calls
+        .filter((call) => call.url.endsWith("/submitCredentials"))
+        .map((call) => {
+          const payload = JSON.parse(call.body) as [
+            { rqData?: { force?: string } },
+          ];
+          return payload[0]?.rqData?.force;
+        });
+      expect(loginForces).toEqual(["0", "1", "0"]);
+    },
+  );
 });
 
 function demandDepositResponse() {

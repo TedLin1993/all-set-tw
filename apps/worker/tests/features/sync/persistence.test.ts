@@ -1,3 +1,10 @@
+import { prepareObankTimeDepositWrite } from "../../../src/features/sync/obank-time-deposits";
+import {
+  bankAccountRecord as mapAccount,
+  bankBalanceSnapshotRecord as mapBalance,
+} from "../../../src/features/sync/record-mapper";
+import { listBankAccounts } from "../../../src/features/bank/repository";
+import { calculateBankDepositValue } from "../../../src/features/net-worth/repository";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
@@ -29,6 +36,10 @@ class SqliteStatement {
 
   async run() {
     return this.execute();
+  }
+
+  async all<T>() {
+    return this.execute() as unknown as { results: T[] };
   }
 
   async first<T>() {
@@ -881,5 +892,75 @@ describe("staged sync persistence", () => {
         )
         .get(),
     ).toMatchObject({ cursor: "old-cursor" });
+  });
+});
+
+describe("O-Bank complete deposit snapshots", () => {
+  it("retires missing deposits atomically, preserves history and reactivates a returned account", async () => {
+    const sqlite = createDb();
+    const db = sqlite as unknown as D1Database;
+    const before = "2026-09-01T02:06:05Z";
+    const now = "2026-09-07T13:31:07Z";
+    const account = {
+      sourceId: "td",
+      accountType: "time_deposit" as const,
+      currency: "TWD",
+      openedDate: "2026-01-01",
+      maturityDate: "2026-09-05",
+    };
+    const balance = {
+      accountId: "td",
+      sourceId: "td:first",
+      balance: 30550,
+      currency: "TWD",
+      asOfAt: before,
+    };
+    await persistStagedSyncWrite(db, {
+      records: [
+        mapAccount("obank", account, before),
+        mapBalance("obank", balance, before),
+      ],
+    });
+    const result = {
+      records: [],
+      bankAccounts: [],
+      timeDepositsComplete: true as const,
+    };
+    const write = await prepareObankTimeDepositWrite(db, result, now);
+    // A failure in the same batch must roll back both zero balances and status.
+    await expect(
+      persistStagedSyncWrite(db, {
+        ...write,
+        finalizeStatements: [
+          db.prepare("INSERT INTO missing_table VALUES (1)"),
+        ],
+      }),
+    ).rejects.toThrow();
+    expect(await listBankAccounts(db)).toHaveLength(1);
+    expect(await calculateBankDepositValue(db, "2026-09-07")).toBe(30550);
+    await persistStagedSyncWrite(db, write);
+    expect(await listBankAccounts(db)).toEqual([]);
+    expect(await calculateBankDepositValue(db, "2026-09-01")).toBe(30550);
+    expect(await calculateBankDepositValue(db, "2026-09-07")).toBe(0);
+    expect(
+      (await prepareObankTimeDepositWrite(db, result, now)).records,
+    ).toEqual([]);
+    await persistStagedSyncWrite(db, {
+      records: [
+        mapAccount("obank", account, now),
+        mapBalance(
+          "obank",
+          {
+            ...balance,
+            sourceId: "td:returned",
+            asOfAt: "2026-09-08T01:00:00Z",
+          },
+          now,
+        ),
+      ],
+    });
+    expect(await listBankAccounts(db)).toMatchObject([
+      { openedDate: "2026-01-01", maturityDate: "2026-09-05", balance: 30550 },
+    ]);
   });
 });

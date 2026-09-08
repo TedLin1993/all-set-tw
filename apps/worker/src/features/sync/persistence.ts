@@ -101,6 +101,9 @@ const ENTITY_CONFIG: Record<SyncEntityType, EntityConfig> = {
       "account_type",
       "currency",
       "credit_limit",
+      "opened_date",
+      "maturity_date",
+      "inactive_at",
       "bank_code",
       "account_last4",
       "raw_payload",
@@ -114,6 +117,9 @@ const ENTITY_CONFIG: Record<SyncEntityType, EntityConfig> = {
       "account_type",
       "currency",
       "credit_limit",
+      "opened_date",
+      "maturity_date",
+      "inactive_at",
       "bank_code",
       "account_last4",
       "raw_payload",
@@ -167,6 +173,7 @@ const ENTITY_CONFIG: Record<SyncEntityType, EntityConfig> = {
       "description",
       "counterparty",
       "status",
+      "transfer_peer_id",
       "raw_payload",
       "created_at",
       "updated_at",
@@ -180,6 +187,7 @@ const ENTITY_CONFIG: Record<SyncEntityType, EntityConfig> = {
       "description",
       "counterparty",
       "status",
+      "transfer_peer_id",
       "raw_payload",
       "updated_at",
     ],
@@ -490,6 +498,8 @@ function promotionStatement(
       }
       if (entityType !== "bank_transaction")
         return `${column} = excluded.${column}`;
+      if (column === "transfer_peer_id")
+        return "transfer_peer_id = COALESCE(excluded.transfer_peer_id, bank_transactions.transfer_peer_id)";
       if (column === "status")
         return "status = CASE WHEN bank_transactions.status = 'posted' OR excluded.status = 'posted' THEN 'posted' ELSE 'pending' END";
       if (column === "authorized_at")

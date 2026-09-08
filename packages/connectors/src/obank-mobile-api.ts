@@ -162,7 +162,7 @@ export function createObankConnector(
       config: ObankConfig,
       _cursor?: string,
       options: ObankSyncOptions = {},
-    ): Promise<SyncResult<never>> {
+    ): Promise<SyncResult<never> & { timeDepositsComplete: true }> {
       const credentials = requireObankCredentials(config);
       let session: ObankMobileFirstSession;
       let captcha = config.captcha;
@@ -211,6 +211,10 @@ export function createObankConnector(
           { page: "td", linkFromTxnId: "FAO01012_010" },
           "FAO01022",
         );
+        const timeDepositDetails = await fetchTimeDepositDetails(
+          session,
+          timeDeposits,
+        );
         const transactionResponses = await fetchDemandDepositTransactions(
           session,
           demandDeposits,
@@ -218,9 +222,18 @@ export function createObankConnector(
         const payloads: ObankPayloads = {
           demandDeposits,
           timeDeposits,
+          timeDepositDetails,
           transactionResponses,
         };
         const parsed = parseObankData(payloads, new Date());
+        if (
+          parsed.bankAccounts.filter(
+            (account) => account.accountType === "time_deposit",
+          ).length !== timeDepositDetails.length
+        )
+          throw new ObankProtocolError(
+            "王道銀行定存清單無法完整對應，未更新定存狀態。",
+          );
         if (
           parsed.bankAccounts.length === 0 ||
           parsed.bankBalanceSnapshots.length === 0
@@ -233,6 +246,7 @@ export function createObankConnector(
         return {
           records: [],
           ...parsed,
+          timeDepositsComplete: true,
           cursor: JSON.stringify({ syncedAt: new Date().toISOString() }),
         };
       } catch (error) {
@@ -555,6 +569,48 @@ class ObankMobileFirstSession {
       "; ",
     );
   }
+}
+
+// The public FAO01012 controller uses repeats as the complete account selector,
+// then requests tdDetail for each selected tdAccountNumber (no pagination).
+async function fetchTimeDepositDetails(
+  session: ObankMobileFirstSession,
+  payload: JsonRecord,
+) {
+  const data = recordAt(payload, "rsData");
+  if (!Array.isArray(data.repeats))
+    throw new ObankProtocolError(
+      "王道銀行定存清單格式無法辨識，未更新定存狀態。",
+    );
+  const details: JsonRecord[] = [];
+  const seen = new Set<string>();
+  for (const value of data.repeats) {
+    if (!isRecord(value))
+      throw new ObankProtocolError("王道銀行定存清單資料不完整。");
+    const summary = isRecord(value.tdDetail) ? value.tdDetail : value;
+    const number = stringValue(summary.tdAccountNumber);
+    if (!number || seen.has(number))
+      throw new ObankProtocolError("王道銀行定存識別資料不完整。");
+    seen.add(number);
+    const response = await session.secureResource(
+      TIME_DEPOSIT_RESOURCE,
+      { tdAccountNumber: number, linkFromTxnId: "FAO01012_010" },
+      "FAO01022",
+    );
+    const detail = recordAt(recordAt(response, "rsData"), "tdDetail");
+    if (detail.tdAccountNumber !== number)
+      throw new ObankProtocolError(
+        "王道銀行定存明細與帳戶不符，未更新定存狀態。",
+      );
+    const parsed = parseObankData({
+      demandDeposits: {},
+      timeDeposits: { repeats: [{ ...summary, ...detail }] },
+    });
+    if (parsed.bankAccounts.length !== 1)
+      throw new ObankProtocolError("王道銀行定存明細無法完整解析。");
+    details.push(response);
+  }
+  return details;
 }
 
 async function fetchDemandDepositTransactions(

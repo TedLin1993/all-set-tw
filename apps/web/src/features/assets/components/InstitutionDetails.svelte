@@ -88,6 +88,16 @@
               <p class="break-words text-sm font-semibold">
                 {account.accountName ?? formatBankAccountName(account)}
               </p>
+              {#if account.accountType === "time_deposit"}
+                <p class="mt-1 text-xs text-muted-foreground">
+                  起息日 {account.openedDate
+                    ? formatDate(account.openedDate)
+                    : "尚未取得"}
+                  · 到期日 {account.maturityDate
+                    ? formatDate(account.maturityDate)
+                    : "尚未取得"}
+                </p>
+              {/if}
               <p class="mt-1 text-xs text-muted-foreground">
                 {account.currency}{account.asOfAt
                   ? ` · 更新 ${formatDate(account.asOfAt)}`

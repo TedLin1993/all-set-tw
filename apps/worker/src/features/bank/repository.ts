@@ -22,6 +22,7 @@ export type BankTransactionPageRow = {
   effectiveDate: string;
   updatedAt: string;
   calculationPreference: number | null;
+  transferPeerId?: string | null;
 };
 
 export type CreditCardBillPageCursor = {
@@ -41,6 +42,7 @@ const BANK_TRANSACTION_SELECT = `SELECT
       account.bank_code AS bankCode,
       account.account_last4 AS accountLast4,
       txn.source_id AS sourceId,
+      txn.transfer_peer_id AS transferPeerId,
       txn.posted_date AS postedDate,
       txn.authorized_at AS authorizedAt,
       txn.amount,
@@ -72,6 +74,8 @@ export async function listBankAccounts(db: D1Database) {
       account.account_name AS accountName,
       account.account_type AS accountType,
       account.currency,
+      account.opened_date AS openedDate,
+      account.maturity_date AS maturityDate,
       account.bank_code AS bankCode,
       account.account_last4 AS accountLast4,
       balance.balance AS balance,
@@ -88,7 +92,7 @@ export async function listBankAccounts(db: D1Database) {
         ORDER BY latest.as_of_at DESC, latest.updated_at DESC
         LIMIT 1
       )
-    WHERE account.canonical_account_id IS NULL
+    WHERE account.canonical_account_id IS NULL AND account.inactive_at IS NULL
     ORDER BY account.institution_name ASC, account.account_name ASC, account.source_id ASC`,
     )
     .all<Record<string, unknown>>();

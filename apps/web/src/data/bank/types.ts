@@ -15,6 +15,8 @@ export interface BankAccountRow {
   paymentDueDate?: string;
   statementClosingDate?: string;
   asOfAt?: string;
+  openedDate?: string;
+  maturityDate?: string;
 }
 
 export interface BankTransactionRow {

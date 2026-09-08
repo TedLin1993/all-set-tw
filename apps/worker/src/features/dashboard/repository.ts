@@ -17,7 +17,7 @@ export async function loadDashboardSummary(db: D1Database) {
         .first<{ count: number; total: number }>(),
       db
         .prepare(
-          "SELECT COUNT(*) AS count FROM bank_accounts WHERE canonical_account_id IS NULL",
+          "SELECT COUNT(*) AS count FROM bank_accounts WHERE canonical_account_id IS NULL AND inactive_at IS NULL",
         )
         .first<{ count: number }>(),
       db
@@ -33,7 +33,7 @@ export async function loadDashboardSummary(db: D1Database) {
            LIMIT 1
          )
          FROM bank_accounts account
-         WHERE account.canonical_account_id IS NULL
+         WHERE account.canonical_account_id IS NULL AND account.inactive_at IS NULL
        )`,
         )
         .first<{ total: number }>(),
