@@ -196,3 +196,33 @@ describe("bank transaction presentation", () => {
     });
   });
 });
+
+it("keeps derived deposit principal excluded when the demand leg is manually classified", async () => {
+  const demand = transaction({
+    id: "demand",
+    accountId: "demand-account",
+    amount: -52736,
+  });
+  const deposit = transaction({
+    id: "deposit",
+    accountId: "deposit-account",
+    accountType: "time_deposit",
+    amount: 52736,
+    transferPeerId: "demand",
+  });
+  const range = { from: "2026-08-01", to: "2026-09-01" };
+  const overrides = [
+    { target_id: "demand", category_id: "other", label: "未分類" },
+  ];
+  const result = await getBankRange(
+    createDb([deposit], [deposit, demand], overrides),
+    range,
+  );
+  expect(result.transactions[0].excludedFromCalculation).toBe(true);
+  const included = { ...deposit, calculationPreference: 0 };
+  const explicit = await getBankRange(
+    createDb([included], [included, demand], overrides),
+    range,
+  );
+  expect(explicit.transactions[0].excludedFromCalculation).toBe(false);
+});

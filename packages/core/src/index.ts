@@ -125,6 +125,9 @@ export interface BankAccount {
   accountName?: string;
   accountType?: BankAccountType;
   currency: string;
+  openedDate?: string;
+  maturityDate?: string;
+  inactiveAt?: string;
   creditLimit?: number;
   raw?: unknown;
 }
@@ -148,6 +151,7 @@ export interface BankBalanceSnapshot {
 export type BankTransactionStatus = "pending" | "posted";
 
 export interface BankTransaction {
+  transferPeer?: { accountId: string; sourceId: string };
   id: string;
   connectorId: string;
   accountId: string;

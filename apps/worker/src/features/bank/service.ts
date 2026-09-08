@@ -130,6 +130,7 @@ async function presentBankTransactions(
       return {
         ...normalizeBankTransactionDisplay(transaction),
         excludedFromCalculation: resolveCalculationExclusion({
+          transferPeerId: transaction.transferPeerId,
           accountType: transaction.accountType,
           description: transaction.description,
           counterparty: transaction.counterparty,

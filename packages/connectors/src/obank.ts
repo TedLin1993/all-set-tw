@@ -28,6 +28,7 @@ export type ObankPayloads = {
   demandDeposits: unknown;
   timeDeposits?: unknown;
   transactionResponses?: unknown[];
+  timeDepositDetails?: unknown[];
 };
 
 export type ObankData = {
@@ -47,6 +48,8 @@ type ParsedAccount = {
   currency: string;
   balance: number;
   availableBalance?: number;
+  openedDate?: string;
+  maturityDate?: string;
 };
 
 export function parseObankData(
@@ -54,7 +57,10 @@ export function parseObankData(
   now = new Date(),
 ): ObankData {
   const demandAccounts = parseDemandDepositAccounts(payloads.demandDeposits);
-  const timeDepositAccounts = parseTimeDepositAccounts(payloads.timeDeposits);
+  const timeDepositAccounts = parseTimeDepositAccounts(
+    payloads.timeDeposits,
+    payloads.timeDepositDetails,
+  );
   const accounts = dedupeBySourceId([
     ...demandAccounts,
     ...timeDepositAccounts,
@@ -82,6 +88,8 @@ export function parseObankData(
           ? "王道銀行定存"
           : "王道銀行存款帳戶"),
     accountType: account.type,
+    openedDate: account.openedDate,
+    maturityDate: account.maturityDate,
     currency: account.currency,
     raw: sanitizeAccount(account),
   }));
@@ -192,7 +200,10 @@ function parseDemandDepositAccounts(payload: unknown): ParsedAccount[] {
   });
 }
 
-function parseTimeDepositAccounts(payload: unknown): ParsedAccount[] {
+function parseTimeDepositAccounts(
+  payload: unknown,
+  details: unknown[] = [],
+): ParsedAccount[] {
   const response = responseData(payload);
   const repeats = firstArray(response, [
     "repeats",
@@ -202,54 +213,75 @@ function parseTimeDepositAccounts(payload: unknown): ParsedAccount[] {
   ]);
   return repeats.flatMap((value) => {
     if (!isRecord(value)) return [];
-    const detail = isRecord(value.tdDetail) ? value.tdDetail : value;
-    const externalId = firstString(detail, [
-      "tdAccountItemNo",
-      "accountItemNo",
-      "tdAccountNumber",
-      "accountNo",
-    ]);
-    const accountNumber = firstString(detail, [
-      "tdAccountNumber",
-      "accountNo",
-      "displayAccountNo",
-    ]);
-    const currency = normalizeCurrency(
-      firstString(detail, ["currency", "curr", "curry"]),
-    );
-    const balance = firstNumber(detail, [
-      "workingBalance",
-      "principalAmount",
-      "amount",
-      "displayWorkingBalance",
-      "displayAmount",
-    ]);
-    if (!externalId || !currency || balance == null) return [];
-    const digits = digitsOnly(accountNumber || externalId);
-    return [
-      {
-        sourceId: accountSourceId(
-          "time-deposit",
-          externalId,
-          digits.slice(-4),
-          currency,
-        ),
-        externalId,
-        last4: digits.slice(-4) || undefined,
-        last5: digits.slice(-5) || undefined,
-        name:
-          firstString(detail, [
-            "productName",
-            "depositName",
-            "accountName",
-            "displayProductType",
-          ]) || "王道銀行定存",
-        type: "time_deposit" as const,
-        currency,
-        balance,
-      },
-    ];
+    const summary = isRecord(value.tdDetail) ? value.tdDetail : value;
+    const detail = details
+      .map(responseData)
+      .map((row) => row.tdDetail)
+      .find(
+        (row) =>
+          isRecord(row) && row.tdAccountNumber === summary.tdAccountNumber,
+      );
+    // Keep the existing selector identity and balance; detail supplies dates only.
+    const merged = isRecord(detail)
+      ? {
+          ...summary,
+          contractDate: detail.contractDate ?? summary.contractDate,
+          maturityDate: detail.maturityDate ?? summary.maturityDate,
+        }
+      : summary;
+    return parseTimeDepositAccount(merged);
   });
+}
+
+function parseTimeDepositAccount(detail: JsonRecord): ParsedAccount[] {
+  const externalId = firstString(detail, [
+    "tdAccountItemNo",
+    "accountItemNo",
+    "tdAccountNumber",
+    "accountNo",
+  ]);
+  const accountNumber = firstString(detail, [
+    "tdAccountNumber",
+    "accountNo",
+    "displayAccountNo",
+  ]);
+  const currency = normalizeCurrency(
+    firstString(detail, ["currency", "curr", "curry"]),
+  );
+  const balance = firstNumber(detail, [
+    "workingBalance",
+    "principalAmount",
+    "amount",
+    "displayWorkingBalance",
+    "displayAmount",
+  ]);
+  if (!externalId || !currency || balance == null) return [];
+  const digits = digitsOnly(accountNumber || externalId);
+  return [
+    {
+      sourceId: accountSourceId(
+        "time-deposit",
+        externalId,
+        digits.slice(-4),
+        currency,
+      ),
+      externalId,
+      last4: digits.slice(-4) || undefined,
+      last5: digits.slice(-5) || undefined,
+      name:
+        firstString(detail, [
+          "productName",
+          "depositName",
+          "accountName",
+          "displayProductType",
+        ]) || "王道銀行定存",
+      type: "time_deposit" as const,
+      openedDate: normalizeDate(firstString(detail, ["contractDate"])),
+      maturityDate: normalizeDate(firstString(detail, ["maturityDate"])),
+      currency,
+      balance,
+    },
+  ];
 }
 
 function parseTransactionResponse(

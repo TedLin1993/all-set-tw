@@ -4,6 +4,7 @@ import {
 } from "./calculation-repository";
 
 export type CalculationTransaction = {
+  transferPeerId?: string | null;
   accountType?: string | null;
   description?: string | null;
   counterparty?: string | null;
@@ -27,6 +28,8 @@ function calculationText(transaction: CalculationTransaction) {
 export function isDefaultCalculationExcluded(
   transaction: CalculationTransaction,
 ) {
+  if (transaction.accountType === "time_deposit" && transaction.transferPeerId)
+    return true;
   const { compact, words } = calculationText(transaction);
   const paddedWords = ` ${words} `;
 

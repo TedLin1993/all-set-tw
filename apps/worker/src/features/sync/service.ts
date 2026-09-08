@@ -1,3 +1,4 @@
+import { prepareObankTimeDepositWrite } from "./obank-time-deposits";
 import {
   EInvoiceProtocolUnavailableError,
   createCtbcConnector,
@@ -1149,7 +1150,13 @@ export async function syncObank(
   );
 
   const now = new Date().toISOString();
+  const timeDepositWrite = await prepareObankTimeDepositWrite(
+    env.DB,
+    result,
+    now,
+  );
   const records: SyncWriteRecord[] = [
+    ...timeDepositWrite.records,
     ...bankAccounts.map((account) =>
       bankAccountRecord(connectorId, account, now),
     ),
@@ -1185,10 +1192,12 @@ export async function syncObank(
 
   const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
-    afterPromoteStatements:
-      bankAccounts.length > 0
+    afterPromoteStatements: [
+      ...timeDepositWrite.afterPromoteStatements,
+      ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB)]
-        : [],
+        : []),
+    ],
     finalizeStatements,
   });
   if (bankBalanceSnapshots.length > 0) {
@@ -1199,6 +1208,7 @@ export async function syncObank(
     connectorId,
     scope,
     records:
+      timeDepositWrite.records.length +
       bankAccounts.length +
       bankBalanceSnapshots.length +
       bankTransactions.length,
