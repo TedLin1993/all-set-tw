@@ -109,7 +109,7 @@ export async function listBankTransactions(
     : "";
   const statement = db.prepare(
     `${BANK_TRANSACTION_SELECT}
-    WHERE account.canonical_account_id IS NULL
+    WHERE account.canonical_account_id IS NULL AND (txn.status <> 'pending' OR txn.matched_transaction_id IS NULL)
     ${cursorClause}
     ORDER BY txn.effective_date DESC, txn.updated_at DESC, txn.id DESC
     LIMIT ?`,
@@ -130,7 +130,7 @@ export async function listBankTransactionsInRange(
   const rows = await db
     .prepare(
       `${BANK_TRANSACTION_SELECT}
-       WHERE account.canonical_account_id IS NULL
+       WHERE account.canonical_account_id IS NULL AND (txn.status <> 'pending' OR txn.matched_transaction_id IS NULL)
          AND ${days ? `(${BANK_TRANSACTION_DAY}) IN (SELECT value FROM json_each(?))` : `(${BANK_TRANSACTION_DAY}) >= ? AND (${BANK_TRANSACTION_DAY}) < ?`}
        ORDER BY txn.effective_date DESC, txn.updated_at DESC, txn.id DESC`,
     )
@@ -177,7 +177,7 @@ export async function listBankTransactionsForTransferMatching(
   const rows = await db
     .prepare(
       `${BANK_TRANSACTION_SELECT}
-       WHERE account.canonical_account_id IS NULL
+       WHERE account.canonical_account_id IS NULL AND (txn.status <> 'pending' OR txn.matched_transaction_id IS NULL)
          AND txn.status = 'posted'
          AND txn.amount <> 0
          AND ABS(txn.amount) IN (

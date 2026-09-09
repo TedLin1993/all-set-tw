@@ -4,7 +4,9 @@ export async function bankTransactionExists(
 ) {
   return Boolean(
     await db
-      .prepare("SELECT id FROM bank_transactions WHERE id = ?")
+      .prepare(
+        "SELECT id FROM bank_transactions WHERE id = ? AND (status <> 'pending' OR matched_transaction_id IS NULL)",
+      )
       .bind(transactionId)
       .first<{ id: string }>(),
   );

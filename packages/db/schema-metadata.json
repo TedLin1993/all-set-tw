@@ -73,7 +73,8 @@
         "updated_at": "交易最後更新的時間。",
         "effective_date": "由 posted_date 優先、authorized_at 備援產生的查詢排序日期。",
         "status": "交易狀態，目前限制為 pending 或 posted。",
-        "transfer_peer_id": "定存衍生活動所配對之活存交易的系統識別碼，供本金轉帳一對一配對；沒有明確配對時為 NULL。"
+        "transfer_peer_id": "定存衍生活動所配對之活存交易的系統識別碼，供本金轉帳一對一配對；沒有明確配對時為 NULL。",
+        "matched_transaction_id": "授權對應的已入帳交易 ID，一對一；僅隱藏 pending 且已配對的交易，同 ID 入帳可指向自身。"
       }
     },
     "classification_categories": {

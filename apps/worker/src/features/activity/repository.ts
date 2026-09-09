@@ -30,6 +30,10 @@ export async function listInvoiceTransactionPreferences(db: D1Database) {
         created_at AS createdAt,
         updated_at AS updatedAt
       FROM invoice_transaction_preferences
+      WHERE transaction_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM bank_transactions txn
+        WHERE txn.id = transaction_id AND txn.status = 'pending' AND txn.matched_transaction_id IS NOT NULL
+      )
       ORDER BY updated_at DESC, invoice_id ASC`,
     )
     .all<InvoiceTransactionPreferenceRow>();
@@ -62,7 +66,7 @@ export async function findMappingTransaction(
         account.account_type AS accountType
       FROM bank_transactions bank_tx
       JOIN bank_accounts account ON account.id = bank_tx.account_id
-      WHERE bank_tx.id = ?`,
+      WHERE bank_tx.id = ? AND (bank_tx.status <> 'pending' OR bank_tx.matched_transaction_id IS NULL)`,
     )
     .bind(transactionId)
     .first<MappingTransactionRow>();

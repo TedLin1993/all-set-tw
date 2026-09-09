@@ -46,6 +46,7 @@ type SinopacApiPayloads = {
 };
 type Scraped = {
   pendingSnapshotComplete?: boolean;
+  cardAuthorizations?: Array<Omit<BankTransaction, "id" | "connectorId">>;
   bankAccounts: Array<Omit<BankAccount, "id" | "connectorId">>;
   bankBalanceSnapshots: Array<Omit<BankBalanceSnapshot, "id" | "connectorId">>;
   bankTransactions: Array<Omit<BankTransaction, "id" | "connectorId">>;
@@ -94,7 +95,10 @@ export function createSinopacConnector(
     async sync(
       config: SinopacConfig,
       _cursor?: string,
-    ): Promise<SyncResult<never> & { pendingSnapshotComplete?: boolean }> {
+    ): Promise<
+      SyncResult<never> &
+        Pick<Scraped, "pendingSnapshotComplete" | "cardAuthorizations">
+    > {
       let sessionCookies = config.sessionCookies;
       let browserInstance: Browser | undefined;
       let verifiedThisRun = false;
@@ -836,10 +840,12 @@ export function parseSinopacCardData(
   }
   const summary = parseSummary(payloads.summary);
   const bills = parseBills(payloads.bills, now);
-  const transactions =
+  const sinoCard =
     payloads.outstanding != null || payloads.latest != null
       ? parseSinoCardTransactions(payloads.latest, payloads.outstanding)
-      : parseTransactions(payloads.unbilled);
+      : undefined;
+  const transactions =
+    sinoCard?.transactions ?? parseTransactions(payloads.unbilled);
   const latestTwdBill = bills
     .filter((bill) => bill.currency === "TWD")
     .sort((left, right) =>
@@ -944,6 +950,10 @@ export function parseSinopacCardData(
   }
 
   return {
+    cardAuthorizations: sinoCard?.authorizations.map((transaction) => ({
+      ...transaction,
+      accountId: accountIdForCurrency(transaction.currency),
+    })),
     pendingSnapshotComplete:
       payloads.latest != null && payloads.outstanding != null,
     bankAccounts,
@@ -1233,9 +1243,14 @@ function parseSinoCardTransactions(
     return occurrence > (postedCounts.get(transaction.matchKey) ?? 0);
   });
 
-  return [...upgradedPostedTransactions, ...unmatchedPending].map(
-    ({ matchKey: _matchKey, ...transaction }) => transaction,
-  );
+  return {
+    transactions: [...upgradedPostedTransactions, ...unmatchedPending].map(
+      ({ matchKey: _matchKey, ...transaction }) => transaction,
+    ),
+    authorizations: pendingTransactions.map(
+      ({ matchKey: _matchKey, ...transaction }) => transaction,
+    ),
+  };
 }
 
 function groupSinoCardTransactions(

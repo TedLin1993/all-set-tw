@@ -29,6 +29,19 @@ export const ACTIVITY_CATEGORY_COLORS = [
   "#68747b",
 ];
 
+export function activityAmountTwd(
+  item: ActivityItem,
+  rates: Record<string, number>,
+): number | undefined {
+  const amount = activityDisplayAmount(item);
+  if (amount == null) return undefined;
+  if (item.currency === "TWD") return amount;
+  const rate = rates[item.currency];
+  return rate != null && Number.isFinite(rate) && rate > 0
+    ? amount * rate
+    : undefined;
+}
+
 export function activityCashAmountTwd(
   item: ActivityItem,
   rates: Record<string, number>,
@@ -41,8 +54,7 @@ export function activityCashAmountTwd(
       item.source !== "invoice")
   )
     return 0;
-  const rate = item.currency === "TWD" ? 1 : (rates[item.currency] ?? 0);
-  return (activityDisplayAmount(item) ?? 0) * rate;
+  return activityAmountTwd(item, rates) ?? 0;
 }
 
 export function buildActivityCategorySlices(

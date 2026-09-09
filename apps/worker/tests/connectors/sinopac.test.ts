@@ -423,6 +423,10 @@ describe("sinopac App JSON parser", () => {
       new Date("2026-07-22T12:00:00.000Z"),
     );
 
+    expect(result.cardAuthorizations).toHaveLength(2);
+    expect(result.cardAuthorizations?.[0]?.authorizedAt).toBe(
+      "2026-07-19T18:35:13+08:00",
+    );
     expect(result.bankTransactions).toHaveLength(2);
     expect(result.bankTransactions).toEqual([
       expect.objectContaining({
