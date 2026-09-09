@@ -1,3 +1,4 @@
+import { launchBrowserWithRetry } from "./browser.js";
 import puppeteer, {
   type Browser,
   type Frame,
@@ -1173,7 +1174,7 @@ async function launchBrowser(
   options?: { keep_alive?: number },
 ): Promise<Browser> {
   try {
-    return await puppeteer.launch(browser, options);
+    return await launchBrowserWithRetry(browser, options);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/Browser time limit exceeded for today/i.test(message)) {

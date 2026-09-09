@@ -1,3 +1,4 @@
+import { launchBrowserWithRetry } from "./browser.js";
 import puppeteer, {
   type Browser,
   type Dialog,
@@ -779,7 +780,7 @@ async function acquireBrowser(
 
 async function launchBrowser(browserFetcher: Fetcher): Promise<Browser> {
   try {
-    return await puppeteer.launch(browserFetcher, {
+    return await launchBrowserWithRetry(browserFetcher, {
       keep_alive: CAPTCHA_KEEP_ALIVE_MS,
     });
   } catch (error) {
