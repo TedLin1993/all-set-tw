@@ -11,7 +11,7 @@
 - 組裝各 feature routes。
 - 設定統一錯誤處理。
 - 提供前端靜態資源。
-- 接收 Cloudflare scheduled event。
+- 接收 Cloudflare scheduled event 與 Queue message batch。
 
 入口檔不得放置 SQL、connector 實作或具體商業流程。
 
@@ -373,7 +373,10 @@ apps/worker/src/features/sync/
 - `repository.ts`：同步流程使用的 query 與 prepared statement。
 - `schedule-route.ts`：排程設定 API。
 - `schedule-service.ts`：排程設定 use case。
-- `scheduler.ts`：Cron tick 與到期工作 dispatch。
+- `scheduler.ts`：到期工作選取、預設排程批次與同步 dispatch。
+- `scheduler-queue.ts`：Cron 啟動訊息、Queue consumer 與分段同步 continuation。
+- `einvoice-sync-service.ts` / `einvoice-run-repository.ts`：電子發票 durable run 與明細工作。
+- `tdcc-sync-service.ts` / `tdcc-run-repository.ts`：集保 durable run、分頁工作與結果彙整。
 
 同步資料流：
 
@@ -411,7 +414,7 @@ sequenceDiagram
 
 - Lease 為 30 分鐘。
 - 執行期間每 5 分鐘續租。
-- 工作完成或失敗後必須在 `finally` 釋放。
+- 一般同步工作完成或失敗後必須在 `finally` 釋放。durable run 的 connector lock 跨 invocation 維持，由成功寫入或失敗結案流程釋放；每段另有 owner-scoped run lease。
 - Lock acquisition 失敗時回傳或記錄「已有同步執行中」，不得平行執行同一 connector。
 
 Cron trigger 只負責向 `SYNC_QUEUE` 送出 scheduler 啟動訊息。Queue consumer
@@ -436,6 +439,24 @@ promotion 前後的重送皆可冪等。
 暫時錯誤由 Queue retry，session 失效會清除 session 後重新初始化；需要使用者操作或重試
 耗盡才將 run 結案為 `needs_user_action` 或 `failed`，不寫入部分完成的明細。
 
+### 集保分段同步
+
+集保的手動 API 與排程由 `startTdccSyncRun` 建立／取得 active run，再 enqueue
+`run-tdcc-chunk`。`tdcc_sync_runs` 保存 scope、設定版本、加密認證與 session；
+`tdcc_sync_run_items` 保存銀行與投資交易的分頁工作及結果。同一 connector 的
+`all`、`investments`、`bank`、`trades` 共用 active run 限制與 canonical lock。
+
+手動啟動會先初始化登入以回報 OTP 等互動需求；排程由 Queue 初始化且不主動寄送
+OTP。API 的排入同步回應不代表全部資料已完成，前端須追蹤 sync job lifecycle。
+每個 chunk 取得 owner-scoped run lease、更新 connector lock，最多 claim 一個
+分頁 item；仍有 pending 或 processing work 時 enqueue 下一段。item 更新使用
+claim token，chunk 的 `finally` 只釋放該 owner 的 run lease。
+
+分頁結果完成後彙整並透過 `sync_write_staging` 與 staged persistence 寫入正式表，
+寫入前檢查設定版本，並在 promotion batch 更新 connector 狀態、cursor 與 sync job。
+後續處理排程結果、手動報告修復與 run 結案；`promoting`、`promoted_at` 用於辨識
+promotion 與 finalize 的進度。暫時錯誤使用 Queue retry，需要互動或重試耗盡時結案。
+
 ## 同步結果通知
 
 同步結果通知位於 `apps/worker/src/features/notifications/`，不放入 sync repository。
@@ -447,7 +468,13 @@ promotion 前後的重送皆可冪等。
 
 排程同步更新 `sync_jobs` 後才呼叫通知 service。通知是 best-effort；發送失敗只記錄 log，不得將成功同步改成失敗。瀏覽器 subscription payload 使用既有設定加密金鑰保存。
 
-使用預設排程（`schedule_mode = inherit`）的工作採「一輪一批次」。沒有進行中的批次且至少一個繼承工作到期時，scheduler 會以單一 D1 batch transaction 建立 header，並固定快照當下所有啟用且不需使用者處理的繼承工作。批次進行期間，每次 Queue consumer invocation 只從尚未完成的固定成員中挑選一個目前未鎖定且不需使用者處理的工作；已完成的成員不會在同一輪再次執行，新啟用的工作則等下一輪。排程結果會在釋放 connector lock 前直接寫入成員，避免重複 Queue 訊息遺漏結果；停用、改為自訂排程或進入 `needs_user_action` 的非執行中成員會被略過。只有所有固定成員都有結果或被略過時，scheduler 才以條件式更新取得一次推播發送權並關閉批次，下一輪才能建立。建立新輪次時會清理超過 30 天的已結案批次。手動同步不完成或改寫批次成員，自訂排程維持逐工作推播。
+使用預設排程（`schedule_mode = inherit`）的工作採「一輪一批次」。沒有進行中的批次且至少一個繼承工作到期時，scheduler 會以單一 D1 batch transaction 建立 header，並固定快照當下所有啟用且不需使用者處理的繼承工作。批次進行期間，每次 Queue consumer invocation 只從尚未完成的固定成員中挑選一個目前未鎖定且不需使用者處理的工作；已完成的成員不會在同一輪再次執行，新啟用的工作則等下一輪。排程結果會在釋放 connector lock 前直接寫入成員，避免重複 Queue 訊息遺漏結果；停用、改為自訂排程或進入 `needs_user_action` 的非執行中成員會被略過。只有所有固定成員都有結果或被略過時，scheduler 才以條件式更新取得一次推播發送權並關閉批次，下一輪才能建立。建立新輪次時會清理超過 30 天的已結案批次。手動同步不完成或改寫進行中的批次成員；自訂排程維持逐工作推播。
+
+手動完整同步成功後，可修復最近一筆已結案預設排程報告中同一 connector 的
+`failed` 或 `needs_user_action` 來源。修復保留原排程完成時間，另記錄
+`recovered_at`，並一次性累加新增筆數、更新報告的 after-snapshot。同步式手動流程
+會在開始前固定可修復的批次，避免誤改執行期間才結案的新輪次；集保部分 scope
+同步不修復 `all` 的批次結果。
 
 每次 Queue scheduler invocation：
 

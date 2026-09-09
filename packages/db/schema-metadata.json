@@ -17,7 +17,10 @@
         "bank_code": "金融機構代碼，用於跨連接器辨識同一帳戶。",
         "account_last4": "帳號末四碼，用於顯示與帳戶比對。",
         "canonical_account_id": "指向同一實體的主要帳戶；NULL 表示此記錄本身就是主要帳戶。",
-        "credit_limit": "信用卡或授信帳戶的額度；非授信帳戶通常為 NULL。"
+        "credit_limit": "信用卡或授信帳戶的額度；非授信帳戶通常為 NULL。",
+        "opened_date": "銀行提供的定存起息日；來源未提供時為 NULL。",
+        "maturity_date": "銀行提供的定存到期日；不作為自動結清的判定條件。",
+        "inactive_at": "同步確認來源不再列出定存的觀測時間，不是銀行實際結清日；有效帳戶為 NULL。"
       }
     },
     "bank_balance_snapshots": {
@@ -69,7 +72,8 @@
         "created_at": "交易首次寫入的時間。",
         "updated_at": "交易最後更新的時間。",
         "effective_date": "由 posted_date 優先、authorized_at 備援產生的查詢排序日期。",
-        "status": "交易狀態，目前限制為 pending 或 posted。"
+        "status": "交易狀態，目前限制為 pending 或 posted。",
+        "transfer_peer_id": "定存衍生活動所配對之活存交易的系統識別碼，供本金轉帳一對一配對；沒有明確配對時為 NULL。"
       }
     },
     "classification_categories": {

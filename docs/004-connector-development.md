@@ -20,14 +20,14 @@ Connector 採三層 registry：
 
 新增 connector 前先選擇最接近的連接模式：
 
-| Mode                      | 適用情境                                                 | 現有範例             |
-| ------------------------- | -------------------------------------------------------- | -------------------- |
-| `api_credentials`         | 帳密登入外部 API，可自行更新 token                       | 電子發票、中信、新光 |
-| `api_captcha_session`     | App API 登入含 CAPTCHA，challenge 僅短暫加密保存         | 王道銀行             |
-| `api_device_otp`          | API 登入，首次裝置需要 OTP                               | 集保 e 存摺          |
-| `browser_per_sync`        | 每次同步都必須以 Browser 登入與擷取                      | 國泰世華             |
-| `browser_session`         | Browser 只負責登入，後續使用可復用的 HTTP session        | 玉山                 |
-| `browser_captcha_session` | Browser 登入含 CAPTCHA，可由 AI 或人工完成並復用 session | 永豐、台新           |
+| Mode                      | 適用情境                                                 | 現有範例                   |
+| ------------------------- | -------------------------------------------------------- | -------------------------- |
+| `api_credentials`         | 帳密登入外部 API，可自行更新 token                       | 電子發票、中信、新光       |
+| `api_captcha_session`     | App API 登入含 CAPTCHA，challenge 僅短暫加密保存         | 王道銀行                   |
+| `api_device_otp`          | API 登入，首次裝置需要 OTP                               | 集保 e 存摺                |
+| `browser_per_sync`        | 每次同步都必須以 Browser 登入與擷取                      | 國泰世華                   |
+| `browser_session`         | Browser 只負責登入，後續使用可復用的 HTTP session        | 玉山                       |
+| `browser_captcha_session` | Browser 登入含 CAPTCHA，可由 AI 或人工完成並復用 session | 永豐、台新、華南、第一銀行 |
 
 不要為單一銀行建立新的通用框架。只有登入生命週期真的不同時才新增 mode，並同時補上 catalog 說明及共同測試。
 
@@ -98,13 +98,31 @@ Connector 不得依賴 Hono、D1、Worker `Env`，也不得直接寫入資料庫
 
 ## 路由、排程與 challenge
 
-- 一般同步使用 `runConnectorSync`，不要在 route 或 scheduler 新增 connector switch。
+- 一般同步使用 `runConnectorSync`，不要在 route 或 scheduler 新增 connector switch。電子發票與集保的手動／排程入口使用各自的 durable-run service 啟動 Queue 流程。
 - 所有 scope 必須先宣告在 `connectorCatalog`；排程工作目前固定使用 `all`。
 - 同一 connector 的所有 scope 共用 canonical lock。
 - 需要 CAPTCHA／OTP 時，runtime registry 提供 `prepareChallenge`，route 只處理輸入驗證與 HTTP error mapping。
 - 排程不得主動寄送 OTP；需要互動時標記 `needs_user_action`。
 - 若外部服務支援接管其他登入中的裝置，必須明確定義手動與排程的 `force` policy，並在介面與使用文件提示可能中斷使用者目前的工作階段。
 - 新 connector 必須透過 D1 migration 建立 `<connectorId>:all` sync job，預設停用。
+
+### 集保分段同步
+
+集保與電子發票同樣使用 durable run。手動與排程入口呼叫 `startTdccSyncRun`，
+並 enqueue `run-tdcc-chunk`，不以一般單次同步流程取代分段處理。
+
+- `tdcc_sync_runs` 保存 run lifecycle、scope、設定版本及加密認證／session；
+  `tdcc_sync_run_items` 保存 `bank_page`、`trade_page` 工作與結果。
+- 手動啟動先初始化登入以處理 OTP；排程初始化不主動寄送 OTP。
+- 同一 connector 的所有 scope 共用 active run 限制與 canonical lock；每個 chunk
+  另取得 owner-scoped run lease，每次最多 claim 一個分頁 item，以 claim token
+  更新或釋放該 item，尚有工作時 enqueue continuation。
+- 分頁結果完成後彙整，透過一般 staging 與 promotion 寫入金融資料，並檢查設定版本、
+  更新 cursor；後續完成排程結果、手動完整同步的報告修復與 run 結案。
+- 暫時錯誤交給 Queue retry；需要互動或重試耗盡時終止。不得把每段 run lease 的
+  釋放當成整個 connector 同步完成。
+
+詳細流程與檔案責任參考[後端架構](002-backend-architecture.md#集保分段同步)。
 
 ### 電子發票分段明細同步
 
