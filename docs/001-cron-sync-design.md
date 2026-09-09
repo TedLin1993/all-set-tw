@@ -1,4 +1,8 @@
-# Cron Job Design
+# Cron Job Design（歷史設計）
+
+> 本文件為最初 v1 提案與後續補記，保留作為歷史背景，不作為現行實作規範。
+> 現行排程、Queue 分段同步與報告修復行為統一維護於
+> [`002-backend-architecture.md`](002-backend-architecture.md)；新增行為請更新該文件。
 
 > 現況更新：Cron 目前只負責向 Cloudflare Queue 送出啟動訊息；每個 connector
 > 由獨立的 Queue consumer invocation 執行，完成後延遲 20 秒 enqueue 下一個工作。

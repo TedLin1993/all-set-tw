@@ -55,7 +55,7 @@
 
 **需要：** [Cloudflare 帳號](https://dash.cloudflare.com/signup)、[GitHub 帳號](https://github.com/signup)
 
-> 玉山、國泰、永豐與台新會使用 [Browser Run](https://developers.cloudflare.com/browser-run/pricing/)。Workers Free Plan 目前每日包含 10 分鐘瀏覽器使用量；實際額度以 Cloudflare 最新方案為準。
+> 玉山、國泰、永豐、台新、華南與第一銀行會使用 [Browser Run](https://developers.cloudflare.com/browser-run/pricing/)。Workers Free Plan 目前每日包含 10 分鐘瀏覽器使用量；實際額度以 Cloudflare 最新方案為準。
 
 ### 步驟一：一鍵部署
 
