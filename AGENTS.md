@@ -41,8 +41,7 @@
 - 共用 API contract 與金融資料型別放在 `packages/core`，不得混入 Hono `Context`、D1 row 或 Puppeteer object。
 - 前端採 feature-first 結構；`features` 可依賴 `data` 與 `shared`，`data`、`shared` 不得反向依賴 feature。
 - 前端單元及元件測試與實作 colocate；Playwright browser tests 放在 `apps/web/e2e`。
-- 詳細後端變更開始前，先閱讀 `docs/002-backend-architecture.md` 的相關章節。
-- 詳細前端結構變更開始前，先閱讀 `docs/003-frontend-architecture.md`。
+- 修改前依下方「文件閱讀與維護」對照表閱讀相關文件。
 
 ## 常用驗證指令
 
@@ -61,8 +60,23 @@
 - **禁止**用 `prettier --check <touched files>` 代替 `npm run format:check`。只對改動檔跑 Prettier 通過，不算完成。
 - CI（`.github/workflows/ci.yml`）順序為 `format:check` → `typecheck` → `test:backend` → `test:unit` → `build`。在本地通過前三項中適用的檢查之前，不得視為 commit 完成。
 
-## 文件維護
+## 文件閱讀與維護
 
+開始修改前，依任務範圍閱讀下表文件的相關章節；跨領域變更須涵蓋所有涉及的文件，不必每次讀完整個 `docs/`。
+
+| 涉及的變更                       | 修改前閱讀，描述受影響時同步更新                                |
+| -------------------------------- | --------------------------------------------------------------- |
+| 後端架構、同步、Queue、排程      | `docs/002-backend-architecture.md`                              |
+| 前端結構、資料查詢、共用元件     | `docs/003-frontend-architecture.md`                             |
+| 連接器、登入、驗證碼、資料正規化 | `docs/004-connector-development.md`；涉及同步流程時也讀後端架構 |
+| 部署、自動更新、環境變數         | `docs/005-deployment.md`、`README.md` 對應章節                  |
+| 資料庫 schema                    | `docs/database-schema.md`、相關 `packages/db/migrations/*.sql`  |
+| 使用方式、支援資料來源、限制     | `README.md` 對應章節                                            |
+
+- 若變更使文件描述不再正確，必須在同一個 PR 更新相關文件；純重構且不影響文件描述時，不必為了更新而更新。
+- Schema 變更須同步維護 `packages/db/schema-metadata.json`，並從 repo root 執行 `npm run db:schema:docs`，提交重新產生的 `docs/database-schema.md`；不得直接手改產生的文件。
+- 提交前對照 diff 檢查文件是否仍符合實作。PR 說明須列出文件更新項目；不需更新其他文件時，簡述原因。
+- `docs/001-cron-sync-design.md` 是歷史設計，不作為現行實作依據；現行排程與同步行為維護於 `docs/002-backend-architecture.md`。
 - 架構判斷以實際程式碼及各 workspace 的 `package.json` 為最終依據。
 - 技術棧、目錄責任或主要驗證指令改變時，應同步更新本文件。
 - `README.md` 用於產品介紹、部署與使用說明；本文件維持精簡，作為開發工作的快速架構索引。
