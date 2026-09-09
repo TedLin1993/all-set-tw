@@ -777,7 +777,7 @@ describe("第一銀行 browser session lifecycle", () => {
     const result = await prepareFirstbankCaptcha({} as Fetcher, credentials);
 
     expect(puppeteerMock.launch).toHaveBeenCalledWith(
-      {},
+      expect.objectContaining({ fetch: expect.any(Function) }),
       expect.objectContaining({ keep_alive: expect.any(Number) }),
     );
     expect(browser.sessionId).toHaveBeenCalledOnce();

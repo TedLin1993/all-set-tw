@@ -1,4 +1,5 @@
-import puppeteer, { type Page } from "@cloudflare/puppeteer";
+import { launchBrowserWithRetry } from "./browser.js";
+import { type Page } from "@cloudflare/puppeteer";
 import type {
   BankAccount,
   BankBalanceSnapshot,
@@ -111,7 +112,7 @@ async function loginWithBrowser(
   config: EsunConfig,
 ) {
   console.log("[esun debug] launching browser");
-  const browser = await puppeteer.launch(browserBinding);
+  const browser = await launchBrowserWithRetry(browserBinding);
   const page = await browser.newPage();
   let txnDupToken: string | undefined;
 

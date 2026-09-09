@@ -1,3 +1,4 @@
+import { launchBrowserWithRetry } from "./browser.js";
 import puppeteer, {
   type Browser,
   type CookieParam,
@@ -159,7 +160,7 @@ async function scrapeWithBrowser(
     );
     b = reconnecting
       ? await connectCathayBrowser(browserBinding, config.browserSessionId!)
-      : await puppeteer.launch(browserBinding, {
+      : await launchBrowserWithRetry(browserBinding, {
           keep_alive: OTP_SESSION_TTL_MS,
         });
     const pages = await b.pages();

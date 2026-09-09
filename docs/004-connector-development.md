@@ -82,6 +82,15 @@ Schema 需要涵蓋同步期間會持久化的 secret state，否則 Zod parse �
 
 Connector 不得依賴 Hono、D1、Worker `Env`，也不得直接寫入資料庫。
 
+所有 Browser adapter 建立新瀏覽器時，統一呼叫
+`apps/worker/src/connectors/browser.ts` 的 `launchBrowserWithRetry`，不得直接呼叫
+`puppeteer.launch`。共用 adapter 在 binding `fetch` 層僅針對建立瀏覽器的
+`POST /v1/devtools/browser` 請求依 HTTP status `503` 判斷重試，不比對錯誤文案。
+預設等待 2 秒、5 秒後重試，
+最多嘗試 3 次；耗盡後保留原始錯誤，交由既有同步失敗流程處理。結構化 log
+只記錄狀態碼、嘗試次數與重試延遲。`429` 額度／限流錯誤維持既有處理，
+session 重連、瀏覽器建立後的操作與銀行登入不在此重試範圍內。
+
 ## 正規化資料契約
 
 - Connector 回傳 `SyncResult`，資料必須符合 `@taiwan-fin-hub/core`。

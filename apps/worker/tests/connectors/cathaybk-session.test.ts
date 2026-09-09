@@ -153,7 +153,7 @@ describe("Cathay browser session lifecycle", () => {
       ).rejects.toThrow();
 
       expect(puppeteerMock.launch).toHaveBeenCalledWith(
-        {},
+        expect.objectContaining({ fetch: expect.any(Function) }),
         { keep_alive: 120_000 },
       );
       expect(browser.close).toHaveBeenCalledOnce();
