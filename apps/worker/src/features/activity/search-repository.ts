@@ -24,7 +24,7 @@ export async function findActivitySearchDays(
         ELSE substr(COALESCE(txn.authorized_at, txn.posted_date), 1, 10) END AS day
       FROM bank_transactions txn
       JOIN bank_accounts account ON account.id = txn.account_id
-      WHERE account.canonical_account_id IS NULL AND (
+      WHERE account.canonical_account_id IS NULL AND (txn.status <> 'pending' OR txn.matched_transaction_id IS NULL) AND (
         instr(lower(COALESCE(txn.description, '') || ' ' || COALESCE(txn.counterparty, '') || ' ' ||
           COALESCE(account.institution_name, '') || ' ' || COALESCE(account.account_name, '') || ' ' ||
           COALESCE(account.account_last4, '') || ' 銀行 信用卡'), ?1) > 0

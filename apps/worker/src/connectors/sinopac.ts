@@ -45,6 +45,8 @@ type SinopacApiPayloads = {
   unbilled?: unknown;
 };
 type Scraped = {
+  pendingSnapshotComplete?: boolean;
+  cardAuthorizations?: Array<Omit<BankTransaction, "id" | "connectorId">>;
   bankAccounts: Array<Omit<BankAccount, "id" | "connectorId">>;
   bankBalanceSnapshots: Array<Omit<BankBalanceSnapshot, "id" | "connectorId">>;
   bankTransactions: Array<Omit<BankTransaction, "id" | "connectorId">>;
@@ -93,7 +95,10 @@ export function createSinopacConnector(
     async sync(
       config: SinopacConfig,
       _cursor?: string,
-    ): Promise<SyncResult<never>> {
+    ): Promise<
+      SyncResult<never> &
+        Pick<Scraped, "pendingSnapshotComplete" | "cardAuthorizations">
+    > {
       let sessionCookies = config.sessionCookies;
       let browserInstance: Browser | undefined;
       let verifiedThisRun = false;
@@ -835,10 +840,12 @@ export function parseSinopacCardData(
   }
   const summary = parseSummary(payloads.summary);
   const bills = parseBills(payloads.bills, now);
-  const transactions =
+  const sinoCard =
     payloads.outstanding != null || payloads.latest != null
       ? parseSinoCardTransactions(payloads.latest, payloads.outstanding)
-      : parseTransactions(payloads.unbilled);
+      : undefined;
+  const transactions =
+    sinoCard?.transactions ?? parseTransactions(payloads.unbilled);
   const latestTwdBill = bills
     .filter((bill) => bill.currency === "TWD")
     .sort((left, right) =>
@@ -943,6 +950,12 @@ export function parseSinopacCardData(
   }
 
   return {
+    cardAuthorizations: sinoCard?.authorizations.map((transaction) => ({
+      ...transaction,
+      accountId: accountIdForCurrency(transaction.currency),
+    })),
+    pendingSnapshotComplete:
+      payloads.latest != null && payloads.outstanding != null,
     bankAccounts,
     bankBalanceSnapshots,
     creditCardBills: bills.map((bill) => ({
@@ -1122,7 +1135,10 @@ function parseSinoCardTransactions(
     const rawAmount =
       parseAmount(stringValue(record.AuthAmt)) ??
       parseAmount(stringValue(record.AuthAmtDesc));
-    if (!transactionDate || rawAmount == null || rawAmount === 0) return [];
+    if (!transactionDate || rawAmount == null) {
+      throw new Error("永豐信用卡交易日期或金額格式不完整。");
+    }
+    if (rawAmount === 0) return [];
     const description = stringValue(record.Memo).trim() || "永豐信用卡消費";
     const amount = signedTransactionAmount(
       rawAmount,
@@ -1161,7 +1177,10 @@ function parseSinoCardTransactions(
     const rawAmount =
       parseAmount(stringValue(record.AMT)) ??
       parseAmount(stringValue(record.TXAMT));
-    if (!transactionDate || rawAmount == null || rawAmount === 0) return [];
+    if (!transactionDate || rawAmount == null) {
+      throw new Error("永豐信用卡交易日期或金額格式不完整。");
+    }
+    if (rawAmount === 0) return [];
     const description = stringValue(record.MEMO).trim() || "永豐信用卡消費";
     const amount = signedTransactionAmount(
       rawAmount,
@@ -1224,9 +1243,14 @@ function parseSinoCardTransactions(
     return occurrence > (postedCounts.get(transaction.matchKey) ?? 0);
   });
 
-  return [...upgradedPostedTransactions, ...unmatchedPending].map(
-    ({ matchKey: _matchKey, ...transaction }) => transaction,
-  );
+  return {
+    transactions: [...upgradedPostedTransactions, ...unmatchedPending].map(
+      ({ matchKey: _matchKey, ...transaction }) => transaction,
+    ),
+    authorizations: pendingTransactions.map(
+      ({ matchKey: _matchKey, ...transaction }) => transaction,
+    ),
+  };
 }
 
 function groupSinoCardTransactions(
@@ -1246,9 +1270,13 @@ function sinoCardResultRecords(payload: unknown, key: "Items" | "Detail") {
     !isRecord(payload) ||
     !isRecord(payload.Result) ||
     !Array.isArray(payload.Result[key])
-  )
-    return [];
-  return payload.Result[key].filter(isRecord);
+  ) {
+    throw new Error(`永豐信用卡 ${key} 清單格式不完整。`);
+  }
+  if (!payload.Result[key].every(isRecord)) {
+    throw new Error(`永豐信用卡 ${key} 交易格式不完整。`);
+  }
+  return payload.Result[key];
 }
 
 function assignSinoCardSourceIds(candidates: SinoCardTransactionCandidate[]) {

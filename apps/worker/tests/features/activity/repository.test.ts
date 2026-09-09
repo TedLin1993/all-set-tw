@@ -44,7 +44,9 @@ describe("activity repository", () => {
         posted_date TEXT,
         authorized_at TEXT,
         amount REAL NOT NULL,
-        currency TEXT NOT NULL
+        currency TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'posted',
+        matched_transaction_id TEXT
       );
       INSERT INTO bank_accounts (id, account_type)
       VALUES ('card-1', 'credit');
@@ -67,5 +69,11 @@ describe("activity repository", () => {
       currency: "TWD",
       accountType: "credit",
     });
+    database.exec(
+      "UPDATE bank_transactions SET status = 'pending', matched_transaction_id = 'posted-1'",
+    );
+    await expect(
+      findMappingTransaction(db, "transaction-1"),
+    ).resolves.toBeNull();
   });
 });

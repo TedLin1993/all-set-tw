@@ -105,6 +105,20 @@ session 重連、瀏覽器建立後的操作與銀行登入不在此重試範圍
   connector 可直接以其 run item table 作為 staging source。資料 promotion 與 cursor
   必須放在同一 guarded D1 batch，secret state 需以設定版本 CAS 保護。
 
+永豐信用卡取得 `LatestTx.Items` 與 `OutstandingDetail.Detail` 後，在 `bank_transactions`
+原表保存授權，以 `matched_transaction_id` 記錄已入帳關係，不另設授權表或停用欄位。
+配對僅限同卡、同消費日，不跨日；排除手續費、服務費、不同金額方向與卡片識別不足的資料。
+既有相同 sourceId 優先，其次同幣別同金額，再以正規化店名相似度及目前匯率金額接近度
+計分；同組採最大總分的一對一分配，無合理候選則不配對。跨幣別不要求人工確認。
+已配對關係不重新分配；已入帳保留正式金額、幣別與入帳日，只繼承授權時刻。
+在同一 D1 batch upsert 交易、保存配對、補入時刻，並於首次配對移轉原授權的個別分類、
+計算偏好（已入帳既有設定優先）及發票關係。原授權與設定持續保存。
+活動、搜尋、發票配對候選與收支統計僅排除 `status = 'pending'` 且
+`matched_transaction_id IS NOT NULL` 的授權；同 ID 升為已入帳仍正常顯示。
+不處理來源消失：未配對授權即使來源不再回傳，仍保留並顯示；空清單不刪除或隱藏資料。
+缺少清單或解析失敗不寫入；無有效卡與舊版解析不執行授權配對。
+已在舊版永久刪除的授權，若來源不再回傳，無法從此變更復原。
+
 ## 路由、排程與 challenge
 
 - 一般同步使用 `runConnectorSync`，不要在 route 或 scheduler 新增 connector switch。電子發票與集保的手動／排程入口使用各自的 durable-run service 啟動 Queue 流程。

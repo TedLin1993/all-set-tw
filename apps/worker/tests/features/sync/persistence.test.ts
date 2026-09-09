@@ -1,9 +1,15 @@
+import { findActivitySearchDays } from "../../../src/features/activity/search-repository";
+import { prepareSinopacAuthorizationWrite } from "../../../src/features/sync/sinopac-authorizations";
 import { prepareObankTimeDepositWrite } from "../../../src/features/sync/obank-time-deposits";
 import {
   bankAccountRecord as mapAccount,
   bankBalanceSnapshotRecord as mapBalance,
 } from "../../../src/features/sync/record-mapper";
-import { listBankAccounts } from "../../../src/features/bank/repository";
+import {
+  listBankAccounts,
+  listBankTransactions,
+  listBankTransactionsInRange,
+} from "../../../src/features/bank/repository";
 import { calculateBankDepositValue } from "../../../src/features/net-worth/repository";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -508,6 +514,221 @@ describe("staged sync persistence", () => {
         )
         .get(),
     ).toEqual({ count: 3 });
+  });
+
+  it("retains unmatched authorizations and later restores time without duplicate spending", async () => {
+    const db = createDb();
+    const d1 = db as unknown as D1Database;
+    const make = (
+      currency: string,
+      amount: number,
+      status: "pending" | "posted",
+    ) => {
+      const record = bankTransactionRecord(
+        `sinopac:card:tx:v2:${currency}:2026-09-04:${amount}:4303:1`,
+        status,
+        {
+          authorizedAt:
+            status === "pending" ? "2026-09-04T18:57:25+08:00" : "2026-09-04",
+          postedDate: status === "posted" ? "2026-09-08" : undefined,
+        },
+      );
+      Object.assign(record.payload, {
+        connector_id: "sinopac",
+        amount,
+        currency,
+        description:
+          status === "pending"
+            ? "餐廳/UNAGISHIKISHIMA"
+            : "A- UNAGISHIKISHIMA OKINAWA JP",
+      });
+      return record;
+    };
+    const pending = make("TWD", -1096, "pending");
+    await persistStagedSyncWrite(d1, {
+      records: [bankAccountRecord(0), pending],
+    });
+    const apply = async (
+      incoming: SyncWriteRecord[],
+      authorizations: SyncWriteRecord[],
+      fail = false,
+    ) => {
+      const write = await prepareSinopacAuthorizationWrite(
+        d1,
+        incoming,
+        authorizations,
+      );
+      await persistStagedSyncWrite(d1, {
+        ...write,
+        afterPromoteStatements: [...write.afterPromoteStatements],
+        finalizeStatements: fail
+          ? [d1.prepare("INSERT INTO missing_table VALUES (1)")]
+          : [],
+      });
+    };
+    await expect(apply([], [], true)).rejects.toThrow();
+    expect(
+      db.database
+        .prepare(
+          "SELECT * FROM bank_transactions WHERE matched_transaction_id IS NOT NULL",
+        )
+        .all(),
+    ).toHaveLength(0);
+    expect(
+      db.database
+        .prepare(
+          "SELECT * FROM bank_transactions WHERE (status <> 'pending' OR matched_transaction_id IS NULL)",
+        )
+        .all(),
+    ).toHaveLength(1);
+    await apply([], []);
+    expect(await listBankTransactions(d1, 100)).toHaveLength(1);
+    expect(
+      await listBankTransactionsInRange(d1, {
+        from: "2026-09-01",
+        to: "2026-10-01",
+      }),
+    ).toHaveLength(1);
+    expect(await findActivitySearchDays(d1, { q: "UNAGISHIKISHIMA" })).toEqual([
+      "2026-09-04",
+    ]);
+    expect(
+      db.database.prepare("SELECT * FROM bank_transactions").all(),
+    ).toHaveLength(1);
+
+    expect(
+      db.database
+        .prepare(
+          "SELECT * FROM bank_transactions WHERE (status <> 'pending' OR matched_transaction_id IS NULL)",
+        )
+        .all(),
+    ).toHaveLength(1);
+    expect(
+      db.database
+        .prepare(
+          "SELECT authorized_at FROM bank_transactions WHERE status = 'pending'",
+        )
+        .get()?.authorized_at,
+    ).toBe("2026-09-04T18:57:25+08:00");
+    const posted = make("JPY", -5500, "posted");
+    await expect(apply([posted], [], true)).rejects.toThrow();
+    expect(
+      db.database
+        .prepare(
+          "SELECT matched_transaction_id FROM bank_transactions WHERE status = 'pending'",
+        )
+        .get()?.matched_transaction_id,
+    ).toBeNull();
+    expect(
+      db.database
+        .prepare(
+          "SELECT * FROM bank_transactions WHERE (status <> 'pending' OR matched_transaction_id IS NULL)",
+        )
+        .all(),
+    ).toHaveLength(1);
+    await apply([posted], []);
+    expect(await listBankTransactions(d1, 100)).toHaveLength(1);
+    expect(
+      await listBankTransactionsInRange(d1, {
+        from: "2026-09-01",
+        to: "2026-10-01",
+      }),
+    ).toHaveLength(1);
+    expect(await findActivitySearchDays(d1, { q: "UNAGISHIKISHIMA" })).toEqual([
+      "2026-09-04",
+    ]);
+    expect(
+      db.database.prepare("SELECT * FROM bank_transactions").all(),
+    ).toHaveLength(2);
+
+    expect(
+      db.database
+        .prepare(
+          "SELECT amount, currency, authorized_at FROM bank_transactions WHERE (status <> 'pending' OR matched_transaction_id IS NULL)",
+        )
+        .get(),
+    ).toMatchObject({
+      amount: -5500,
+      currency: "JPY",
+      authorized_at: "2026-09-04T18:57:25+08:00",
+    });
+    // A reappearing pending response cannot reintroduce a duplicate or steal a saved match.
+    await apply([pending, posted], [pending]);
+    expect(
+      db.database
+        .prepare(
+          "SELECT * FROM bank_transactions WHERE (status <> 'pending' OR matched_transaction_id IS NULL)",
+        )
+        .all(),
+    ).toHaveLength(1);
+    expect(
+      db.database
+        .prepare(
+          "SELECT matched_transaction_id FROM bank_transactions WHERE status = 'pending'",
+        )
+        .get()?.matched_transaction_id,
+    ).toBe(posted.recordKey);
+    const domesticPending = make("TWD", -300, "pending");
+    const domesticPosted = make("TWD", -300, "posted");
+    await persistStagedSyncWrite(d1, { records: [domesticPending] });
+    await apply([domesticPosted], [domesticPending]);
+    expect(
+      (await listBankTransactions(d1, 100)).find(
+        (row) => row.id === domesticPosted.recordKey,
+      )?.status,
+    ).toBe("posted");
+    expect(
+      db.database
+        .prepare(
+          "SELECT matched_transaction_id FROM bank_transactions WHERE id = ?",
+        )
+        .get(domesticPosted.recordKey)?.matched_transaction_id,
+    ).toBe(domesticPosted.recordKey);
+    const nextPending = make("TWD", -200, "pending");
+    const nextPosted = make("JPY", -1000, "posted");
+    await persistStagedSyncWrite(d1, { records: [nextPending] });
+    db.database
+      .prepare(
+        "INSERT INTO bank_transaction_preferences VALUES (?, 1, 'now', 'now')",
+      )
+      .run(nextPending.recordKey);
+    db.database
+      .prepare(
+        "INSERT INTO classification_overrides VALUES ('next', 'bank_transaction', ?, 'shopping', 'now', 'now')",
+      )
+      .run(nextPending.recordKey);
+    db.database
+      .prepare(
+        "INSERT INTO invoice_transaction_preferences VALUES ('invoice-next', ?, 'linked', 'now', 'now')",
+      )
+      .run(nextPending.recordKey);
+    await apply([nextPending, nextPosted], [nextPending]);
+    expect(
+      db.database
+        .prepare(
+          "SELECT transaction_id FROM bank_transaction_preferences WHERE transaction_id = ?",
+        )
+        .get(nextPosted.recordKey)?.transaction_id,
+    ).toBe(nextPosted.recordKey);
+    expect(
+      db.database
+        .prepare(
+          "SELECT target_id FROM classification_overrides WHERE target_id = ?",
+        )
+        .get(nextPosted.recordKey)?.target_id,
+    ).toBe(nextPosted.recordKey);
+    expect(
+      db.database
+        .prepare("SELECT transaction_id FROM invoice_transaction_preferences")
+        .get()?.transaction_id,
+    ).toBe(nextPosted.recordKey);
+    expect(
+      db.database
+        .prepare(
+          "SELECT * FROM bank_transactions WHERE status = 'pending' AND (status <> 'pending' OR matched_transaction_id IS NULL)",
+        )
+        .all(),
+    ).toHaveLength(0);
   });
 
   it("migrates preferences and removes matching legacy Sinopac transaction ids", async () => {

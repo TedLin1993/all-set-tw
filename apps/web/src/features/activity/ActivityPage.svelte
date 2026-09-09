@@ -32,6 +32,7 @@
   import { activitySearchQuery } from "@/data/activity/queries";
   import ActivitySearchFilters from "./components/ActivitySearchFilters.svelte";
   import SearchHighlight from "./components/SearchHighlight.svelte";
+  import ActivityAmount from "./components/ActivityAmount.svelte";
   import ActivityCategoryChart from "./components/ActivityCategoryChart.svelte";
   import CalculationUpdateDialog from "./components/CalculationUpdateDialog.svelte";
   import CategoryUpdateDialog from "./components/CategoryUpdateDialog.svelte";
@@ -76,6 +77,7 @@
     buildActivityCategorySlices,
     activityCashAmountTwd,
     activityDisplayAmount,
+    activityAmountTwd,
   } from "./model/chart";
   import {
     deduplicateBankTransactions,
@@ -436,6 +438,19 @@
           item.source === "invoice"),
     ),
   );
+  const missingMonthlyRates = $derived([
+    ...new Set(
+      monthlyCalculatedItems
+        .filter(
+          (item) =>
+            !item.excludedFromCalculation &&
+            item.amount != null &&
+            ["bank", "card", "invoice"].includes(item.source) &&
+            activityAmountTwd(item, rateValues) == null,
+        )
+        .map((item) => item.currency),
+    ),
+  ]);
   const incomeSlices = $derived(
     buildActivityCategorySlices(monthlyCalculatedItems, "income", rateValues),
   );
@@ -896,6 +911,14 @@
           </p>{/if}
       </section>
     {/if}
+    {#if missingMonthlyRates.length > 0}
+      <p role="status" class="text-sm text-coral">
+        缺少 {missingMonthlyRates.join("、")} 匯率，月份總額與分類圖表尚未包含這些外幣交易。
+        <button type="button" class="underline" onclick={() => $rates.refetch()}
+          >重試匯率</button
+        >
+      </p>
+    {/if}
     {#if activityDataStatus.hasFailure}
       <div
         class="flex flex-col gap-3 rounded-xl border border-coral/25 bg-coral/5 px-4 py-3 text-sm text-ink sm:flex-row sm:items-center sm:justify-between"
@@ -1202,9 +1225,11 @@
                         <p
                           class={`truncate text-sm font-semibold tabular-nums ${item.excludedFromCalculation ? "text-ink/35 line-through" : (amount ?? 0) < 0 ? "text-coral" : item.source !== "invoice" ? "text-moss" : ""}`}
                         >
-                          {amount == null
-                            ? "—"
-                            : `${amount >= 0 && item.source !== "invoice" ? "+" : ""}${formatCurrency(amount, item.currency)}`}
+                          <ActivityAmount
+                            {item}
+                            rates={rateValues}
+                            exchangeRates={$rates.data}
+                          />
                         </p>
                         <p class="mt-1 text-[11px] text-ink/40">
                           {activityStatusLabel(item)}
@@ -1322,9 +1347,11 @@
                             <p
                               class={`truncate whitespace-nowrap font-semibold tabular-nums ${item.excludedFromCalculation ? "text-ink/35 line-through" : (amount ?? 0) < 0 ? "text-coral" : item.source !== "invoice" ? "text-moss" : ""}`}
                             >
-                              {amount == null
-                                ? "—"
-                                : `${amount >= 0 && item.source !== "invoice" ? "+" : ""}${formatCurrency(amount, item.currency)}`}
+                              <ActivityAmount
+                                {item}
+                                rates={rateValues}
+                                exchangeRates={$rates.data}
+                              />
                             </p>
                             <p class="mt-1 text-xs text-ink/40">
                               {activityStatusLabel(item)}
@@ -1406,7 +1433,9 @@
 
           <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-7 md:py-6">
             <section class="border-b border-ink/10 pb-5">
-              <div class="flex items-start justify-between gap-4">
+              <div
+                class="flex flex-col items-start justify-between gap-4 sm:flex-row"
+              >
                 <div class="min-w-0">
                   <h3 class="break-words text-xl font-semibold leading-snug">
                     {detailItem.title}
@@ -1420,9 +1449,12 @@
                 <p
                   class={`shrink-0 pt-1 text-lg font-bold tabular-nums ${detailItem.excludedFromCalculation ? "text-ink/35 line-through" : (amount ?? 0) < 0 ? "text-coral" : detailItem.source !== "invoice" ? "text-moss" : ""}`}
                 >
-                  {amount == null
-                    ? "—"
-                    : `${amount >= 0 && detailItem.source !== "invoice" ? "+" : ""}${formatCurrency(amount, detailItem.currency)}`}
+                  <ActivityAmount
+                    item={detailItem}
+                    rates={rateValues}
+                    exchangeRates={$rates.data}
+                    detail
+                  />
                 </p>
               </div>
               <Badge variant="secondary" class="mt-3"

@@ -1,3 +1,4 @@
+import { prepareSinopacAuthorizationWrite } from "./sinopac-authorizations";
 import { prepareObankTimeDepositWrite } from "./obank-time-deposits";
 import {
   EInvoiceProtocolUnavailableError,
@@ -1011,7 +1012,7 @@ export async function syncSinopac(
   );
 
   const now = new Date().toISOString();
-  const records: SyncWriteRecord[] = [
+  let records: SyncWriteRecord[] = [
     ...bankAccounts.map((account) =>
       bankAccountRecord(connectorId, account, now),
     ),
@@ -1050,10 +1051,21 @@ export async function syncSinopac(
       ),
     );
   }
+  const authorizationWrite = result.pendingSnapshotComplete
+    ? await prepareSinopacAuthorizationWrite(
+        env.DB,
+        records,
+        (result.cardAuthorizations ?? []).map((transaction) =>
+          bankTransactionRecord(connectorId, transaction, now),
+        ),
+      )
+    : undefined;
+  if (authorizationWrite) records = authorizationWrite.records;
   const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
     afterPromoteStatements: [
       ...reconcileSinopacLegacyTransactionStatements(env.DB),
+      ...(authorizationWrite?.afterPromoteStatements ?? []),
       ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB)]
         : []),

@@ -380,6 +380,38 @@ describe("sinopac App JSON parser", () => {
     });
   });
 
+  it("marks an explicit empty snapshot as complete", () => {
+    const result = parseSinopacCardData({
+      summary: mobileSummaryPayload,
+      bills: mobileBillPayload,
+      latest: { Result: { Items: [] } },
+      outstanding: { Result: { Detail: [] } },
+    });
+    expect(result.pendingSnapshotComplete).toBe(true);
+    expect(result.bankTransactions).toEqual([]);
+    expect(
+      parseSinopacCardData({ summary: {}, bills: {}, hasValidCard: false })
+        .pendingSnapshotComplete,
+    ).not.toBe(true);
+  });
+
+  it.each([
+    { Result: {} },
+    { Result: { Items: null } },
+    { Result: { Items: [null] } },
+    { Result: { Items: [{ AuthDate: "invalid", AuthAmt: 100 }] } },
+    { Result: { Items: [{ AuthDate: "2026/07/19", AuthAmt: "invalid" }] } },
+  ])("rejects incomplete snapshots before allowing cleanup: %j", (latest) => {
+    expect(() =>
+      parseSinopacCardData({
+        summary: {},
+        bills: {},
+        latest,
+        outstanding: sinoCardOutstandingPayload,
+      }),
+    ).toThrow("不完整");
+  });
+
   it("maps latest authorizations to pending and upgrades matching card transactions to posted", () => {
     const result = parseSinopacCardData(
       {
@@ -391,6 +423,10 @@ describe("sinopac App JSON parser", () => {
       new Date("2026-07-22T12:00:00.000Z"),
     );
 
+    expect(result.cardAuthorizations).toHaveLength(2);
+    expect(result.cardAuthorizations?.[0]?.authorizedAt).toBe(
+      "2026-07-19T18:35:13+08:00",
+    );
     expect(result.bankTransactions).toHaveLength(2);
     expect(result.bankTransactions).toEqual([
       expect.objectContaining({
