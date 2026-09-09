@@ -99,6 +99,7 @@ import {
   reconcileHncbLegacyTransactionStatements,
   reconcileHncbSingleCardSummaryAccountStatements,
   reconcileSinopacLegacyTransactionStatements,
+  pruneSinopacPendingTransactionStatements,
   updateConnectorEncryptedConfig,
 } from "./repository";
 import {
@@ -1054,6 +1055,12 @@ export async function syncSinopac(
     records,
     afterPromoteStatements: [
       ...reconcileSinopacLegacyTransactionStatements(env.DB),
+      ...(result.pendingSnapshotComplete
+        ? pruneSinopacPendingTransactionStatements(
+            env.DB,
+            bankTransactions.map((transaction) => transaction.sourceId),
+          )
+        : []),
       ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB)]
         : []),

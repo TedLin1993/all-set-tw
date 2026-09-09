@@ -201,6 +201,39 @@ function reconcileSingleCardSummaryAccountStatements(
   ];
 }
 
+/** Remove only pending authorizations absent from a validated SinoCard snapshot. */
+export function pruneSinopacPendingTransactionStatements(
+  db: D1Database,
+  currentSourceIds: string[],
+) {
+  const staleIds = `SELECT id FROM bank_transactions
+    WHERE connector_id = 'sinopac'
+      AND source_id LIKE 'sinopac:card:tx:v2:%'
+      AND status = 'pending'
+      AND source_id NOT IN (SELECT value FROM json_each(?))`;
+  const sourceIds = JSON.stringify(currentSourceIds);
+  return [
+    db
+      .prepare(
+        `DELETE FROM bank_transaction_preferences WHERE transaction_id IN (${staleIds})`,
+      )
+      .bind(sourceIds),
+    db
+      .prepare(
+        `DELETE FROM classification_overrides WHERE target_type = 'bank_transaction' AND target_id IN (${staleIds})`,
+      )
+      .bind(sourceIds),
+    db
+      .prepare(
+        `DELETE FROM invoice_transaction_preferences WHERE transaction_id IN (${staleIds})`,
+      )
+      .bind(sourceIds),
+    db
+      .prepare(`DELETE FROM bank_transactions WHERE id IN (${staleIds})`)
+      .bind(sourceIds),
+  ];
+}
+
 export function reconcileSinopacLegacyTransactionStatements(db: D1Database) {
   const match = `canonical.connector_id = legacy.connector_id
       AND canonical.account_id = legacy.account_id

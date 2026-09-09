@@ -19,6 +19,7 @@ import {
   reconcileEsunSingleCardSummaryAccountStatements,
   reconcileHncbLegacyTransactionStatements,
   reconcileSinopacLegacyTransactionStatements,
+  pruneSinopacPendingTransactionStatements,
 } from "../../../src/features/sync/repository";
 
 class SqliteStatement {
@@ -509,6 +510,122 @@ describe("staged sync persistence", () => {
         .get(),
     ).toEqual({ count: 3 });
   });
+
+  it.each([false, true])(
+    "prunes only missing Sinopac pending records atomically (rollback=%s)",
+    async (fail) => {
+      const db = createDb();
+      const d1 = db as unknown as D1Database;
+      const make = (name: string, status: "pending" | "posted") => {
+        const record = bankTransactionRecord(
+          `sinopac:card:tx:v2:${name}`,
+          status,
+          { authorizedAt: "2026-09-04" },
+        );
+        record.payload.connector_id = "sinopac";
+        return record;
+      };
+      const stale = make("TWD-old", "pending");
+      const retained = make("TWD-current", "pending");
+      const upgraded = make("TWD-upgrade", "pending");
+      const history = make("history", "posted");
+      const other = bankTransactionRecord("other", "pending", {
+        authorizedAt: "2026-09-04",
+      });
+      await persistStagedSyncWrite(d1, {
+        records: [
+          bankAccountRecord(0),
+          stale,
+          retained,
+          upgraded,
+          history,
+          other,
+        ],
+      });
+      db.database
+        .prepare(
+          "INSERT INTO bank_transaction_preferences VALUES (?, 1, 'now', 'now')",
+        )
+        .run(stale.recordKey);
+      db.database
+        .prepare(
+          "INSERT INTO classification_overrides VALUES ('stale', 'bank_transaction', ?, 'shopping', 'now', 'now')",
+        )
+        .run(stale.recordKey);
+      db.database
+        .prepare(
+          "INSERT INTO invoice_transaction_preferences VALUES ('invoice', ?, 'linked', 'now', 'now')",
+        )
+        .run(stale.recordKey);
+      const posted = make("JPY-new", "posted");
+      posted.payload.currency = "JPY";
+      posted.payload.amount = -5500;
+      const incoming = [retained, make("TWD-upgrade", "posted"), posted];
+      const write = persistStagedSyncWrite(d1, {
+        records: incoming,
+        afterPromoteStatements: pruneSinopacPendingTransactionStatements(
+          d1,
+          incoming.map((r) => String(r.payload.source_id)),
+        ),
+        finalizeStatements: fail
+          ? [d1.prepare("INSERT INTO nonexistent_table VALUES (1)")]
+          : [],
+      });
+      if (fail) await expect(write).rejects.toThrow();
+      else await write;
+      const remaining = db.database
+        .prepare("SELECT id FROM bank_transactions")
+        .all()
+        .map((r) => r.id);
+      expect(remaining.includes(stale.recordKey)).toBe(fail);
+      expect(remaining.includes(posted.recordKey)).toBe(!fail);
+      expect(remaining).toEqual(
+        expect.arrayContaining([
+          retained.recordKey,
+          upgraded.recordKey,
+          history.recordKey,
+          other.recordKey,
+        ]),
+      );
+      expect(
+        db.database
+          .prepare("SELECT status FROM bank_transactions WHERE id = ?")
+          .get(upgraded.recordKey)?.status,
+      ).toBe(fail ? "pending" : "posted");
+      for (const table of [
+        "bank_transaction_preferences",
+        "classification_overrides",
+        "invoice_transaction_preferences",
+      ]) {
+        expect(
+          db.database.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n,
+        ).toBe(fail ? 1 : 0);
+      }
+      if (!fail) {
+        await persistStagedSyncWrite(d1, {
+          records: [],
+          afterPromoteStatements: pruneSinopacPendingTransactionStatements(
+            d1,
+            [],
+          ),
+        });
+        expect(
+          db.database
+            .prepare(
+              "SELECT id FROM bank_transactions WHERE connector_id = 'sinopac' AND status = 'pending'",
+            )
+            .all(),
+        ).toEqual([]);
+        expect(
+          db.database
+            .prepare(
+              "SELECT count(*) AS n FROM bank_transactions WHERE status = 'posted'",
+            )
+            .get()?.n,
+        ).toBe(3);
+      }
+    },
+  );
 
   it("migrates preferences and removes matching legacy Sinopac transaction ids", async () => {
     const db = createDb();

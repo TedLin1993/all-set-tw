@@ -105,6 +105,14 @@ session 重連、瀏覽器建立後的操作與銀行登入不在此重試範圍
   connector 可直接以其 run item table 作為 staging source。資料 promotion 與 cursor
   必須放在同一 guarded D1 batch，secret state 需以設定版本 CAS 保護。
 
+永豐信用卡以成功取得的 `LatestTx.Items` 與 `OutstandingDetail.Detail` 作為本次交易快照。
+先 upsert，再於同一 D1 batch 刪除未出現在快照中的永豐 `v2` 待入帳交易及其分類、
+計算偏好與發票配對設定；已入帳歷史永久保留，不做跨幣別配對。明確空清單可清理，
+缺少清單、交易解析失敗或同步失敗不可清理；無有效卡與舊版資料解析不觸發清理。
+此策略跟隨來源清單：來源同時保留授權與入帳時，本地也會同時保留。
+`LatestTx` 目前沒有傳入日期或分頁參數；若來源增加查詢期間或分頁限制，須先補齊
+快照範圍，再允許清理，不得將部分清單當完整快照。
+
 ## 路由、排程與 challenge
 
 - 一般同步使用 `runConnectorSync`，不要在 route 或 scheduler 新增 connector switch。電子發票與集保的手動／排程入口使用各自的 durable-run service 啟動 Queue 流程。
