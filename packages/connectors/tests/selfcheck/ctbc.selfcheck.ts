@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { BANK_SYNC_MONTHS } from "../../src/sync-window";
-import { parseCtbcConfig, parseCtbcData } from "../../src/ctbc";
+import {
+  ctbcTransactionsMatch,
+  parseCtbcConfig,
+  parseCtbcData,
+} from "../../src/ctbc";
 
 assert.deepEqual(
   parseCtbcConfig({
@@ -320,5 +324,26 @@ invalidDate.creditCards.rsData.billData.TWD["202607"].bills[0]!.purchaseDt =
 invalidDate.creditCards.rsData.billData.TWD["202607"].bills[0]!.postingDt =
   "000000";
 assert.throws(() => parseCtbcData(invalidDate), /日期或金額/);
+
+const matchBase = {
+  amount: -350,
+  currency: "TWD",
+  description: "測試商店",
+  raw: { cardLast4: "3108" },
+};
+assert.equal(
+  ctbcTransactionsMatch(
+    { ...matchBase, authorizedAt: "2026-07-08T12:00:00+08:00" },
+    { ...matchBase, authorizedAt: undefined, postedDate: undefined },
+  ),
+  true,
+);
+assert.equal(
+  ctbcTransactionsMatch(
+    { ...matchBase, authorizedAt: "2026-07-08T12:00:00+08:00" },
+    { ...matchBase, authorizedAt: "2026-07-09" },
+  ),
+  false,
+);
 
 console.log("CTBC connector self-check passed.");
