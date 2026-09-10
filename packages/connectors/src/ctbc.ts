@@ -4,6 +4,7 @@ import type {
   BankTransaction,
   CreditCardBill,
 } from "@taiwan-fin-hub/core";
+import forge from "node-forge";
 import { z } from "zod";
 import { BANK_SYNC_MONTHS } from "./sync-window";
 
@@ -64,6 +65,7 @@ type CtbcCardTransactionCandidate = Omit<
 > & {
   matchKey: string;
   identityKey: string;
+  legacyIdentityKey?: string;
 };
 
 const TWD = "TWD";
@@ -274,8 +276,8 @@ function parseCreditCardGroups(payload: unknown): CreditCardGroup[] {
         billingPeriod,
         currentPayment: numberValue(summary.currPmtAmt),
         minimumPayment: numberValue(summary.minPmtAmt),
-        paymentDueDate: normalizeDate(summary.pmtExpDt) ?? undefined,
-        statementClosingDate: normalizeDate(summary.billDt) ?? undefined,
+        paymentDueDate: normalizeCardDate(summary.pmtExpDt) ?? undefined,
+        statementClosingDate: normalizeCardDate(summary.billDt) ?? undefined,
         statementAmount: numberValue(summary.billAmt),
         paidAmount: numberValue(summary.pmtAmt),
         adjustment: numberValue(summary.adjust),
@@ -360,10 +362,10 @@ function parseCreditCardTransactions(groups: CreditCardGroup[]) {
   const transactions: CtbcCardTransactionCandidate[] = [];
   for (const group of groups) {
     for (const bill of group.bills) {
-      const purchaseDate = normalizeDate(bill.purchaseDt) ?? undefined;
+      const purchaseDate = normalizeCardDate(bill.purchaseDt) ?? undefined;
       const postedDate =
-        normalizeDate(bill.postingDt) ??
-        normalizeDate(bill.clearingDt) ??
+        normalizeCardDate(bill.postingDt) ??
+        normalizeCardDate(bill.clearingDt) ??
         purchaseDate;
       const description =
         optionalString(bill.merchantChiName) || "中國信託信用卡消費";
@@ -371,7 +373,9 @@ function parseCreditCardTransactions(groups: CreditCardGroup[]) {
         group.currency === TWD
           ? numberValue(bill.ntAmt)
           : (numberValue(bill.foreignAmt) ?? numberValue(bill.ntAmt));
-      if (rawAmount == null || rawAmount === 0) continue;
+      if (rawAmount === 0) continue;
+      if (rawAmount == null || !postedDate)
+        throw new Error("中信已入帳明細日期或金額格式無法辨識。");
       const refund =
         rawAmount < 0 ||
         /退款|退貨|折讓|沖銷|回饋|繳款|refund|credit|payment/i.test(
@@ -403,6 +407,16 @@ function parseCreditCardTransactions(groups: CreditCardGroup[]) {
         raw: sanitizeCreditCardTransaction(bill),
         matchKey,
         identityKey,
+        legacyIdentityKey: [
+          [
+            group.currency,
+            normalizeDate(bill.purchaseDt) ?? "",
+            amount,
+            cardLast4,
+          ].join(":"),
+          normalizeMerchantName(description),
+          stringValue(bill.sorting),
+        ].join(":"),
       });
     }
   }
@@ -459,11 +473,17 @@ function parseUnbilledTransactions(payload: unknown) {
   const items = arrayAt(responseData(payload), "allItems");
   return items.flatMap<CtbcCardTransactionCandidate>((value) => {
     if (!isRecord(value)) return [];
-    const purchaseDate = normalizeDate(value.purchaseDt) ?? undefined;
-    const postedDate = normalizeDate(value.postingDt) ?? purchaseDate;
-    const rawAmount = numberValue(value.ntAmt) ?? numberValue(value.txnAmt);
-    if (!postedDate || rawAmount == null || rawAmount === 0) return [];
+    const purchaseDate = normalizeCardDate(value.purchaseDt) ?? undefined;
+    const postedDate = normalizeCardDate(value.postingDt) ?? purchaseDate;
+    const rawAmount =
+      numberValue(value.purchaseAmt) ??
+      numberValue(value.ntAmt) ??
+      numberValue(value.txnAmt);
+    if (rawAmount === 0) return [];
+    if (!postedDate || rawAmount == null)
+      throw new Error("中信未出帳明細日期或金額格式無法辨識。");
     const description =
+      optionalString(value.description) ||
       optionalString(value.merchantChiName) ||
       optionalString(value.merchName) ||
       "中國信託信用卡消費";
@@ -512,25 +532,18 @@ function reconcileCreditCardLifecycle(
   posted: CtbcCardTransactionCandidate[],
   pending: CtbcCardTransactionCandidate[],
 ) {
-  const pendingByMatchKey = new Map<string, CtbcCardTransactionCandidate[]>();
-  for (const transaction of pending) {
-    const candidates = pendingByMatchKey.get(transaction.matchKey) ?? [];
-    candidates.push(transaction);
-    pendingByMatchKey.set(transaction.matchKey, candidates);
-  }
+  const candidates = posted.map((transaction) =>
+    pending.filter((candidate) =>
+      ctbcTransactionsMatch(transaction, candidate),
+    ),
+  );
   const consumedPending = new Set<CtbcCardTransactionCandidate>();
-  const reconciledPosted = posted.map((transaction) => {
-    const candidates = (
-      pendingByMatchKey.get(transaction.matchKey) ?? []
-    ).filter(
-      (candidate) =>
-        !consumedPending.has(candidate) &&
-        merchantsMatch(transaction.description, candidate.description),
-    );
-    // A same-day, same-amount group must have exactly one merchant-confirmed
-    // candidate before it can replace a pending authorization.
-    if (candidates.length !== 1) return transaction;
-    const candidate = candidates[0]!;
+  const reconciledPosted = posted.map((transaction, index) => {
+    const matches = candidates[index]!;
+    if (matches.length !== 1) return transaction;
+    const candidate = matches[0]!;
+    if (candidates.filter((group) => group.includes(candidate)).length !== 1)
+      return transaction;
     consumedPending.add(candidate);
     return {
       ...transaction,
@@ -546,14 +559,35 @@ function reconcileCreditCardLifecycle(
     ...pending.filter((transaction) => !consumedPending.has(transaction)),
   ];
   const occurrences = new Map<string, number>();
-  return all.map(({ matchKey: _matchKey, identityKey, ...transaction }) => {
-    const occurrence = (occurrences.get(identityKey) ?? 0) + 1;
-    occurrences.set(identityKey, occurrence);
-    return {
-      ...transaction,
-      sourceId: `ctbc:card:tx:${stableHash(identityKey)}:${occurrence}`,
-    };
-  });
+  const legacyOccurrences = new Map<string, number>();
+  return all.map(
+    ({
+      matchKey: _matchKey,
+      identityKey,
+      legacyIdentityKey,
+      ...transaction
+    }) => {
+      const occurrence = (occurrences.get(identityKey) ?? 0) + 1;
+      occurrences.set(identityKey, occurrence);
+      const legacyOccurrence = legacyIdentityKey
+        ? (legacyOccurrences.get(legacyIdentityKey) ?? 0) + 1
+        : 0;
+      if (legacyIdentityKey)
+        legacyOccurrences.set(legacyIdentityKey, legacyOccurrence);
+      return {
+        ...transaction,
+        raw: {
+          ...(isRecord(transaction.raw) ? transaction.raw : {}),
+          ...(legacyIdentityKey
+            ? {
+                legacySourceId: `ctbc:card:tx:${stableHash(legacyIdentityKey)}:${legacyOccurrence}`,
+              }
+            : {}),
+        },
+        sourceId: `ctbc:card:tx:${stableHash(identityKey)}:${occurrence}`,
+      };
+    },
+  );
 }
 
 function preferredAuthorizedAt(
@@ -568,6 +602,60 @@ function preferredAuthorizedAt(
 
 function hasTimeComponent(value: string | undefined) {
   return Boolean(value && /T\d{2}:\d{2}(?::\d{2})?/.test(value));
+}
+
+/** Match only the same card, purchase day, currency and signed amount. */
+export function ctbcTransactionsMatch(
+  left: Pick<
+    BankTransaction,
+    "authorizedAt" | "amount" | "currency" | "description" | "raw"
+  >,
+  right: Pick<
+    BankTransaction,
+    "authorizedAt" | "amount" | "currency" | "description" | "raw"
+  >,
+) {
+  const l = isRecord(left.raw) ? left.raw : {};
+  const r = isRecord(right.raw) ? right.raw : {};
+  if (
+    !l.cardLast4 ||
+    l.cardLast4 !== r.cardLast4 ||
+    !left.authorizedAt ||
+    !right.authorizedAt ||
+    purchaseDay(left.authorizedAt) !== purchaseDay(right.authorizedAt) ||
+    left.currency !== right.currency ||
+    left.amount !== right.amount
+  )
+    return false;
+  if (l.authorizationHash && r.authorizationHash)
+    return l.authorizationHash === r.authorizationHash;
+  return merchantsMatch(left.description, right.description);
+}
+
+function purchaseDay(value: string) {
+  const timestamp = value.includes("T") ? Date.parse(value) : NaN;
+  return Number.isFinite(timestamp)
+    ? new Date(timestamp + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    : value.slice(0, 10);
+}
+
+function authorizationHash(value: unknown) {
+  const code = stringValue(value).trim();
+  return code && !/^0+$/.test(code)
+    ? forge.md.sha256.create().update(code, "utf8").digest().toHex()
+    : undefined;
+}
+
+// Card statements use MMDDYY, while deposit and unbilled feeds use full years.
+function normalizeCardDate(value: unknown) {
+  const text = stringValue(value).trim();
+  if (/^\d{6}$/.test(text)) {
+    if (text === "000000") return undefined;
+    return normalizeDate(
+      `20${text.slice(4)}-${text.slice(0, 2)}-${text.slice(2, 4)}`,
+    );
+  }
+  return normalizeDate(value);
 }
 
 function merchantsMatch(left: string | undefined, right: string | undefined) {
@@ -644,21 +732,28 @@ function sanitizeCreditCardGroup(group: CreditCardGroup) {
 
 function sanitizeCreditCardTransaction(value: JsonRecord) {
   return {
-    purchaseDt: normalizeDate(value.purchaseDt),
-    postingDt: normalizeDate(value.postingDt),
-    clearingDt: normalizeDate(value.clearingDt),
-    merchantChiName: optionalString(value.merchantChiName),
+    purchaseDt: normalizeCardDate(value.purchaseDt),
+    postingDt: normalizeCardDate(value.postingDt),
+    clearingDt: normalizeCardDate(value.clearingDt),
+    merchantChiName:
+      optionalString(value.description) ??
+      optionalString(value.merchantChiName),
+    authorizationHash: authorizationHash(value.authCode),
+    referenceHash: authorizationHash(value.acwRefNbr),
     occCurCode: normalizeCurrency(value.occCurCode),
     foreignAmt: numberValue(value.foreignAmt),
-    ntAmt: numberValue(value.ntAmt),
+    ntAmt: numberValue(value.purchaseAmt) ?? numberValue(value.ntAmt),
     cardLast4:
-      last4(stringValue(value.cardNo)) ?? last4(stringValue(value.fullCardNo)),
+      last4(stringValue(value.cardNoSuffixFour)) ??
+      last4(stringValue(value.cardNo)) ??
+      last4(stringValue(value.fullCardNo)),
     txCode: optionalString(value.txCode),
   };
 }
 
 function sanitizeRealtimeTransaction(value: JsonRecord) {
   return {
+    authorizationHash: authorizationHash(value.authCode),
     txnCountry: optionalString(value.txnCountry),
     origCurCode: normalizeCurrency(value.origCurCode ?? value.origCurCo),
     merchName: optionalString(value.merchName),

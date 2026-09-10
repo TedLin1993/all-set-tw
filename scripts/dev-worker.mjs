@@ -70,23 +70,27 @@ if (!address || typeof address === "string") {
   throw new Error("Unable to resolve the CTBC local relay address.");
 }
 
+const dashDash = process.argv.indexOf("--");
+const extraWranglerArgs =
+  dashDash === -1 ? [] : process.argv.slice(dashDash + 1);
+const wranglerArgs = extraWranglerArgs.length
+  ? extraWranglerArgs
+  : ["dev", "-c", "wrangler.local.toml", "--port", "8787"];
+const wranglerCwd = extraWranglerArgs.length ? projectRoot : workerDirectory;
+
 console.log(`CTBC local relay ready on 127.0.0.1:${address.port}`);
 const wrangler = spawn(
   "npx",
   [
     "wrangler",
-    "dev",
-    "-c",
-    "wrangler.local.toml",
-    "--port",
-    "8787",
+    ...wranglerArgs,
     "--var",
     `CTBC_API_RELAY_URL:http://127.0.0.1:${address.port}/ctbc`,
     "--var",
     `CTBC_API_RELAY_TOKEN:${relayToken}`,
   ],
   {
-    cwd: workerDirectory,
+    cwd: wranglerCwd,
     env: {
       ...process.env,
       X_BROWSER_HEADFUL: process.env.X_BROWSER_HEADFUL ?? "true",
