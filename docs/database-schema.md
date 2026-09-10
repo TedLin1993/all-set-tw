@@ -11,7 +11,7 @@
 - Tables：28
 - Explicit indexes：41
 - Other objects：0
-- Migrations：40
+- Migrations：41
 
 ## Tables
 
@@ -1545,6 +1545,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0040_bank_transaction_day_index.sql`](../packages/db/migrations/0040_bank_transaction_day_index.sql)
 - [`0041_time_deposit_lifecycle.sql`](../packages/db/migrations/0041_time_deposit_lifecycle.sql)
 - [`0042_bank_transaction_lifecycle.sql`](../packages/db/migrations/0042_bank_transaction_lifecycle.sql)
+- [`0043_merge_legacy_invoice_duplicates.sql`](../packages/db/migrations/0043_merge_legacy_invoice_duplicates.sql)
 
 ## 程式碼導覽
 

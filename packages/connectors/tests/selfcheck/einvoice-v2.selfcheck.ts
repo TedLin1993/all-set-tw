@@ -343,6 +343,12 @@ async function main() {
     dateHeaders[1].sourceId,
     `LOCAL:${new Date("2026-07-01T00:00:00").toISOString()}`,
   );
+  // Migration 0043 keeps this UTC identity; repeated v2 epoch payloads must reuse it.
+  assert.equal(dateHeaders[3].sourceId, "EPOCH:2026-06-30T16:00:00.000Z");
+  const repeatedHeaders = await initializeEInvoiceSync(primitiveConfig, {
+    client: dateClient,
+  });
+  assert.equal(repeatedHeaders.headers[3].sourceId, dateHeaders[3].sourceId);
   assert.ok(
     dateHeaders.every((header) => header.detailInvDate === "2026/07/01"),
   );
