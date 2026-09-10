@@ -1,4 +1,5 @@
 import { findActivitySearchDays } from "../../../src/features/activity/search-repository";
+import { resolveClassifications } from "../../../src/features/classification/service";
 import { prepareSinopacAuthorizationWrite } from "../../../src/features/sync/sinopac-authorizations";
 import { prepareObankTimeDepositWrite } from "../../../src/features/sync/obank-time-deposits";
 import {
@@ -627,6 +628,40 @@ describe("staged sync persistence", () => {
         .all(),
     ).toHaveLength(1);
     await apply([posted], []);
+    const expectFoodName = async (id: string) => {
+      const row = (await listBankTransactions(d1, 100)).find(
+        (transaction) => transaction.id === id,
+      )!;
+      expect(row).toMatchObject({
+        description: "餐廳/UNAGISHIKISHIMA",
+        counterparty: "餐廳/UNAGISHIKISHIMA",
+        status: "posted",
+      });
+      expect((await resolveClassifications(d1, [row])).get(id)).toMatchObject({
+        categoryId: "food",
+        source: "system_rule",
+      });
+    };
+    await expectFoodName(posted.recordKey);
+    expect(await findActivitySearchDays(d1, { q: "餐廳" })).toEqual([
+      "2026-09-04",
+    ]);
+    // Existing matches from the previous version are repaired even when both
+    // transactions have disappeared from the bank's current response.
+    db.database
+      .prepare(
+        "UPDATE bank_transactions SET description = ?, counterparty = ? WHERE id = ?",
+      )
+      .run(
+        String(posted.payload.description),
+        String(posted.payload.description),
+        posted.recordKey,
+      );
+    await apply([], []);
+    await expectFoodName(posted.recordKey);
+    // Repeated posted-only syncs must not overwrite the restored name.
+    await apply([posted], []);
+    await expectFoodName(posted.recordKey);
     expect(await listBankTransactions(d1, 100)).toHaveLength(1);
     expect(
       await listBankTransactionsInRange(d1, {
@@ -672,6 +707,9 @@ describe("staged sync persistence", () => {
     const domesticPosted = make("TWD", -300, "posted");
     await persistStagedSyncWrite(d1, { records: [domesticPending] });
     await apply([domesticPosted], [domesticPending]);
+    await expectFoodName(domesticPosted.recordKey);
+    await apply([domesticPosted], []);
+    await expectFoodName(domesticPosted.recordKey);
     expect(
       (await listBankTransactions(d1, 100)).find(
         (row) => row.id === domesticPosted.recordKey,
@@ -703,6 +741,14 @@ describe("staged sync persistence", () => {
       )
       .run(nextPending.recordKey);
     await apply([nextPending, nextPosted], [nextPending]);
+    const classifiedNext = (await listBankTransactions(d1, 100)).find(
+      (row) => row.id === nextPosted.recordKey,
+    )!;
+    expect(
+      (await resolveClassifications(d1, [classifiedNext])).get(
+        nextPosted.recordKey,
+      ),
+    ).toMatchObject({ categoryId: "shopping", source: "override" });
     expect(
       db.database
         .prepare(

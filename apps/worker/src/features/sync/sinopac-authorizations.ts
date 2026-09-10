@@ -122,6 +122,13 @@ export async function prepareSinopacAuthorizationWrite(
           payload: {
             ...record.payload,
             authorized_at: authorization.authorized_at,
+            ...(authorization.description?.trim() &&
+            authorization.description !== "永豐信用卡消費"
+              ? {
+                  description: authorization.description,
+                  counterparty: authorization.description,
+                }
+              : {}),
           },
         }
       : record;
@@ -141,6 +148,20 @@ export async function prepareSinopacAuthorizationWrite(
       ) WHERE connector_id = 'sinopac' AND id IN (SELECT json_extract(value, '$.id') FROM json_each(?))`,
         )
         .bind(linksJson, linksJson),
+      // Reapply names for all saved links, including older matches no longer
+      // returned by the bank. Keep the posted raw payload and financial fields.
+      db
+        .prepare(
+          `UPDATE bank_transactions SET
+        description = json_extract(link.value, '$.description'),
+        counterparty = json_extract(link.value, '$.description')
+      FROM json_each(?) link
+      WHERE bank_transactions.connector_id = 'sinopac' AND bank_transactions.status = 'posted'
+        AND bank_transactions.id = json_extract(link.value, '$.matched_transaction_id')
+        AND trim(COALESCE(json_extract(link.value, '$.description'), '')) <> ''
+        AND json_extract(link.value, '$.description') <> '永豐信用卡消費'`,
+        )
+        .bind(linksJson),
       db
         .prepare(
           `UPDATE bank_transactions SET authorized_at = (
