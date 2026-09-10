@@ -1,3 +1,4 @@
+import { prepareCtbcAuthorizationWrite } from "../../../src/features/sync/ctbc-authorizations";
 import { findActivitySearchDays } from "../../../src/features/activity/search-repository";
 import { resolveClassifications } from "../../../src/features/classification/service";
 import { prepareSinopacAuthorizationWrite } from "../../../src/features/sync/sinopac-authorizations";
@@ -515,6 +516,181 @@ describe("staged sync persistence", () => {
         )
         .get(),
     ).toEqual({ count: 3 });
+  });
+
+  it("repairs CTBC date-less IDs, links saved authorizations atomically and preserves preferences", async () => {
+    const db = createDb();
+    const d1 = db as unknown as D1Database;
+    const make = (
+      key: string,
+      status: "pending" | "posted",
+      date: string | null,
+      metadata: Record<string, unknown> = {},
+    ) => {
+      const r = bankTransactionRecord(`ctbc:card:tx:${key}:1`, status, {
+        authorizedAt: date ?? "",
+        postedDate: date ? "2026-09-07" : undefined,
+      });
+      Object.assign(r.payload, {
+        connector_id: "ctbc",
+        authorized_at: date,
+        raw_payload: JSON.stringify({ cardLast4: "1234", ...metadata }),
+      });
+      return r;
+    };
+    const legacy = make("legacy", "posted", null);
+    const pending = make("pending", "pending", "2026-09-02T10:20:00+08:00");
+    await persistStagedSyncWrite(d1, {
+      records: [bankAccountRecord(0), legacy, pending],
+    });
+    db.database
+      .prepare(
+        "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES (?, 1, '2026-09-01', '2026-09-01')",
+      )
+      .run(pending.recordKey);
+    db.database
+      .prepare(
+        "INSERT INTO classification_overrides VALUES ('ctbc-category', 'bank_transaction', ?, 'shopping', 'now', 'now')",
+      )
+      .run(pending.recordKey);
+    db.database
+      .prepare(
+        "INSERT INTO invoice_transaction_preferences VALUES ('ctbc-invoice', ?, 'linked', 'now', 'now')",
+      )
+      .run(pending.recordKey);
+    const incoming = make("corrected", "posted", "2026-09-02", {
+      legacySourceId: legacy.payload.source_id,
+    });
+    const write = await prepareCtbcAuthorizationWrite(d1, [incoming]);
+    expect(write.records[0]!.recordKey).toBe(legacy.recordKey);
+    await expect(
+      persistStagedSyncWrite(d1, {
+        ...write,
+        finalizeStatements: [
+          d1.prepare("INSERT INTO missing_table VALUES (1)"),
+        ],
+      }),
+    ).rejects.toThrow();
+    expect(
+      db.database
+        .prepare("SELECT authorized_at FROM bank_transactions WHERE id = ?")
+        .get(legacy.recordKey)?.authorized_at,
+    ).toBeNull();
+    await persistStagedSyncWrite(
+      d1,
+      await prepareCtbcAuthorizationWrite(d1, [incoming]),
+    );
+    expect(
+      db.database.prepare("SELECT count(*) AS n FROM bank_transactions").get()
+        ?.n,
+    ).toBe(2);
+    expect(
+      db.database
+        .prepare("SELECT authorized_at FROM bank_transactions WHERE id = ?")
+        .get(legacy.recordKey)?.authorized_at,
+    ).toBe("2026-09-02T10:20:00+08:00");
+    expect(
+      db.database
+        .prepare(
+          "SELECT matched_transaction_id FROM bank_transactions WHERE id = ?",
+        )
+        .get(pending.recordKey)?.matched_transaction_id,
+    ).toBe(legacy.recordKey);
+    expect(
+      db.database
+        .prepare(
+          "SELECT excluded_from_calculation FROM bank_transaction_preferences WHERE transaction_id = ?",
+        )
+        .get(legacy.recordKey)?.excluded_from_calculation,
+    ).toBe(1);
+    expect(
+      db.database
+        .prepare(
+          "SELECT category_id FROM classification_overrides WHERE target_id = ?",
+        )
+        .get(legacy.recordKey)?.category_id,
+    ).toBe("shopping");
+    expect(
+      db.database
+        .prepare(
+          "SELECT transaction_id FROM invoice_transaction_preferences WHERE invoice_id = 'ctbc-invoice'",
+        )
+        .get()?.transaction_id,
+    ).toBe(legacy.recordKey);
+    // Repeated sync and a changed feed identity still update the original row.
+    await persistStagedSyncWrite(
+      d1,
+      await prepareCtbcAuthorizationWrite(d1, [incoming]),
+    );
+    await persistStagedSyncWrite(
+      d1,
+      await prepareCtbcAuthorizationWrite(d1, [
+        make("next-feed", "posted", "2026-09-02"),
+      ]),
+    );
+    expect(
+      db.database.prepare("SELECT count(*) AS n FROM bank_transactions").get()
+        ?.n,
+    ).toBe(2);
+    await persistStagedSyncWrite(
+      d1,
+      await prepareCtbcAuthorizationWrite(d1, [
+        make("pending", "posted", "2026-09-02", {
+          legacySourceId: legacy.payload.source_id,
+        }),
+      ]),
+    );
+    expect(
+      db.database
+        .prepare("SELECT status FROM bank_transactions WHERE id = ?")
+        .get(pending.recordKey)?.status,
+    ).toBe("pending");
+    expect(
+      db.database.prepare("SELECT count(*) AS n FROM bank_transactions").get()
+        ?.n,
+    ).toBe(2);
+    expect(await listBankTransactions(d1, 100)).toHaveLength(1);
+  });
+
+  it("does not pair ambiguous CTBC authorizations or downgrade posted rows", async () => {
+    const db = createDb();
+    const d1 = db as unknown as D1Database;
+    const make = (key: string, status: "posted" | "pending") => {
+      const r = bankTransactionRecord(`ctbc:card:tx:${key}:1`, status, {
+        authorizedAt: "2026-09-02",
+        postedDate: status === "posted" ? "2026-09-07" : undefined,
+      });
+      Object.assign(r.payload, {
+        connector_id: "ctbc",
+        raw_payload: JSON.stringify({ cardLast4: "1234" }),
+      });
+      return r;
+    };
+    const posted = make("posted", "posted");
+    await persistStagedSyncWrite(d1, {
+      records: [
+        bankAccountRecord(0),
+        posted,
+        make("a", "pending"),
+        make("b", "pending"),
+      ],
+    });
+    await persistStagedSyncWrite(
+      d1,
+      await prepareCtbcAuthorizationWrite(d1, [make("posted", "pending")]),
+    );
+    expect(
+      db.database
+        .prepare("SELECT status FROM bank_transactions WHERE id = ?")
+        .get(posted.recordKey)?.status,
+    ).toBe("posted");
+    expect(
+      db.database
+        .prepare(
+          "SELECT count(*) AS n FROM bank_transactions WHERE matched_transaction_id IS NOT NULL",
+        )
+        .get()?.n,
+    ).toBe(0);
   });
 
   it("retains unmatched authorizations and later restores time without duplicate spending", async () => {

@@ -1,3 +1,4 @@
+import { prepareCtbcAuthorizationWrite } from "./ctbc-authorizations";
 import { prepareSinopacAuthorizationWrite } from "./sinopac-authorizations";
 import { prepareObankTimeDepositWrite } from "./obank-time-deposits";
 import {
@@ -782,12 +783,18 @@ export async function syncCtbc(
     );
   }
 
-  const newRecords = await persistStagedSyncWrite(env.DB, {
+  const authorizationWrite = await prepareCtbcAuthorizationWrite(
+    env.DB,
     records,
-    afterPromoteStatements:
-      bankAccounts.length > 0
+  );
+  const newRecords = await persistStagedSyncWrite(env.DB, {
+    records: authorizationWrite.records,
+    afterPromoteStatements: [
+      ...authorizationWrite.afterPromoteStatements,
+      ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB)]
-        : [],
+        : []),
+    ],
     finalizeStatements,
   });
 

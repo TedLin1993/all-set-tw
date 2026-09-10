@@ -95,7 +95,12 @@ export type {
 } from "./taishin";
 import { taishinConfigSchema } from "./taishin";
 
-export { ctbcConfigSchema, parseCtbcData, parseCtbcConfig } from "./ctbc";
+export {
+  ctbcConfigSchema,
+  parseCtbcData,
+  parseCtbcConfig,
+  ctbcTransactionsMatch,
+} from "./ctbc";
 export type { CtbcConfig, CtbcData, CtbcPayloads } from "./ctbc";
 export {
   classifyCtbcError,
