@@ -368,7 +368,9 @@ function parseCreditCardTransactions(groups: CreditCardGroup[]) {
         normalizeCardDate(bill.clearingDt) ??
         purchaseDate;
       const description =
-        optionalString(bill.merchantChiName) || "中國信託信用卡消費";
+        optionalString(bill.description) ||
+        optionalString(bill.merchantChiName) ||
+        "中國信託信用卡消費";
       const rawAmount =
         group.currency === TWD
           ? numberValue(bill.ntAmt)
@@ -383,7 +385,9 @@ function parseCreditCardTransactions(groups: CreditCardGroup[]) {
         );
       const amount = refund ? Math.abs(rawAmount) : -Math.abs(rawAmount);
       const cardLast4 =
-        last4(stringValue(bill.cardNo)) ?? last4(stringValue(bill.fullCardNo));
+        last4(stringValue(bill.cardNoSuffixFour)) ??
+        last4(stringValue(bill.cardNo)) ??
+        last4(stringValue(bill.fullCardNo));
       const matchKey = [
         group.currency,
         purchaseDate ?? "",
@@ -594,42 +598,47 @@ function preferredAuthorizedAt(
   postedAuthorizedAt: string | undefined,
   pendingAuthorizedAt: string | undefined,
 ) {
-  const postedHasTime = hasTimeComponent(postedAuthorizedAt);
-  const pendingHasTime = hasTimeComponent(pendingAuthorizedAt);
-  if (pendingHasTime && !postedHasTime) return pendingAuthorizedAt;
-  return postedAuthorizedAt;
+  if (hasTimeComponent(pendingAuthorizedAt)) return pendingAuthorizedAt;
+  if (hasTimeComponent(postedAuthorizedAt)) return postedAuthorizedAt;
+  return pendingAuthorizedAt ?? postedAuthorizedAt;
 }
 
 function hasTimeComponent(value: string | undefined) {
   return Boolean(value && /T\d{2}:\d{2}(?::\d{2})?/.test(value));
 }
 
-/** Match only the same card, purchase day, currency and signed amount. */
+type CtbcMatchTransaction = Pick<
+  BankTransaction,
+  "authorizedAt" | "amount" | "currency" | "description" | "raw"
+> & {
+  postedDate?: string;
+};
+
+/** Match only the same card, currency and signed amount. */
 export function ctbcTransactionsMatch(
-  left: Pick<
-    BankTransaction,
-    "authorizedAt" | "amount" | "currency" | "description" | "raw"
-  >,
-  right: Pick<
-    BankTransaction,
-    "authorizedAt" | "amount" | "currency" | "description" | "raw"
-  >,
+  left: CtbcMatchTransaction,
+  right: CtbcMatchTransaction,
 ) {
   const l = isRecord(left.raw) ? left.raw : {};
   const r = isRecord(right.raw) ? right.raw : {};
   if (
     !l.cardLast4 ||
     l.cardLast4 !== r.cardLast4 ||
-    !left.authorizedAt ||
-    !right.authorizedAt ||
-    purchaseDay(left.authorizedAt) !== purchaseDay(right.authorizedAt) ||
     left.currency !== right.currency ||
     left.amount !== right.amount
   )
     return false;
+  const leftDay = transactionDay(left);
+  const rightDay = transactionDay(right);
+  if (leftDay && rightDay && leftDay !== rightDay) return false;
   if (l.authorizationHash && r.authorizationHash)
     return l.authorizationHash === r.authorizationHash;
   return merchantsMatch(left.description, right.description);
+}
+
+function transactionDay(value: CtbcMatchTransaction) {
+  const source = value.authorizedAt || value.postedDate;
+  return source ? purchaseDay(source) : undefined;
 }
 
 function purchaseDay(value: string) {

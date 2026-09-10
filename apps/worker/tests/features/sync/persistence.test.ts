@@ -583,32 +583,33 @@ describe("staged sync persistence", () => {
     expect(
       db.database.prepare("SELECT count(*) AS n FROM bank_transactions").get()
         ?.n,
-    ).toBe(2);
-    expect(
-      db.database
-        .prepare("SELECT authorized_at FROM bank_transactions WHERE id = ?")
-        .get(legacy.recordKey)?.authorized_at,
-    ).toBe("2026-09-02T10:20:00+08:00");
+    ).toBe(1);
     expect(
       db.database
         .prepare(
-          "SELECT matched_transaction_id FROM bank_transactions WHERE id = ?",
+          "SELECT id, status, description, authorized_at, matched_transaction_id FROM bank_transactions",
         )
-        .get(pending.recordKey)?.matched_transaction_id,
-    ).toBe(legacy.recordKey);
+        .get(),
+    ).toEqual({
+      id: pending.recordKey,
+      status: "posted",
+      description: "全支付﹘全聯",
+      authorized_at: "2026-09-02T10:20:00+08:00",
+      matched_transaction_id: null,
+    });
     expect(
       db.database
         .prepare(
           "SELECT excluded_from_calculation FROM bank_transaction_preferences WHERE transaction_id = ?",
         )
-        .get(legacy.recordKey)?.excluded_from_calculation,
+        .get(pending.recordKey)?.excluded_from_calculation,
     ).toBe(1);
     expect(
       db.database
         .prepare(
           "SELECT category_id FROM classification_overrides WHERE target_id = ?",
         )
-        .get(legacy.recordKey)?.category_id,
+        .get(pending.recordKey)?.category_id,
     ).toBe("shopping");
     expect(
       db.database
@@ -616,7 +617,7 @@ describe("staged sync persistence", () => {
           "SELECT transaction_id FROM invoice_transaction_preferences WHERE invoice_id = 'ctbc-invoice'",
         )
         .get()?.transaction_id,
-    ).toBe(legacy.recordKey);
+    ).toBe(pending.recordKey);
     // Repeated sync and a changed feed identity still update the original row.
     await persistStagedSyncWrite(
       d1,
@@ -631,7 +632,7 @@ describe("staged sync persistence", () => {
     expect(
       db.database.prepare("SELECT count(*) AS n FROM bank_transactions").get()
         ?.n,
-    ).toBe(2);
+    ).toBe(1);
     await persistStagedSyncWrite(
       d1,
       await prepareCtbcAuthorizationWrite(d1, [
@@ -644,11 +645,11 @@ describe("staged sync persistence", () => {
       db.database
         .prepare("SELECT status FROM bank_transactions WHERE id = ?")
         .get(pending.recordKey)?.status,
-    ).toBe("pending");
+    ).toBe("posted");
     expect(
       db.database.prepare("SELECT count(*) AS n FROM bank_transactions").get()
         ?.n,
-    ).toBe(2);
+    ).toBe(1);
     expect(await listBankTransactions(d1, 100)).toHaveLength(1);
   });
 
@@ -691,6 +692,169 @@ describe("staged sync persistence", () => {
         )
         .get()?.n,
     ).toBe(0);
+  });
+
+  it("promotes a unique CTBC authorization over a date-less posted row", async () => {
+    const db = createDb();
+    const d1 = db as unknown as D1Database;
+    const make = (
+      key: string,
+      status: "posted" | "pending",
+      date: string | null,
+    ) => {
+      const r = bankTransactionRecord(`ctbc:card:tx:${key}:1`, status, {
+        authorizedAt: date ?? "",
+        postedDate: date && status === "posted" ? "2026-07-10" : undefined,
+      });
+      Object.assign(r.payload, {
+        connector_id: "ctbc",
+        authorized_at: date,
+        posted_date: date && status === "posted" ? "2026-07-10" : null,
+        description: status === "posted" ? "全支付﹘全聯" : "全支付 全聯",
+        counterparty: status === "posted" ? "全支付﹘全聯" : "全支付 全聯",
+        raw_payload: JSON.stringify({
+          cardLast4: "1234",
+          authorizationHash: "ctbc-auth",
+        }),
+      });
+      return r;
+    };
+    const posted = make("posted", "posted", null);
+    const pending = make("pending", "pending", "2026-07-08T12:00:00+08:00");
+    await persistStagedSyncWrite(d1, {
+      records: [bankAccountRecord(0), posted],
+    });
+    db.database
+      .prepare(
+        "INSERT INTO classification_overrides VALUES ('ctbc-posted', 'bank_transaction', ?, 'food', 'now', 'now')",
+      )
+      .run(posted.recordKey);
+    db.database
+      .prepare(
+        "INSERT INTO classification_overrides VALUES ('ctbc-pending', 'bank_transaction', ?, 'shopping', 'now', 'now')",
+      )
+      .run(pending.recordKey);
+    await persistStagedSyncWrite(
+      d1,
+      await prepareCtbcAuthorizationWrite(d1, [pending]),
+    );
+    expect(
+      db.database
+        .prepare(
+          "SELECT id, status, description, counterparty, authorized_at, matched_transaction_id FROM bank_transactions",
+        )
+        .get(),
+    ).toEqual({
+      id: pending.recordKey,
+      status: "posted",
+      description: "全支付﹘全聯",
+      counterparty: "全支付﹘全聯",
+      authorized_at: "2026-07-08T12:00:00+08:00",
+      matched_transaction_id: null,
+    });
+    expect(
+      db.database
+        .prepare(
+          "SELECT category_id FROM classification_overrides WHERE target_id = ?",
+        )
+        .get(pending.recordKey)?.category_id,
+    ).toBe("shopping");
+    expect(await listBankTransactions(d1, 100)).toHaveLength(1);
+  });
+
+  it("keeps the posted CTBC classification when the authorization is unclassified", async () => {
+    const db = createDb();
+    const d1 = db as unknown as D1Database;
+    const make = (key: string, status: "posted" | "pending") => {
+      const r = bankTransactionRecord(`ctbc:card:tx:${key}:1`, status, {
+        authorizedAt: status === "pending" ? "2026-07-08T12:00:00+08:00" : "",
+        postedDate: undefined,
+      });
+      Object.assign(r.payload, {
+        connector_id: "ctbc",
+        authorized_at:
+          status === "pending" ? "2026-07-08T12:00:00+08:00" : null,
+        raw_payload: JSON.stringify({ cardLast4: "1234" }),
+      });
+      return r;
+    };
+    const posted = make("posted", "posted");
+    const pending = make("pending", "pending");
+    await persistStagedSyncWrite(d1, {
+      records: [bankAccountRecord(0), posted],
+    });
+    db.database
+      .prepare(
+        "INSERT INTO classification_overrides VALUES ('ctbc-posted-keep', 'bank_transaction', ?, 'food', 'now', 'now')",
+      )
+      .run(posted.recordKey);
+    db.database
+      .prepare(
+        "INSERT INTO classification_overrides VALUES ('ctbc-pending-other', 'bank_transaction', ?, 'other', 'now', 'now')",
+      )
+      .run(pending.recordKey);
+    await persistStagedSyncWrite(
+      d1,
+      await prepareCtbcAuthorizationWrite(d1, [pending]),
+    );
+    expect(
+      db.database
+        .prepare(
+          "SELECT category_id FROM classification_overrides WHERE target_id = ?",
+        )
+        .get(pending.recordKey)?.category_id,
+    ).toBe("food");
+    expect(
+      db.database.prepare("SELECT id, status FROM bank_transactions").get(),
+    ).toEqual({ id: pending.recordKey, status: "posted" });
+  });
+
+  it("promotes a previously hidden CTBC authorization in place", async () => {
+    const db = createDb();
+    const d1 = db as unknown as D1Database;
+    const posted = bankTransactionRecord("ctbc:card:tx:posted:1", "posted", {
+      authorizedAt: "",
+      postedDate: "2026-07-10",
+    });
+    const pending = bankTransactionRecord("ctbc:card:tx:pending:1", "pending", {
+      authorizedAt: "2026-07-08T12:00:00+08:00",
+    });
+    Object.assign(posted.payload, {
+      connector_id: "ctbc",
+      description: "全支付﹘全聯",
+      counterparty: "全支付﹘全聯",
+      raw_payload: JSON.stringify({ cardLast4: "1234" }),
+    });
+    Object.assign(pending.payload, {
+      connector_id: "ctbc",
+      description: "全支付 全聯",
+      counterparty: "全支付 全聯",
+      raw_payload: JSON.stringify({ cardLast4: "1234" }),
+    });
+    await persistStagedSyncWrite(d1, {
+      records: [bankAccountRecord(0), posted, pending],
+    });
+    db.database
+      .prepare(
+        "UPDATE bank_transactions SET matched_transaction_id = ? WHERE id = ?",
+      )
+      .run(posted.recordKey, pending.recordKey);
+    await persistStagedSyncWrite(
+      d1,
+      await prepareCtbcAuthorizationWrite(d1, []),
+    );
+    expect(
+      db.database
+        .prepare(
+          "SELECT id, status, description, authorized_at FROM bank_transactions",
+        )
+        .get(),
+    ).toEqual({
+      id: pending.recordKey,
+      status: "posted",
+      description: "全支付﹘全聯",
+      authorized_at: "2026-07-08T12:00:00+08:00",
+    });
   });
 
   it("retains unmatched authorizations and later restores time without duplicate spending", async () => {

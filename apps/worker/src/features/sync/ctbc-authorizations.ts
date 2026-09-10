@@ -18,6 +18,7 @@ const raw = (row: Row): Record<string, unknown> =>
   JSON.parse(row.raw_payload || "{}");
 const candidate = (row: Row) => ({
   authorizedAt: row.authorized_at ?? undefined,
+  postedDate: row.posted_date ?? undefined,
   amount: row.amount,
   currency: row.currency,
   description: row.description,
@@ -166,16 +167,21 @@ export async function prepareCtbcAuthorizationWrite(
       return [];
     return [{ ...p, matched_transaction_id: matches[0]!.id }];
   });
-  const links = [...savedLinks, ...newLinks];
   const linksJson = JSON.stringify(
-    links.map((p) => ({
-      id: p.id,
-      posted: p.matched_transaction_id,
-      time: p.authorized_at,
-    })),
-  );
-  const newLinksJson = JSON.stringify(
-    newLinks.map((p) => ({ id: p.id, posted: p.matched_transaction_id })),
+    [...savedLinks, ...newLinks].flatMap((pendingRow) => {
+      const posted = all.get(pendingRow.matched_transaction_id ?? "");
+      return posted && posted.id !== pendingRow.id
+        ? [
+            {
+              id: pendingRow.id,
+              posted: posted.id,
+              postedName: posted.description,
+              postedDate: posted.posted_date,
+              postedAmount: posted.amount,
+            },
+          ]
+        : [];
+    }),
   );
   return {
     records: records.flatMap((r) =>
@@ -188,40 +194,77 @@ export async function prepareCtbcAuthorizationWrite(
     afterPromoteStatements: [
       db
         .prepare(
-          `UPDATE bank_transactions SET matched_transaction_id = json_extract(link.value, '$.posted')
-        FROM json_each(?) link WHERE connector_id = 'ctbc' AND status = 'pending' AND bank_transactions.id = json_extract(link.value, '$.id')`,
+          `UPDATE bank_transactions SET
+          status = 'posted',
+          description = COALESCE(NULLIF(trim(json_extract(link.value, '$.postedName')), ''), description),
+          counterparty = COALESCE(NULLIF(trim(json_extract(link.value, '$.postedName')), ''), counterparty),
+          posted_date = COALESCE(json_extract(link.value, '$.postedDate'), posted_date),
+          amount = COALESCE(json_extract(link.value, '$.postedAmount'), amount),
+          matched_transaction_id = NULL
+        FROM json_each(?) link
+        WHERE connector_id = 'ctbc' AND bank_transactions.id = json_extract(link.value, '$.id')`,
         )
         .bind(linksJson),
       db
         .prepare(
-          `UPDATE bank_transactions SET authorized_at = json_extract(link.value, '$.time')
-        FROM json_each(?) link WHERE connector_id = 'ctbc' AND status = 'posted'
-        AND bank_transactions.id = json_extract(link.value, '$.posted') AND instr(json_extract(link.value, '$.time'), 'T') > 0`,
+          `INSERT INTO classification_overrides (id, target_type, target_id, category_id, created_at, updated_at)
+        SELECT 'override:bank_transaction:' || json_extract(link.value, '$.id'), 'bank_transaction', json_extract(link.value, '$.id'), posted.category_id, posted.created_at, posted.updated_at
+        FROM json_each(?) link JOIN classification_overrides posted ON posted.target_type = 'bank_transaction' AND posted.target_id = json_extract(link.value, '$.posted')
+        WHERE posted.category_id <> 'other'
+        ON CONFLICT(target_type, target_id) DO UPDATE SET
+          category_id = excluded.category_id,
+          updated_at = excluded.updated_at
+        WHERE classification_overrides.category_id = 'other'`,
         )
         .bind(linksJson),
       db
         .prepare(
           `INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at)
-        SELECT json_extract(link.value, '$.posted'), p.excluded_from_calculation, p.created_at, p.updated_at
-        FROM json_each(?) link JOIN bank_transaction_preferences p ON p.transaction_id = json_extract(link.value, '$.id')
+        SELECT json_extract(link.value, '$.id'), posted.excluded_from_calculation, posted.created_at, posted.updated_at
+        FROM json_each(?) link JOIN bank_transaction_preferences posted ON posted.transaction_id = json_extract(link.value, '$.posted')
         WHERE true ON CONFLICT(transaction_id) DO NOTHING`,
         )
-        .bind(newLinksJson),
+        .bind(linksJson),
       db
         .prepare(
-          `INSERT INTO classification_overrides (id, target_type, target_id, category_id, created_at, updated_at)
-        SELECT 'override:bank_transaction:' || json_extract(link.value, '$.posted'), 'bank_transaction', json_extract(link.value, '$.posted'), p.category_id, p.created_at, p.updated_at
-        FROM json_each(?) link JOIN classification_overrides p ON p.target_type = 'bank_transaction' AND p.target_id = json_extract(link.value, '$.id')
-        WHERE true ON CONFLICT(target_type, target_id) DO NOTHING`,
+          `UPDATE invoice_transaction_preferences SET transaction_id = json_extract(link.value, '$.id')
+        FROM json_each(?) link WHERE invoice_transaction_preferences.transaction_id = json_extract(link.value, '$.posted')
+        AND NOT EXISTS (SELECT 1 FROM invoice_transaction_preferences existing WHERE existing.transaction_id = json_extract(link.value, '$.id') AND existing.decision = 'linked')`,
         )
-        .bind(newLinksJson),
+        .bind(linksJson),
       db
         .prepare(
-          `UPDATE invoice_transaction_preferences SET transaction_id = json_extract(link.value, '$.posted')
-        FROM json_each(?) link WHERE invoice_transaction_preferences.transaction_id = json_extract(link.value, '$.id')
-        AND NOT EXISTS (SELECT 1 FROM invoice_transaction_preferences existing WHERE existing.transaction_id = json_extract(link.value, '$.posted') AND existing.decision = 'linked')`,
+          `UPDATE bank_transactions SET matched_transaction_id = NULL
+        WHERE matched_transaction_id IN (SELECT json_extract(value, '$.posted') FROM json_each(?))`,
         )
-        .bind(newLinksJson),
+        .bind(linksJson),
+      db
+        .prepare(
+          `DELETE FROM invoice_transaction_preferences
+        WHERE transaction_id IN (SELECT json_extract(value, '$.posted') FROM json_each(?))`,
+        )
+        .bind(linksJson),
+      db
+        .prepare(
+          `DELETE FROM classification_overrides
+        WHERE target_type = 'bank_transaction'
+          AND target_id IN (SELECT json_extract(value, '$.posted') FROM json_each(?))`,
+        )
+        .bind(linksJson),
+      db
+        .prepare(
+          `DELETE FROM bank_transaction_preferences
+        WHERE transaction_id IN (SELECT json_extract(value, '$.posted') FROM json_each(?))`,
+        )
+        .bind(linksJson),
+      db
+        .prepare(
+          `DELETE FROM bank_transactions
+        WHERE connector_id = 'ctbc'
+          AND id IN (SELECT json_extract(value, '$.posted') FROM json_each(?))
+          AND id NOT IN (SELECT json_extract(value, '$.id') FROM json_each(?))`,
+        )
+        .bind(linksJson, linksJson),
     ],
   };
 }
