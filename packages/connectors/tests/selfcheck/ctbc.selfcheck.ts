@@ -329,7 +329,7 @@ const matchBase = {
   amount: -350,
   currency: "TWD",
   description: "測試商店",
-  raw: { cardLast4: "3108" },
+  raw: { cardLast4: "3108", authorizationHash: "same-auth" },
 };
 assert.equal(
   ctbcTransactionsMatch(
@@ -342,6 +342,53 @@ assert.equal(
   ctbcTransactionsMatch(
     { ...matchBase, authorizedAt: "2026-07-08T12:00:00+08:00" },
     { ...matchBase, authorizedAt: "2026-07-09" },
+  ),
+  false,
+);
+
+// Card numbers and merchant names are not matching criteria.
+const authorization = {
+  ...matchBase,
+  authorizedAt: "2026-09-09T19:02:00+08:00",
+  raw: { cardLast4: "3108", authorizationHash: "same-auth" },
+};
+const cardlessPosted = {
+  ...matchBase,
+  authorizedAt: "2026-09-09",
+  postedDate: "2026-09-10",
+  description: "測試商店 TAIPEI TW",
+  raw: { authorizationHash: "same-auth" },
+};
+for (const accepted of [
+  cardlessPosted,
+  {
+    ...cardlessPosted,
+    raw: { authorizationHash: "same-auth", cardLast4: "9999" },
+  },
+  { ...cardlessPosted, authorizedAt: undefined, postedDate: "2026-09-10" },
+]) {
+  assert.equal(ctbcTransactionsMatch(authorization, accepted), true);
+  assert.equal(ctbcTransactionsMatch(accepted, authorization), true);
+}
+for (const rejected of [
+  { ...cardlessPosted, raw: {} },
+  { ...cardlessPosted, raw: { authorizationHash: "different" } },
+  { ...cardlessPosted, authorizedAt: "2026-09-08" },
+  { ...cardlessPosted, amount: 350 },
+  { ...cardlessPosted, currency: "USD" },
+])
+  assert.equal(ctbcTransactionsMatch(authorization, rejected), false);
+assert.equal(
+  ctbcTransactionsMatch(
+    { ...cardlessPosted, authorizedAt: undefined },
+    { ...cardlessPosted, authorizedAt: undefined },
+  ),
+  true,
+);
+assert.equal(
+  ctbcTransactionsMatch(
+    { ...cardlessPosted, raw: {} },
+    { ...cardlessPosted, raw: {} },
   ),
   false,
 );
