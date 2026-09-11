@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "prebuild": "node ../../scripts/prepare-cloudflare-build.mjs",
-    "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
+    "build": "npm run typecheck && vite build",
     "format": "prettier --write . --ignore-path ../../.prettierignore",
     "format:check": "prettier --check . --ignore-path ../../.prettierignore",
-    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json --tsgo",
     "dev": "vite",
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
@@ -32,7 +32,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.4.2",
     "jsdom": "^29.1.1",
-    "svelte-check": "^4.7.2",
+    "svelte-check": "^4.7.6",
     "tailwindcss": "^4.3.2",
     "vite": "^8.1.4",
     "vitest": "^4.1.10"

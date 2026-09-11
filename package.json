@@ -56,10 +56,11 @@
     }
   },
   "devDependencies": {
+    "@typescript/native": "npm:typescript@~7.0.2",
     "esbuild": "^0.28.1",
     "prettier": "^3.9.5",
     "prettier-plugin-svelte": "^4.1.1",
-    "vite": "^8.1.4",
-    "typescript": "^5.5.4"
+    "typescript": "~6.0.3",
+    "vite": "^8.1.4"
   }
 }
