@@ -534,7 +534,11 @@ describe("staged sync persistence", () => {
       Object.assign(r.payload, {
         connector_id: "ctbc",
         authorized_at: date,
-        raw_payload: JSON.stringify({ cardLast4: "1234", ...metadata }),
+        raw_payload: JSON.stringify({
+          cardLast4: "1234",
+          authorizationHash: "ctbc-auth",
+          ...metadata,
+        }),
       });
       return r;
     };
@@ -663,7 +667,7 @@ describe("staged sync persistence", () => {
       });
       Object.assign(r.payload, {
         connector_id: "ctbc",
-        raw_payload: JSON.stringify({ cardLast4: "1234" }),
+        raw_payload: JSON.stringify({ authorizationHash: "ctbc-auth" }),
       });
       return r;
     };
@@ -713,7 +717,7 @@ describe("staged sync persistence", () => {
         description: status === "posted" ? "全支付﹘全聯" : "全支付 全聯",
         counterparty: status === "posted" ? "全支付﹘全聯" : "全支付 全聯",
         raw_payload: JSON.stringify({
-          cardLast4: "1234",
+          cardLast4: status === "posted" ? undefined : "1234",
           authorizationHash: "ctbc-auth",
         }),
       });
@@ -774,7 +778,7 @@ describe("staged sync persistence", () => {
         connector_id: "ctbc",
         authorized_at:
           status === "pending" ? "2026-07-08T12:00:00+08:00" : null,
-        raw_payload: JSON.stringify({ cardLast4: "1234" }),
+        raw_payload: JSON.stringify({ authorizationHash: "ctbc-auth" }),
       });
       return r;
     };
@@ -823,13 +827,13 @@ describe("staged sync persistence", () => {
       connector_id: "ctbc",
       description: "全支付﹘全聯",
       counterparty: "全支付﹘全聯",
-      raw_payload: JSON.stringify({ cardLast4: "1234" }),
+      raw_payload: JSON.stringify({ authorizationHash: "ctbc-auth" }),
     });
     Object.assign(pending.payload, {
       connector_id: "ctbc",
       description: "全支付 全聯",
       counterparty: "全支付 全聯",
-      raw_payload: JSON.stringify({ cardLast4: "1234" }),
+      raw_payload: JSON.stringify({ authorizationHash: "ctbc-auth" }),
     });
     await persistStagedSyncWrite(d1, {
       records: [bankAccountRecord(0), posted, pending],

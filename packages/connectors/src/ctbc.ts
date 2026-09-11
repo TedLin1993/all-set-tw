@@ -614,7 +614,7 @@ type CtbcMatchTransaction = Pick<
   postedDate?: string;
 };
 
-/** Match only the same card, currency and signed amount. */
+/** Authorization, currency and signed amount must agree; callers enforce uniqueness. */
 export function ctbcTransactionsMatch(
   left: CtbcMatchTransaction,
   right: CtbcMatchTransaction,
@@ -622,23 +622,18 @@ export function ctbcTransactionsMatch(
   const l = isRecord(left.raw) ? left.raw : {};
   const r = isRecord(right.raw) ? right.raw : {};
   if (
-    !l.cardLast4 ||
-    l.cardLast4 !== r.cardLast4 ||
+    !l.authorizationHash ||
+    l.authorizationHash !== r.authorizationHash ||
     left.currency !== right.currency ||
     left.amount !== right.amount
   )
     return false;
-  const leftDay = transactionDay(left);
-  const rightDay = transactionDay(right);
-  if (leftDay && rightDay && leftDay !== rightDay) return false;
-  if (l.authorizationHash && r.authorizationHash)
-    return l.authorizationHash === r.authorizationHash;
-  return merchantsMatch(left.description, right.description);
-}
-
-function transactionDay(value: CtbcMatchTransaction) {
-  const source = value.authorizedAt || value.postedDate;
-  return source ? purchaseDay(source) : undefined;
+  // Posting dates describe a different lifecycle event, not the purchase day.
+  return (
+    !left.authorizedAt ||
+    !right.authorizedAt ||
+    purchaseDay(left.authorizedAt) === purchaseDay(right.authorizedAt)
+  );
 }
 
 function purchaseDay(value: string) {
@@ -665,16 +660,6 @@ function normalizeCardDate(value: unknown) {
     );
   }
   return normalizeDate(value);
-}
-
-function merchantsMatch(left: string | undefined, right: string | undefined) {
-  const leftNormalized = normalizeMerchantName(left ?? "");
-  const rightNormalized = normalizeMerchantName(right ?? "");
-  return (
-    leftNormalized.length >= 2 &&
-    rightNormalized.length >= 2 &&
-    leftNormalized === rightNormalized
-  );
 }
 
 function parseCardMetadata(payload: unknown) {
