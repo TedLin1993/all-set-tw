@@ -42,6 +42,12 @@ apps/web/src/
 
 ## 驗證
 
+前端 `typecheck` 使用 `svelte-check --tsgo` 進行 TypeScript 7 型別檢查；
+`build` 先執行同一個 `typecheck`，再由 Vite 打包。
+TypeScript 7 透過根目錄的 `@typescript/native` npm alias 安裝，
+並保留 `svelte-check` 所需的 TypeScript 6 相依。
+Vite 資源型別透過 `vite/client` 載入；`.svelte-check` 是不提交的產生檔。
+
 完整前端驗證使用：
 
 ```bash

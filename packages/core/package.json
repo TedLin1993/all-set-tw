@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json"
+    "build": "node ../../node_modules/@typescript/native/bin/tsc -p tsconfig.json",
+    "typecheck": "node ../../node_modules/@typescript/native/bin/tsc -p tsconfig.json"
   }
 }

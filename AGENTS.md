@@ -2,7 +2,7 @@
 
 ## 專案概況
 
-- 本專案是使用 TypeScript ESM 與 npm workspaces 管理的 monorepo。
+- 本專案是使用 TypeScript ESM 與 npm workspaces 管理的 monorepo。前後端與共用套件皆使用 TS7 型別檢查；前端透過 `svelte-check --tsgo` 執行，並保留其所需的 TS6 相依。
 - 前端位於 `apps/web`，使用 Svelte 5、Vite、Tailwind CSS 4 與 TanStack Svelte Query。
 - 後端位於 `apps/worker`，執行於 Cloudflare Workers，使用 Hono 提供 API。
 - 資料庫使用 Cloudflare D1；schema 變更由 `packages/db/migrations` 管理。

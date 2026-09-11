@@ -178,7 +178,7 @@ npm run build
 
 ## 技術架構
 
-前端使用 Svelte 5、TypeScript、Tailwind CSS 4 與 shadcn-svelte；後端執行於 Cloudflare Workers，以 Hono 提供 API，並整合 D1、Access、Browser Run、Workers AI、Cron Triggers 與 Queues。專案以 npm workspaces 管理 Web、Worker、共用型別、資料庫與連接器套件。
+前端使用 Svelte 5、TypeScript、Tailwind CSS 4 與 shadcn-svelte；後端執行於 Cloudflare Workers，以 Hono 提供 API，並整合 D1、Access、Browser Run、Workers AI、Cron Triggers 與 Queues。專案以 npm workspaces 管理 Web、Worker、共用型別、資料庫與連接器套件。前後端與共用套件皆使用 TypeScript 7 型別檢查；Svelte 前端透過 `svelte-check --tsgo` 執行，並保留工具所需的 TypeScript 6 相依。
 
 詳細設計請參考[後端架構](docs/002-backend-architecture.md)、[前端架構](docs/003-frontend-architecture.md)與[連接器開發](docs/004-connector-development.md)。
 

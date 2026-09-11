@@ -31,3 +31,5 @@ docs/*
 !docs/*.md
 
 .vscode/
+
+**/.svelte-check/
