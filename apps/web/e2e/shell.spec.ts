@@ -990,7 +990,7 @@ test("uses app-like scrolling and history only in standalone display mode", asyn
   await expect(page.locator("html")).toHaveClass(/is-standalone/);
   await expect(page.locator("html")).toHaveCSS("overflow", "hidden");
   await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
-  await expect(page.locator("#root")).toHaveCSS("touch-action", "pan-x pan-y");
+  await expect(page.locator("#root")).toHaveCSS("touch-action", "manipulation");
   await expect(page.locator("#root")).toHaveCSS("overflow-y", "auto");
   await expect(page.locator("#root")).toHaveCSS("overscroll-behavior", "none");
 

@@ -157,6 +157,6 @@ html.is-standalone #root {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: none;
-  /* Keep the installed PWA app-like: allow scrolling, but no gesture zoom. */
-  touch-action: pan-x pan-y;
+  /* Allow pinch zoom while preventing double-tap zoom in the installed PWA. */
+  touch-action: manipulation;
 }
