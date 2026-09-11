@@ -20,7 +20,7 @@ export const swipeBack: Action<HTMLElement, SwipeBackOptions> = (
 
   function applyTouchAction() {
     node.style.touchAction =
-      options.enabled === false ? originalTouchAction : "pan-y";
+      options.enabled === false ? originalTouchAction : "pan-y pinch-zoom";
   }
 
   function reset() {
