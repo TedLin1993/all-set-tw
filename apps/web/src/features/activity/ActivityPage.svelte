@@ -116,6 +116,7 @@
   let flow = $state<ActivityFlowFilter>("all");
   let source = $state<ActivitySourceFilter>("all");
   let search = $state("");
+  let monthlySearch = $state("");
   let submittedSearch = $state("");
   let searchTime = $state("all");
   let searchFrom = $state("");
@@ -502,7 +503,7 @@
       categoryId: searching ? searchCategory : undefined,
       flow,
       source,
-      search: submittedSearch,
+      search: searching ? submittedSearch : monthlySearch,
       category: selectedCategory,
     }),
   );
@@ -1135,7 +1136,15 @@
               onclick={clearCategoryFilter}>清除分類</button
             >
           </div>{/if}
-        {#if !searching}<div class="grid min-w-0 gap-1.5">
+        {#if !searching}
+          <Input
+            type="search"
+            aria-label="搜尋該月活動"
+            placeholder="搜尋該月活動"
+            class="h-11"
+            bind:value={monthlySearch}
+          />
+          <div class="grid min-w-0 gap-1.5">
             <span class="text-xs font-semibold text-ink/50">來源</span>
             <TabsList
               aria-label="活動來源"

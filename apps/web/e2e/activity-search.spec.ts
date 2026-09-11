@@ -86,6 +86,8 @@ for (const width of [1440, 390, 320]) {
     await month.selectOption({ index: 1 });
     const selected = await month.inputValue();
     await page.getByRole("tab", { name: "信用卡", exact: true }).click();
+    const monthlySearch = page.getByRole("searchbox", { name: "搜尋該月活動" });
+    await monthlySearch.fill("月報關鍵字");
     const search = page.getByRole("searchbox", { name: "搜尋所有活動" });
     await search.fill("airbnb");
     await page.waitForTimeout(500); // Typing must not trigger the former debounce.
@@ -114,6 +116,7 @@ for (const width of [1440, 390, 320]) {
     await expect(search).toHaveValue("airbnb");
     await page.goBack();
     await expect(month).toHaveValue(selected);
+    await expect(monthlySearch).toHaveValue("月報關鍵字");
     await page.goForward();
     await expect(search).toHaveValue("airbnb");
     if (width < 768)
@@ -240,4 +243,59 @@ test("failed next batch retains results and can be retried", async ({
     page.getByRole("heading", { name: "已載入 35 筆", exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("monthly search filters selected month without global requests", async ({
+  page,
+}) => {
+  const requests = await mockSearch(page, []);
+  await page.route("**/api/bank**", async (route) => {
+    const month = new URL(route.request().url()).searchParams
+      .get("to")
+      ?.slice(0, 7);
+    await route.fulfill({
+      json: {
+        accounts: [
+          {
+            id: "card",
+            connectorId: "esun",
+            sourceId: "card",
+            currency: "TWD",
+            accountType: "credit_card",
+          },
+        ],
+        transactions: ["咖啡", "午餐"].map((description, index) => ({
+          id: `monthly-${index}`,
+          connectorId: "esun",
+          accountId: "card",
+          sourceId: `monthly-${index}`,
+          postedDate: `${month}-01`,
+          amount: -100 - index,
+          currency: "TWD",
+          description,
+          status: "posted",
+        })),
+      },
+    });
+  });
+  await page.goto("/#/activity");
+  const coffee = page
+    .getByRole("button", { name: "查看 咖啡 活動詳情" })
+    .filter({ visible: true });
+  const lunch = page
+    .getByRole("button", { name: "查看 午餐 活動詳情" })
+    .filter({ visible: true });
+  await expect(coffee).toBeVisible();
+  await expect(lunch).toBeVisible();
+  const search = page.getByRole("searchbox", { name: "搜尋該月活動" });
+  await search.fill("咖啡");
+  await expect(coffee).toBeVisible();
+  await expect(lunch).toHaveCount(0);
+  await page.getByLabel("選擇活動月份").selectOption({ index: 1 });
+  await expect(coffee).toHaveCount(0);
+  await page.getByLabel("選擇活動月份").selectOption({ index: 0 });
+  await expect(coffee).toBeVisible();
+  await search.fill("");
+  await expect(lunch).toBeVisible();
+  expect(requests).toHaveLength(0);
 });
