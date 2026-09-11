@@ -657,46 +657,123 @@ describe("staged sync persistence", () => {
     expect(await listBankTransactions(d1, 100)).toHaveLength(1);
   });
 
-  it("does not pair ambiguous CTBC authorizations or downgrade posted rows", async () => {
-    const db = createDb();
-    const d1 = db as unknown as D1Database;
-    const make = (key: string, status: "posted" | "pending") => {
-      const r = bankTransactionRecord(`ctbc:card:tx:${key}:1`, status, {
-        authorizedAt: "2026-09-02",
-        postedDate: status === "posted" ? "2026-09-07" : undefined,
+  it.each(["pending", "posted"] as const)(
+    "merges a CTBC authorization already promoted by the connector (stored %s)",
+    async (status) => {
+      const db = createDb();
+      const d1 = db as unknown as D1Database;
+      const make = (key: string, state: "pending" | "posted", date: string) => {
+        const record = bankTransactionRecord(`ctbc:card:tx:${key}:1`, state, {
+          authorizedAt: date,
+          postedDate: state === "posted" ? "2026-09-10" : undefined,
+        });
+        Object.assign(record.payload, {
+          connector_id: "ctbc",
+          raw_payload: JSON.stringify({ authorizationHash: "same-auth" }),
+        });
+        return record;
+      };
+      const authorization = make(
+        "authorization",
+        status,
+        "2026-09-09T19:02:00+08:00",
+      );
+      const posted = make("posted", "posted", "2026-09-09");
+      await persistStagedSyncWrite(d1, {
+        records: [bankAccountRecord(0), authorization, posted],
       });
-      Object.assign(r.payload, {
-        connector_id: "ctbc",
-        raw_payload: JSON.stringify({ authorizationHash: "ctbc-auth" }),
-      });
-      return r;
-    };
-    const posted = make("posted", "posted");
-    await persistStagedSyncWrite(d1, {
-      records: [
-        bankAccountRecord(0),
-        posted,
-        make("a", "pending"),
-        make("b", "pending"),
-      ],
-    });
-    await persistStagedSyncWrite(
-      d1,
-      await prepareCtbcAuthorizationWrite(d1, [make("posted", "pending")]),
-    );
-    expect(
-      db.database
-        .prepare("SELECT status FROM bank_transactions WHERE id = ?")
-        .get(posted.recordKey)?.status,
-    ).toBe("posted");
-    expect(
       db.database
         .prepare(
-          "SELECT count(*) AS n FROM bank_transactions WHERE matched_transaction_id IS NOT NULL",
+          "INSERT INTO invoice_transaction_preferences VALUES ('retained-invoice', ?, 'linked', 'now', 'now')",
         )
-        .get()?.n,
-    ).toBe(0);
-  });
+        .run(authorization.recordKey);
+      const reconciled = make(
+        "authorization",
+        "posted",
+        "2026-09-09T19:02:00+08:00",
+      );
+      // Existing broken data must also heal without the bank returning it again.
+      await persistStagedSyncWrite(
+        d1,
+        await prepareCtbcAuthorizationWrite(
+          d1,
+          status === "pending" ? [reconciled] : [],
+        ),
+      );
+      expect(
+        db.database
+          .prepare("SELECT id, status, authorized_at FROM bank_transactions")
+          .all(),
+      ).toEqual([
+        {
+          id: authorization.recordKey,
+          status: "posted",
+          authorized_at: "2026-09-09T19:02:00+08:00",
+        },
+      ]);
+      // Either feed identity on later syncs must keep the same single activity.
+      for (const incoming of [posted, reconciled, posted]) {
+        await persistStagedSyncWrite(
+          d1,
+          await prepareCtbcAuthorizationWrite(d1, [incoming]),
+        );
+        expect(await listBankTransactions(d1, 100)).toHaveLength(1);
+      }
+      expect(
+        db.database
+          .prepare(
+            "SELECT transaction_id FROM invoice_transaction_preferences WHERE invoice_id = 'retained-invoice'",
+          )
+          .get()?.transaction_id,
+      ).toBe(authorization.recordKey);
+    },
+  );
+
+  it.each(["pending", "posted"] as const)(
+    "does not pair ambiguous CTBC authorizations (%s) or downgrade posted rows",
+    async (status) => {
+      const db = createDb();
+      const d1 = db as unknown as D1Database;
+      const make = (key: string, status: "posted" | "pending") => {
+        const r = bankTransactionRecord(`ctbc:card:tx:${key}:1`, status, {
+          authorizedAt:
+            key === "posted" ? "2026-09-02" : "2026-09-02T19:02:00+08:00",
+          postedDate: status === "posted" ? "2026-09-07" : undefined,
+        });
+        Object.assign(r.payload, {
+          connector_id: "ctbc",
+          raw_payload: JSON.stringify({ authorizationHash: "ctbc-auth" }),
+        });
+        return r;
+      };
+      const posted = make("posted", "posted");
+      await persistStagedSyncWrite(d1, {
+        records: [
+          bankAccountRecord(0),
+          posted,
+          make("a", status),
+          make("b", status),
+        ],
+      });
+      await persistStagedSyncWrite(
+        d1,
+        await prepareCtbcAuthorizationWrite(d1, [make("posted", "pending")]),
+      );
+      expect(await listBankTransactions(d1, 100)).toHaveLength(3);
+      expect(
+        db.database
+          .prepare("SELECT status FROM bank_transactions WHERE id = ?")
+          .get(posted.recordKey)?.status,
+      ).toBe("posted");
+      expect(
+        db.database
+          .prepare(
+            "SELECT count(*) AS n FROM bank_transactions WHERE matched_transaction_id IS NOT NULL",
+          )
+          .get()?.n,
+      ).toBe(0);
+    },
+  );
 
   it("promotes a unique CTBC authorization over a date-less posted row", async () => {
     const db = createDb();

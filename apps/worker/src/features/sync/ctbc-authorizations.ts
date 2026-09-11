@@ -145,11 +145,32 @@ export async function prepareCtbcAuthorizationWrite(
     (s) => s.status === "pending" && s.matched_transaction_id,
   );
   const usedPosted = new Set(savedLinks.map((s) => s.matched_transaction_id));
+  // The connector can promote an authorization before this persistence pass.
+  // CTBC posted feeds contain dates only; a retained time identifies an
+  // authorization even in duplicates left by earlier syncs.
+  const authorizationIds = new Set(
+    [...all.values()]
+      .filter(
+        (s) =>
+          s.status === "pending" ||
+          /T\d{2}:\d{2}/.test(s.authorized_at ?? "") ||
+          stored.some(
+            (previous) => previous.id === s.id && previous.status === "pending",
+          ),
+      )
+      .map((s) => s.id),
+  );
   const pending = [...all.values()].filter(
-    (s) => s.status === "pending" && !s.matched_transaction_id,
+    (s) =>
+      authorizationIds.has(s.id) &&
+      !s.matched_transaction_id &&
+      !usedPosted.has(s.id),
   );
   const posted = [...all.values()].filter(
-    (s) => s.status === "posted" && !usedPosted.has(s.id),
+    (s) =>
+      s.status === "posted" &&
+      !usedPosted.has(s.id) &&
+      !authorizationIds.has(s.id),
   );
   const candidates = pending.map((p) =>
     posted.filter(
