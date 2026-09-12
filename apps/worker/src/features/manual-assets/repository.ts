@@ -1,5 +1,5 @@
 import {
-  createDb,
+  createDrizzle,
   manualAssets,
   netWorthHistory,
   type AppDatabase,
@@ -22,7 +22,7 @@ export type ManualAssetHistoryRow = {
 };
 
 export async function listManualAssets(db: D1Database) {
-  return createDb(db)
+  return createDrizzle(db)
     .select({
       id: sql<string>`${manualAssets.id}`,
       name: manualAssets.name,
@@ -37,7 +37,7 @@ export async function listManualAssets(db: D1Database) {
 }
 
 export async function listLatestManualAssetValues(db: D1Database) {
-  return createDb(db)
+  return createDrizzle(db)
     .select({
       assetId: sql<string>`${netWorthHistory.assetType}`,
       value: netWorthHistory.netWorth,
@@ -63,7 +63,7 @@ export async function createManualAsset(
     now: string;
   },
 ) {
-  const database = createDb(db);
+  const database = createDrizzle(db);
   await database.batch([
     database.insert(manualAssets).values({
       id: input.id,
@@ -107,7 +107,7 @@ export async function updateManualAsset(
   if ("note" in input) patch.note = input.note ?? null;
   if (input.currency) patch.currency = input.currency;
 
-  const database = createDb(db);
+  const database = createDrizzle(db);
   const assetUpdate =
     Object.keys(patch).length > 0
       ? database.update(manualAssets).set(patch).where(eq(manualAssets.id, id))
@@ -126,7 +126,7 @@ export async function updateManualAsset(
 }
 
 export async function deleteManualAsset(db: D1Database, id: string) {
-  const database = createDb(db);
+  const database = createDrizzle(db);
   await database.batch([
     database
       .delete(netWorthHistory)
@@ -141,7 +141,7 @@ export async function deleteManualAsset(db: D1Database, id: string) {
 }
 
 export async function listManualAssetHistory(db: D1Database, id: string) {
-  return createDb(db)
+  return createDrizzle(db)
     .select({
       date: netWorthHistory.date,
       value: netWorthHistory.netWorth,
@@ -164,7 +164,7 @@ export async function upsertManualAssetHistory(
   value: number,
   now: string,
 ) {
-  await manualAssetHistoryUpsert(createDb(db), id, date, value, now);
+  await manualAssetHistoryUpsert(createDrizzle(db), id, date, value, now);
 }
 
 export async function deleteManualAssetHistory(
@@ -172,7 +172,7 @@ export async function deleteManualAssetHistory(
   id: string,
   date: string,
 ) {
-  await createDb(db)
+  await createDrizzle(db)
     .delete(netWorthHistory)
     .where(
       and(

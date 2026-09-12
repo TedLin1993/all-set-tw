@@ -1,5 +1,5 @@
 import {
-  createDb,
+  createDrizzle,
   notificationPreferences,
   pushSubscriptions,
 } from "@taiwan-fin-hub/db";
@@ -25,7 +25,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
 };
 
 export async function listPushSubscriptions(db: D1Database) {
-  const rows = await createDb(db)
+  const rows = await createDrizzle(db)
     .select({
       id: sql<string>`${pushSubscriptions.id}`,
       encryptedSubscription: pushSubscriptions.encryptedSubscription,
@@ -58,7 +58,7 @@ export async function upsertPushSubscription(
     now: string;
   },
 ) {
-  await createDb(db)
+  await createDrizzle(db)
     .insert(pushSubscriptions)
     .values({
       id: input.id,
@@ -79,13 +79,13 @@ export async function upsertPushSubscription(
 }
 
 export async function removePushSubscription(db: D1Database, id: string) {
-  await createDb(db)
+  await createDrizzle(db)
     .delete(pushSubscriptions)
     .where(eq(pushSubscriptions.id, id));
 }
 
 export async function markPushSuccess(db: D1Database, id: string, now: string) {
-  await createDb(db)
+  await createDrizzle(db)
     .update(pushSubscriptions)
     .set({
       lastSuccessAt: now,
@@ -96,7 +96,7 @@ export async function markPushSuccess(db: D1Database, id: string, now: string) {
 }
 
 export async function markPushFailure(db: D1Database, id: string, now: string) {
-  await createDb(db)
+  await createDrizzle(db)
     .update(pushSubscriptions)
     .set({
       consecutiveFailures: sql`${pushSubscriptions.consecutiveFailures} + 1`,
@@ -106,7 +106,7 @@ export async function markPushFailure(db: D1Database, id: string, now: string) {
 }
 
 export async function getNotificationPreferences(db: D1Database) {
-  const row = await createDb(db)
+  const row = await createDrizzle(db)
     .select({
       success: notificationPreferences.notifySuccess,
       failed: notificationPreferences.notifyFailed,
@@ -129,7 +129,7 @@ export async function saveNotificationPreferences(
   preferences: NotificationPreferences,
   now: string,
 ) {
-  await createDb(db)
+  await createDrizzle(db)
     .insert(notificationPreferences)
     .values({
       id: "default",
@@ -150,7 +150,7 @@ export async function saveNotificationPreferences(
 }
 
 export async function countPushSubscriptions(db: D1Database) {
-  const row = await createDb(db)
+  const row = await createDrizzle(db)
     .select({ count: count() })
     .from(pushSubscriptions)
     .get();

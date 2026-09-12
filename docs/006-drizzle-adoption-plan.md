@@ -28,7 +28,7 @@
 
 ## 架構決策
 
-1. 在 `packages/db/src/client.ts` 提供 `createDb(binding: D1Database)`，使用 `drizzle-orm/d1`。從當次 request／Queue invocation 傳入 binding，不建立跨環境的全域 client。
+1. 在 `packages/db/src/client.ts` 提供 `createDrizzle(binding: D1Database)`，使用 `drizzle-orm/d1`。從當次 request／Queue invocation 傳入 binding，不建立跨環境的全域 client。
 2. 在 `packages/db/src/schema/` 依業務領域定義 tables，透過 `schema/index.ts` 匯出。初期完整描述現有 28 張業務表，排除 `d1_migrations` 與平台內部表。
 3. Drizzle 型別留在 DB 與 Worker repository 層。`packages/core` 保持穩定商業契約；前端、`packages/connectors` 不依賴 ORM。
 4. 過渡期沿用 repository／service 接受 `D1Database` 的介面，在 repository 內取得 Drizzle client，避免全面改寫 routes 或新增 DI container。

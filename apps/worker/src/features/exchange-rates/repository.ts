@@ -1,4 +1,4 @@
-import { createDb, exchangeRates } from "@taiwan-fin-hub/db";
+import { createDrizzle, exchangeRates } from "@taiwan-fin-hub/db";
 import { inArray, sql } from "drizzle-orm";
 
 export type ExchangeRateRow = Pick<
@@ -12,7 +12,7 @@ export type ExchangeRateRow = Pick<
 export const SUPPORTED_EXCHANGE_CURRENCIES = ["USD", "JPY", "EUR"] as const;
 
 export async function listExchangeRates(db: D1Database) {
-  return createDb(db)
+  return createDrizzle(db)
     .select({
       // The IN predicate excludes the nullable legacy TEXT primary key.
       currency: sql<string>`${exchangeRates.currency}`,
@@ -37,7 +37,7 @@ export async function replaceExchangeRates(
   rates: Array<{ currency: string; rate: number }>,
   now: string,
 ) {
-  const database = createDb(db);
+  const database = createDrizzle(db);
   // Delete + inserts stay in one D1 batch so a failed insert leaves the old rates.
   await database.batch([
     database.delete(exchangeRates),

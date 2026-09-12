@@ -157,7 +157,7 @@ Feature 專用的 D1 存取層，負責：
 - 回傳 database row、affected row count 或存在性結果。
 - 在仍需原生 statement 時，建立供 service 組合的 `D1PreparedStatement`。
 
-過渡期 repository／service 仍接受 `D1Database`，在 repository 內呼叫 `createDb(binding)`，不另建 DI container，也不建立跨 request／Queue invocation 的全域 client。TypeScript property 使用 camelCase，並明確對應既有 snake_case 欄位；回傳給 service／API 的 shape 由 selection 或 mapper 維持，不把 `$inferSelect` 當成 runtime validation。
+過渡期 repository／service 仍接受 `D1Database`，在 repository 內呼叫 `createDrizzle(binding)`，不另建 DI container，也不建立跨 request／Queue invocation 的全域 client。TypeScript property 使用 camelCase，並明確對應既有 snake_case 欄位；回傳給 service／API 的 shape 由 selection 或 mapper 維持，不把 `$inferSelect` 當成 runtime validation。
 
 複雜 expression、CTE、條件 upsert、跨檔案組成的原生 D1 batch，或轉換後無法保留語意的路徑，可繼續使用參數化 raw SQL，並在呼叫處註明原因。同一 batch 不得混用不相容的 Drizzle query object 與 `D1PreparedStatement`。
 
@@ -238,7 +238,7 @@ Middleware 應只處理跨功能的 request concern，不應承擔 feature 商�
 
 真正跨 feature 使用的 D1 基礎能力，目前主要包括：
 
-- `createDb(binding)`：以當次 request／Queue 的 D1 binding 建立 Drizzle client，關閉 query／parameter logging。
+- `createDrizzle(binding)`：以當次 request／Queue 的 D1 binding 包成 Drizzle client，關閉 query／parameter logging。不是連線池或 DbContext。
 - `src/schema/`：依業務領域描述現有業務表；SQL migrations 仍是 schema 權威。
 - Connector settings。
 - 加密設定與 sync cursor 狀態。

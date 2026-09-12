@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { createDb } from "../src/client";
+import { createDrizzle } from "../src/client";
 import { connectorSettings, exchangeRates } from "../src/schema";
 import { createTestD1 } from "../testing/d1";
 
@@ -23,7 +23,7 @@ describe("Drizzle D1 client", () => {
   });
 
   it("selects aliases, preserves nulls, and upserts a row", async () => {
-    const db = createDb(harness.binding);
+    const db = createDrizzle(harness.binding);
     await db.insert(connectorSettings).values({
       id: "settings-1",
       connectorId: "einvoice",
@@ -90,7 +90,7 @@ describe("Drizzle D1 client", () => {
   });
 
   it("rolls back a D1 batch when a later statement fails", async () => {
-    const db = createDb(harness.binding);
+    const db = createDrizzle(harness.binding);
     await db.insert(exchangeRates).values({
       currency: "USD",
       rateToTwd: 30,

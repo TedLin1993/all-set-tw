@@ -1,4 +1,4 @@
-export { createDb } from "./client";
+export { createDrizzle } from "./client";
 export type { AppDatabase } from "./client";
 export * from "./schema";
 
