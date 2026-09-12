@@ -1,14 +1,25 @@
+import {
+  createDrizzle,
+  bankTransactionPreferences,
+  bankTransactions,
+} from "@taiwan-fin-hub/db";
+import { and, eq, sql } from "drizzle-orm";
+
 export async function bankTransactionExists(
   db: D1Database,
   transactionId: string,
 ) {
   return Boolean(
-    await db
-      .prepare(
-        "SELECT id FROM bank_transactions WHERE id = ? AND (status <> 'pending' OR matched_transaction_id IS NULL)",
+    await createDrizzle(db)
+      .select({ id: sql<string>`${bankTransactions.id}` })
+      .from(bankTransactions)
+      .where(
+        and(
+          eq(bankTransactions.id, transactionId),
+          sql`(${bankTransactions.status} <> 'pending' OR ${bankTransactions.matchedTransactionId} IS NULL)`,
+        ),
       )
-      .bind(transactionId)
-      .first<{ id: string }>(),
+      .get(),
   );
 }
 
@@ -18,15 +29,20 @@ export async function upsertCalculationPreference(
   excludedFromCalculation: boolean,
   now: string,
 ) {
-  await db
-    .prepare(
-      `INSERT INTO bank_transaction_preferences
-       (transaction_id, excluded_from_calculation, created_at, updated_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(transaction_id) DO UPDATE SET
-       excluded_from_calculation = excluded.excluded_from_calculation,
-       updated_at = excluded.updated_at`,
-    )
-    .bind(transactionId, excludedFromCalculation ? 1 : 0, now, now)
+  await createDrizzle(db)
+    .insert(bankTransactionPreferences)
+    .values({
+      transactionId,
+      excludedFromCalculation: excludedFromCalculation ? 1 : 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: bankTransactionPreferences.transactionId,
+      set: {
+        excludedFromCalculation: excludedFromCalculation ? 1 : 0,
+        updatedAt: now,
+      },
+    })
     .run();
 }

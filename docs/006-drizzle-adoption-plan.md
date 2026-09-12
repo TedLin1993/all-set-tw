@@ -1,6 +1,6 @@
 # Drizzle 導入實作計畫
 
-日期：2026-09-12。狀態：階段 1–2 與 3A–3C 已落地（schema／client、exchange-rates、manual-assets、notifications、classification、connector settings，以及 invoices／investments／bank 一般列表／明細）；階段 3D–5 待實作。SQL migrations 仍是 schema 權威，正式環境不使用 `drizzle-kit push`。
+日期：2026-09-12。狀態：階段 1–2 與 3A–3D 已落地（schema／client、exchange-rates、manual-assets、notifications、classification、connector settings、invoices／investments／bank 一般列表／明細，以及 dashboard／net-worth／activity／bank calculation／search 聚合）；階段 4–5 待實作。SQL migrations 仍是 schema 權威，正式環境不使用 `drizzle-kit push`。
 
 ## 目標與建議方案
 
@@ -93,7 +93,15 @@
 - investments 最新持倉與交易列表／區間改用 Drizzle，保留 per-connector＋asset_type 的最新 as_of_date、effective_date 游標與 TEXT 日期邊界。
 - bank 帳戶、交易、信用卡帳單的一般列表／明細改用 Drizzle；帳戶 latest snapshot 維持 LEFT JOIN null，pending 僅在未 matching 時可見，使用者 calculation preference 可為 null。
 - 銀行交易日條件維持與 `idx_bank_transactions_transaction_day` 相同的 CASE 運算式；既有 `EXPLAIN QUERY PLAN` 測試繼續驗證索引。
-- dashboard／net-worth／activity 聚合、bank calculation／search 與同步 lease／staging 仍留待 3D／4；此批未變更 schema、ID 格式或 SQL migrations。
+- dashboard／net-worth／activity 聚合、bank calculation／search 已於 3D 轉換；同步 lease／staging 仍留待階段 4。此批未變更 schema、ID 格式或 SQL migrations。
+
+3D 已完成：
+
+- dashboard 四個獨立聚合維持 `Promise.all`，investment 最新持倉仍依 connector＋asset_type 取 `MAX(as_of_date)`，銀行餘額只加總 canonical／active 帳戶的最新 snapshot。
+- net-worth 圖表／分頁、銀行存款歷史上下界與當日市值改用 Drizzle；外幣換算、TEXT 日期游標與每 100 筆一批的 upsert 原子邊界不變。
+- activity 對應偏好、發票／交易對應查詢改用 Drizzle，pending 已 matching 的交易維持不可見；全域搜尋日聚合保留 `WITH candidates` CTE、`UNION ALL`＋`DISTINCT` 跨來源去重，以及與 `idx_bank_transactions_transaction_day` 相同的 CASE。
+- bank calculation preference 的存在檢查與 upsert 改用 Drizzle，保留 pending 可見性與 0／1 flag。
+- 此批未變更 schema、ID 格式、SQL migrations 或部署流程；下一批為階段 4 同步 lease／staging。
 
 保留並延伸 `bank/repository.test.ts` 既有 `EXPLAIN QUERY PLAN` 測試，尤其 `idx_bank_transactions_transaction_day`。不得把可使用 expression index 的條件改寫成無法使用索引的等價運算，或將資料全取回 JavaScript 才篩選。
 

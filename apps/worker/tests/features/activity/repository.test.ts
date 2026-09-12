@@ -21,6 +21,13 @@ class SqliteQueryStatement {
       null
     );
   }
+
+  async raw() {
+    const row = this.database
+      .prepare(this.sql)
+      .get(...(this.values as never[])) as Record<string, unknown> | undefined;
+    return row ? [Object.values(row)] : [];
+  }
 }
 
 const databases: DatabaseSync[] = [];
