@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildActivityItems,
+  matchInvoicesToTransactions,
+} from "@taiwan-fin-hub/core";
+import {
   activityDateKey,
   activityStatusLabel,
   compareActivityItems,
@@ -25,6 +29,65 @@ function item(id: string, date: string, dateHasTime = false): ActivityItem {
 }
 
 describe("activity list", () => {
+  it.each([
+    [undefined, "2026-07-28T01:05:00Z", "credit", undefined, "09:05"],
+    ["2026-07-28", "2026-07-28T01:05:00Z", "credit", "linked", "09:05"],
+    [
+      "2026-07-28T02:30:00Z",
+      "2026-07-28T01:05:00Z",
+      "credit",
+      undefined,
+      "09:05",
+    ],
+    ["2026-07-28T02:30:00Z", "2026-07-28", "credit", undefined, "10:30"],
+    [undefined, "2026-07-28", "credit", undefined, undefined],
+    [undefined, "2026-07-28T01:05:00Z", "credit", "separate", undefined],
+    [undefined, "2026-07-28T01:05:00Z", "checking", undefined, "09:05"],
+  ] as const)(
+    "selects the activity time for authorization %s, invoice %s, account %s, decision %s",
+    (authorizedAt, invoiceDate, accountType, decision, expectedTime) => {
+      const transaction = {
+        id: "card-transaction",
+        connectorId: "bank",
+        sourceId: "source",
+        accountId: "account",
+        accountType,
+        authorizedAt,
+        postedDate: "2026-07-28",
+        amount: -100,
+        currency: "TWD",
+        status: "posted",
+      };
+      const invoice = { id: "invoice", invoiceDate, amount: 100 };
+      const matches = matchInvoicesToTransactions(
+        [transaction],
+        [invoice],
+        decision
+          ? [{ invoiceId: invoice.id, transactionId: transaction.id, decision }]
+          : [],
+      );
+      const activities = buildActivityItems(
+        [transaction],
+        [invoice],
+        [],
+        new Map(),
+        matches,
+      );
+      const activity = activities.find(({ id }) => id === transaction.id)!;
+
+      expect(formatActivityTime(activity)).toBe(expectedTime);
+      expect(activityDateKey(activity)).toBe("2026-07-28");
+      expect(activities).toHaveLength(decision === "separate" ? 2 : 1);
+      expect(transaction.authorizedAt).toBe(authorizedAt);
+      if (expectedTime) {
+        expect(formatActivityDate(activity)).toContain(expectedTime);
+        expect(
+          compareActivityItems(activity, item("date-only", "2026-07-28")),
+        ).toBeLessThan(0);
+      }
+    },
+  );
+
   it("groups sorted activities by their financial date", () => {
     const groups = groupActivitiesByDate([
       item("a", "2026-07-28T12:00:00+08:00"),

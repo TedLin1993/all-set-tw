@@ -63,6 +63,12 @@ export function buildActivityItems(
       const matchedInvoice = invoiceMatches.transactionToInvoice.get(t.id);
       const isCard =
         account?.accountType === "credit" || t.accountType === "credit";
+      const hasAuthorizationTime = isActivityDateTime(
+        t.authorizedAt ?? undefined,
+      );
+      const invoiceTime = isActivityDateTime(matchedInvoice?.invoiceDate)
+        ? matchedInvoice.invoiceDate
+        : undefined;
       const institutionName =
         t.institutionName ??
         account?.institutionName ??
@@ -75,8 +81,8 @@ export function buildActivityItems(
       return {
         id: t.id,
         source: isCard ? ("card" as const) : ("bank" as const),
-        date: t.authorizedAt ?? t.postedDate ?? "",
-        dateHasTime: isActivityDateTime(t.authorizedAt ?? undefined),
+        date: invoiceTime ?? t.authorizedAt ?? t.postedDate ?? "",
+        dateHasTime: hasAuthorizationTime || invoiceTime != null,
         title: t.description ?? t.counterparty ?? "銀行交易",
         searchText: [
           t.counterparty,
