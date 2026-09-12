@@ -46,6 +46,11 @@ function fixture() {
         async all() {
           return { results: database.prepare(sql).all(...(values as never[])) };
         },
+        async raw() {
+          const statement = database.prepare(sql);
+          statement.setReturnArrays(true);
+          return statement.all(...(values as never[]));
+        },
         async first() {
           return database.prepare(sql).get(...(values as never[])) ?? null;
         },
@@ -67,7 +72,7 @@ describe("global activity search", () => {
       queries.filter((sql) => sql.includes("WITH candidates")),
     ).toHaveLength(1);
     expect(
-      queries.filter((sql) => sql.includes("LEFT JOIN bank_balance_snapshots")),
+      queries.filter((sql) => /bank_balance_snapshots/i.test(sql)),
     ).toHaveLength(1);
     const invoiceOnly = await searchActivity(db, {
       q: "airbnb",

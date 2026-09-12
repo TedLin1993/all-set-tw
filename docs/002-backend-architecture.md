@@ -250,7 +250,7 @@ Drizzle 型別只留在 DB 與 Worker repository 層。`packages/core`、前端�
 
 Feature-specific 查詢應放在 feature 的 `repository.ts`，而不是持續擴大 `packages/db/src/index.ts`。一般 repository 以 Drizzle 為預設寫法；同步 lease、staging promotion 等尚未轉換的路徑仍使用原生 D1。
 
-分類 repository 已轉換為 Drizzle；規則重排維持單一 batch，保留 NOCASE 分類唯一性、系統規則保護與 override conflict target。
+分類 repository 已轉換為 Drizzle；規則重排維持單一 batch，保留 NOCASE 分類唯一性、系統規則保護與 override conflict target。invoices、investments 與 bank 的一般列表／明細查詢已轉換為 Drizzle，保留游標分頁、LEFT JOIN null、pending／posted 可見性與 TEXT 日期邊界；銀行交易日條件維持可使用 `idx_bank_transactions_transaction_day`。dashboard／activity 聚合與同步 lease／staging 仍使用原生 D1。
 
 資料庫 schema 與預設資料必須透過：
 

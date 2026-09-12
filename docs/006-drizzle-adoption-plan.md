@@ -1,6 +1,6 @@
 # Drizzle 導入實作計畫
 
-日期：2026-09-12。狀態：階段 1–2 與 3A–3B 已落地（schema／client、exchange-rates、manual-assets、notifications、classification 與 connector settings）；階段 3C–5 待實作。SQL migrations 仍是 schema 權威，正式環境不使用 `drizzle-kit push`。
+日期：2026-09-12。狀態：階段 1–2 與 3A–3C 已落地（schema／client、exchange-rates、manual-assets、notifications、classification、connector settings，以及 invoices／investments／bank 一般列表／明細）；階段 3D–5 待實作。SQL migrations 仍是 schema 權威，正式環境不使用 `drizzle-kit push`。
 
 ## 目標與建議方案
 
@@ -86,6 +86,14 @@
 - 共用 connector settings／cursor 改用 Drizzle；connectors repository 沿用既有委派介面。設定 upsert 不覆蓋既有 ID、created_at 或 sync_cursor，public config 與 cursor 更新僅修改指定欄位。
 - 設定存取邊界使用 sanitizeDatabaseError，避免 Drizzle 綁定參數流入 API log 或同步錯誤紀錄；隔離 D1 測試涵蓋上述保留語意、排序回滾及敏感參數遮罩。
 - 此批未變更 schema、ID 格式、SQL migrations 或部署流程；下一批為 3C。Schema／ID 調整另行規劃 migration。
+
+3C 已完成：
+
+- invoices 列表／區間／明細與 line items 改用 Drizzle，保留 invoice_date／updated_at／id 游標、Taipei 日界與 json_each 批次查詢。
+- investments 最新持倉與交易列表／區間改用 Drizzle，保留 per-connector＋asset_type 的最新 as_of_date、effective_date 游標與 TEXT 日期邊界。
+- bank 帳戶、交易、信用卡帳單的一般列表／明細改用 Drizzle；帳戶 latest snapshot 維持 LEFT JOIN null，pending 僅在未 matching 時可見，使用者 calculation preference 可為 null。
+- 銀行交易日條件維持與 `idx_bank_transactions_transaction_day` 相同的 CASE 運算式；既有 `EXPLAIN QUERY PLAN` 測試繼續驗證索引。
+- dashboard／net-worth／activity 聚合、bank calculation／search 與同步 lease／staging 仍留待 3D／4；此批未變更 schema、ID 格式或 SQL migrations。
 
 保留並延伸 `bank/repository.test.ts` 既有 `EXPLAIN QUERY PLAN` 測試，尤其 `idx_bank_transactions_transaction_day`。不得把可使用 expression index 的條件改寫成無法使用索引的等價運算，或將資料全取回 JavaScript 才篩選。
 

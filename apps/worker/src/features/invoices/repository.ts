@@ -1,9 +1,22 @@
 import type { ConnectorId } from "@taiwan-fin-hub/core";
+import { createDrizzle, invoiceLineItems, invoices } from "@taiwan-fin-hub/db";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { MonthDateRange } from "../../platform/month-range";
 
-const INVOICE_DAY = `CASE WHEN length(invoice_date) > 10
-  THEN COALESCE(date(invoice_date, '+8 hours'), substr(invoice_date, 1, 10))
-  ELSE invoice_date END`;
+// Taipei calendar day for precise timestamps; date-only TEXT stays unchanged.
+const invoiceDay = sql`CASE WHEN length(${invoices.invoiceDate}) > 10
+  THEN COALESCE(date(${invoices.invoiceDate}, '+8 hours'), substr(${invoices.invoiceDate}, 1, 10))
+  ELSE ${invoices.invoiceDate} END`;
+
+const invoiceSummaryColumns = {
+  id: sql<string>`${invoices.id}`,
+  connectorId: sql<ConnectorId>`${invoices.connectorId}`,
+  sourceId: invoices.sourceId,
+  invoiceNumber: invoices.invoiceNumber,
+  invoiceDate: invoices.invoiceDate,
+  sellerName: invoices.sellerName,
+  amount: invoices.amount,
+};
 
 export type InvoicePageCursor = {
   invoiceDate: string;
@@ -38,30 +51,24 @@ export async function listInvoices(
   limit: number,
   cursor?: InvoicePageCursor,
 ) {
-  const cursorClause = cursor
-    ? "WHERE (invoice_date, updated_at, id) < (?, ?, ?)"
-    : "";
-  const statement = db.prepare(
-    `SELECT
-      id,
-      connector_id AS connectorId,
-      source_id AS sourceId,
-      invoice_number AS invoiceNumber,
-      invoice_date AS invoiceDate,
-      seller_name AS sellerName,
-      amount,
-      updated_at AS updatedAt
-    FROM invoices
-    ${cursorClause}
-    ORDER BY invoice_date DESC, updated_at DESC, id DESC
-    LIMIT ?`,
-  );
-  const rows = await (
-    cursor
-      ? statement.bind(cursor.invoiceDate, cursor.updatedAt, cursor.id, limit)
-      : statement.bind(limit)
-  ).all<InvoiceRow>();
-  return rows.results;
+  return createDrizzle(db)
+    .select({
+      ...invoiceSummaryColumns,
+      updatedAt: invoices.updatedAt,
+    })
+    .from(invoices)
+    .where(
+      cursor
+        ? sql`(${invoices.invoiceDate}, ${invoices.updatedAt}, ${invoices.id}) < (${cursor.invoiceDate}, ${cursor.updatedAt}, ${cursor.id})`
+        : undefined,
+    )
+    .orderBy(
+      desc(invoices.invoiceDate),
+      desc(invoices.updatedAt),
+      desc(invoices.id),
+    )
+    .limit(limit)
+    .all();
 }
 
 export async function listInvoicesInRange(
@@ -69,63 +76,60 @@ export async function listInvoicesInRange(
   range: MonthDateRange,
   days?: string[],
 ) {
-  const rows = await db
-    .prepare(
-      `SELECT
-      id,
-      connector_id AS connectorId,
-      source_id AS sourceId,
-      invoice_number AS invoiceNumber,
-      invoice_date AS invoiceDate,
-      seller_name AS sellerName,
-      amount,
-      updated_at AS updatedAt
-    FROM invoices
-    WHERE ${days ? `(${INVOICE_DAY}) IN (SELECT value FROM json_each(?))` : `(${INVOICE_DAY}) >= ? AND (${INVOICE_DAY}) < ?`}
-    ORDER BY invoice_date DESC, updated_at DESC, id DESC`,
+  return createDrizzle(db)
+    .select({
+      ...invoiceSummaryColumns,
+      updatedAt: invoices.updatedAt,
+    })
+    .from(invoices)
+    .where(
+      days
+        ? sql`(${invoiceDay}) IN (SELECT value FROM json_each(${JSON.stringify(days)}))`
+        : and(
+            sql`(${invoiceDay}) >= ${range.from}`,
+            sql`(${invoiceDay}) < ${range.to}`,
+          ),
     )
-    .bind(...(days ? [JSON.stringify(days)] : [range.from, range.to]))
-    .all<InvoiceRow>();
-  return rows.results;
+    .orderBy(
+      desc(invoices.invoiceDate),
+      desc(invoices.updatedAt),
+      desc(invoices.id),
+    )
+    .all();
 }
 
 export async function listInvoiceItems(db: D1Database, invoiceIds: string[]) {
   if (invoiceIds.length === 0) return [];
-  const placeholders = invoiceIds.map(() => "?").join(", ");
-  const rows = await db
-    .prepare(
-      `SELECT
-      id,
-      invoice_id AS invoiceId,
-      source_id AS sourceId,
-      line_number AS lineNumber,
-      description,
-      quantity,
-      unit_price AS unitPrice,
-      amount
-    FROM invoice_line_items
-    WHERE invoice_id IN (${placeholders})
-    ORDER BY invoice_id ASC, line_number ASC, source_id ASC`,
+  return createDrizzle(db)
+    .select({
+      id: sql<string>`${invoiceLineItems.id}`,
+      invoiceId: invoiceLineItems.invoiceId,
+      sourceId: invoiceLineItems.sourceId,
+      lineNumber: invoiceLineItems.lineNumber,
+      description: invoiceLineItems.description,
+      quantity: invoiceLineItems.quantity,
+      unitPrice: invoiceLineItems.unitPrice,
+      amount: invoiceLineItems.amount,
+    })
+    .from(invoiceLineItems)
+    .where(
+      sql`${invoiceLineItems.invoiceId} IN (SELECT value FROM json_each(${JSON.stringify(invoiceIds)}))`,
     )
-    .bind(...invoiceIds)
-    .all<InvoiceItemRow>();
-  return rows.results;
+    .orderBy(
+      asc(invoiceLineItems.invoiceId),
+      asc(invoiceLineItems.lineNumber),
+      asc(invoiceLineItems.sourceId),
+    )
+    .all();
 }
 
 export async function findInvoice(db: D1Database, invoiceId: string) {
-  return db
-    .prepare(
-      `SELECT
-      id,
-      connector_id AS connectorId,
-      source_id AS sourceId,
-      invoice_number AS invoiceNumber,
-      invoice_date AS invoiceDate,
-      seller_name AS sellerName,
-      amount
-    FROM invoices
-    WHERE id = ?`,
-    )
-    .bind(invoiceId)
-    .first<Omit<InvoiceRow, "updatedAt">>();
+  return (
+    (await createDrizzle(db)
+      .select(invoiceSummaryColumns)
+      .from(invoices)
+      .where(eq(invoices.id, invoiceId))
+      .limit(1)
+      .get()) ?? null
+  );
 }

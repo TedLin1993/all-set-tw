@@ -32,7 +32,7 @@
 - `docs/002-backend-architecture.md`：後端分層、相依方向與維護約定的詳細文件。
 - `docs/003-frontend-architecture.md`：前端分層、相依方向與測試 colocate 約定。
 - `docs/004-connector-development.md`：Connector catalog、連接模式、敏感狀態與新增流程規範。
-- `docs/006-drizzle-adoption-plan.md`：Drizzle 分階段導入計畫；階段 1–2 與 3A–3B 已落地，後續批次見該文件。
+- `docs/006-drizzle-adoption-plan.md`：Drizzle 分階段導入計畫；階段 1–2 與 3A–3C 已落地，後續批次見該文件。
 
 ## 架構約定
 
