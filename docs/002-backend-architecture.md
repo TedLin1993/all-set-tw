@@ -77,6 +77,7 @@ flowchart TD
     FeatureService --> Connectors
     FeatureService --> DB
 
+    FeatureRepository --> DB
     FeatureRepository --> D1
     DB --> D1
     WorkerConnector --> Browser
@@ -150,10 +151,15 @@ Service 可以直接接受 `D1Database` 或 `Env`，不需要額外建立 Depend
 
 Feature 專用的 D1 存取層，負責：
 
-- 集中該 feature 使用的 SQL。
+- 集中該 feature 使用的資料存取。
+- 一般 CRUD 與查詢組合預設使用 `@taiwan-fin-hub/db` 的 Drizzle schema／client。
 - 執行 query、insert、update、delete 與 upsert。
 - 回傳 database row、affected row count 或存在性結果。
-- 建立供 service 組合的 `D1PreparedStatement`。
+- 在仍需原生 statement 時，建立供 service 組合的 `D1PreparedStatement`。
+
+過渡期 repository／service 仍接受 `D1Database`，在 repository 內呼叫 `createDb(binding)`，不另建 DI container，也不建立跨 request／Queue invocation 的全域 client。TypeScript property 使用 camelCase，並明確對應既有 snake_case 欄位；回傳給 service／API 的 shape 由 selection 或 mapper 維持，不把 `$inferSelect` 當成 runtime validation。
+
+複雜 expression、CTE、條件 upsert、跨檔案組成的原生 D1 batch，或轉換後無法保留語意的路徑，可繼續使用參數化 raw SQL，並在呼叫處註明原因。同一 batch 不得混用不相容的 Drizzle query object 與 `D1PreparedStatement`。
 
 Repository 不應：
 
@@ -232,12 +238,16 @@ Middleware 應只處理跨功能的 request concern，不應承擔 feature 商�
 
 真正跨 feature 使用的 D1 基礎能力，目前主要包括：
 
+- `createDb(binding)`：以當次 request／Queue 的 D1 binding 建立 Drizzle client，關閉 query／parameter logging。
+- `src/schema/`：依業務領域描述現有業務表；SQL migrations 仍是 schema 權威。
 - Connector settings。
 - 加密設定與 sync cursor 狀態。
 - Sync job、schedule 與 lock。
 - D1 migrations。
 
-Feature-specific SQL 應放在 feature 的 `repository.ts`，而不是持續擴大 `packages/db/src/index.ts`。
+Drizzle 型別只留在 DB 與 Worker repository 層。`packages/core`、前端與 `packages/connectors` 不依賴 ORM。日期維持既有 TEXT string，金額與 JSON／flag 語意不因導入而改寫。
+
+Feature-specific 查詢應放在 feature 的 `repository.ts`，而不是持續擴大 `packages/db/src/index.ts`。一般 repository 以 Drizzle 為預設寫法；同步 lease、staging promotion 等尚未轉換的路徑仍使用原生 D1。
 
 資料庫 schema 與預設資料必須透過：
 
@@ -245,7 +255,7 @@ Feature-specific SQL 應放在 feature 的 `repository.ts`，而不是持續擴�
 packages/db/migrations/
 ```
 
-管理，不得由 `GET` API 在執行期間自動建立。
+管理，不得由 `GET` API 在執行期間自動建立，也不得對正式環境使用 `drizzle-kit push`。Schema 比對測試以 migration 重播結果為準；隔離 D1 整合測試使用 Miniflare／workerd binding，不連線正式資料庫。
 
 ## HTTP Request 流程
 

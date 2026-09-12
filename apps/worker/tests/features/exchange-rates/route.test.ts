@@ -6,11 +6,23 @@ function envWithDb() {
   const db = {
     prepare() {
       const statement = {
+        bind() {
+          return statement;
+        },
         async all() {
           return { results: [] };
         },
+        async raw() {
+          return [];
+        },
+        async run() {
+          return { success: true, meta: { changes: 0 } };
+        },
       };
       return statement;
+    },
+    async batch() {
+      return [];
     },
   } as unknown as D1Database;
   return { DB: db } as Env;

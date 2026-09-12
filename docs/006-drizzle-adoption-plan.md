@@ -1,6 +1,6 @@
 # Drizzle 導入實作計畫
 
-日期：2026-09-12。狀態：待實作；本文件不代表已安裝套件或完成 D1 runtime 驗證。
+日期：2026-09-12。狀態：階段 1–2 已落地（schema／client、語意比對、隔離 D1 整合測試、exchange-rates repository）；階段 3–5 待實作。SQL migrations 仍是 schema 權威，正式環境不使用 `drizzle-kit push`。
 
 ## 目標與建議方案
 
@@ -150,4 +150,4 @@ npm run test:backend
 - [Cloudflare D1 batch](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch)：D1 原子批次行為。
 - [Cloudflare migrations](https://developers.cloudflare.com/d1/reference/migrations/)：Wrangler ledger 與目錄匹配方式；本次已透過 Cloudflare Docs MCP 核對。
 
-本次完成的是本機程式碼／migration 盤點、SQLite 重播與官方文件查核；尚未安裝 Drizzle、執行 Drizzle schema 比對或存取線上 D1。
+階段 1–2 已在隔離環境完成 schema 比對與 Miniflare D1 讀寫／回滾驗證；未連線正式 D1，也未改寫既有 SQL migrations。

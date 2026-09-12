@@ -21,12 +21,14 @@ export async function listExchangeRates(db: D1Database) {
     })
     .from(exchangeRates)
     .where(inArray(exchangeRates.currency, [...SUPPORTED_EXCHANGE_CURRENCIES]))
-    .orderBy(sql`CASE ${exchangeRates.currency}
+    .orderBy(
+      sql`CASE ${exchangeRates.currency}
        WHEN 'USD' THEN 1
        WHEN 'JPY' THEN 2
        WHEN 'EUR' THEN 3
        ELSE 4
-     END`)
+     END`,
+    )
     .all();
 }
 
@@ -36,6 +38,7 @@ export async function replaceExchangeRates(
   now: string,
 ) {
   const database = createDb(db);
+  // Delete + inserts stay in one D1 batch so a failed insert leaves the old rates.
   await database.batch([
     database.delete(exchangeRates),
     ...rates.map(({ currency, rate }) =>
