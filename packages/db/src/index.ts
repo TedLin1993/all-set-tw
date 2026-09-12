@@ -1,25 +1,38 @@
 export { createDrizzle } from "./client";
+export { sanitizeDatabaseError } from "./errors";
 export type { AppDatabase } from "./client";
 export * from "./schema";
 
-export interface ConnectorSettingsRow {
-  id: string;
-  connector_id: string;
-  encrypted_config: string;
-  public_config: string | null;
-  sync_cursor: string | null;
-  created_at: string;
-  updated_at: string;
-}
+import { eq, sql } from "drizzle-orm";
+import { createDrizzle } from "./client";
+import { connectorSettings } from "./schema/settings";
+import { sanitizeDatabaseError } from "./errors";
+
+export type ConnectorSettingsRow = NonNullable<
+  Awaited<ReturnType<typeof getConnectorSettings>>
+>;
 
 export async function getConnectorSettings(
   db: D1Database,
   connectorId: string,
 ) {
-  return db
-    .prepare("SELECT * FROM connector_settings WHERE connector_id = ?")
-    .bind(connectorId)
-    .first<ConnectorSettingsRow>();
+  return (
+    (await createDrizzle(db)
+      .select({
+        id: sql<string>`${connectorSettings.id}`,
+        connector_id: connectorSettings.connectorId,
+        encrypted_config: connectorSettings.encryptedConfig,
+        public_config: connectorSettings.publicConfig,
+        sync_cursor: connectorSettings.syncCursor,
+        created_at: connectorSettings.createdAt,
+        updated_at: connectorSettings.updatedAt,
+      })
+      .from(connectorSettings)
+      .where(eq(connectorSettings.connectorId, connectorId))
+      .limit(1)
+      .get()
+      .catch(rethrowSettingsError)) ?? null
+  );
 }
 
 export async function upsertConnectorSettings(
@@ -32,30 +45,26 @@ export async function upsertConnectorSettings(
     now: string;
   },
 ) {
-  await db
-    .prepare(
-      `INSERT INTO connector_settings (
-        id,
-        connector_id,
-        encrypted_config,
-        public_config,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(connector_id) DO UPDATE SET
-        encrypted_config = excluded.encrypted_config,
-        public_config = excluded.public_config,
-        updated_at = excluded.updated_at`,
-    )
-    .bind(
-      input.id,
-      input.connectorId,
-      input.encryptedConfig,
-      input.publicConfig,
-      input.now,
-      input.now,
-    )
-    .run();
+  await createDrizzle(db)
+    .insert(connectorSettings)
+    .values({
+      id: input.id,
+      connectorId: input.connectorId,
+      encryptedConfig: input.encryptedConfig,
+      publicConfig: input.publicConfig,
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
+    .onConflictDoUpdate({
+      target: connectorSettings.connectorId,
+      set: {
+        encryptedConfig: input.encryptedConfig,
+        publicConfig: input.publicConfig,
+        updatedAt: input.now,
+      },
+    })
+    .run()
+    .catch(rethrowSettingsError);
 }
 
 export async function updateConnectorPublicConfig(
@@ -64,14 +73,12 @@ export async function updateConnectorPublicConfig(
   publicConfig: string,
   now: string,
 ) {
-  await db
-    .prepare(
-      `UPDATE connector_settings
-      SET public_config = ?, updated_at = ?
-      WHERE connector_id = ?`,
-    )
-    .bind(publicConfig, now, connectorId)
-    .run();
+  await createDrizzle(db)
+    .update(connectorSettings)
+    .set({ publicConfig, updatedAt: now })
+    .where(eq(connectorSettings.connectorId, connectorId))
+    .run()
+    .catch(rethrowSettingsError);
 }
 
 export async function updateConnectorCursor(
@@ -80,14 +87,12 @@ export async function updateConnectorCursor(
   cursor: string,
   now: string,
 ) {
-  await db
-    .prepare(
-      `UPDATE connector_settings
-      SET sync_cursor = ?, updated_at = ?
-      WHERE connector_id = ?`,
-    )
-    .bind(cursor, now, connectorId)
-    .run();
+  await createDrizzle(db)
+    .update(connectorSettings)
+    .set({ syncCursor: cursor, updatedAt: now })
+    .where(eq(connectorSettings.connectorId, connectorId))
+    .run()
+    .catch(rethrowSettingsError);
 }
 
 export async function clearConnectorCursor(
@@ -95,14 +100,18 @@ export async function clearConnectorCursor(
   connectorId: string,
   now: string,
 ) {
-  await db
-    .prepare(
-      `UPDATE connector_settings
-      SET sync_cursor = NULL, updated_at = ?
-      WHERE connector_id = ?`,
-    )
-    .bind(now, connectorId)
-    .run();
+  await createDrizzle(db)
+    .update(connectorSettings)
+    .set({ syncCursor: null, updatedAt: now })
+    .where(eq(connectorSettings.connectorId, connectorId))
+    .run()
+    .catch(rethrowSettingsError);
+}
+
+// Settings are also used by Queue/sync callers that persist error messages.
+// Remove ORM-bound configuration/cursor values before an error leaves this boundary.
+function rethrowSettingsError(error: unknown): never {
+  throw sanitizeDatabaseError(error);
 }
 
 export {

@@ -35,6 +35,11 @@ function asD1(database: DatabaseSync) {
           params = values;
           return this;
         },
+        async raw() {
+          const statement = database.prepare(sql);
+          statement.setReturnArrays(true);
+          return statement.all(...params);
+        },
         async all() {
           return { results: database.prepare(sql).all(...params) };
         },

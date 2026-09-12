@@ -45,6 +45,9 @@ function createDb(
           values = nextValues;
           return statement;
         },
+        async raw() {
+          return (await this.all()).results.map((row) => Object.values(row));
+        },
         async all() {
           if (sql.includes("ABS(txn.amount)"))
             return { results: candidateTransactions };

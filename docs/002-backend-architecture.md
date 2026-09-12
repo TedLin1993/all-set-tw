@@ -240,7 +240,8 @@ Middleware 應只處理跨功能的 request concern，不應承擔 feature 商�
 
 - `createDrizzle(binding)`：以當次 request／Queue 的 D1 binding 包成 Drizzle client，關閉 query／parameter logging。不是連線池或 DbContext。
 - `src/schema/`：依業務領域描述現有業務表；SQL migrations 仍是 schema 權威。
-- Connector settings。
+- Connector settings（Drizzle CRUD，保留既有 ID、建立時間與 sync cursor）。
+- `sanitizeDatabaseError(error)`：在設定存取、API 與通知 log 邊界移除 Drizzle query error 的 SQL、綁定參數及 cause。
 - 加密設定與 sync cursor 狀態。
 - Sync job、schedule 與 lock。
 - D1 migrations。
@@ -248,6 +249,8 @@ Middleware 應只處理跨功能的 request concern，不應承擔 feature 商�
 Drizzle 型別只留在 DB 與 Worker repository 層。`packages/core`、前端與 `packages/connectors` 不依賴 ORM。日期維持既有 TEXT string，金額與 JSON／flag 語意不因導入而改寫。
 
 Feature-specific 查詢應放在 feature 的 `repository.ts`，而不是持續擴大 `packages/db/src/index.ts`。一般 repository 以 Drizzle 為預設寫法；同步 lease、staging promotion 等尚未轉換的路徑仍使用原生 D1。
+
+分類 repository 已轉換為 Drizzle；規則重排維持單一 batch，保留 NOCASE 分類唯一性、系統規則保護與 override conflict target。
 
 資料庫 schema 與預設資料必須透過：
 

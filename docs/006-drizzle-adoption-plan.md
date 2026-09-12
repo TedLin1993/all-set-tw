@@ -1,6 +1,6 @@
 # Drizzle 導入實作計畫
 
-日期：2026-09-12。狀態：階段 1–2 與 3A 已落地（schema／client、exchange-rates、manual-assets、notifications）；階段 3B–5 待實作。SQL migrations 仍是 schema 權威，正式環境不使用 `drizzle-kit push`。
+日期：2026-09-12。狀態：階段 1–2 與 3A–3B 已落地（schema／client、exchange-rates、manual-assets、notifications、classification 與 connector settings）；階段 3C–5 待實作。SQL migrations 仍是 schema 權威，正式環境不使用 `drizzle-kit push`。
 
 ## 目標與建議方案
 
@@ -78,6 +78,14 @@
 | 3B   | `classification/repository.ts`、共用 connector settings 與 `connectors/repository.ts` | 規則順序、分類唯一性、conflict target、cursor 保留及敏感參數遮罩。                 |
 | 3C   | `invoices`、`investments`、`bank` 的一般列表／明細查詢                                | API shape、排序及游標分頁、LEFT JOIN null、pending／posted、使用者偏好及日期邊界。 |
 | 3D   | `dashboard`、`net-worth`、`activity`、bank calculation／search 聚合                   | 計算值一致、跨來源去重一致、query plan 與查詢數不退化；必要複雜 SQL 保留。         |
+
+3B 已完成：
+
+- 分類 CRUD 使用 Drizzle，保留 NOCASE label 唯一性、規則 priority／updated_at／id 排序、系統規則不可修改／刪除，以及單一 batch 重排的原子性。
+- Override 維持 target_type／target_id conflict target、既有 ID 與 created_at；大量交易 ID 仍使用單一 JSON 陣列搭配 json_each 查詢。
+- 共用 connector settings／cursor 改用 Drizzle；connectors repository 沿用既有委派介面。設定 upsert 不覆蓋既有 ID、created_at 或 sync_cursor，public config 與 cursor 更新僅修改指定欄位。
+- 設定存取邊界使用 sanitizeDatabaseError，避免 Drizzle 綁定參數流入 API log 或同步錯誤紀錄；隔離 D1 測試涵蓋上述保留語意、排序回滾及敏感參數遮罩。
+- 此批未變更 schema、ID 格式、SQL migrations 或部署流程；下一批為 3C。Schema／ID 調整另行規劃 migration。
 
 保留並延伸 `bank/repository.test.ts` 既有 `EXPLAIN QUERY PLAN` 測試，尤其 `idx_bank_transactions_transaction_day`。不得把可使用 expression index 的條件改寫成無法使用索引的等價運算，或將資料全取回 JavaScript 才篩選。
 

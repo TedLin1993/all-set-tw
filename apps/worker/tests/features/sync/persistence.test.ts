@@ -50,6 +50,13 @@ class SqliteStatement {
     return this.execute() as unknown as { results: T[] };
   }
 
+  async raw() {
+    this.owner.executedSql.push(this.sql);
+    const statement = this.owner.database.prepare(this.sql);
+    statement.setReturnArrays(true);
+    return statement.all(...(this.values as never[]));
+  }
+
   async first<T>() {
     this.owner.executedSql.push(this.sql);
     return (
