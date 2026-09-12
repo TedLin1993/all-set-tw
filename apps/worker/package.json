@@ -19,6 +19,7 @@
     "@taiwan-fin-hub/connectors": "0.1.0",
     "@taiwan-fin-hub/core": "0.1.0",
     "@taiwan-fin-hub/db": "0.1.0",
+    "drizzle-orm": "0.45.2",
     "hono": "^4.5.8",
     "jpeg-js": "^0.4.4",
     "web-push": "^3.6.7",

@@ -1,3 +1,7 @@
+export { createDb } from "./client";
+export type { AppDatabase } from "./client";
+export * from "./schema";
+
 export interface ConnectorSettingsRow {
   id: string;
   connector_id: string;
