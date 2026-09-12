@@ -6,7 +6,7 @@ import {
   bankTransactions,
   creditCardBills,
 } from "@taiwan-fin-hub/db";
-import { and, asc, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { TransactionPageCursor } from "../investments/repository";
 import type { MonthDateRange } from "../../platform/month-range";
@@ -15,7 +15,6 @@ const txn = alias(bankTransactions, "txn");
 const account = alias(bankAccounts, "account");
 const preference = alias(bankTransactionPreferences, "preference");
 const balance = alias(bankBalanceSnapshots, "balance");
-const latestBalance = alias(bankBalanceSnapshots, "latest");
 const bill = alias(creditCardBills, "b");
 const billAccount = alias(bankAccounts, "a");
 
@@ -26,47 +25,61 @@ const bankTransactionDay = sql`CASE WHEN length(txn.authorized_at) > 10
 
 const visibleBankTransactionFilter = and(
   isNull(account.canonicalAccountId),
-  or(ne(txn.status, "pending"), isNull(txn.matchedTransactionId)),
+  sql`(${txn.status} <> 'pending' OR ${txn.matchedTransactionId} IS NULL)`,
 );
 
 const bankTransactionColumns = {
-  id: sql<string>`${txn.id}`,
-  connectorId: txn.connectorId,
-  accountId: txn.accountId,
-  accountSourceId: account.sourceId,
-  accountName: account.accountName,
-  institutionName: account.institutionName,
-  accountType: account.accountType,
-  bankCode: account.bankCode,
-  accountLast4: account.accountLast4,
-  sourceId: txn.sourceId,
-  transferPeerId: txn.transferPeerId,
-  postedDate: txn.postedDate,
-  authorizedAt: txn.authorizedAt,
-  amount: txn.amount,
-  currency: txn.currency,
-  description: txn.description,
-  counterparty: txn.counterparty,
-  status: sql<"pending" | "posted">`${txn.status}`,
-  effectiveDate: sql<string>`${txn.effectiveDate}`,
-  updatedAt: txn.updatedAt,
-  calculationPreference: preference.excludedFromCalculation,
+  id: sql<string>`${txn.id}`.as("id"),
+  connectorId: sql<string>`${txn.connectorId}`.as("connectorId"),
+  accountId: sql<string>`${txn.accountId}`.as("accountId"),
+  accountSourceId: sql<string>`${account.sourceId}`.as("accountSourceId"),
+  accountName: sql<string>`${account.accountName}`.as("accountName"),
+  institutionName: sql<string>`${account.institutionName}`.as(
+    "institutionName",
+  ),
+  accountType: sql<string>`${account.accountType}`.as("accountType"),
+  bankCode: sql<string>`${account.bankCode}`.as("bankCode"),
+  accountLast4: sql<string>`${account.accountLast4}`.as("accountLast4"),
+  sourceId: sql<string>`${txn.sourceId}`.as("sourceId"),
+  transferPeerId: sql<string | null>`${txn.transferPeerId}`.as(
+    "transferPeerId",
+  ),
+  postedDate: sql<string | null>`${txn.postedDate}`.as("postedDate"),
+  authorizedAt: sql<string | null>`${txn.authorizedAt}`.as("authorizedAt"),
+  amount: sql<number>`${txn.amount}`.as("amount"),
+  currency: sql<string>`${txn.currency}`.as("currency"),
+  description: sql<string | null>`${txn.description}`.as("description"),
+  counterparty: sql<string | null>`${txn.counterparty}`.as("counterparty"),
+  status: sql<"pending" | "posted">`${txn.status}`.as("status"),
+  effectiveDate: sql<string>`${txn.effectiveDate}`.as("effectiveDate"),
+  updatedAt: sql<string>`${txn.updatedAt}`.as("updatedAt"),
+  calculationPreference: sql<
+    number | null
+  >`${preference.excludedFromCalculation}`.as("calculationPreference"),
 };
 
 const creditCardBillColumns = {
-  id: sql<string>`${bill.id}`,
-  connectorId: bill.connectorId,
-  accountId: bill.accountId,
-  accountSourceId: billAccount.sourceId,
-  sourceId: bill.sourceId,
-  billingPeriod: bill.billingPeriod,
-  statementAmount: bill.statementAmount,
-  minimumPayment: bill.minimumPayment,
-  paidAmount: bill.paidAmount,
-  isPaid: bill.isPaid,
-  paymentDueDate: bill.paymentDueDate,
-  statementClosingDate: bill.statementClosingDate,
-  currency: bill.currency,
+  id: sql<string>`${bill.id}`.as("id"),
+  connectorId: sql<string>`${bill.connectorId}`.as("connectorId"),
+  accountId: sql<string>`${bill.accountId}`.as("accountId"),
+  accountSourceId: sql<string>`${billAccount.sourceId}`.as("accountSourceId"),
+  sourceId: sql<string>`${bill.sourceId}`.as("sourceId"),
+  billingPeriod: sql<string>`${bill.billingPeriod}`.as("billingPeriod"),
+  statementAmount: sql<number | null>`${bill.statementAmount}`.as(
+    "statementAmount",
+  ),
+  minimumPayment: sql<number | null>`${bill.minimumPayment}`.as(
+    "minimumPayment",
+  ),
+  paidAmount: sql<number | null>`${bill.paidAmount}`.as("paidAmount"),
+  isPaid: sql<number | null>`${bill.isPaid}`.as("isPaid"),
+  paymentDueDate: sql<string | null>`${bill.paymentDueDate}`.as(
+    "paymentDueDate",
+  ),
+  statementClosingDate: sql<string | null>`${bill.statementClosingDate}`.as(
+    "statementClosingDate",
+  ),
+  currency: sql<string>`${bill.currency}`.as("currency"),
 };
 
 export type BankTransactionPageRow = {
@@ -149,10 +162,10 @@ export async function listBankAccounts(db: D1Database) {
       eq(
         balance.id,
         sql`(
-          SELECT ${latestBalance.id}
-          FROM ${latestBalance}
-          WHERE ${latestBalance.accountId} = ${account.id}
-          ORDER BY ${latestBalance.asOfAt} DESC, ${latestBalance.updatedAt} DESC
+          SELECT latest.id
+          FROM bank_balance_snapshots latest
+          WHERE latest.account_id = ${account.id}
+          ORDER BY latest.as_of_at DESC, latest.updated_at DESC
           LIMIT 1
         )`,
       ),

@@ -52,9 +52,11 @@ class SqliteStatement {
 
   async raw() {
     this.owner.executedSql.push(this.sql);
-    const statement = this.owner.database.prepare(this.sql);
-    statement.setReturnArrays(true);
-    return statement.all(...(this.values as never[]));
+    return (
+      this.owner.database
+        .prepare(this.sql)
+        .all(...(this.values as never[])) as Record<string, unknown>[]
+    ).map((row) => Object.values(row));
   }
 
   async first<T>() {

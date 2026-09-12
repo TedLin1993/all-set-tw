@@ -4,10 +4,7 @@ import {
   investmentTransactions,
 } from "@taiwan-fin-hub/db";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
 import type { MonthDateRange } from "../../platform/month-range";
-
-const latestPosition = alias(investmentPositions, "p2");
 
 const investmentTransactionColumns = {
   id: sql<string>`${investmentTransactions.id}`,
@@ -81,10 +78,10 @@ export async function listLatestInvestmentPositions(
         eq(
           investmentPositions.asOfDate,
           sql`(
-            SELECT MAX(${latestPosition.asOfDate})
-            FROM ${latestPosition}
-            WHERE ${latestPosition.connectorId} = ${investmentPositions.connectorId}
-              AND ${latestPosition.assetType} = ${investmentPositions.assetType}
+            SELECT MAX(p2.as_of_date)
+            FROM investment_positions p2
+            WHERE p2.connector_id = ${investmentPositions.connectorId}
+              AND p2.asset_type = ${investmentPositions.assetType}
           )`,
         ),
         cursor

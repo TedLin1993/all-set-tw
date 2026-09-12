@@ -47,9 +47,12 @@ class SqliteD1 {
         };
       },
       async raw() {
-        const prepared = this.database.prepare(sql);
-        prepared.setReturnArrays(true);
-        return prepared.all(...(values as never[]));
+        return (
+          this.database.prepare(sql).all(...(values as never[])) as Record<
+            string,
+            unknown
+          >[]
+        ).map((row) => Object.values(row));
       },
       async first<T>() {
         return (
