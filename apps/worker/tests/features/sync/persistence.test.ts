@@ -29,6 +29,18 @@ import {
   reconcileSinopacLegacyTransactionStatements,
 } from "../../../src/features/sync/repository";
 
+/** This Node sqlite bind API only accepts anonymous `?`; expand D1 `?1` placeholders. */
+function expandNumberedParams(sql: string, values: unknown[]) {
+  const expanded: unknown[] = [];
+  const rewritten = sql.replace(/\?(\d+)/g, (_, index) => {
+    expanded.push(values[Number(index) - 1]);
+    return "?";
+  });
+  return expanded.length > 0
+    ? { sql: rewritten, values: expanded }
+    : { sql, values };
+}
+
 class SqliteStatement {
   private values: unknown[] = [];
 
@@ -52,36 +64,39 @@ class SqliteStatement {
 
   async raw() {
     this.owner.executedSql.push(this.sql);
+    const query = expandNumberedParams(this.sql, this.values);
     return (
       this.owner.database
-        .prepare(this.sql)
-        .all(...(this.values as never[])) as Record<string, unknown>[]
+        .prepare(query.sql)
+        .all(...(query.values as never[])) as Record<string, unknown>[]
     ).map((row) => Object.values(row));
   }
 
   async first<T>() {
     this.owner.executedSql.push(this.sql);
+    const query = expandNumberedParams(this.sql, this.values);
     return (
       (this.owner.database
-        .prepare(this.sql)
-        .get(...(this.values as never[])) as T) ?? null
+        .prepare(query.sql)
+        .get(...(query.values as never[])) as T) ?? null
     );
   }
 
   execute() {
     this.owner.executedSql.push(this.sql);
-    if (/^\s*(SELECT|WITH)\b/i.test(this.sql)) {
+    const query = expandNumberedParams(this.sql, this.values);
+    if (/^\s*(SELECT|WITH)\b/i.test(query.sql)) {
       return {
         success: true,
         meta: { changes: 0 },
         results: this.owner.database
-          .prepare(this.sql)
-          .all(...(this.values as never[])),
+          .prepare(query.sql)
+          .all(...(query.values as never[])),
       };
     }
     const result = this.owner.database
-      .prepare(this.sql)
-      .run(...(this.values as never[]));
+      .prepare(query.sql)
+      .run(...(query.values as never[]));
     return {
       success: true,
       meta: { changes: Number(result.changes) },

@@ -36,9 +36,9 @@ function asD1(database: DatabaseSync) {
           return this;
         },
         async raw() {
-          const statement = database.prepare(sql);
-          statement.setReturnArrays(true);
-          return statement.all(...params);
+          return (
+            database.prepare(sql).all(...params) as Record<string, unknown>[]
+          ).map((row) => Object.values(row));
         },
         async all() {
           return { results: database.prepare(sql).all(...params) };
