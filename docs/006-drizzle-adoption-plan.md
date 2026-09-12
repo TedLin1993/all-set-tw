@@ -1,6 +1,6 @@
 # Drizzle 導入實作計畫
 
-日期：2026-09-12。狀態：階段 1–2 已落地（schema／client、語意比對、隔離 D1 整合測試、exchange-rates repository）；階段 3–5 待實作。SQL migrations 仍是 schema 權威，正式環境不使用 `drizzle-kit push`。
+日期：2026-09-12。狀態：階段 1–2 與 3A 已落地（schema／client、exchange-rates、manual-assets、notifications）；階段 3B–5 待實作。SQL migrations 仍是 schema 權威，正式環境不使用 `drizzle-kit push`。
 
 ## 目標與建議方案
 

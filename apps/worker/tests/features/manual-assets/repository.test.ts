@@ -1,111 +1,101 @@
-import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
+  createManualAsset,
+  deleteManualAsset,
+  listLatestManualAssetValues,
   listManualAssetHistory,
+  listManualAssets,
   updateManualAsset,
 } from "../../../src/features/manual-assets/repository";
-
-class SqliteQueryStatement {
-  private values: unknown[] = [];
-
-  constructor(
-    private readonly database: DatabaseSync,
-    private readonly sql: string,
-  ) {}
-
-  bind(...values: unknown[]) {
-    this.values = values;
-    return this;
-  }
-
-  async run() {
-    this.database.prepare(this.sql).run(...(this.values as never[]));
-  }
-
-  async all<T>() {
-    return {
-      results: this.database
-        .prepare(this.sql)
-        .all(...(this.values as never[])) as T[],
-    };
-  }
-}
-
-const databases: DatabaseSync[] = [];
-
-afterEach(() => {
-  for (const database of databases.splice(0)) database.close();
-});
+import { createTestD1 } from "../../../../../packages/db/testing/d1";
 
 describe("manual asset repository", () => {
-  it("lists valuation history from oldest to newest", async () => {
-    const database = new DatabaseSync(":memory:");
-    databases.push(database);
-    database.exec(`
-      CREATE TABLE net_worth_history (
-        id TEXT PRIMARY KEY,
-        date TEXT NOT NULL,
-        net_worth REAL NOT NULL,
-        asset_type TEXT NOT NULL,
-        source TEXT NOT NULL,
-        snapshotted_at TEXT NOT NULL
-      );
-      INSERT INTO net_worth_history
-        (id, date, net_worth, asset_type, source, snapshotted_at)
-      VALUES
-        ('new', '2026-08-03', 4790, 'manual:stock', 'manual', '2026-08-03T00:00:00.000Z'),
-        ('old', '2025-03-03', 3031, 'manual:stock', 'manual', '2025-03-03T00:00:00.000Z');
-    `);
-    const db = {
-      prepare(sql: string) {
-        return new SqliteQueryStatement(database, sql);
-      },
-    } as unknown as D1Database;
+  let harness: Awaited<ReturnType<typeof createTestD1>>;
 
-    await expect(listManualAssetHistory(db, "manual:stock")).resolves.toEqual([
+  beforeAll(async () => {
+    harness = await createTestD1();
+  }, 60_000);
+
+  afterAll(async () => {
+    await harness?.mf.dispose();
+  });
+
+  beforeEach(async () => {
+    await harness.binding.batch([
+      harness.binding.prepare(
+        "DELETE FROM net_worth_history WHERE source = 'manual'",
+      ),
+      harness.binding.prepare("DELETE FROM manual_assets"),
+    ]);
+  });
+
+  it("lists valuation history from oldest to newest", async () => {
+    await createManualAsset(harness.binding, {
+      id: "manual:stock",
+      name: "股票",
+      category: "investment",
+      note: null,
+      currency: "TWD",
+      value: 3031,
+      date: "2025-03-03",
+      now: "2025-03-03T00:00:00.000Z",
+    });
+    await updateManualAsset(
+      harness.binding,
+      "manual:stock",
+      { value: 4790, date: "2026-08-03" },
+      "2026-08-03T00:00:00.000Z",
+    );
+
+    await expect(
+      listManualAssetHistory(harness.binding, "manual:stock"),
+    ).resolves.toEqual([
       { date: "2025-03-03", value: 3031 },
       { date: "2026-08-03", value: 4790 },
     ]);
   });
 
+  it("creates an asset and its first valuation in one batch", async () => {
+    await createManualAsset(harness.binding, {
+      id: "manual:home",
+      name: "房子",
+      category: "real_estate",
+      note: "備註",
+      currency: "TWD",
+      value: 100,
+      date: "2026-08-01",
+      now: "2026-08-01T00:00:00.000Z",
+    });
+
+    await expect(listManualAssets(harness.binding)).resolves.toEqual([
+      {
+        id: "manual:home",
+        name: "房子",
+        category: "real_estate",
+        note: "備註",
+        currency: "TWD",
+        createdAt: "2026-08-01T00:00:00.000Z",
+      },
+    ]);
+    await expect(listLatestManualAssetValues(harness.binding)).resolves.toEqual(
+      [{ assetId: "manual:home", value: 100, date: "2026-08-01" }],
+    );
+  });
+
   it("updates asset metadata and its current valuation atomically", async () => {
-    const database = new DatabaseSync(":memory:");
-    databases.push(database);
-    database.exec(`
-      CREATE TABLE manual_assets (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        category TEXT NOT NULL,
-        note TEXT,
-        currency TEXT NOT NULL
-      );
-      CREATE TABLE net_worth_history (
-        id TEXT PRIMARY KEY,
-        date TEXT NOT NULL,
-        net_worth REAL NOT NULL,
-        asset_type TEXT NOT NULL,
-        source TEXT NOT NULL,
-        snapshotted_at TEXT NOT NULL,
-        UNIQUE(source, asset_type, date)
-      );
-      INSERT INTO manual_assets (id, name, category, note, currency)
-      VALUES ('manual:home', '舊名稱', 'real_estate', '舊備註', 'TWD');
-      INSERT INTO net_worth_history
-        (id, date, net_worth, asset_type, source, snapshotted_at)
-      VALUES
-        ('manual:manual:home:2026-08-01', '2026-08-01', 100, 'manual:home', 'manual', '2026-08-01T00:00:00.000Z');
-    `);
-    const db = {
-      prepare(sql: string) {
-        return new SqliteQueryStatement(database, sql);
-      },
-      async batch(statements: SqliteQueryStatement[]) {
-        for (const statement of statements) await statement.run();
-      },
-    } as unknown as D1Database;
+    await createManualAsset(harness.binding, {
+      id: "manual:home",
+      name: "舊名稱",
+      category: "real_estate",
+      note: "舊備註",
+      currency: "TWD",
+      value: 100,
+      date: "2026-08-01",
+      now: "2026-08-01T00:00:00.000Z",
+    });
 
     await updateManualAsset(
-      db,
+      harness.binding,
       "manual:home",
       {
         name: "新名稱",
@@ -117,23 +107,99 @@ describe("manual asset repository", () => {
       "2026-08-03T12:00:00.000Z",
     );
 
-    expect(database.prepare("SELECT * FROM manual_assets").get()).toMatchObject(
+    await expect(listManualAssets(harness.binding)).resolves.toEqual([
       {
+        id: "manual:home",
         name: "新名稱",
+        category: "real_estate",
         note: null,
         currency: "USD",
+        createdAt: "2026-08-01T00:00:00.000Z",
       },
+    ]);
+    await expect(listLatestManualAssetValues(harness.binding)).resolves.toEqual(
+      [{ assetId: "manual:home", value: 125, date: "2026-08-03" }],
     );
-    expect(
-      database
-        .prepare(
-          "SELECT date, net_worth, snapshotted_at FROM net_worth_history WHERE date = '2026-08-03'",
-        )
-        .get(),
-    ).toEqual({
-      date: "2026-08-03",
-      net_worth: 125,
-      snapshotted_at: "2026-08-03T12:00:00.000Z",
+    await expect(
+      listManualAssetHistory(harness.binding, "manual:home"),
+    ).resolves.toEqual([
+      { date: "2026-08-01", value: 100 },
+      { date: "2026-08-03", value: 125 },
+    ]);
+  });
+
+  it("keeps the previous asset row when a later history insert in the update batch fails", async () => {
+    await createManualAsset(harness.binding, {
+      id: "manual:home",
+      name: "舊名稱",
+      category: "real_estate",
+      note: "舊備註",
+      currency: "TWD",
+      value: 100,
+      date: "2026-08-01",
+      now: "2026-08-01T00:00:00.000Z",
     });
+    await harness.binding
+      .prepare(
+        `INSERT INTO net_worth_history
+           (id, date, net_worth, asset_type, source, snapshotted_at)
+         VALUES
+           ('manual:manual:home:2026-08-03', '2020-01-01', 1, 'other', 'manual', '2020-01-01T00:00:00.000Z')`,
+      )
+      .run();
+
+    await expect(
+      updateManualAsset(
+        harness.binding,
+        "manual:home",
+        {
+          name: "新名稱",
+          note: null,
+          value: 125,
+          date: "2026-08-03",
+        },
+        "2026-08-03T12:00:00.000Z",
+      ),
+    ).rejects.toThrow();
+
+    await expect(listManualAssets(harness.binding)).resolves.toEqual([
+      {
+        id: "manual:home",
+        name: "舊名稱",
+        category: "real_estate",
+        note: "舊備註",
+        currency: "TWD",
+        createdAt: "2026-08-01T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("deletes an asset and all of its valuations together", async () => {
+    await createManualAsset(harness.binding, {
+      id: "manual:home",
+      name: "房子",
+      category: "real_estate",
+      note: null,
+      currency: "TWD",
+      value: 100,
+      date: "2026-08-01",
+      now: "2026-08-01T00:00:00.000Z",
+    });
+    await updateManualAsset(
+      harness.binding,
+      "manual:home",
+      { value: 125, date: "2026-08-03" },
+      "2026-08-03T00:00:00.000Z",
+    );
+
+    await deleteManualAsset(harness.binding, "manual:home");
+
+    await expect(listManualAssets(harness.binding)).resolves.toEqual([]);
+    await expect(listLatestManualAssetValues(harness.binding)).resolves.toEqual(
+      [],
+    );
+    await expect(
+      listManualAssetHistory(harness.binding, "manual:home"),
+    ).resolves.toEqual([]);
   });
 });

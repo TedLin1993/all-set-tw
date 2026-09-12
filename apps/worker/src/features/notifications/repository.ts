@@ -1,7 +1,13 @@
+import {
+  createDb,
+  notificationPreferences,
+  pushSubscriptions,
+} from "@taiwan-fin-hub/db";
 import type {
   NotificationPreferences,
   PushSubscriptionInput,
 } from "@taiwan-fin-hub/core";
+import { asc, count, eq, sql } from "drizzle-orm";
 
 export type PushSubscriptionRow = {
   id: string;
@@ -19,15 +25,29 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
 };
 
 export async function listPushSubscriptions(db: D1Database) {
-  const result = await db
-    .prepare(
-      `SELECT id, encrypted_subscription, created_at, updated_at,
-              last_success_at, consecutive_failures
-       FROM push_subscriptions
-       ORDER BY created_at ASC, id ASC`,
-    )
-    .all<PushSubscriptionRow>();
-  return result.results;
+  const rows = await createDb(db)
+    .select({
+      id: sql<string>`${pushSubscriptions.id}`,
+      encryptedSubscription: pushSubscriptions.encryptedSubscription,
+      createdAt: pushSubscriptions.createdAt,
+      updatedAt: pushSubscriptions.updatedAt,
+      lastSuccessAt: pushSubscriptions.lastSuccessAt,
+      consecutiveFailures: pushSubscriptions.consecutiveFailures,
+    })
+    .from(pushSubscriptions)
+    .orderBy(asc(pushSubscriptions.createdAt), asc(pushSubscriptions.id))
+    .all();
+  return rows.map(
+    (row) =>
+      ({
+        id: row.id,
+        encrypted_subscription: row.encryptedSubscription,
+        created_at: row.createdAt,
+        updated_at: row.updatedAt,
+        last_success_at: row.lastSuccessAt,
+        consecutive_failures: row.consecutiveFailures,
+      }) satisfies PushSubscriptionRow,
+  );
 }
 
 export async function upsertPushSubscription(
@@ -38,64 +58,63 @@ export async function upsertPushSubscription(
     now: string;
   },
 ) {
-  await db
-    .prepare(
-      `INSERT INTO push_subscriptions (
-         id, encrypted_subscription, created_at, updated_at,
-         last_success_at, consecutive_failures
-       ) VALUES (?, ?, ?, ?, NULL, 0)
-       ON CONFLICT(id) DO UPDATE SET
-         encrypted_subscription = excluded.encrypted_subscription,
-         updated_at = excluded.updated_at,
-         consecutive_failures = 0`,
-    )
-    .bind(input.id, input.encryptedSubscription, input.now, input.now)
-    .run();
+  await createDb(db)
+    .insert(pushSubscriptions)
+    .values({
+      id: input.id,
+      encryptedSubscription: input.encryptedSubscription,
+      createdAt: input.now,
+      updatedAt: input.now,
+      lastSuccessAt: null,
+      consecutiveFailures: 0,
+    })
+    .onConflictDoUpdate({
+      target: pushSubscriptions.id,
+      set: {
+        encryptedSubscription: input.encryptedSubscription,
+        updatedAt: input.now,
+        consecutiveFailures: 0,
+      },
+    });
 }
 
 export async function removePushSubscription(db: D1Database, id: string) {
-  await db
-    .prepare("DELETE FROM push_subscriptions WHERE id = ?")
-    .bind(id)
-    .run();
+  await createDb(db)
+    .delete(pushSubscriptions)
+    .where(eq(pushSubscriptions.id, id));
 }
 
 export async function markPushSuccess(db: D1Database, id: string, now: string) {
-  await db
-    .prepare(
-      `UPDATE push_subscriptions
-       SET last_success_at = ?, consecutive_failures = 0, updated_at = ?
-       WHERE id = ?`,
-    )
-    .bind(now, now, id)
-    .run();
+  await createDb(db)
+    .update(pushSubscriptions)
+    .set({
+      lastSuccessAt: now,
+      consecutiveFailures: 0,
+      updatedAt: now,
+    })
+    .where(eq(pushSubscriptions.id, id));
 }
 
 export async function markPushFailure(db: D1Database, id: string, now: string) {
-  await db
-    .prepare(
-      `UPDATE push_subscriptions
-       SET consecutive_failures = consecutive_failures + 1, updated_at = ?
-       WHERE id = ?`,
-    )
-    .bind(now, id)
-    .run();
+  await createDb(db)
+    .update(pushSubscriptions)
+    .set({
+      consecutiveFailures: sql`${pushSubscriptions.consecutiveFailures} + 1`,
+      updatedAt: now,
+    })
+    .where(eq(pushSubscriptions.id, id));
 }
 
 export async function getNotificationPreferences(db: D1Database) {
-  const row = await db
-    .prepare(
-      `SELECT notify_success AS success,
-              notify_failed AS failed,
-              notify_needs_user_action AS needsUserAction
-       FROM notification_preferences
-       WHERE id = 'default'`,
-    )
-    .first<{
-      success: number;
-      failed: number;
-      needsUserAction: number;
-    }>();
+  const row = await createDb(db)
+    .select({
+      success: notificationPreferences.notifySuccess,
+      failed: notificationPreferences.notifyFailed,
+      needsUserAction: notificationPreferences.notifyNeedsUserAction,
+    })
+    .from(notificationPreferences)
+    .where(eq(notificationPreferences.id, "default"))
+    .get();
 
   if (!row) return DEFAULT_PREFERENCES;
   return {
@@ -110,31 +129,31 @@ export async function saveNotificationPreferences(
   preferences: NotificationPreferences,
   now: string,
 ) {
-  await db
-    .prepare(
-      `INSERT INTO notification_preferences (
-         id, notify_success, notify_failed,
-         notify_needs_user_action, updated_at
-       ) VALUES ('default', ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         notify_success = excluded.notify_success,
-         notify_failed = excluded.notify_failed,
-         notify_needs_user_action = excluded.notify_needs_user_action,
-         updated_at = excluded.updated_at`,
-    )
-    .bind(
-      preferences.success ? 1 : 0,
-      preferences.failed ? 1 : 0,
-      preferences.needsUserAction ? 1 : 0,
-      now,
-    )
-    .run();
+  await createDb(db)
+    .insert(notificationPreferences)
+    .values({
+      id: "default",
+      notifySuccess: preferences.success ? 1 : 0,
+      notifyFailed: preferences.failed ? 1 : 0,
+      notifyNeedsUserAction: preferences.needsUserAction ? 1 : 0,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: notificationPreferences.id,
+      set: {
+        notifySuccess: preferences.success ? 1 : 0,
+        notifyFailed: preferences.failed ? 1 : 0,
+        notifyNeedsUserAction: preferences.needsUserAction ? 1 : 0,
+        updatedAt: now,
+      },
+    });
 }
 
 export async function countPushSubscriptions(db: D1Database) {
-  const row = await db
-    .prepare("SELECT COUNT(*) AS count FROM push_subscriptions")
-    .first<{ count: number }>();
+  const row = await createDb(db)
+    .select({ count: count() })
+    .from(pushSubscriptions)
+    .get();
   return row?.count ?? 0;
 }
 

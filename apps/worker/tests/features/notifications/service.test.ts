@@ -26,8 +26,20 @@ function createDb(encryptedSubscription: string) {
         async all() {
           return { results: [row] };
         },
+        async raw() {
+          return [
+            [
+              row.id,
+              row.encrypted_subscription,
+              row.created_at,
+              row.updated_at,
+              row.last_success_at,
+              row.consecutive_failures,
+            ],
+          ];
+        },
         async run() {
-          return { meta: { changes: 1 } };
+          return { success: true, meta: { changes: 1 } };
         },
       };
       return statement;
