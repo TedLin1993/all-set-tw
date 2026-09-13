@@ -36,7 +36,7 @@ export type MappingTransactionRow = {
 export async function listInvoiceTransactionPreferences(db: D1Database) {
   return createDrizzle(db)
     .select({
-      invoiceId: sql<string>`${invoiceTransactionPreferences.invoiceId}`,
+      invoiceId: invoiceTransactionPreferences.invoiceId,
       transactionId: invoiceTransactionPreferences.transactionId,
       decision: sql<
         "linked" | "separate"
@@ -62,7 +62,7 @@ export async function findMappingInvoice(db: D1Database, invoiceId: string) {
   return (
     (await createDrizzle(db)
       .select({
-        id: sql<string>`${invoices.id}`,
+        id: invoices.id,
         invoiceDate: invoices.invoiceDate,
       })
       .from(invoices)
@@ -78,7 +78,7 @@ export async function findMappingTransaction(
   return (
     (await createDrizzle(db)
       .select({
-        id: sql<string>`${bankTx.id}`,
+        id: bankTx.id,
         postedDate: bankTx.postedDate,
         authorizedAt: bankTx.authorizedAt,
         amount: bankTx.amount,
@@ -103,7 +103,7 @@ export async function findLinkedInvoiceId(
 ) {
   const row = await createDrizzle(db)
     .select({
-      invoiceId: sql<string>`${invoiceTransactionPreferences.invoiceId}`,
+      invoiceId: invoiceTransactionPreferences.invoiceId,
     })
     .from(invoiceTransactionPreferences)
     .where(

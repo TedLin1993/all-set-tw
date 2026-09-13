@@ -40,7 +40,7 @@ export async function listClassificationOverrides(
 export async function listEnabledClassificationRules(db: D1Database) {
   return createDrizzle(db)
     .select({
-      id: sql<string>`${rules.id}`,
+      id: rules.id,
       category_id: rules.categoryId,
       label: categories.label,
       target_type: rules.targetType,
@@ -60,7 +60,7 @@ export async function listEnabledClassificationRules(db: D1Database) {
 export async function listClassificationCategories(db: D1Database) {
   return createDrizzle(db)
     .select({
-      id: sql<string>`${categories.id}`,
+      id: categories.id,
       label: categories.label,
       sortOrder: categories.sortOrder,
       isSystem: categories.isSystem,
@@ -73,7 +73,7 @@ export async function listClassificationCategories(db: D1Database) {
 export async function findCategoryByLabel(db: D1Database, label: string) {
   return (
     (await createDrizzle(db)
-      .select({ id: sql<string>`${categories.id}` })
+      .select({ id: categories.id })
       .from(categories)
       .where(sql`${categories.label} = ${label} COLLATE NOCASE`)
       .limit(1)
@@ -111,7 +111,7 @@ export async function insertClassificationCategory(
 export async function listClassificationRules(db: D1Database) {
   return createDrizzle(db)
     .select({
-      id: sql<string>`${rules.id}`,
+      id: rules.id,
       categoryId: rules.categoryId,
       targetType: rules.targetType,
       field: rules.field,
@@ -131,7 +131,7 @@ export async function listClassificationRules(db: D1Database) {
 
 export async function listEditableClassificationRuleIds(db: D1Database) {
   const rows = await createDrizzle(db)
-    .select({ id: sql<string>`${rules.id}` })
+    .select({ id: rules.id })
     .from(rules)
     .where(eq(rules.isSystem, 0))
     .orderBy(desc(rules.priority), desc(rules.updatedAt), rules.id)

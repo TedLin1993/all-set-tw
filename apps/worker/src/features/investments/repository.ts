@@ -7,7 +7,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { MonthDateRange } from "../../platform/month-range";
 
 const investmentTransactionColumns = {
-  id: sql<string>`${investmentTransactions.id}`,
+  id: investmentTransactions.id,
   connectorId: investmentTransactions.connectorId,
   accountId: investmentTransactions.accountId,
   sourceId: investmentTransactions.sourceId,
@@ -61,7 +61,7 @@ export async function listLatestInvestmentPositions(
 ) {
   return createDrizzle(db)
     .select({
-      id: sql<string>`${investmentPositions.id}`,
+      id: investmentPositions.id,
       assetType: investmentPositions.assetType,
       symbol: investmentPositions.symbol,
       name: investmentPositions.name,

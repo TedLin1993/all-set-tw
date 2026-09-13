@@ -9,7 +9,7 @@ const invoiceDay = sql`CASE WHEN length(${invoices.invoiceDate}) > 10
   ELSE ${invoices.invoiceDate} END`;
 
 const invoiceSummaryColumns = {
-  id: sql<string>`${invoices.id}`,
+  id: invoices.id,
   connectorId: sql<ConnectorId>`${invoices.connectorId}`,
   sourceId: invoices.sourceId,
   invoiceNumber: invoices.invoiceNumber,
@@ -102,7 +102,7 @@ export async function listInvoiceItems(db: D1Database, invoiceIds: string[]) {
   if (invoiceIds.length === 0) return [];
   return createDrizzle(db)
     .select({
-      id: sql<string>`${invoiceLineItems.id}`,
+      id: invoiceLineItems.id,
       invoiceId: invoiceLineItems.invoiceId,
       sourceId: invoiceLineItems.sourceId,
       lineNumber: invoiceLineItems.lineNumber,

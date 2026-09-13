@@ -28,6 +28,7 @@ const visibleBankTransactionFilter = and(
   sql`(${txn.status} <> 'pending' OR ${txn.matchedTransactionId} IS NULL)`,
 );
 
+// Alias-join selects keep sql`.as()` so D1 raw() column order matches Drizzle fields.
 const bankTransactionColumns = {
   id: sql<string>`${txn.id}`.as("id"),
   connectorId: sql<string>`${txn.connectorId}`.as("connectorId"),
@@ -139,7 +140,7 @@ function bankTransactionQuery(db: D1Database) {
 export async function listBankAccounts(db: D1Database) {
   return createDrizzle(db)
     .select({
-      id: sql<string>`${account.id}`,
+      id: account.id,
       connectorId: account.connectorId,
       sourceId: account.sourceId,
       institutionName: account.institutionName,

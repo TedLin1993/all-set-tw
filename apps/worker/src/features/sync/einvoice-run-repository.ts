@@ -86,7 +86,7 @@ export type MergeEinvoiceRunItemInput = {
 };
 
 const runSelection = {
-  id: sql<EinvoiceRunRow["id"]>`${einvoiceSyncRuns.id}`,
+  id: einvoiceSyncRuns.id,
   connector_id: sql<
     EinvoiceRunRow["connector_id"]
   >`${einvoiceSyncRuns.connectorId}`,
@@ -112,7 +112,7 @@ const runSelection = {
 };
 
 const itemSelection = {
-  id: sql<EinvoiceRunItemRow["id"]>`${einvoiceSyncRunItems.id}`,
+  id: einvoiceSyncRunItems.id,
   run_id: einvoiceSyncRunItems.runId,
   invoice_source_id: einvoiceSyncRunItems.invoiceSourceId,
   header_json: einvoiceSyncRunItems.headerJson,

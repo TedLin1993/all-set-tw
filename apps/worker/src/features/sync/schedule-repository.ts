@@ -49,7 +49,7 @@ export async function findDefaultSyncSchedule(db: D1Database) {
 
 export async function listInheritedSyncJobs(db: D1Database) {
   return createDrizzle(db)
-    .select({ id: sql<string>`${syncJobs.id}`, nextRunAt: syncJobs.nextRunAt })
+    .select({ id: syncJobs.id, nextRunAt: syncJobs.nextRunAt })
     .from(syncJobs)
     .where(eq(syncJobs.scheduleMode, "inherit"))
     .all()
@@ -109,7 +109,7 @@ export async function saveDefaultSyncSchedule(
 export async function listSyncJobs(db: D1Database) {
   return createDrizzle(db)
     .select({
-      id: sql<string>`${syncJobs.id}`,
+      id: syncJobs.id,
       connectorId: sql<ConnectorId>`${syncJobs.connectorId}`,
       configured: syncJobConfiguredSelection,
       scope: syncJobs.scope,

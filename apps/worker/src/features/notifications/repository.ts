@@ -27,7 +27,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
 export async function listPushSubscriptions(db: D1Database) {
   const rows = await createDrizzle(db)
     .select({
-      id: sql<string>`${pushSubscriptions.id}`,
+      id: pushSubscriptions.id,
       encryptedSubscription: pushSubscriptions.encryptedSubscription,
       createdAt: pushSubscriptions.createdAt,
       updatedAt: pushSubscriptions.updatedAt,

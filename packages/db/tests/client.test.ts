@@ -71,7 +71,7 @@ describe("Drizzle D1 client", () => {
       .all();
     const [rate] = await db
       .select({
-        code: sql<string>`${exchangeRates.currency}`,
+        code: exchangeRates.currency,
         rateTwd: exchangeRates.rateToTwd,
         updatedAt: exchangeRates.updatedAt,
       })
@@ -114,7 +114,7 @@ describe("Drizzle D1 client", () => {
 
     const rows = await db
       .select({
-        currency: sql<string>`${exchangeRates.currency}`,
+        currency: exchangeRates.currency,
         rateTwd: exchangeRates.rateToTwd,
       })
       .from(exchangeRates)

@@ -19,7 +19,7 @@ export async function getConnectorSettings(
   return (
     (await createDrizzle(db)
       .select({
-        id: sql<string>`${connectorSettings.id}`,
+        id: connectorSettings.id,
         connector_id: connectorSettings.connectorId,
         encrypted_config: connectorSettings.encryptedConfig,
         public_config: connectorSettings.publicConfig,
