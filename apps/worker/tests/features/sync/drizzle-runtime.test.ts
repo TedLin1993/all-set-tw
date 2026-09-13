@@ -146,6 +146,23 @@ describe("階段 4：隔離 D1 lease 與 promotion", () => {
       ["tdcc:all", 1],
       ["tdcc:bank", 1],
     ]);
+    await db.prepare("DELETE FROM connector_settings").run();
+    expect((await listSyncJobs(db)).every((row) => !row.configured)).toBe(true);
+    await db
+      .prepare(
+        "INSERT INTO connector_settings (id, connector_id, encrypted_config, created_at, updated_at) VALUES ('tdcc', 'tdcc', 'synthetic', ?, ?)",
+      )
+      .bind(now, now)
+      .run();
+    const configuredJobs = (await listSyncJobs(db)).filter(
+      (row) => row.configured && row.scope === "all",
+    );
+    expect(configuredJobs).toEqual([
+      expect.objectContaining({ connectorId: "tdcc", configured: 1 }),
+    ]);
+    expect(
+      (await listSyncJobs(db)).filter((row) => row.configured).length,
+    ).toBe(2);
     expect(
       (await listInheritedSyncJobs(db)).sort((a, b) =>
         a.id.localeCompare(b.id),

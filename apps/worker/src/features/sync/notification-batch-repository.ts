@@ -2,6 +2,7 @@ import {
   createDrizzle,
   sanitizeDatabaseError,
   syncJobs,
+  syncJobConfiguredJoin,
   syncJobSelection,
   connectorSettings,
   scheduledSyncBatches,
@@ -50,10 +51,10 @@ export async function ensureDefaultScheduleBatch(db: D1Database) {
       connector_id: sql<ConnectorId>`${syncJobs.connectorId}`,
     })
     .from(syncJobs)
+    .innerJoin(connectorSettings, syncJobConfiguredJoin)
     .where(
       and(
         eq(syncJobs.enabled, 1),
-        sql`EXISTS (SELECT 1 FROM ${connectorSettings} WHERE ${connectorSettings.connectorId} = ${syncJobs.connectorId})`,
         eq(syncJobs.scheduleMode, "inherit"),
         or(
           isNull(syncJobs.lastStatus),
@@ -135,12 +136,12 @@ export async function findNextDefaultScheduleBatchJob(
     .select(syncJobSelection)
     .from(scheduledSyncBatchResults)
     .innerJoin(syncJobs, eq(syncJobs.id, scheduledSyncBatchResults.jobId))
+    .innerJoin(connectorSettings, syncJobConfiguredJoin)
     .where(
       and(
         eq(scheduledSyncBatchResults.batchId, batchId),
         isNull(scheduledSyncBatchResults.completedAt),
         eq(syncJobs.enabled, 1),
-        sql`EXISTS (SELECT 1 FROM ${connectorSettings} WHERE ${connectorSettings.connectorId} = ${syncJobs.connectorId})`,
         eq(syncJobs.scheduleMode, "inherit"),
         or(
           isNull(syncJobs.lastStatus),

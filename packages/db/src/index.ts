@@ -115,6 +115,9 @@ function rethrowSettingsError(error: unknown): never {
 }
 
 export {
+  hasConnectorSettings,
+  syncJobConfiguredJoin,
+  syncJobConfiguredSelection,
   syncJobSelection,
   acquireSyncJobLock,
   completeSyncJob,

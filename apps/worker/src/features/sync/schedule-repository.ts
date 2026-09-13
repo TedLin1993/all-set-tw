@@ -4,6 +4,8 @@ import {
   syncJobs,
   syncScheduleSettings,
   connectorSettings,
+  syncJobConfiguredJoin,
+  syncJobConfiguredSelection,
   syncJobSelection,
 } from "@taiwan-fin-hub/db";
 import { and, asc, eq, sql } from "drizzle-orm";
@@ -109,7 +111,7 @@ export async function listSyncJobs(db: D1Database) {
     .select({
       id: sql<string>`${syncJobs.id}`,
       connectorId: sql<ConnectorId>`${syncJobs.connectorId}`,
-      configured: sql<number>`EXISTS (SELECT 1 FROM ${connectorSettings} WHERE ${connectorSettings.connectorId} = ${syncJobs.connectorId})`,
+      configured: syncJobConfiguredSelection,
       scope: syncJobs.scope,
       enabled: syncJobs.enabled,
       intervalMinutes: syncJobs.intervalMinutes,
@@ -128,6 +130,7 @@ export async function listSyncJobs(db: D1Database) {
       updatedAt: syncJobs.updatedAt,
     })
     .from(syncJobs)
+    .leftJoin(connectorSettings, syncJobConfiguredJoin)
     .orderBy(asc(syncJobs.connectorId), asc(syncJobs.scope))
     .all()
     .catch((error) => {
