@@ -1,3 +1,11 @@
+import {
+  createDrizzle,
+  sanitizeDatabaseError,
+  tdccSyncRuns,
+  tdccSyncRunItems,
+} from "@taiwan-fin-hub/db";
+import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+
 /**
  * Durable state for TDCC's paginated provider work.
  *
@@ -5,6 +13,10 @@
  * responsible for mapping a completed item into `sync_write_staging` and for
  * promoting that staging data after every item is done.
  */
+
+// 讀取以明確 selection 維持 snake_case DTO；寫入的 claim、JSON merge、
+// 計數及 promotion 保留原生 statement composition 與原子邊界。
+// create-or-get 保留 partial unique index 衝突後讀取既有 active run 的流程。
 
 export type TdccRunStatus =
   | "queued"
@@ -132,6 +144,55 @@ export type TdccRunLeaseInput = {
   now?: Date;
 };
 
+const runSelection = {
+  id: sql<TdccRunRow["id"]>`${tdccSyncRuns.id}`,
+  connector_id: sql<TdccRunRow["connector_id"]>`${tdccSyncRuns.connectorId}`,
+  trigger: sql<TdccRunRow["trigger"]>`${tdccSyncRuns.trigger}`,
+  scope: sql<TdccRunRow["scope"]>`${tdccSyncRuns.scope}`,
+  sync_job_id: tdccSyncRuns.syncJobId,
+  scheduled_batch_id: tdccSyncRuns.scheduledBatchId,
+  settings_version: tdccSyncRuns.settingsVersion,
+  phase: sql<TdccRunRow["phase"]>`${tdccSyncRuns.phase}`,
+  status: sql<TdccRunRow["status"]>`${tdccSyncRuns.status}`,
+  encrypted_config: tdccSyncRuns.encryptedConfig,
+  encrypted_session: tdccSyncRuns.encryptedSession,
+  session_json: tdccSyncRuns.sessionJson,
+  total_item_count: tdccSyncRuns.totalItemCount,
+  pending_item_count: tdccSyncRuns.pendingItemCount,
+  processing_item_count: tdccSyncRuns.processingItemCount,
+  done_item_count: tdccSyncRuns.doneItemCount,
+  failed_item_count: tdccSyncRuns.failedItemCount,
+  session_refresh_count: tdccSyncRuns.sessionRefreshCount,
+  last_error: tdccSyncRuns.lastError,
+  lease_owner: tdccSyncRuns.leaseOwner,
+  lease_expires_at: tdccSyncRuns.leaseExpiresAt,
+  created_at: tdccSyncRuns.createdAt,
+  updated_at: tdccSyncRuns.updatedAt,
+  promoted_at: tdccSyncRuns.promotedAt,
+  completed_at: tdccSyncRuns.completedAt,
+};
+
+const itemSelection = {
+  id: sql<TdccRunItemRow["id"]>`${tdccSyncRunItems.id}`,
+  run_id: tdccSyncRunItems.runId,
+  task_type: tdccSyncRunItems.taskType,
+  task_key: tdccSyncRunItems.taskKey,
+  account_id: tdccSyncRunItems.accountId,
+  page_cursor: tdccSyncRunItems.pageCursor,
+  next_page_cursor: tdccSyncRunItems.nextPageCursor,
+  page_number: tdccSyncRunItems.pageNumber,
+  task_json: tdccSyncRunItems.taskJson,
+  payload_json: tdccSyncRunItems.payloadJson,
+  status: sql<TdccRunItemRow["status"]>`${tdccSyncRunItems.status}`,
+  attempt_count: tdccSyncRunItems.attemptCount,
+  last_error: tdccSyncRunItems.lastError,
+  lease_token: tdccSyncRunItems.leaseToken,
+  lease_expires_at: tdccSyncRunItems.leaseExpiresAt,
+  created_at: tdccSyncRunItems.createdAt,
+  updated_at: tdccSyncRunItems.updatedAt,
+  completed_at: tdccSyncRunItems.completedAt,
+};
+
 const ACTIVE_RUN_STATUSES: TdccRunStatus[] = [
   "queued",
   "initializing",
@@ -194,15 +255,21 @@ export async function getActiveTdccRun(
   db: D1Database,
 ): Promise<TdccRunRow | null> {
   return (
-    (await db
-      .prepare(
-        `SELECT * FROM tdcc_sync_runs
-         WHERE connector_id = 'tdcc'
-           AND status IN ('queued', 'initializing', 'processing', 'promoting')
-         ORDER BY created_at ASC
-         LIMIT 1`,
+    (await createDrizzle(db)
+      .select(runSelection)
+      .from(tdccSyncRuns)
+      .where(
+        and(
+          eq(tdccSyncRuns.connectorId, "tdcc"),
+          inArray(tdccSyncRuns.status, ACTIVE_RUN_STATUSES),
+        ),
       )
-      .first<TdccRunRow>()) ?? null
+      .orderBy(asc(tdccSyncRuns.createdAt))
+      .limit(1)
+      .get()
+      .catch((error) => {
+        throw sanitizeDatabaseError(error);
+      })) ?? null
   );
 }
 
@@ -211,10 +278,15 @@ export async function getTdccRun(
   runId: string,
 ): Promise<TdccRunRow | null> {
   return (
-    (await db
-      .prepare("SELECT * FROM tdcc_sync_runs WHERE id = ?")
-      .bind(runId)
-      .first<TdccRunRow>()) ?? null
+    (await createDrizzle(db)
+      .select(runSelection)
+      .from(tdccSyncRuns)
+      .where(eq(tdccSyncRuns.id, runId))
+      .limit(1)
+      .get()
+      .catch((error) => {
+        throw sanitizeDatabaseError(error);
+      })) ?? null
   );
 }
 
@@ -238,27 +310,25 @@ export async function transitionTdccRun(
       ? input.from
       : [input.from]
     : ACTIVE_RUN_STATUSES;
-  const placeholders = fromStatuses.map(() => "?").join(", ");
   const now = input.now ?? new Date().toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET status = ?,
-           phase = COALESCE(?, phase),
-           last_error = CASE WHEN ? IS NULL THEN last_error ELSE ? END,
-           updated_at = ?
-       WHERE id = ? AND status IN (${placeholders})`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      status: input.to,
+      phase: input.phase ?? undefined,
+      lastError: input.error ?? undefined,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        inArray(tdccSyncRuns.status, fromStatuses),
+      ),
     )
-    .bind(
-      input.to,
-      input.phase ?? null,
-      input.error ?? null,
-      input.error ?? null,
-      now,
-      input.runId,
-      ...fromStatuses,
-    )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -278,20 +348,28 @@ export async function acquireTdccRunLease(
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET lease_owner = ?, lease_expires_at = ?, updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing', 'promoting')
-         AND (
-           lease_owner IS NULL
-           OR lease_expires_at IS NULL
-           OR lease_expires_at < ?
-         )`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      leaseOwner: input.owner,
+      leaseExpiresAt: expiresAt,
+      updatedAt: nowIso,
+    })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        inArray(tdccSyncRuns.status, ACTIVE_RUN_STATUSES),
+        or(
+          isNull(tdccSyncRuns.leaseOwner),
+          isNull(tdccSyncRuns.leaseExpiresAt),
+          lt(tdccSyncRuns.leaseExpiresAt, nowIso),
+        ),
+      ),
     )
-    .bind(input.owner, expiresAt, nowIso, input.runId, nowIso)
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -302,16 +380,20 @@ export async function renewTdccRunLease(
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET lease_expires_at = ?, updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing', 'promoting')
-         AND lease_owner = ?`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({ leaseExpiresAt: expiresAt, updatedAt: nowIso })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        inArray(tdccSyncRuns.status, ACTIVE_RUN_STATUSES),
+        eq(tdccSyncRuns.leaseOwner, input.owner),
+      ),
     )
-    .bind(expiresAt, nowIso, input.runId, input.owner)
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -319,14 +401,23 @@ export async function releaseTdccRunLease(
   db: D1Database,
   input: { runId: string; owner: string; now?: string },
 ) {
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-       WHERE id = ? AND lease_owner = ?`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: input.now ?? new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        eq(tdccSyncRuns.leaseOwner, input.owner),
+      ),
     )
-    .bind(input.now ?? new Date().toISOString(), input.runId, input.owner)
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -350,39 +441,27 @@ export async function updateTdccRunState(
     now?: string;
   },
 ) {
-  const assignments: string[] = [];
-  const values: unknown[] = [];
-  if (input.settingsVersion !== undefined) {
-    assignments.push("settings_version = ?");
-    values.push(input.settingsVersion);
-  }
-  if (input.encryptedConfig !== undefined) {
-    assignments.push("encrypted_config = ?");
-    values.push(input.encryptedConfig);
-  }
-  if (input.encryptedSession !== undefined) {
-    assignments.push("encrypted_session = ?");
-    values.push(input.encryptedSession);
-  }
-  // `session` is intentionally not written: TDCC session tokens are secrets.
-  // Keep the optional input for source compatibility with the initialization
-  // helper; encryptedSession is the only persisted representation.
-  if (input.phase !== undefined) {
-    assignments.push("phase = ?");
-    values.push(input.phase);
-  }
-  if (input.status !== undefined) {
-    assignments.push("status = ?");
-    values.push(input.status);
-  }
-  if (assignments.length === 0) return false;
-  const now = input.now ?? new Date().toISOString();
-  assignments.push("updated_at = ?");
-  values.push(now, input.runId);
-  const result = await db
-    .prepare(`UPDATE tdcc_sync_runs SET ${assignments.join(", ")} WHERE id = ?`)
-    .bind(...values)
-    .run();
+  const updates = {
+    settingsVersion: input.settingsVersion,
+    encryptedConfig: input.encryptedConfig,
+    encryptedSession: input.encryptedSession,
+    phase: input.phase,
+    status: input.status,
+  };
+  // session is intentionally ignored; provider tokens only persist encrypted.
+  if (Object.values(updates).every((value) => value === undefined))
+    return false;
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      ...updates,
+      updatedAt: input.now ?? new Date().toISOString(),
+    })
+    .where(eq(tdccSyncRuns.id, input.runId))
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -393,20 +472,26 @@ export async function claimTdccRunSessionRefresh(
   db: D1Database,
   input: { runId: string; maxRefreshes?: number; now?: string },
 ) {
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET session_refresh_count = session_refresh_count + 1, updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing', 'promoting')
-         AND session_refresh_count < ?`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      sessionRefreshCount: sql`${tdccSyncRuns.sessionRefreshCount} + 1`,
+      updatedAt: input.now ?? new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        inArray(tdccSyncRuns.status, ACTIVE_RUN_STATUSES),
+        lt(
+          tdccSyncRuns.sessionRefreshCount,
+          Math.max(1, Math.floor(input.maxRefreshes ?? 1)),
+        ),
+      ),
     )
-    .bind(
-      input.now ?? new Date().toISOString(),
-      input.runId,
-      Math.max(1, Math.floor(input.maxRefreshes ?? 1)),
-    )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -515,25 +600,28 @@ export async function getTdccRunItem(
     "taskType" | "taskKey" | "pageCursor"
   >,
 ) {
-  const clause = identity
-    ? " AND task_type = ? AND task_key = ? AND page_cursor = ?"
-    : "";
-  const bindings: unknown[] = [runId, itemId];
-  if (identity) {
-    bindings.push(
-      identity.taskType,
-      identity.taskKey ?? "",
-      identity.pageCursor ?? "",
-    );
-  }
   return (
-    (await db
-      .prepare(
-        `SELECT * FROM tdcc_sync_run_items
-         WHERE run_id = ? AND id = ?${clause}`,
+    (await createDrizzle(db)
+      .select(itemSelection)
+      .from(tdccSyncRunItems)
+      .where(
+        and(
+          eq(tdccSyncRunItems.runId, runId),
+          eq(tdccSyncRunItems.id, itemId),
+          identity
+            ? and(
+                eq(tdccSyncRunItems.taskType, identity.taskType),
+                eq(tdccSyncRunItems.taskKey, identity.taskKey ?? ""),
+                eq(tdccSyncRunItems.pageCursor, identity.pageCursor ?? ""),
+              )
+            : undefined,
+        ),
       )
-      .bind(...bindings)
-      .first<TdccRunItemRow>()) ?? null
+      .limit(1)
+      .get()
+      .catch((error) => {
+        throw sanitizeDatabaseError(error);
+      })) ?? null
   );
 }
 
@@ -588,16 +676,26 @@ export async function claimTdccRunItems(
       ),
     refreshTdccRunCountsStatement(db, input.runId, nowIso),
   ]);
-  return (
-    await db
-      .prepare(
-        `SELECT * FROM tdcc_sync_run_items
-         WHERE run_id = ? AND lease_token = ? AND status = 'processing'
-         ORDER BY created_at ASC, task_type ASC, task_key ASC, page_number ASC`,
-      )
-      .bind(input.runId, claimToken)
-      .all<TdccRunItemRow>()
-  ).results;
+  return createDrizzle(db)
+    .select(itemSelection)
+    .from(tdccSyncRunItems)
+    .where(
+      and(
+        eq(tdccSyncRunItems.runId, input.runId),
+        eq(tdccSyncRunItems.leaseToken, claimToken),
+        eq(tdccSyncRunItems.status, "processing"),
+      ),
+    )
+    .orderBy(
+      asc(tdccSyncRunItems.createdAt),
+      asc(tdccSyncRunItems.taskType),
+      asc(tdccSyncRunItems.taskKey),
+      asc(tdccSyncRunItems.pageNumber),
+    )
+    .all()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
 /** Generic CAS item update for a page worker. */
@@ -784,65 +882,76 @@ export async function finalizeTdccRun(
   },
 ) {
   const now = input.now ?? new Date().toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET status = ?,
-           phase = COALESCE(?, phase),
-           last_error = ?,
-           lease_owner = NULL,
-           lease_expires_at = NULL,
-           promoted_at = COALESCE(?, promoted_at),
-           completed_at = ?,
-           updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing', 'promoting')
-         AND (
-           ? != 'completed'
-           OR NOT EXISTS (
-             SELECT 1 FROM tdcc_sync_run_items
-             WHERE run_id = tdcc_sync_runs.id AND status != 'done'
-           )
-         )`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      status: input.status,
+      phase: input.phase ?? undefined,
+      lastError: input.error ?? null,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      promotedAt: input.promotedAt ?? undefined,
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        inArray(tdccSyncRuns.status, ACTIVE_RUN_STATUSES),
+        input.status === "completed"
+          ? sql`NOT EXISTS (SELECT 1 FROM ${tdccSyncRunItems} WHERE ${tdccSyncRunItems.runId} = ${tdccSyncRuns.id} AND ${tdccSyncRunItems.status} != 'done')`
+          : undefined,
+      ),
     )
-    .bind(
-      input.status,
-      input.phase ?? null,
-      input.error ?? null,
-      input.promotedAt ?? null,
-      now,
-      now,
-      input.runId,
-      input.status,
-    )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
 export async function listPendingTdccRunItems(db: D1Database, runId: string) {
-  return (
-    await db
-      .prepare(
-        `SELECT * FROM tdcc_sync_run_items
-         WHERE run_id = ? AND status != 'done'
-         ORDER BY created_at ASC, task_type ASC, task_key ASC, page_number ASC`,
-      )
-      .bind(runId)
-      .all<TdccRunItemRow>()
-  ).results;
+  return createDrizzle(db)
+    .select(itemSelection)
+    .from(tdccSyncRunItems)
+    .where(
+      and(
+        eq(tdccSyncRunItems.runId, runId),
+        ne(tdccSyncRunItems.status, "done"),
+      ),
+    )
+    .orderBy(
+      asc(tdccSyncRunItems.createdAt),
+      asc(tdccSyncRunItems.taskType),
+      asc(tdccSyncRunItems.taskKey),
+      asc(tdccSyncRunItems.pageNumber),
+    )
+    .all()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
 export async function listCompletedTdccRunItems(db: D1Database, runId: string) {
-  return (
-    await db
-      .prepare(
-        `SELECT * FROM tdcc_sync_run_items
-         WHERE run_id = ? AND status = 'done'
-         ORDER BY created_at ASC, task_type ASC, task_key ASC, page_number ASC`,
-      )
-      .bind(runId)
-      .all<TdccRunItemRow>()
-  ).results;
+  return createDrizzle(db)
+    .select(itemSelection)
+    .from(tdccSyncRunItems)
+    .where(
+      and(
+        eq(tdccSyncRunItems.runId, runId),
+        eq(tdccSyncRunItems.status, "done"),
+      ),
+    )
+    .orderBy(
+      asc(tdccSyncRunItems.createdAt),
+      asc(tdccSyncRunItems.taskType),
+      asc(tdccSyncRunItems.taskKey),
+      asc(tdccSyncRunItems.pageNumber),
+    )
+    .all()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
 function refreshTdccRunCountsStatement(

@@ -4,37 +4,79 @@ import {
   markManualSyncFailure,
   type SyncJobRow,
 } from "@taiwan-fin-hub/db";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { createTestD1 } from "../../../../../packages/db/testing/d1";
+
+const now = "2026-07-15T00:00:00.000Z";
 
 describe("sync job user-action pause", () => {
-  it("keeps an enabled job out of the scheduler while user action is required", async () => {
-    let sql = "";
-    const db = {
-      prepare: vi.fn((statement: string) => {
-        sql = statement;
-        return {
-          bind: vi.fn(() => ({ first: vi.fn().mockResolvedValue(null) })),
-        };
-      }),
-    } as unknown as D1Database;
+  let harness: Awaited<ReturnType<typeof createTestD1>>;
 
-    await findNextDueSyncJob(db, new Date("2026-07-15T00:00:00.000Z"));
-    expect(sql).toContain("last_status != 'needs_user_action'");
-    expect(sql).toContain("FROM connector_settings");
+  beforeAll(async () => {
+    harness = await createTestD1();
+  }, 60_000);
+
+  afterAll(async () => {
+    await harness?.mf.dispose();
+  });
+
+  beforeEach(async () => {
+    const db = harness.binding;
+    await db.batch([
+      db.prepare("DELETE FROM connector_settings"),
+      db.prepare("DELETE FROM sync_jobs"),
+    ]);
+  });
+
+  it("keeps an enabled job out of the scheduler while user action is required", async () => {
+    const db = harness.binding;
+    await db
+      .prepare(
+        "INSERT INTO connector_settings (id, connector_id, encrypted_config, created_at, updated_at) VALUES ('sinopac', 'sinopac', 'synthetic', ?, ?)",
+      )
+      .bind(now, now)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO sync_jobs (
+          id, connector_id, scope, enabled, interval_minutes, next_run_at,
+          last_status, created_at, updated_at
+        ) VALUES (
+          'sinopac:all', 'sinopac', 'all', 1, 1440, ?,
+          'needs_user_action', ?, ?
+        )`,
+      )
+      .bind(now, now, now)
+      .run();
+
+    expect(await findNextDueSyncJob(db, new Date(now))).toBeNull();
+
+    await db
+      .prepare(
+        "UPDATE sync_jobs SET last_status = 'success' WHERE id = 'sinopac:all'",
+      )
+      .run();
+
+    expect(await findNextDueSyncJob(db, new Date(now))).toMatchObject({
+      id: "sinopac:all",
+      enabled: 1,
+    });
   });
 
   it("records required user action without disabling the user's schedule", async () => {
-    const statements: string[] = [];
-    const db = {
-      prepare: vi.fn((statement: string) => {
-        statements.push(statement);
-        return {
-          bind: vi.fn(() => ({
-            run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
-          })),
-        };
-      }),
-    } as unknown as D1Database;
+    const db = harness.binding;
+    await db
+      .prepare(
+        `INSERT INTO sync_jobs (
+          id, connector_id, scope, enabled, interval_minutes, next_run_at,
+          created_at, updated_at
+        ) VALUES (
+          'sinopac:all', 'sinopac', 'all', 1, 1440, ?, ?, ?
+        )`,
+      )
+      .bind("2026-07-16T00:00:00.000Z", now, now)
+      .run();
+
     const job = {
       id: "sinopac:all",
       connector_id: "sinopac",
@@ -53,8 +95,17 @@ describe("sync job user-action pause", () => {
       errorMessage: "請重新驗證",
     });
 
-    expect(statements).toHaveLength(2);
-    for (const statement of statements)
-      expect(statement).not.toMatch(/\benabled\s*=/);
+    const row = await db
+      .prepare(
+        "SELECT enabled, last_status, last_error FROM sync_jobs WHERE id = ?",
+      )
+      .bind("sinopac:all")
+      .first<{ enabled: number; last_status: string; last_error: string }>();
+
+    expect(row).toMatchObject({
+      enabled: 1,
+      last_status: "needs_user_action",
+      last_error: "請重新驗證",
+    });
   });
 });

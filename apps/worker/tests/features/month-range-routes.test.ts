@@ -15,6 +15,10 @@ function createDb() {
           calls.push({ sql, values });
           return statement;
         },
+        async raw() {
+          if (!values.length) calls.push({ sql, values });
+          return [];
+        },
         async all() {
           if (!values.length) calls.push({ sql, values });
           return { results: [] };
@@ -39,7 +43,11 @@ describe("month-filtered resource APIs", () => {
       transactions: [],
     });
     expect(
-      calls.some(({ sql }) => sql.includes("COALESCE(txn.authorized_at")),
+      calls.some(
+        ({ sql }) =>
+          sql.includes("COALESCE(txn.authorized_at") ||
+          /authorized_at/.test(sql),
+      ),
     ).toBe(true);
     expect(
       calls.some(({ values }) => values.join(",") === "2026-07-01,2026-08-01"),
@@ -54,9 +62,11 @@ describe("month-filtered resource APIs", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual([]);
-    expect(calls.some(({ sql }) => sql.includes("b.billing_period >="))).toBe(
-      true,
-    );
+    expect(
+      calls.some(
+        ({ sql }) => sql.includes("billing_period") && sql.includes("substr("),
+      ),
+    ).toBe(true);
     expect(
       calls.some(({ values }) => values.join(",") === "2026-07-01,2026-08-01"),
     ).toBe(true);
@@ -112,6 +122,18 @@ describe("month-filtered resource APIs", () => {
         const statement = {
           bind() {
             return statement;
+          },
+          async raw() {
+            return invoiceRows.map((row) => [
+              row.id,
+              row.connectorId,
+              row.sourceId,
+              row.invoiceNumber,
+              row.invoiceDate,
+              row.sellerName,
+              row.amount,
+              row.updatedAt,
+            ]);
           },
           async all() {
             return { results: invoiceRows };

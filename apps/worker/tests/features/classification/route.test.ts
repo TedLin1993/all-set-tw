@@ -5,7 +5,8 @@ import { classificationRoutes } from "../../../src/features/classification/route
 function createDb(options: { existingLabel?: boolean } = {}) {
   const calls: Array<{ sql: string; values: unknown[] }> = [];
   const db = {
-    prepare(sql: string) {
+    prepare(query: string) {
+      const sql = query.replaceAll('"', "").toUpperCase();
       let values: unknown[] = [];
       return {
         bind(...nextValues: unknown[]) {
@@ -13,12 +14,17 @@ function createDb(options: { existingLabel?: boolean } = {}) {
           calls.push({ sql, values });
           return this;
         },
+        async raw() {
+          const row = await this.first();
+          return row ? [Object.values(row)] : [];
+        },
         async first() {
-          if (sql.includes("WHERE label = ?")) {
+          if (sql.includes("CLASSIFICATION_CATEGORIES.LABEL = ?")) {
             return options.existingLabel ? { id: "travel" } : null;
           }
-          if (sql.includes("MAX(sort_order)")) return { sortOrder: 15 };
-          if (sql.includes("WHERE id = ?")) return { id: values[0] };
+          if (sql.includes("MAX(SORT_ORDER)")) return { sortOrder: 15 };
+          if (sql.includes("CLASSIFICATION_CATEGORIES.ID = ?"))
+            return { id: values[0] };
           return null;
         },
         async run() {
@@ -33,13 +39,17 @@ function createDb(options: { existingLabel?: boolean } = {}) {
 function createReorderDb(ruleIds = ["user:rule-1", "user:rule-2"]) {
   const calls: Array<{ sql: string; values: unknown[] }> = [];
   const db = {
-    prepare(sql: string) {
+    prepare(query: string) {
+      const sql = query.replaceAll('"', "").toUpperCase();
       let values: unknown[] = [];
       const statement = {
         bind(...nextValues: unknown[]) {
           values = nextValues;
           calls.push({ sql, values });
           return statement;
+        },
+        async raw() {
+          return ruleIds.map((id) => [id]);
         },
         async all() {
           return { results: ruleIds.map((id) => ({ id })) };
@@ -77,7 +87,7 @@ describe("classification categories", () => {
       isSystem: false,
     });
     const insert = calls.find(({ sql }) =>
-      sql.includes("INSERT INTO classification_categories"),
+      sql.includes("INSERT INTO CLASSIFICATION_CATEGORIES"),
     );
     expect(insert?.values[1]).toBe("旅遊");
     expect(insert?.values[2]).toBe(15);
@@ -120,10 +130,10 @@ describe("classification rule actions", () => {
 
     expect(response.status).toBe(200);
     const insert = calls.find(({ sql }) =>
-      sql.includes("INSERT INTO classification_rules"),
+      sql.includes("INSERT INTO CLASSIFICATION_RULES"),
     );
-    expect(insert?.sql).toContain("excluded_from_calculation");
-    expect(insert?.values[8]).toBe(1);
+    expect(insert?.sql).toContain("EXCLUDED_FROM_CALCULATION");
+    expect(insert?.values.at(-1)).toBe(1);
   });
 
   it("updates an editable rule's category, condition, keyword, and calculation action", async () => {
@@ -145,13 +155,13 @@ describe("classification rule actions", () => {
 
     expect(response.status).toBe(200);
     const update = calls.find(({ sql }) =>
-      sql.includes("UPDATE classification_rules"),
+      sql.includes("UPDATE CLASSIFICATION_RULES"),
     );
-    expect(update?.sql).toContain("category_id = ?");
-    expect(update?.sql).toContain("operator = ?");
-    expect(update?.sql).toContain("pattern = ?");
-    expect(update?.sql).toContain("excluded_from_calculation = ?");
-    expect(update?.sql).toContain("is_system = 0");
+    expect(update?.sql).toContain("CATEGORY_ID = ?");
+    expect(update?.sql).toContain("OPERATOR = ?");
+    expect(update?.sql).toContain("PATTERN = ?");
+    expect(update?.sql).toContain("EXCLUDED_FROM_CALCULATION = ?");
+    expect(update?.sql).toContain("IS_SYSTEM = ?");
     expect(update?.values).toContain("equals");
     expect(update?.values).toContain(0);
   });
@@ -170,7 +180,7 @@ describe("classification rule actions", () => {
 
     expect(response.status).toBe(200);
     const updates = calls.filter(({ sql }) =>
-      sql.includes("UPDATE classification_rules"),
+      sql.includes("UPDATE CLASSIFICATION_RULES"),
     );
     expect(updates.map(({ values }) => values[0])).toEqual([1002, 1001]);
     expect(updates.map(({ values }) => values[2])).toEqual([

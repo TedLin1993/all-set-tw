@@ -1,3 +1,20 @@
+import {
+  createDrizzle,
+  bankAccounts,
+  bankBalanceSnapshots,
+  exchangeRates,
+  manualAssets,
+  netWorthHistory,
+} from "@taiwan-fin-hub/db";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
+
+const history = alias(netWorthHistory, "history");
+const asset = alias(manualAssets, "asset");
+const rate = alias(exchangeRates, "rate");
+const account = alias(bankAccounts, "account");
+const latest = alias(bankBalanceSnapshots, "latest");
+
 export type NetWorthPageCursor = {
   date: string;
   source: string;
@@ -6,39 +23,37 @@ export type NetWorthPageCursor = {
 };
 
 export async function listNetWorthChartHistory(db: D1Database) {
-  const result = await db
-    .prepare(
-      `SELECT
-         history.date,
-         CASE
-           WHEN history.source != 'manual' OR asset.currency = 'TWD'
-             THEN history.net_worth
-           WHEN rate.rate_to_twd IS NOT NULL
-             THEN history.net_worth * rate.rate_to_twd
+  return createDrizzle(db)
+    .select({
+      date: history.date,
+      netWorth: sql<number>`CASE
+           WHEN ${history.source} != 'manual' OR ${asset.currency} = 'TWD'
+             THEN ${history.netWorth}
+           WHEN ${rate.rateToTwd} IS NOT NULL
+             THEN ${history.netWorth} * ${rate.rateToTwd}
            ELSE 0
-         END AS netWorth,
-         history.asset_type AS assetType,
-         history.source
-       FROM net_worth_history history
-       LEFT JOIN manual_assets asset
-         ON history.source = 'manual' AND asset.id = history.asset_type
-       LEFT JOIN exchange_rates rate ON rate.currency = asset.currency
-       WHERE history.source = 'manual'
-          OR (history.source = 'bank' AND history.asset_type = 'deposit')
-          OR history.asset_type IN ('stock', 'fund')
-       ORDER BY
-         history.date ASC,
-         history.source ASC,
-         history.asset_type ASC,
-         history.id ASC`,
+         END`.as("netWorth"),
+      assetType: history.assetType,
+      source: history.source,
+    })
+    .from(history)
+    .leftJoin(
+      asset,
+      sql`${history.source} = 'manual' AND ${asset.id} = ${history.assetType}`,
     )
-    .all<{
-      date: string;
-      netWorth: number;
-      assetType: string;
-      source: string;
-    }>();
-  return result.results;
+    .leftJoin(rate, eq(rate.currency, asset.currency))
+    .where(
+      sql`${history.source} = 'manual'
+          OR (${history.source} = 'bank' AND ${history.assetType} = 'deposit')
+          OR ${history.assetType} IN ('stock', 'fund')`,
+    )
+    .orderBy(
+      asc(history.date),
+      asc(history.source),
+      asc(history.assetType),
+      asc(history.id),
+    )
+    .all();
 }
 
 export async function listNetWorthHistory(
@@ -46,80 +61,85 @@ export async function listNetWorthHistory(
   limit: number,
   cursor?: NetWorthPageCursor,
 ) {
-  const cursorClause = cursor
-    ? `WHERE (
-        date < ?
-        OR (
-          date = ?
-          AND (source, asset_type, id) > (?, ?, ?)
-        )
-      )`
-    : "";
-  const statement = db.prepare(
-    `SELECT id, date, net_worth AS netWorth, asset_type AS assetType, source
-     FROM net_worth_history
-     ${cursorClause}
-     ORDER BY date DESC, source ASC, asset_type ASC, id ASC
-     LIMIT ?`,
-  );
-  const rows = await (
-    cursor
-      ? statement.bind(
-          cursor.date,
-          cursor.date,
-          cursor.source,
-          cursor.assetType,
-          cursor.id,
-          limit,
-        )
-      : statement.bind(limit)
-  ).all<{
-    id: string;
-    date: string;
-    netWorth: number;
-    assetType: string;
-    source: string;
-  }>();
-  return rows.results;
+  return createDrizzle(db)
+    .select({
+      id: sql<string>`${history.id}`,
+      date: history.date,
+      netWorth: history.netWorth,
+      assetType: history.assetType,
+      source: history.source,
+    })
+    .from(history)
+    .where(
+      cursor
+        ? sql`(
+            ${history.date} < ${cursor.date}
+            OR (
+              ${history.date} = ${cursor.date}
+              AND (${history.source}, ${history.assetType}, ${history.id}) > (${cursor.source}, ${cursor.assetType}, ${cursor.id})
+            )
+          )`
+        : undefined,
+    )
+    .orderBy(
+      desc(history.date),
+      asc(history.source),
+      asc(history.assetType),
+      asc(history.id),
+    )
+    .limit(limit)
+    .all();
 }
 
-export function findBankHistoryDateBounds(db: D1Database) {
-  return db
-    .prepare(
-      `SELECT
-       MIN(substr(as_of_at, 1, 10)) AS minDate,
-       MAX(substr(as_of_at, 1, 10)) AS maxDate
-     FROM bank_balance_snapshots`,
-    )
-    .first<{ minDate: string | null; maxDate: string | null }>();
+export async function findBankHistoryDateBounds(db: D1Database) {
+  return (
+    (await createDrizzle(db)
+      .select({
+        minDate: sql<
+          string | null
+        >`min(substr(${bankBalanceSnapshots.asOfAt}, 1, 10))`.as("minDate"),
+        maxDate: sql<
+          string | null
+        >`max(substr(${bankBalanceSnapshots.asOfAt}, 1, 10))`.as("maxDate"),
+      })
+      .from(bankBalanceSnapshots)
+      .get()) ?? null
+  );
 }
 
 export async function calculateBankDepositValue(db: D1Database, date: string) {
-  const rows = await db
-    .prepare(
-      `SELECT
-       latest.balance AS balance,
-       latest.currency AS currency,
-       rate.rate_to_twd AS rateToTwd
-     FROM bank_accounts account
-     JOIN bank_balance_snapshots latest
-       ON latest.id = (
-         SELECT snapshot.id
-         FROM bank_balance_snapshots snapshot
-         WHERE snapshot.account_id = account.id
-           AND substr(snapshot.as_of_at, 1, 10) <= ?
-         ORDER BY snapshot.as_of_at DESC, snapshot.updated_at DESC
-         LIMIT 1
-       )
-     LEFT JOIN exchange_rates rate ON rate.currency = latest.currency
-     WHERE account.canonical_account_id IS NULL
-       AND COALESCE(account.account_type, 'unknown') != 'credit'`,
+  const rows = await createDrizzle(db)
+    .select({
+      balance: latest.balance,
+      currency: latest.currency,
+      rateToTwd: rate.rateToTwd,
+    })
+    .from(account)
+    .innerJoin(
+      latest,
+      eq(
+        latest.id,
+        sql`(
+          SELECT snapshot.id
+          FROM bank_balance_snapshots snapshot
+          WHERE snapshot.account_id = ${account.id}
+            AND substr(snapshot.as_of_at, 1, 10) <= ${date}
+          ORDER BY snapshot.as_of_at DESC, snapshot.updated_at DESC
+          LIMIT 1
+        )`,
+      ),
     )
-    .bind(date)
-    .all<{ balance: number; currency: string; rateToTwd: number | null }>();
+    .leftJoin(rate, eq(rate.currency, latest.currency))
+    .where(
+      and(
+        isNull(account.canonicalAccountId),
+        sql`COALESCE(${account.accountType}, 'unknown') != 'credit'`,
+      ),
+    )
+    .all();
 
   return Math.round(
-    rows.results.reduce((sum, row) => {
+    rows.reduce((sum, row) => {
       const currency = row.currency || "TWD";
       if (currency === "TWD") return sum + row.balance;
       return row.rateToTwd ? sum + row.balance * row.rateToTwd : sum;
@@ -132,19 +152,33 @@ export async function upsertBankDepositHistory(
   points: Array<{ date: string; netWorth: number }>,
   now: string,
 ) {
+  const database = createDrizzle(db);
   for (let offset = 0; offset < points.length; offset += 100) {
-    await db.batch(
-      points.slice(offset, offset + 100).map(({ date, netWorth }) =>
-        db
-          .prepare(
-            `INSERT INTO net_worth_history (id, date, net_worth, asset_type, source, snapshotted_at)
-         VALUES (?, ?, ?, 'deposit', 'bank', ?)
-         ON CONFLICT(source, asset_type, date) DO UPDATE SET
-           net_worth = excluded.net_worth,
-           snapshotted_at = excluded.snapshotted_at`,
-          )
-          .bind(`bank:deposit:${date}`, date, netWorth, now),
-      ),
-    );
+    const [first, ...rest] = points
+      .slice(offset, offset + 100)
+      .map(({ date, netWorth }) =>
+        database
+          .insert(netWorthHistory)
+          .values({
+            id: `bank:deposit:${date}`,
+            date,
+            netWorth,
+            assetType: "deposit",
+            source: "bank",
+            snapshottedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: [
+              netWorthHistory.source,
+              netWorthHistory.assetType,
+              netWorthHistory.date,
+            ],
+            set: {
+              netWorth,
+              snapshottedAt: now,
+            },
+          }),
+      );
+    if (first) await database.batch([first, ...rest]);
   }
 }

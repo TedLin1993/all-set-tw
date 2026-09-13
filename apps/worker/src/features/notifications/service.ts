@@ -3,6 +3,7 @@ import type {
   NotificationPreferences,
   PushSubscriptionInput,
 } from "@taiwan-fin-hub/core";
+import { sanitizeDatabaseError } from "@taiwan-fin-hub/db";
 import { configEncryptionKey } from "../../platform/config";
 import { decryptJson, encryptJson } from "../../platform/crypto";
 import type { Env } from "../../platform/env";
@@ -147,12 +148,14 @@ export async function safelySendSyncNotification(
     }
     await deliverPushPayload(env, syncNotificationPayload(event));
   } catch (error) {
+    const safeError = sanitizeDatabaseError(error);
     console.error(
       JSON.stringify({
         event: "push_notification_failed",
         connectorId: event.connectorId,
         status: event.status,
-        message: error instanceof Error ? error.message : String(error),
+        message:
+          safeError instanceof Error ? safeError.message : String(safeError),
       }),
     );
   }
@@ -173,12 +176,14 @@ export async function safelySendScheduledSyncSummary(
     }
     await deliverPushPayload(env, scheduledSyncSummaryPayload(events));
   } catch (error) {
+    const safeError = sanitizeDatabaseError(error);
     console.error(
       JSON.stringify({
         event: "push_notification_failed",
         scheduleMode: "inherit",
         status,
-        message: error instanceof Error ? error.message : String(error),
+        message:
+          safeError instanceof Error ? safeError.message : String(safeError),
       }),
     );
   }

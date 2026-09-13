@@ -3,8 +3,12 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  listBankAccounts,
+  listBankTransactions,
   listBankTransactionsForTransferMatching,
   listBankTransactionsInRange,
+  listCreditCardBills,
+  listCreditCardBillsInRange,
   type BankTransactionPageRow,
 } from "../../../src/features/bank/repository";
 import { listInvoicesInRange } from "../../../src/features/invoices/repository";
@@ -41,6 +45,19 @@ class SqliteD1 {
             .prepare(sql)
             .all(...(values as never[])) as T[],
         };
+      },
+      async raw() {
+        return (
+          this.database.prepare(sql).all(...(values as never[])) as Record<
+            string,
+            unknown
+          >[]
+        ).map((row) => Object.values(row));
+      },
+      async first<T>() {
+        return (
+          (this.database.prepare(sql).get(...(values as never[])) as T) ?? null
+        );
       },
       database: this.database,
     };
@@ -163,5 +180,112 @@ describe("bank transaction transfer candidates", () => {
     );
 
     expect(rows).toEqual([]);
+  });
+});
+
+describe("bank list and detail queries", () => {
+  it("joins the latest balance and hides canonical or inactive accounts", async () => {
+    const db = createDb();
+    db.database.exec(`
+      INSERT INTO bank_accounts
+        (id, connector_id, source_id, institution_name, account_name, account_type,
+         currency, canonical_account_id, inactive_at, opened_date, maturity_date,
+         created_at, updated_at)
+      VALUES
+        ('canonical', 'tdcc', 'canonical', '測試銀行', '別名', 'savings', 'TWD',
+         'account-a', NULL, NULL, NULL, '2026-08-22', '2026-08-22'),
+        ('inactive', 'tdcc', 'inactive', '測試銀行', '停用', 'savings', 'TWD',
+         NULL, '2026-08-01', NULL, NULL, '2026-08-22', '2026-08-22');
+      INSERT INTO bank_balance_snapshots
+        (id, connector_id, account_id, source_id, balance, currency, as_of_at,
+         created_at, updated_at)
+      VALUES
+        ('old', 'tdcc', 'account-a', 'old', 100, 'TWD', '2026-08-01', '2026-08-01', '2026-08-01'),
+        ('new', 'tdcc', 'account-a', 'new', 250, 'TWD', '2026-08-22', '2026-08-22', '2026-08-22');
+    `);
+    const rows = await listBankAccounts(db as unknown as D1Database);
+    expect(rows.map((row) => row.id).sort()).toEqual([
+      "account-a",
+      "account-b",
+      "account-c",
+    ]);
+    expect(rows.find((row) => row.id === "account-a")).toMatchObject({
+      balance: 250,
+      openedDate: null,
+      maturityDate: null,
+    });
+    expect(rows.find((row) => row.id === "account-b")).toMatchObject({
+      balance: null,
+      availableBalance: null,
+      asOfAt: null,
+    });
+  });
+
+  it("hides matched pending rows and keeps unmatched pending plus user prefs", async () => {
+    const db = createDb();
+    db.database.exec(`
+      UPDATE bank_transactions SET matched_transaction_id = 'out' WHERE id = 'pending';
+      INSERT INTO bank_transactions
+        (id, connector_id, account_id, source_id, posted_date, amount, currency,
+         status, created_at, updated_at)
+      VALUES
+        ('open-pending', 'tdcc', 'account-a', 'open-pending', '2026-08-21', -50, 'TWD',
+         'pending', '2026-08-21', '2026-08-21');
+      INSERT INTO bank_transaction_preferences
+        (transaction_id, excluded_from_calculation, created_at, updated_at)
+      VALUES ('out', 1, '2026-08-22', '2026-08-22');
+    `);
+    const rows = await listBankTransactions(db as unknown as D1Database, 20);
+    expect(rows.map((row) => row.id)).toEqual([
+      "other-day",
+      "late",
+      "out",
+      "in",
+      "open-pending",
+    ]);
+    expect(rows.find((row) => row.id === "out")).toMatchObject({
+      status: "posted",
+      calculationPreference: 1,
+    });
+    expect(rows.find((row) => row.id === "open-pending")).toMatchObject({
+      status: "pending",
+      calculationPreference: null,
+    });
+    expect(rows.some((row) => row.id === "pending")).toBe(false);
+    const next = await listBankTransactions(db as unknown as D1Database, 2, {
+      effectiveDate: "2026-08-22",
+      updatedAt: "2026-08-22",
+      id: "out",
+    });
+    expect(next.map((row) => row.id)).toEqual(["in", "open-pending"]);
+  });
+
+  it("pages credit-card bills and filters by YYYY-MM TEXT boundaries", async () => {
+    const db = createDb();
+    db.database.exec(`
+      INSERT INTO credit_card_bills (
+        id, connector_id, account_id, source_id, billing_period, currency,
+        created_at, updated_at
+      ) VALUES
+        ('jul', 'tdcc', 'account-a', 'jul', '2026-07', 'TWD', '2026-07-01', '2026-07-01'),
+        ('aug-b', 'tdcc', 'account-b', 'aug-b', '2026-08', 'TWD', '2026-08-01', '2026-08-01'),
+        ('aug-a', 'tdcc', 'account-a', 'aug-a', '2026-08', 'TWD', '2026-08-01', '2026-08-01');
+    `);
+    const first = await listCreditCardBills(db as unknown as D1Database, 2);
+    expect(first.map((row) => row.id)).toEqual(["aug-a", "aug-b"]);
+    const next = await listCreditCardBills(db as unknown as D1Database, 2, {
+      billingPeriod: first[1].billingPeriod,
+      accountId: first[1].accountId,
+      id: first[1].id,
+    });
+    expect(next.map((row) => row.id)).toEqual(["jul"]);
+    expect(
+      (
+        await listCreditCardBillsInRange(db as unknown as D1Database, {
+          from: "2026-08-01",
+          to: "2026-09-01",
+        })
+      ).map((row) => row.id),
+    ).toEqual(["aug-a", "aug-b"]);
   });
 });

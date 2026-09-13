@@ -1,3 +1,9 @@
+import {
+  createDrizzle,
+  connectorSettings,
+  sanitizeDatabaseError,
+} from "@taiwan-fin-hub/db";
+import { eq } from "drizzle-orm";
 import type { ConnectorId } from "@taiwan-fin-hub/core";
 
 export async function updateConnectorEncryptedConfig(
@@ -5,14 +11,18 @@ export async function updateConnectorEncryptedConfig(
   connectorId: ConnectorId,
   encryptedConfig: string,
 ) {
-  await db
-    .prepare(
-      `UPDATE connector_settings SET encrypted_config = ? WHERE connector_id = ?`,
-    )
-    .bind(encryptedConfig, connectorId)
-    .run();
+  await createDrizzle(db)
+    .update(connectorSettings)
+    .set({ encryptedConfig })
+    .where(eq(connectorSettings.connectorId, connectorId))
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
+// 以下 statement factories 保留原生 D1：service 將設定、cursor 與 lifecycle
+// reconciliation 併入 persistence 的單一 promotion batch，不可各自 await。
 export function connectorEncryptedConfigStatement(
   db: D1Database,
   connectorId: ConnectorId,

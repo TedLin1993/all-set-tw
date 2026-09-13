@@ -1,80 +1,93 @@
-export type ClassificationOverrideRow = {
-  target_id: string;
-  category_id: string;
-  label: string;
-};
+import {
+  createDrizzle,
+  classificationCategories as categories,
+  classificationOverrides as overrides,
+  classificationRules as rules,
+} from "@taiwan-fin-hub/db";
+import { and, desc, eq, sql } from "drizzle-orm";
 
-export type ClassificationRuleMatchRow = {
-  id: string;
-  category_id: string;
-  label: string;
-  target_type: string | null;
-  field: string;
-  operator: string;
-  pattern: string;
-  is_system: number;
-  excluded_from_calculation: number;
-};
+export type ClassificationOverrideRow = Awaited<
+  ReturnType<typeof listClassificationOverrides>
+>[number];
+export type ClassificationRuleMatchRow = Awaited<
+  ReturnType<typeof listEnabledClassificationRules>
+>[number];
 
 export async function listClassificationOverrides(
   db: D1Database,
   transactionIds: string[],
 ) {
-  const rows = await db
-    .prepare(
-      `SELECT o.target_id, o.category_id, c.label
-     FROM classification_overrides o
-     JOIN classification_categories c ON c.id = o.category_id
-     WHERE o.target_type = 'bank_transaction'
-       AND o.target_id IN (SELECT value FROM json_each(?))`,
-    )
-    .bind(JSON.stringify(transactionIds))
-    .all<ClassificationOverrideRow>();
-  return rows.results;
+  return (
+    createDrizzle(db)
+      .select({
+        target_id: overrides.targetId,
+        category_id: overrides.categoryId,
+        label: categories.label,
+      })
+      .from(overrides)
+      .innerJoin(categories, eq(categories.id, overrides.categoryId))
+      // Keep one bound JSON array, including for large transaction lists.
+      .where(
+        and(
+          eq(overrides.targetType, "bank_transaction"),
+          sql`${overrides.targetId} IN (SELECT value FROM json_each(${JSON.stringify(transactionIds)}))`,
+        ),
+      )
+      .all()
+  );
 }
 
 export async function listEnabledClassificationRules(db: D1Database) {
-  const rows = await db
-    .prepare(
-      `SELECT r.id, r.category_id, c.label, r.target_type, r.field, r.operator, r.pattern,
-            r.is_system, r.excluded_from_calculation
-     FROM classification_rules r
-     JOIN classification_categories c ON c.id = r.category_id
-     WHERE r.enabled = 1
-     ORDER BY r.priority DESC, r.updated_at DESC, r.id ASC`,
-    )
-    .all<ClassificationRuleMatchRow>();
-  return rows.results;
+  return createDrizzle(db)
+    .select({
+      id: sql<string>`${rules.id}`,
+      category_id: rules.categoryId,
+      label: categories.label,
+      target_type: rules.targetType,
+      field: rules.field,
+      operator: rules.operator,
+      pattern: rules.pattern,
+      is_system: rules.isSystem,
+      excluded_from_calculation: rules.excludedFromCalculation,
+    })
+    .from(rules)
+    .innerJoin(categories, eq(categories.id, rules.categoryId))
+    .where(eq(rules.enabled, 1))
+    .orderBy(desc(rules.priority), desc(rules.updatedAt), rules.id)
+    .all();
 }
 
 export async function listClassificationCategories(db: D1Database) {
-  const rows = await db
-    .prepare(
-      `SELECT id, label, sort_order AS sortOrder, is_system AS isSystem
-     FROM classification_categories
-     ORDER BY sort_order ASC, id ASC`,
-    )
-    .all<Record<string, unknown> & { isSystem: number }>();
-  return rows.results;
+  return createDrizzle(db)
+    .select({
+      id: sql<string>`${categories.id}`,
+      label: categories.label,
+      sortOrder: categories.sortOrder,
+      isSystem: categories.isSystem,
+    })
+    .from(categories)
+    .orderBy(categories.sortOrder, categories.id)
+    .all();
 }
 
-export function findCategoryByLabel(db: D1Database, label: string) {
-  return db
-    .prepare(
-      `SELECT id FROM classification_categories
-     WHERE label = ? COLLATE NOCASE
-     LIMIT 1`,
-    )
-    .bind(label)
-    .first<{ id: string }>();
+export async function findCategoryByLabel(db: D1Database, label: string) {
+  return (
+    (await createDrizzle(db)
+      .select({ id: sql<string>`${categories.id}` })
+      .from(categories)
+      .where(sql`${categories.label} = ${label} COLLATE NOCASE`)
+      .limit(1)
+      .get()) ?? null
+  );
 }
 
 export async function nextCategorySortOrder(db: D1Database) {
-  const row = await db
-    .prepare(
-      "SELECT COALESCE(MAX(sort_order), 0) + 1 AS sortOrder FROM classification_categories",
-    )
-    .first<{ sortOrder: number }>();
+  const row = await createDrizzle(db)
+    .select({
+      sortOrder: sql<number>`COALESCE(MAX(${categories.sortOrder}), 0) + 1`,
+    })
+    .from(categories)
+    .get();
   return Number(row?.sortOrder ?? 1);
 }
 
@@ -82,45 +95,48 @@ export async function insertClassificationCategory(
   db: D1Database,
   input: { id: string; label: string; sortOrder: number; now: string },
 ) {
-  await db
-    .prepare(
-      `INSERT INTO classification_categories
-       (id, label, sort_order, is_system, created_at, updated_at)
-     VALUES (?, ?, ?, 0, ?, ?)`,
-    )
-    .bind(input.id, input.label, input.sortOrder, input.now, input.now)
+  await createDrizzle(db)
+    .insert(categories)
+    .values({
+      id: input.id,
+      label: input.label,
+      sortOrder: input.sortOrder,
+      isSystem: 0,
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
     .run();
 }
 
 export async function listClassificationRules(db: D1Database) {
-  const rows = await db
-    .prepare(
-      `SELECT id, category_id AS categoryId, target_type AS targetType, field, operator,
-            pattern, priority, enabled, is_system AS isSystem, source, description,
-            excluded_from_calculation AS excludedFromCalculation
-     FROM classification_rules
-     ORDER BY priority DESC, updated_at DESC, id ASC`,
-    )
-    .all<
-      Record<string, unknown> & {
-        enabled: number;
-        isSystem: number;
-        excludedFromCalculation: number;
-      }
-    >();
-  return rows.results;
+  return createDrizzle(db)
+    .select({
+      id: sql<string>`${rules.id}`,
+      categoryId: rules.categoryId,
+      targetType: rules.targetType,
+      field: rules.field,
+      operator: rules.operator,
+      pattern: rules.pattern,
+      priority: rules.priority,
+      enabled: rules.enabled,
+      isSystem: rules.isSystem,
+      source: rules.source,
+      description: rules.description,
+      excludedFromCalculation: rules.excludedFromCalculation,
+    })
+    .from(rules)
+    .orderBy(desc(rules.priority), desc(rules.updatedAt), rules.id)
+    .all();
 }
 
 export async function listEditableClassificationRuleIds(db: D1Database) {
-  const rows = await db
-    .prepare(
-      `SELECT id
-       FROM classification_rules
-       WHERE is_system = 0
-       ORDER BY priority DESC, updated_at DESC, id ASC`,
-    )
-    .all<{ id: string }>();
-  return rows.results.map((row) => row.id);
+  const rows = await createDrizzle(db)
+    .select({ id: sql<string>`${rules.id}` })
+    .from(rules)
+    .where(eq(rules.isSystem, 0))
+    .orderBy(desc(rules.priority), desc(rules.updatedAt), rules.id)
+    .all();
+  return rows.map((row) => row.id);
 }
 
 export async function updateClassificationRuleOrder(
@@ -128,20 +144,15 @@ export async function updateClassificationRuleOrder(
   ruleIds: string[],
   now: string,
 ) {
-  if (ruleIds.length === 0) return;
-
+  const database = createDrizzle(db);
   const topPriority = 1000 + ruleIds.length;
-  await db.batch(
-    ruleIds.map((ruleId, index) =>
-      db
-        .prepare(
-          `UPDATE classification_rules
-           SET priority = ?, updated_at = ?
-           WHERE id = ? AND is_system = 0`,
-        )
-        .bind(topPriority - index, now, ruleId),
-    ),
+  const [first, ...rest] = ruleIds.map((ruleId, index) =>
+    database
+      .update(rules)
+      .set({ priority: topPriority - index, updatedAt: now })
+      .where(and(eq(rules.id, ruleId), eq(rules.isSystem, 0))),
   );
+  if (first) await database.batch([first, ...rest]);
 }
 
 export async function upsertClassificationOverride(
@@ -153,23 +164,20 @@ export async function upsertClassificationOverride(
     now: string;
   },
 ) {
-  await db
-    .prepare(
-      `INSERT INTO classification_overrides
-       (id, target_type, target_id, category_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(target_type, target_id) DO UPDATE SET
-       category_id = excluded.category_id,
-       updated_at = excluded.updated_at`,
-    )
-    .bind(
-      `override:${input.targetType}:${input.targetId}`,
-      input.targetType,
-      input.targetId,
-      input.categoryId,
-      input.now,
-      input.now,
-    )
+  await createDrizzle(db)
+    .insert(overrides)
+    .values({
+      id: `override:${input.targetType}:${input.targetId}`,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      categoryId: input.categoryId,
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
+    .onConflictDoUpdate({
+      target: [overrides.targetType, overrides.targetId],
+      set: { categoryId: input.categoryId, updatedAt: input.now },
+    })
     .run();
 }
 
@@ -178,11 +186,14 @@ export async function deleteClassificationOverride(
   targetType: string,
   targetId: string,
 ) {
-  await db
-    .prepare(
-      "DELETE FROM classification_overrides WHERE target_type = ? AND target_id = ?",
+  await createDrizzle(db)
+    .delete(overrides)
+    .where(
+      and(
+        eq(overrides.targetType, targetType),
+        eq(overrides.targetId, targetId),
+      ),
     )
-    .bind(targetType, targetId)
     .run();
 }
 
@@ -191,10 +202,11 @@ export async function classificationCategoryExists(
   categoryId: string,
 ) {
   return Boolean(
-    await db
-      .prepare("SELECT id FROM classification_categories WHERE id = ?")
-      .bind(categoryId)
-      .first<{ id: string }>(),
+    await createDrizzle(db)
+      .select({ id: categories.id })
+      .from(categories)
+      .where(eq(categories.id, categoryId))
+      .get(),
   );
 }
 
@@ -213,26 +225,24 @@ export async function insertClassificationRule(
     now: string;
   },
 ) {
-  await db
-    .prepare(
-      `INSERT INTO classification_rules
-       (id, category_id, target_type, field, operator, pattern, priority, enabled,
-        is_system, source, description, excluded_from_calculation, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 'user', ?, ?, ?, ?)`,
-    )
-    .bind(
-      input.id,
-      input.categoryId,
-      input.targetType,
-      input.field,
-      input.operator,
-      input.pattern,
-      input.priority,
-      input.description,
-      input.excludedFromCalculation ? 1 : 0,
-      input.now,
-      input.now,
-    )
+  await createDrizzle(db)
+    .insert(rules)
+    .values({
+      id: input.id,
+      categoryId: input.categoryId,
+      targetType: input.targetType,
+      field: input.field,
+      operator: input.operator,
+      pattern: input.pattern,
+      priority: input.priority,
+      enabled: 1,
+      isSystem: 0,
+      source: "user",
+      description: input.description,
+      excludedFromCalculation: input.excludedFromCalculation ? 1 : 0,
+      createdAt: input.now,
+      updatedAt: input.now,
+    })
     .run();
 }
 
@@ -250,51 +260,32 @@ export async function updateClassificationRule(
   },
   now: string,
 ) {
-  const sets: string[] = [];
-  const values: unknown[] = [];
-  if (input.categoryId) {
-    sets.push("category_id = ?");
-    values.push(input.categoryId);
-  }
-  if (input.operator !== undefined) {
-    sets.push("operator = ?");
-    values.push(input.operator);
-  }
-  if (input.pattern !== undefined) {
-    sets.push("pattern = ?");
-    values.push(input.pattern);
-  }
-  if (input.priority !== undefined) {
-    sets.push("priority = ?");
-    values.push(input.priority);
-  }
-  if (input.enabled !== undefined) {
-    sets.push("enabled = ?");
-    values.push(input.enabled ? 1 : 0);
-  }
-  if (input.description !== undefined) {
-    sets.push("description = ?");
-    values.push(input.description);
-  }
-  if (input.excludedFromCalculation !== undefined) {
-    sets.push("excluded_from_calculation = ?");
-    values.push(input.excludedFromCalculation ? 1 : 0);
-  }
-  sets.push("updated_at = ?");
-  values.push(now, ruleId);
-  const result = await db
-    .prepare(
-      `UPDATE classification_rules SET ${sets.join(", ")} WHERE id = ? AND is_system = 0`,
-    )
-    .bind(...values)
+  const result = await createDrizzle(db)
+    .update(rules)
+    .set({
+      categoryId: input.categoryId || undefined,
+      operator: input.operator,
+      pattern: input.pattern,
+      priority: input.priority,
+      enabled: input.enabled === undefined ? undefined : input.enabled ? 1 : 0,
+      description: input.description,
+      excludedFromCalculation:
+        input.excludedFromCalculation === undefined
+          ? undefined
+          : input.excludedFromCalculation
+            ? 1
+            : 0,
+      updatedAt: now,
+    })
+    .where(and(eq(rules.id, ruleId), eq(rules.isSystem, 0)))
     .run();
   return result.meta.changes === 1;
 }
 
 export async function deleteClassificationRule(db: D1Database, ruleId: string) {
-  const result = await db
-    .prepare("DELETE FROM classification_rules WHERE id = ? AND is_system = 0")
-    .bind(ruleId)
+  const result = await createDrizzle(db)
+    .delete(rules)
+    .where(and(eq(rules.id, ruleId), eq(rules.isSystem, 0)))
     .run();
   return result.meta.changes === 1;
 }

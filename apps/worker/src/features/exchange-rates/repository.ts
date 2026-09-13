@@ -1,26 +1,35 @@
-export type ExchangeRateRow = {
+import { createDrizzle, exchangeRates } from "@taiwan-fin-hub/db";
+import { inArray, sql } from "drizzle-orm";
+
+export type ExchangeRateRow = Pick<
+  typeof exchangeRates.$inferSelect,
+  "updatedAt"
+> & {
   currency: string;
   rateTwd: number;
-  updatedAt: string;
 };
 
 export const SUPPORTED_EXCHANGE_CURRENCIES = ["USD", "JPY", "EUR"] as const;
 
 export async function listExchangeRates(db: D1Database) {
-  const rows = await db
-    .prepare(
-      `SELECT currency, rate_to_twd AS rateTwd, updated_at AS updatedAt
-     FROM exchange_rates
-     WHERE currency IN ('USD', 'JPY', 'EUR')
-     ORDER BY CASE currency
+  return createDrizzle(db)
+    .select({
+      // The IN predicate excludes the nullable legacy TEXT primary key.
+      currency: sql<string>`${exchangeRates.currency}`,
+      rateTwd: exchangeRates.rateToTwd,
+      updatedAt: exchangeRates.updatedAt,
+    })
+    .from(exchangeRates)
+    .where(inArray(exchangeRates.currency, [...SUPPORTED_EXCHANGE_CURRENCIES]))
+    .orderBy(
+      sql`CASE ${exchangeRates.currency}
        WHEN 'USD' THEN 1
        WHEN 'JPY' THEN 2
        WHEN 'EUR' THEN 3
        ELSE 4
      END`,
     )
-    .all<ExchangeRateRow>();
-  return rows.results;
+    .all();
 }
 
 export async function replaceExchangeRates(
@@ -28,21 +37,16 @@ export async function replaceExchangeRates(
   rates: Array<{ currency: string; rate: number }>,
   now: string,
 ) {
-  const statements = [db.prepare("DELETE FROM exchange_rates")];
-  if (rates.length === 0) {
-    await db.batch(statements);
-    return;
-  }
-
-  statements.push(
+  const database = createDrizzle(db);
+  // Delete + inserts stay in one D1 batch so a failed insert leaves the old rates.
+  await database.batch([
+    database.delete(exchangeRates),
     ...rates.map(({ currency, rate }) =>
-      db
-        .prepare(
-          `INSERT INTO exchange_rates (currency, rate_to_twd, updated_at) VALUES (?, ?, ?)`,
-        )
-        .bind(currency, rate, now),
+      database.insert(exchangeRates).values({
+        currency,
+        rateToTwd: rate,
+        updatedAt: now,
+      }),
     ),
-  );
-
-  await db.batch(statements);
+  ]);
 }

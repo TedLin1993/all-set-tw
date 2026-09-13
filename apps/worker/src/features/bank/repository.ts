@@ -1,5 +1,86 @@
+import {
+  createDrizzle,
+  bankAccounts,
+  bankBalanceSnapshots,
+  bankTransactionPreferences,
+  bankTransactions,
+  creditCardBills,
+} from "@taiwan-fin-hub/db";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { TransactionPageCursor } from "../investments/repository";
 import type { MonthDateRange } from "../../platform/month-range";
+
+const txn = alias(bankTransactions, "txn");
+const account = alias(bankAccounts, "account");
+const preference = alias(bankTransactionPreferences, "preference");
+const balance = alias(bankBalanceSnapshots, "balance");
+const bill = alias(creditCardBills, "b");
+const billAccount = alias(bankAccounts, "a");
+
+// Must match idx_bank_transactions_transaction_day so range scans stay indexed.
+const bankTransactionDay = sql`CASE WHEN length(txn.authorized_at) > 10
+  THEN COALESCE(date(txn.authorized_at, '+8 hours'), substr(txn.authorized_at, 1, 10))
+  ELSE substr(COALESCE(txn.authorized_at, txn.posted_date), 1, 10) END`;
+
+const visibleBankTransactionFilter = and(
+  isNull(account.canonicalAccountId),
+  sql`(${txn.status} <> 'pending' OR ${txn.matchedTransactionId} IS NULL)`,
+);
+
+const bankTransactionColumns = {
+  id: sql<string>`${txn.id}`.as("id"),
+  connectorId: sql<string>`${txn.connectorId}`.as("connectorId"),
+  accountId: sql<string>`${txn.accountId}`.as("accountId"),
+  accountSourceId: sql<string>`${account.sourceId}`.as("accountSourceId"),
+  accountName: sql<string>`${account.accountName}`.as("accountName"),
+  institutionName: sql<string>`${account.institutionName}`.as(
+    "institutionName",
+  ),
+  accountType: sql<string>`${account.accountType}`.as("accountType"),
+  bankCode: sql<string>`${account.bankCode}`.as("bankCode"),
+  accountLast4: sql<string>`${account.accountLast4}`.as("accountLast4"),
+  sourceId: sql<string>`${txn.sourceId}`.as("sourceId"),
+  transferPeerId: sql<string | null>`${txn.transferPeerId}`.as(
+    "transferPeerId",
+  ),
+  postedDate: sql<string | null>`${txn.postedDate}`.as("postedDate"),
+  authorizedAt: sql<string | null>`${txn.authorizedAt}`.as("authorizedAt"),
+  amount: sql<number>`${txn.amount}`.as("amount"),
+  currency: sql<string>`${txn.currency}`.as("currency"),
+  description: sql<string | null>`${txn.description}`.as("description"),
+  counterparty: sql<string | null>`${txn.counterparty}`.as("counterparty"),
+  status: sql<"pending" | "posted">`${txn.status}`.as("status"),
+  effectiveDate: sql<string>`${txn.effectiveDate}`.as("effectiveDate"),
+  updatedAt: sql<string>`${txn.updatedAt}`.as("updatedAt"),
+  calculationPreference: sql<
+    number | null
+  >`${preference.excludedFromCalculation}`.as("calculationPreference"),
+};
+
+const creditCardBillColumns = {
+  id: sql<string>`${bill.id}`.as("id"),
+  connectorId: sql<string>`${bill.connectorId}`.as("connectorId"),
+  accountId: sql<string>`${bill.accountId}`.as("accountId"),
+  accountSourceId: sql<string>`${billAccount.sourceId}`.as("accountSourceId"),
+  sourceId: sql<string>`${bill.sourceId}`.as("sourceId"),
+  billingPeriod: sql<string>`${bill.billingPeriod}`.as("billingPeriod"),
+  statementAmount: sql<number | null>`${bill.statementAmount}`.as(
+    "statementAmount",
+  ),
+  minimumPayment: sql<number | null>`${bill.minimumPayment}`.as(
+    "minimumPayment",
+  ),
+  paidAmount: sql<number | null>`${bill.paidAmount}`.as("paidAmount"),
+  isPaid: sql<number | null>`${bill.isPaid}`.as("isPaid"),
+  paymentDueDate: sql<string | null>`${bill.paymentDueDate}`.as(
+    "paymentDueDate",
+  ),
+  statementClosingDate: sql<string | null>`${bill.statementClosingDate}`.as(
+    "statementClosingDate",
+  ),
+  currency: sql<string>`${bill.currency}`.as("currency"),
+};
 
 export type BankTransactionPageRow = {
   id: string;
@@ -31,72 +112,71 @@ export type CreditCardBillPageCursor = {
   id: string;
 };
 
-const BANK_TRANSACTION_SELECT = `SELECT
-      txn.id,
-      txn.connector_id AS connectorId,
-      txn.account_id AS accountId,
-      account.source_id AS accountSourceId,
-      account.account_name AS accountName,
-      account.institution_name AS institutionName,
-      account.account_type AS accountType,
-      account.bank_code AS bankCode,
-      account.account_last4 AS accountLast4,
-      txn.source_id AS sourceId,
-      txn.transfer_peer_id AS transferPeerId,
-      txn.posted_date AS postedDate,
-      txn.authorized_at AS authorizedAt,
-      txn.amount,
-      txn.currency,
-      txn.description,
-      txn.counterparty,
-      txn.status,
-      txn.effective_date AS effectiveDate,
-      txn.updated_at AS updatedAt,
-      preference.excluded_from_calculation AS calculationPreference
-    FROM bank_transactions txn
-    JOIN bank_accounts account ON account.id = txn.account_id
-    LEFT JOIN bank_transaction_preferences preference
-      ON preference.transaction_id = txn.id`;
+export type CreditCardBillPageRow = {
+  id: string;
+  connectorId: string;
+  accountId: string;
+  accountSourceId: string;
+  sourceId: string;
+  billingPeriod: string;
+  statementAmount: number | null;
+  minimumPayment: number | null;
+  paidAmount: number | null;
+  isPaid: number | null;
+  paymentDueDate: string | null;
+  statementClosingDate: string | null;
+  currency: string;
+};
 
-// authorized_at has explicit precision; legacy posted_date is a financial date.
-const BANK_TRANSACTION_DAY = `CASE WHEN length(txn.authorized_at) > 10
-  THEN COALESCE(date(txn.authorized_at, '+8 hours'), substr(txn.authorized_at, 1, 10))
-  ELSE substr(COALESCE(txn.authorized_at, txn.posted_date), 1, 10) END`;
+function bankTransactionQuery(db: D1Database) {
+  return createDrizzle(db)
+    .select(bankTransactionColumns)
+    .from(txn)
+    .innerJoin(account, eq(account.id, txn.accountId))
+    .leftJoin(preference, eq(preference.transactionId, txn.id));
+}
 
 export async function listBankAccounts(db: D1Database) {
-  const rows = await db
-    .prepare(
-      `SELECT
-      account.id,
-      account.connector_id AS connectorId,
-      account.source_id AS sourceId,
-      account.institution_name AS institutionName,
-      account.account_name AS accountName,
-      account.account_type AS accountType,
-      account.currency,
-      account.opened_date AS openedDate,
-      account.maturity_date AS maturityDate,
-      account.bank_code AS bankCode,
-      account.account_last4 AS accountLast4,
-      balance.balance AS balance,
-      balance.available_balance AS availableBalance,
-      balance.payment_due_date AS paymentDueDate,
-      balance.statement_closing_date AS statementClosingDate,
-      balance.as_of_at AS asOfAt
-    FROM bank_accounts account
-    LEFT JOIN bank_balance_snapshots balance
-      ON balance.id = (
-        SELECT latest.id
-        FROM bank_balance_snapshots latest
-        WHERE latest.account_id = account.id
-        ORDER BY latest.as_of_at DESC, latest.updated_at DESC
-        LIMIT 1
-      )
-    WHERE account.canonical_account_id IS NULL AND account.inactive_at IS NULL
-    ORDER BY account.institution_name ASC, account.account_name ASC, account.source_id ASC`,
+  return createDrizzle(db)
+    .select({
+      id: sql<string>`${account.id}`,
+      connectorId: account.connectorId,
+      sourceId: account.sourceId,
+      institutionName: account.institutionName,
+      accountName: account.accountName,
+      accountType: account.accountType,
+      currency: account.currency,
+      openedDate: account.openedDate,
+      maturityDate: account.maturityDate,
+      bankCode: account.bankCode,
+      accountLast4: account.accountLast4,
+      balance: balance.balance,
+      availableBalance: balance.availableBalance,
+      paymentDueDate: balance.paymentDueDate,
+      statementClosingDate: balance.statementClosingDate,
+      asOfAt: balance.asOfAt,
+    })
+    .from(account)
+    .leftJoin(
+      balance,
+      eq(
+        balance.id,
+        sql`(
+          SELECT latest.id
+          FROM bank_balance_snapshots latest
+          WHERE latest.account_id = ${account.id}
+          ORDER BY latest.as_of_at DESC, latest.updated_at DESC
+          LIMIT 1
+        )`,
+      ),
     )
-    .all<Record<string, unknown>>();
-  return rows.results;
+    .where(and(isNull(account.canonicalAccountId), isNull(account.inactiveAt)))
+    .orderBy(
+      asc(account.institutionName),
+      asc(account.accountName),
+      asc(account.sourceId),
+    )
+    .all();
 }
 
 export async function listBankTransactions(
@@ -104,22 +184,18 @@ export async function listBankTransactions(
   limit: number,
   cursor?: TransactionPageCursor,
 ) {
-  const cursorClause = cursor
-    ? "AND (txn.effective_date, txn.updated_at, txn.id) < (?, ?, ?)"
-    : "";
-  const statement = db.prepare(
-    `${BANK_TRANSACTION_SELECT}
-    WHERE account.canonical_account_id IS NULL AND (txn.status <> 'pending' OR txn.matched_transaction_id IS NULL)
-    ${cursorClause}
-    ORDER BY txn.effective_date DESC, txn.updated_at DESC, txn.id DESC
-    LIMIT ?`,
-  );
-  const rows = await (
-    cursor
-      ? statement.bind(cursor.effectiveDate, cursor.updatedAt, cursor.id, limit)
-      : statement.bind(limit)
-  ).all<BankTransactionPageRow>();
-  return rows.results;
+  return bankTransactionQuery(db)
+    .where(
+      and(
+        visibleBankTransactionFilter,
+        cursor
+          ? sql`(${txn.effectiveDate}, ${txn.updatedAt}, ${txn.id}) < (${cursor.effectiveDate}, ${cursor.updatedAt}, ${cursor.id})`
+          : undefined,
+      ),
+    )
+    .orderBy(desc(txn.effectiveDate), desc(txn.updatedAt), desc(txn.id))
+    .limit(limit)
+    .all();
 }
 
 export async function listBankTransactionsInRange(
@@ -127,16 +203,20 @@ export async function listBankTransactionsInRange(
   range: MonthDateRange,
   days?: string[],
 ) {
-  const rows = await db
-    .prepare(
-      `${BANK_TRANSACTION_SELECT}
-       WHERE account.canonical_account_id IS NULL AND (txn.status <> 'pending' OR txn.matched_transaction_id IS NULL)
-         AND ${days ? `(${BANK_TRANSACTION_DAY}) IN (SELECT value FROM json_each(?))` : `(${BANK_TRANSACTION_DAY}) >= ? AND (${BANK_TRANSACTION_DAY}) < ?`}
-       ORDER BY txn.effective_date DESC, txn.updated_at DESC, txn.id DESC`,
+  return bankTransactionQuery(db)
+    .where(
+      and(
+        visibleBankTransactionFilter,
+        days
+          ? sql`(${bankTransactionDay}) IN (SELECT value FROM json_each(${JSON.stringify(days)}))`
+          : and(
+              sql`(${bankTransactionDay}) >= ${range.from}`,
+              sql`(${bankTransactionDay}) < ${range.to}`,
+            ),
+      ),
     )
-    .bind(...(days ? [JSON.stringify(days)] : [range.from, range.to]))
-    .all<BankTransactionPageRow>();
-  return rows.results;
+    .orderBy(desc(txn.effectiveDate), desc(txn.updatedAt), desc(txn.id))
+    .all();
 }
 
 export async function listBankTransactionsForTransferMatching(
@@ -164,32 +244,26 @@ export async function listBankTransactionsForTransferMatching(
   if (amounts.length === 0 || currencies.length === 0) return [];
 
   const matchDays = [...new Set(days.filter(Boolean))];
-  const dayClause =
-    matchDays.length > 0
-      ? `
-         AND (${BANK_TRANSACTION_DAY}) IN (
-           SELECT value FROM json_each(?)
-         )`
-      : "";
-  const values = [JSON.stringify(amounts), JSON.stringify(currencies)];
-  if (matchDays.length > 0) values.push(JSON.stringify(matchDays));
-
-  const rows = await db
-    .prepare(
-      `${BANK_TRANSACTION_SELECT}
-       WHERE account.canonical_account_id IS NULL AND (txn.status <> 'pending' OR txn.matched_transaction_id IS NULL)
-         AND txn.status = 'posted'
-         AND txn.amount <> 0
-         AND ABS(txn.amount) IN (
-           SELECT CAST(value AS INTEGER) FROM json_each(?)
-         )
-         AND UPPER(TRIM(txn.currency)) IN (
-           SELECT UPPER(TRIM(value)) FROM json_each(?)
-         )${dayClause}`,
+  return bankTransactionQuery(db)
+    .where(
+      and(
+        visibleBankTransactionFilter,
+        eq(txn.status, "posted"),
+        ne(txn.amount, 0),
+        sql`ABS(txn.amount) IN (
+          SELECT CAST(value AS INTEGER) FROM json_each(${JSON.stringify(amounts)})
+        )`,
+        sql`UPPER(TRIM(txn.currency)) IN (
+          SELECT UPPER(TRIM(value)) FROM json_each(${JSON.stringify(currencies)})
+        )`,
+        matchDays.length > 0
+          ? sql`(${bankTransactionDay}) IN (
+              SELECT value FROM json_each(${JSON.stringify(matchDays)})
+            )`
+          : undefined,
+      ),
     )
-    .bind(...values)
-    .all<BankTransactionPageRow>();
-  return rows.results;
+    .all();
 }
 
 export async function listCreditCardBills(
@@ -197,89 +271,40 @@ export async function listCreditCardBills(
   limit: number,
   cursor?: CreditCardBillPageCursor,
 ) {
-  const cursorClause = cursor
-    ? `WHERE (
-        b.billing_period < ?
-        OR (
-          b.billing_period = ?
-          AND (b.account_id, b.id) > (?, ?)
-        )
-      )`
-    : "";
-  const statement = db.prepare(
-    `SELECT
-      b.id,
-      b.connector_id AS connectorId,
-      b.account_id AS accountId,
-      a.source_id AS accountSourceId,
-      b.source_id AS sourceId,
-      b.billing_period AS billingPeriod,
-      b.statement_amount AS statementAmount,
-      b.minimum_payment AS minimumPayment,
-      b.paid_amount AS paidAmount,
-      b.is_paid AS isPaid,
-      b.payment_due_date AS paymentDueDate,
-      b.statement_closing_date AS statementClosingDate,
-      b.currency
-    FROM credit_card_bills b
-    JOIN bank_accounts a ON a.id = b.account_id
-    ${cursorClause}
-    ORDER BY b.billing_period DESC, b.account_id ASC, b.id ASC
-    LIMIT ?`,
-  );
-  const rows = await (
-    cursor
-      ? statement.bind(
-          cursor.billingPeriod,
-          cursor.billingPeriod,
-          cursor.accountId,
-          cursor.id,
-          limit,
-        )
-      : statement.bind(limit)
-  ).all<
-    Record<string, unknown> & {
-      id: string;
-      accountId: string;
-      billingPeriod: string;
-    }
-  >();
-  return rows.results;
+  return createDrizzle(db)
+    .select(creditCardBillColumns)
+    .from(bill)
+    .innerJoin(billAccount, eq(billAccount.id, bill.accountId))
+    .where(
+      cursor
+        ? sql`(
+            ${bill.billingPeriod} < ${cursor.billingPeriod}
+            OR (
+              ${bill.billingPeriod} = ${cursor.billingPeriod}
+              AND (${bill.accountId}, ${bill.id}) > (${cursor.accountId}, ${cursor.id})
+            )
+          )`
+        : undefined,
+    )
+    .orderBy(desc(bill.billingPeriod), asc(bill.accountId), asc(bill.id))
+    .limit(limit)
+    .all();
 }
 
 export async function listCreditCardBillsInRange(
   db: D1Database,
   range: MonthDateRange,
 ) {
-  const rows = await db
-    .prepare(
-      `SELECT
-      b.id,
-      b.connector_id AS connectorId,
-      b.account_id AS accountId,
-      a.source_id AS accountSourceId,
-      b.source_id AS sourceId,
-      b.billing_period AS billingPeriod,
-      b.statement_amount AS statementAmount,
-      b.minimum_payment AS minimumPayment,
-      b.paid_amount AS paidAmount,
-      b.is_paid AS isPaid,
-      b.payment_due_date AS paymentDueDate,
-      b.statement_closing_date AS statementClosingDate,
-      b.currency
-    FROM credit_card_bills b
-    JOIN bank_accounts a ON a.id = b.account_id
-    WHERE b.billing_period >= substr(?, 1, 7)
-      AND b.billing_period < substr(?, 1, 7)
-    ORDER BY b.billing_period DESC, b.account_id ASC, b.id ASC`,
+  return createDrizzle(db)
+    .select(creditCardBillColumns)
+    .from(bill)
+    .innerJoin(billAccount, eq(billAccount.id, bill.accountId))
+    .where(
+      and(
+        sql`${bill.billingPeriod} >= substr(${range.from}, 1, 7)`,
+        sql`${bill.billingPeriod} < substr(${range.to}, 1, 7)`,
+      ),
     )
-    .bind(range.from, range.to)
-    .all<
-      Record<string, unknown> & {
-        id: string;
-        accountId: string;
-        billingPeriod: string;
-      }
-    >();
-  return rows.results;
+    .orderBy(desc(bill.billingPeriod), asc(bill.accountId), asc(bill.id))
+    .all();
 }

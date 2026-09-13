@@ -35,6 +35,11 @@ function asD1(database: DatabaseSync) {
           params = values;
           return this;
         },
+        async raw() {
+          return (
+            database.prepare(sql).all(...params) as Record<string, unknown>[]
+          ).map((row) => Object.values(row));
+        },
         async all() {
           return { results: database.prepare(sql).all(...params) };
         },

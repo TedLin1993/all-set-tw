@@ -13,6 +13,12 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240620.0",
-    "vitest": "^4.1.10"
+    "drizzle-kit": "0.31.10",
+    "miniflare": "5.20260804.1-alpha",
+    "vitest": "^4.1.10",
+    "wrangler": "4.121.0"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2"
   }
 }

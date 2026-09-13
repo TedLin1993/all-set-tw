@@ -13,6 +13,18 @@ const databases: DatabaseSync[] = [];
 afterEach(() => {
   for (const db of databases.splice(0)) db.close();
 });
+
+/** This Node sqlite bind API only accepts anonymous `?`; expand D1 `?1` placeholders. */
+function expandNumberedParams(sql: string, values: unknown[]) {
+  const expanded: unknown[] = [];
+  const rewritten = sql.replace(/\?(\d+)/g, (_, index) => {
+    expanded.push(values[Number(index) - 1]);
+    return "?";
+  });
+  return expanded.length > 0
+    ? { sql: rewritten, values: expanded }
+    : { sql, values };
+}
 function fixture() {
   const database = new DatabaseSync(":memory:");
   databases.push(database);
@@ -44,10 +56,27 @@ function fixture() {
           return result;
         },
         async all() {
-          return { results: database.prepare(sql).all(...(values as never[])) };
+          const query = expandNumberedParams(sql, values);
+          return {
+            results: database
+              .prepare(query.sql)
+              .all(...(query.values as never[])),
+          };
+        },
+        async raw() {
+          const query = expandNumberedParams(sql, values);
+          return (
+            database
+              .prepare(query.sql)
+              .all(...(query.values as never[])) as Record<string, unknown>[]
+          ).map((row) => Object.values(row));
         },
         async first() {
-          return database.prepare(sql).get(...(values as never[])) ?? null;
+          const query = expandNumberedParams(sql, values);
+          return (
+            database.prepare(query.sql).get(...(query.values as never[])) ??
+            null
+          );
         },
       };
       return result;
@@ -67,7 +96,7 @@ describe("global activity search", () => {
       queries.filter((sql) => sql.includes("WITH candidates")),
     ).toHaveLength(1);
     expect(
-      queries.filter((sql) => sql.includes("LEFT JOIN bank_balance_snapshots")),
+      queries.filter((sql) => /bank_balance_snapshots/i.test(sql)),
     ).toHaveLength(1);
     const invoiceOnly = await searchActivity(db, {
       q: "airbnb",

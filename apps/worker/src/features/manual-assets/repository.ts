@@ -1,3 +1,11 @@
+import {
+  createDrizzle,
+  manualAssets,
+  netWorthHistory,
+  type AppDatabase,
+} from "@taiwan-fin-hub/db";
+import { and, asc, eq, sql } from "drizzle-orm";
+
 export type ManualAssetRow = {
   id: string;
   name: string;
@@ -14,27 +22,32 @@ export type ManualAssetHistoryRow = {
 };
 
 export async function listManualAssets(db: D1Database) {
-  const assets = await db
-    .prepare(
-      `SELECT id, name, category, note, currency, created_at AS createdAt
-     FROM manual_assets
-     ORDER BY created_at ASC`,
-    )
-    .all<ManualAssetRow>();
-  return assets.results;
+  return createDrizzle(db)
+    .select({
+      id: sql<string>`${manualAssets.id}`,
+      name: manualAssets.name,
+      category: manualAssets.category,
+      note: manualAssets.note,
+      currency: manualAssets.currency,
+      createdAt: manualAssets.createdAt,
+    })
+    .from(manualAssets)
+    .orderBy(asc(manualAssets.createdAt))
+    .all();
 }
 
 export async function listLatestManualAssetValues(db: D1Database) {
-  const history = await db
-    .prepare(
-      `SELECT asset_type AS assetId, net_worth AS value, date
-     FROM net_worth_history
-     WHERE source = 'manual'
-     GROUP BY asset_type
-     HAVING date = MAX(date)`,
-    )
-    .all<ManualAssetHistoryRow>();
-  return history.results;
+  return createDrizzle(db)
+    .select({
+      assetId: sql<string>`${netWorthHistory.assetType}`,
+      value: netWorthHistory.netWorth,
+      date: netWorthHistory.date,
+    })
+    .from(netWorthHistory)
+    .where(eq(netWorthHistory.source, "manual"))
+    .groupBy(netWorthHistory.assetType)
+    .having(sql`${netWorthHistory.date} = max(${netWorthHistory.date})`)
+    .all();
 }
 
 export async function createManualAsset(
@@ -50,21 +63,18 @@ export async function createManualAsset(
     now: string;
   },
 ) {
-  await db.batch([
-    db
-      .prepare(
-        `INSERT INTO manual_assets (id, name, category, note, currency, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        input.id,
-        input.name,
-        input.category,
-        input.note,
-        input.currency,
-        input.now,
-      ),
-    manualAssetHistoryUpsertStatement(
-      db,
+  const database = createDrizzle(db);
+  await database.batch([
+    database.insert(manualAssets).values({
+      id: input.id,
+      name: input.name,
+      category: input.category,
+      note: input.note,
+      currency: input.currency,
+      createdAt: input.now,
+    }),
+    manualAssetHistoryUpsert(
+      database,
       input.id,
       input.date,
       input.value,
@@ -86,62 +96,65 @@ export async function updateManualAsset(
   },
   now: string,
 ) {
-  const sets: string[] = [];
-  const values: unknown[] = [];
-  if (input.name) {
-    sets.push("name = ?");
-    values.push(input.name);
+  const patch: {
+    name?: string;
+    category?: string;
+    note?: string | null;
+    currency?: string;
+  } = {};
+  if (input.name) patch.name = input.name;
+  if (input.category) patch.category = input.category;
+  if ("note" in input) patch.note = input.note ?? null;
+  if (input.currency) patch.currency = input.currency;
+
+  const database = createDrizzle(db);
+  const assetUpdate =
+    Object.keys(patch).length > 0
+      ? database.update(manualAssets).set(patch).where(eq(manualAssets.id, id))
+      : undefined;
+  const historyUpsert =
+    input.value !== undefined && input.date !== undefined
+      ? manualAssetHistoryUpsert(database, id, input.date, input.value, now)
+      : undefined;
+  if (assetUpdate && historyUpsert) {
+    await database.batch([assetUpdate, historyUpsert]);
+  } else if (assetUpdate) {
+    await assetUpdate;
+  } else if (historyUpsert) {
+    await historyUpsert;
   }
-  if (input.category) {
-    sets.push("category = ?");
-    values.push(input.category);
-  }
-  if ("note" in input) {
-    sets.push("note = ?");
-    values.push(input.note ?? null);
-  }
-  if (input.currency) {
-    sets.push("currency = ?");
-    values.push(input.currency);
-  }
-  const statements: D1PreparedStatement[] = [];
-  if (sets.length > 0) {
-    statements.push(
-      db
-        .prepare(`UPDATE manual_assets SET ${sets.join(", ")} WHERE id = ?`)
-        .bind(...values, id),
-    );
-  }
-  if (input.value !== undefined && input.date !== undefined) {
-    statements.push(
-      manualAssetHistoryUpsertStatement(db, id, input.date, input.value, now),
-    );
-  }
-  if (statements.length > 0) await db.batch(statements);
 }
 
 export async function deleteManualAsset(db: D1Database, id: string) {
-  await db.batch([
-    db
-      .prepare(
-        "DELETE FROM net_worth_history WHERE source = 'manual' AND asset_type = ?",
-      )
-      .bind(id),
-    db.prepare("DELETE FROM manual_assets WHERE id = ?").bind(id),
+  const database = createDrizzle(db);
+  await database.batch([
+    database
+      .delete(netWorthHistory)
+      .where(
+        and(
+          eq(netWorthHistory.source, "manual"),
+          eq(netWorthHistory.assetType, id),
+        ),
+      ),
+    database.delete(manualAssets).where(eq(manualAssets.id, id)),
   ]);
 }
 
 export async function listManualAssetHistory(db: D1Database, id: string) {
-  const rows = await db
-    .prepare(
-      `SELECT date, net_worth AS value
-     FROM net_worth_history
-     WHERE source = 'manual' AND asset_type = ?
-     ORDER BY date ASC`,
+  return createDrizzle(db)
+    .select({
+      date: netWorthHistory.date,
+      value: netWorthHistory.netWorth,
+    })
+    .from(netWorthHistory)
+    .where(
+      and(
+        eq(netWorthHistory.source, "manual"),
+        eq(netWorthHistory.assetType, id),
+      ),
     )
-    .bind(id)
-    .all<{ date: string; value: number }>();
-  return rows.results;
+    .orderBy(asc(netWorthHistory.date))
+    .all();
 }
 
 export async function upsertManualAssetHistory(
@@ -151,7 +164,7 @@ export async function upsertManualAssetHistory(
   value: number,
   now: string,
 ) {
-  await manualAssetHistoryUpsertStatement(db, id, date, value, now).run();
+  await manualAssetHistoryUpsert(createDrizzle(db), id, date, value, now);
 }
 
 export async function deleteManualAssetHistory(
@@ -159,29 +172,43 @@ export async function deleteManualAssetHistory(
   id: string,
   date: string,
 ) {
-  await db
-    .prepare(
-      `DELETE FROM net_worth_history
-     WHERE source = 'manual' AND asset_type = ? AND date = ?`,
-    )
-    .bind(id, date)
-    .run();
+  await createDrizzle(db)
+    .delete(netWorthHistory)
+    .where(
+      and(
+        eq(netWorthHistory.source, "manual"),
+        eq(netWorthHistory.assetType, id),
+        eq(netWorthHistory.date, date),
+      ),
+    );
 }
 
-function manualAssetHistoryUpsertStatement(
-  db: D1Database,
+function manualAssetHistoryUpsert(
+  database: AppDatabase,
   id: string,
   date: string,
   value: number,
   now: string,
 ) {
-  return db
-    .prepare(
-      `INSERT INTO net_worth_history (id, date, net_worth, asset_type, source, snapshotted_at)
-     VALUES (?, ?, ?, ?, 'manual', ?)
-     ON CONFLICT(source, asset_type, date) DO UPDATE SET
-       net_worth = excluded.net_worth,
-       snapshotted_at = excluded.snapshotted_at`,
-    )
-    .bind(`manual:${id}:${date}`, date, value, id, now);
+  return database
+    .insert(netWorthHistory)
+    .values({
+      id: `manual:${id}:${date}`,
+      date,
+      netWorth: value,
+      assetType: id,
+      source: "manual",
+      snapshottedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        netWorthHistory.source,
+        netWorthHistory.assetType,
+        netWorthHistory.date,
+      ],
+      set: {
+        netWorth: value,
+        snapshottedAt: now,
+      },
+    });
 }

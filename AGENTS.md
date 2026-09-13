@@ -28,16 +28,17 @@
 - `apps/worker/src/connectors`：依賴 Browser Rendering、Workers AI 等 Worker bindings 的連接器 adapter。
 - `packages/core`：前後端、資料庫與連接器共用的穩定型別及契約。
 - `packages/connectors`：不依賴 Hono、D1 或 Worker `Env` 的外部資料來源邏輯。
-- `packages/db`：跨 feature 共用的 D1 基礎能力與 migrations。
+- `packages/db`：跨 feature 共用的 D1 基礎能力、Drizzle schema／client 與 migrations。
 - `docs/002-backend-architecture.md`：後端分層、相依方向與維護約定的詳細文件。
 - `docs/003-frontend-architecture.md`：前端分層、相依方向與測試 colocate 約定。
 - `docs/004-connector-development.md`：Connector catalog、連接模式、敏感狀態與新增流程規範。
+- `docs/006-drizzle-adoption-plan.md`：Drizzle 分階段導入計畫；階段 1–4 已落地，後續批次見該文件。
 
 ## 架構約定
 
 - 後端採 feature-oriented Vertical Slice Architecture。
 - `apps/worker/src/index.ts` 是 Composition Root，只負責 middleware、routes、錯誤處理、靜態資源與 scheduled event 的組裝。
-- HTTP concerns 放在 `route.ts`，use case 與商業流程放在 `service.ts`，feature 專用 SQL 放在 `repository.ts`。
+- HTTP concerns 放在 `route.ts`，use case 與商業流程放在 `service.ts`，feature 專用資料存取放在 `repository.ts`；一般 CRUD 預設使用 Drizzle。
 - 共用 API contract 與金融資料型別放在 `packages/core`，不得混入 Hono `Context`、D1 row 或 Puppeteer object。
 - 前端採 feature-first 結構；`features` 可依賴 `data` 與 `shared`，`data`、`shared` 不得反向依賴 feature。
 - 前端單元及元件測試與實作 colocate；Playwright browser tests 放在 `apps/web/e2e`。
@@ -64,14 +65,15 @@
 
 開始修改前，依任務範圍閱讀下表文件的相關章節；跨領域變更須涵蓋所有涉及的文件，不必每次讀完整個 `docs/`。
 
-| 涉及的變更                       | 修改前閱讀，描述受影響時同步更新                                |
-| -------------------------------- | --------------------------------------------------------------- |
-| 後端架構、同步、Queue、排程      | `docs/002-backend-architecture.md`                              |
-| 前端結構、資料查詢、共用元件     | `docs/003-frontend-architecture.md`                             |
-| 連接器、登入、驗證碼、資料正規化 | `docs/004-connector-development.md`；涉及同步流程時也讀後端架構 |
-| 部署、自動更新、環境變數         | `docs/005-deployment.md`、`README.md` 對應章節                  |
-| 資料庫 schema                    | `docs/database-schema.md`、相關 `packages/db/migrations/*.sql`  |
-| 使用方式、支援資料來源、限制     | `README.md` 對應章節                                            |
+| 涉及的變更                              | 修改前閱讀，描述受影響時同步更新                                        |
+| --------------------------------------- | ----------------------------------------------------------------------- |
+| 後端架構、同步、Queue、排程             | `docs/002-backend-architecture.md`                                      |
+| 前端結構、資料查詢、共用元件            | `docs/003-frontend-architecture.md`                                     |
+| 連接器、登入、驗證碼、資料正規化        | `docs/004-connector-development.md`；涉及同步流程時也讀後端架構         |
+| 部署、自動更新、環境變數                | `docs/005-deployment.md`、`README.md` 對應章節                          |
+| 資料庫 schema                           | `docs/database-schema.md`、相關 `packages/db/migrations/*.sql`          |
+| Drizzle schema、client、repository 轉換 | `docs/006-drizzle-adoption-plan.md`、`docs/002-backend-architecture.md` |
+| 使用方式、支援資料來源、限制            | `README.md` 對應章節                                                    |
 
 - 若變更使文件描述不再正確，必須在同一個 PR 更新相關文件；純重構且不影響文件描述時，不必為了更新而更新。
 - Schema 變更須同步維護 `packages/db/schema-metadata.json`，並從 repo root 執行 `npm run db:schema:docs`，提交重新產生的 `docs/database-schema.md`；不得直接手改產生的文件。

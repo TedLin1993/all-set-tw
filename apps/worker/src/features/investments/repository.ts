@@ -1,5 +1,33 @@
-import type { ActivityTrade } from "@taiwan-fin-hub/core";
+import {
+  createDrizzle,
+  investmentPositions,
+  investmentTransactions,
+} from "@taiwan-fin-hub/db";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { MonthDateRange } from "../../platform/month-range";
+
+const investmentTransactionColumns = {
+  id: sql<string>`${investmentTransactions.id}`,
+  connectorId: investmentTransactions.connectorId,
+  accountId: investmentTransactions.accountId,
+  sourceId: investmentTransactions.sourceId,
+  brokerNo: investmentTransactions.brokerNo,
+  brokerAccount: investmentTransactions.brokerAccount,
+  brokerName: investmentTransactions.brokerName,
+  symbol: investmentTransactions.symbol,
+  name: investmentTransactions.name,
+  assetType: investmentTransactions.assetType,
+  tradeDate: investmentTransactions.tradeDate,
+  postedDate: investmentTransactions.postedDate,
+  transactionCode: investmentTransactions.transactionCode,
+  transactionName: investmentTransactions.transactionName,
+  quantity: investmentTransactions.quantity,
+  price: investmentTransactions.price,
+  amount: investmentTransactions.amount,
+  currency: investmentTransactions.currency,
+  effectiveDate: sql<string>`${investmentTransactions.effectiveDate}`,
+  updatedAt: investmentTransactions.updatedAt,
+};
 
 export type InvestmentPageCursor = {
   asOfDate: string;
@@ -31,49 +59,51 @@ export async function listLatestInvestmentPositions(
   limit: number,
   cursor?: InvestmentPageCursor,
 ) {
-  const cursorClause = cursor
-    ? `AND (
-        investment_positions.as_of_date < ?
-        OR (
-          investment_positions.as_of_date = ?
-          AND (investment_positions.asset_type, investment_positions.name, investment_positions.id) > (?, ?, ?)
-        )
-      )`
-    : "";
-  const statement = db.prepare(
-    `SELECT
-      id,
-      asset_type AS assetType,
-      symbol,
-      name,
-      quantity,
-      market_value AS marketValue,
-      cash_balance AS cashBalance,
-      currency,
-      as_of_date AS asOfDate
-    FROM investment_positions
-    WHERE as_of_date = (
-      SELECT MAX(p2.as_of_date) FROM investment_positions p2
-      WHERE p2.connector_id = investment_positions.connector_id
-        AND p2.asset_type = investment_positions.asset_type
+  return createDrizzle(db)
+    .select({
+      id: sql<string>`${investmentPositions.id}`,
+      assetType: investmentPositions.assetType,
+      symbol: investmentPositions.symbol,
+      name: investmentPositions.name,
+      quantity: investmentPositions.quantity,
+      marketValue: investmentPositions.marketValue,
+      cashBalance: investmentPositions.cashBalance,
+      currency: investmentPositions.currency,
+      asOfDate: investmentPositions.asOfDate,
+    })
+    .from(investmentPositions)
+    .where(
+      and(
+        // Latest as_of_date is per connector + asset type, not a global max.
+        eq(
+          investmentPositions.asOfDate,
+          sql`(
+            SELECT MAX(p2.as_of_date)
+            FROM investment_positions p2
+            WHERE p2.connector_id = ${investmentPositions.connectorId}
+              AND p2.asset_type = ${investmentPositions.assetType}
+          )`,
+        ),
+        cursor
+          ? sql`(
+              ${investmentPositions.asOfDate} < ${cursor.asOfDate}
+              OR (
+                ${investmentPositions.asOfDate} = ${cursor.asOfDate}
+                AND (${investmentPositions.assetType}, ${investmentPositions.name}, ${investmentPositions.id})
+                  > (${cursor.assetType}, ${cursor.name}, ${cursor.id})
+              )
+            )`
+          : undefined,
+      ),
     )
-    ${cursorClause}
-    ORDER BY as_of_date DESC, asset_type ASC, name ASC, id ASC
-    LIMIT ?`,
-  );
-  const rows = await (
-    cursor
-      ? statement.bind(
-          cursor.asOfDate,
-          cursor.asOfDate,
-          cursor.assetType,
-          cursor.name,
-          cursor.id,
-          limit,
-        )
-      : statement.bind(limit)
-  ).all<InvestmentPositionRow>();
-  return rows.results;
+    .orderBy(
+      desc(investmentPositions.asOfDate),
+      asc(investmentPositions.assetType),
+      asc(investmentPositions.name),
+      asc(investmentPositions.id),
+    )
+    .limit(limit)
+    .all();
 }
 
 export async function listInvestmentTransactions(
@@ -81,48 +111,21 @@ export async function listInvestmentTransactions(
   limit: number,
   cursor?: TransactionPageCursor,
 ) {
-  const cursorClause = cursor
-    ? "WHERE (effective_date, updated_at, id) < (?, ?, ?)"
-    : "";
-  const statement = db.prepare(
-    `SELECT
-      id,
-      connector_id AS connectorId,
-      account_id AS accountId,
-      source_id AS sourceId,
-      broker_no AS brokerNo,
-      broker_account AS brokerAccount,
-      broker_name AS brokerName,
-      symbol,
-      name,
-      asset_type AS assetType,
-      trade_date AS tradeDate,
-      posted_date AS postedDate,
-      transaction_code AS transactionCode,
-      transaction_name AS transactionName,
-      quantity,
-      price,
-      amount,
-      currency,
-      effective_date AS effectiveDate,
-      updated_at AS updatedAt
-    FROM investment_transactions
-    ${cursorClause}
-    ORDER BY effective_date DESC, updated_at DESC, id DESC
-    LIMIT ?`,
-  );
-  const rows = await (
-    cursor
-      ? statement.bind(cursor.effectiveDate, cursor.updatedAt, cursor.id, limit)
-      : statement.bind(limit)
-  ).all<
-    Record<string, unknown> & {
-      id: string;
-      effectiveDate: string;
-      updatedAt: string;
-    }
-  >();
-  return rows.results;
+  return createDrizzle(db)
+    .select(investmentTransactionColumns)
+    .from(investmentTransactions)
+    .where(
+      cursor
+        ? sql`(${investmentTransactions.effectiveDate}, ${investmentTransactions.updatedAt}, ${investmentTransactions.id}) < (${cursor.effectiveDate}, ${cursor.updatedAt}, ${cursor.id})`
+        : undefined,
+    )
+    .orderBy(
+      desc(investmentTransactions.effectiveDate),
+      desc(investmentTransactions.updatedAt),
+      desc(investmentTransactions.id),
+    )
+    .limit(limit)
+    .all();
 }
 
 export async function listInvestmentTransactionsInRange(
@@ -130,40 +133,21 @@ export async function listInvestmentTransactionsInRange(
   range: MonthDateRange,
   days?: string[],
 ) {
-  const rows = await db
-    .prepare(
-      `SELECT
-      id,
-      connector_id AS connectorId,
-      account_id AS accountId,
-      source_id AS sourceId,
-      broker_no AS brokerNo,
-      broker_account AS brokerAccount,
-      broker_name AS brokerName,
-      symbol,
-      name,
-      asset_type AS assetType,
-      trade_date AS tradeDate,
-      posted_date AS postedDate,
-      transaction_code AS transactionCode,
-      transaction_name AS transactionName,
-      quantity,
-      price,
-      amount,
-      currency,
-      effective_date AS effectiveDate,
-      updated_at AS updatedAt
-    FROM investment_transactions
-    WHERE ${days ? "substr(effective_date, 1, 10) IN (SELECT value FROM json_each(?))" : "effective_date >= ? AND effective_date < ?"}
-    ORDER BY effective_date DESC, updated_at DESC, id DESC`,
+  return createDrizzle(db)
+    .select(investmentTransactionColumns)
+    .from(investmentTransactions)
+    .where(
+      days
+        ? sql`substr(${investmentTransactions.effectiveDate}, 1, 10) IN (SELECT value FROM json_each(${JSON.stringify(days)}))`
+        : and(
+            sql`${investmentTransactions.effectiveDate} >= ${range.from}`,
+            sql`${investmentTransactions.effectiveDate} < ${range.to}`,
+          ),
     )
-    .bind(...(days ? [JSON.stringify(days)] : [range.from, range.to]))
-    .all<
-      ActivityTrade & {
-        id: string;
-        effectiveDate: string;
-        updatedAt: string;
-      }
-    >();
-  return rows.results;
+    .orderBy(
+      desc(investmentTransactions.effectiveDate),
+      desc(investmentTransactions.updatedAt),
+      desc(investmentTransactions.id),
+    )
+    .all();
 }

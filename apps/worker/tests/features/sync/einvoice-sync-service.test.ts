@@ -27,10 +27,14 @@ vi.mock("@taiwan-fin-hub/connectors", () => ({
   parseInvoiceConfig: (config: unknown) => config,
 }));
 
-vi.mock("@taiwan-fin-hub/db", () => ({
-  getConnectorSettings: mocks.getConnectorSettings,
-  nextSyncRunAt: vi.fn(),
-}));
+vi.mock("@taiwan-fin-hub/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@taiwan-fin-hub/db")>();
+  return {
+    ...actual,
+    getConnectorSettings: mocks.getConnectorSettings,
+    nextSyncRunAt: vi.fn(),
+  };
+});
 
 vi.mock("../../../src/features/sync/einvoice-run-repository", () => ({
   acquireEinvoiceRunChunkLease: mocks.acquireEinvoiceRunChunkLease,

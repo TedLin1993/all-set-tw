@@ -4,23 +4,22 @@ import { notificationRoutes } from "../../../src/features/notifications/route";
 
 function createDb() {
   const db = {
-    prepare(sql: string) {
+    prepare() {
       const statement = {
         bind() {
           return statement;
         },
         async first() {
-          if (sql.includes("COUNT(*)")) return { count: 0 };
-          if (sql.includes("notification_preferences")) {
-            return { success: 0, failed: 1, needsUserAction: 1 };
-          }
           return null;
         },
         async all() {
           return { results: [] };
         },
+        async raw() {
+          return [];
+        },
         async run() {
-          return { meta: { changes: 1 } };
+          return { success: true, meta: { changes: 0 } };
         },
       };
       return statement;

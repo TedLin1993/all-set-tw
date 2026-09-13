@@ -37,6 +37,9 @@ function createClassificationDb(
         bind() {
           return this;
         },
+        async raw() {
+          return (await this.all()).results.map((row) => Object.values(row));
+        },
         async all() {
           return {
             results: sql.includes("classification_overrides")
@@ -83,6 +86,9 @@ describe("resolveClassifications", () => {
           bind() {
             return this;
           },
+          async raw() {
+            return (await this.all()).results.map((row) => Object.values(row));
+          },
           async all() {
             return { results: [] };
           },
@@ -109,6 +115,9 @@ describe("resolveClassifications", () => {
             values = bound;
             calls.push({ sql, values });
             return this;
+          },
+          async raw() {
+            return (await this.all()).results.map((row) => Object.values(row));
           },
           async all() {
             if (sql.includes("classification_overrides"))
@@ -150,6 +159,7 @@ describe("resolveClassifications", () => {
     );
     expect(overrideQuery?.sql).toContain("json_each(?)");
     expect(overrideQuery?.values).toEqual([
+      "bank_transaction",
       JSON.stringify(["tx-card-payment"]),
     ]);
   });

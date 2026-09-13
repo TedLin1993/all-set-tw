@@ -3,13 +3,32 @@ import { afterEach, describe, expect, it } from "vitest";
 import { listNetWorthChartHistory } from "../../../src/features/net-worth/repository";
 
 class SqliteQueryStatement {
+  private values: unknown[] = [];
+
   constructor(
     private readonly database: DatabaseSync,
     private readonly sql: string,
   ) {}
 
+  bind(...values: unknown[]) {
+    this.values = values;
+    return this;
+  }
+
   async all<T>() {
-    return { results: this.database.prepare(this.sql).all() as T[] };
+    return {
+      results: this.database
+        .prepare(this.sql)
+        .all(...(this.values as never[])) as T[],
+    };
+  }
+
+  async raw() {
+    return (
+      this.database
+        .prepare(this.sql)
+        .all(...(this.values as never[])) as Record<string, unknown>[]
+    ).map((row) => Object.values(row));
   }
 }
 

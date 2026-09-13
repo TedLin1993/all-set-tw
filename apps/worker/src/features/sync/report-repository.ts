@@ -1,3 +1,20 @@
+import {
+  createDrizzle,
+  sanitizeDatabaseError,
+  scheduledSyncBatches,
+  scheduledSyncBatchResults,
+} from "@taiwan-fin-hub/db";
+import {
+  and,
+  desc,
+  asc,
+  eq,
+  isNull,
+  isNotNull,
+  inArray,
+  sql,
+} from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type {
   ConnectorId,
   ScheduledSyncReport,
@@ -62,32 +79,48 @@ export async function recoverLatestScheduledSyncSource(
   // newly-completed batch while its manual sync was running. Omitted input is
   // reserved for asynchronous flows that resolve their target at completion.
   if (input.batchId === null) return false;
-  const batchFilter = `batch.id = (
-       SELECT latest.id
-       FROM scheduled_sync_batches latest
-       WHERE latest.completed_at IS NOT NULL
-       ORDER BY latest.completed_at DESC, latest.created_at DESC
-       LIMIT 1
-     )${input.batchId === undefined ? "" : " AND batch.id = ?"}`;
-  const latest = await db
-    .prepare(
-      `SELECT batch.id AS batchId, result.job_id AS jobId
-       FROM scheduled_sync_batches batch
-       JOIN scheduled_sync_batch_results result
-         ON result.batch_id = batch.id
-       WHERE batch.completed_at IS NOT NULL
-         AND ${batchFilter}
-         AND result.connector_id = ?
-         AND result.status IN ('failed', 'needs_user_action')
-         AND result.recovered_at IS NULL
-       ORDER BY batch.completed_at DESC, batch.created_at DESC
-       LIMIT 1`,
+  const orm = createDrizzle(db);
+  const latestBatch = alias(scheduledSyncBatches, "latest");
+  const latestCompletedId = orm
+    .select({ id: latestBatch.id })
+    .from(latestBatch)
+    .where(isNotNull(latestBatch.completedAt))
+    .orderBy(desc(latestBatch.completedAt), desc(latestBatch.createdAt))
+    .limit(1);
+  const latest = await orm
+    .select({
+      batchId: sql<string>`${scheduledSyncBatches.id}`,
+      jobId: scheduledSyncBatchResults.jobId,
+    })
+    .from(scheduledSyncBatches)
+    .innerJoin(
+      scheduledSyncBatchResults,
+      eq(scheduledSyncBatchResults.batchId, scheduledSyncBatches.id),
     )
-    .bind(
-      ...(input.batchId === undefined ? [] : [input.batchId]),
-      input.connectorId,
+    .where(
+      and(
+        isNotNull(scheduledSyncBatches.completedAt),
+        eq(scheduledSyncBatches.id, latestCompletedId),
+        inArray(scheduledSyncBatchResults.status, [
+          "failed",
+          "needs_user_action",
+        ]),
+        isNull(scheduledSyncBatchResults.recoveredAt),
+        eq(scheduledSyncBatchResults.connectorId, input.connectorId),
+        input.batchId === undefined
+          ? undefined
+          : eq(scheduledSyncBatches.id, input.batchId),
+      ),
     )
-    .first<{ batchId: string; jobId: string }>();
+    .orderBy(
+      desc(scheduledSyncBatches.completedAt),
+      desc(scheduledSyncBatches.createdAt),
+    )
+    .limit(1)
+    .get()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   if (!latest) return false;
 
   // Read the post-recovery snapshot before touching the report rows. The
@@ -149,34 +182,49 @@ export async function findLatestRecoverableScheduledBatchId(
   db: D1Database,
   connectorId: ConnectorId,
 ) {
-  const row = await db
-    .prepare(
-      `SELECT batch.id AS batchId
-       FROM scheduled_sync_batches batch
-       JOIN scheduled_sync_batch_results result
-         ON result.batch_id = batch.id
-       WHERE batch.completed_at IS NOT NULL
-         AND batch.id = (
-           SELECT latest.id
-           FROM scheduled_sync_batches latest
-           WHERE latest.completed_at IS NOT NULL
-           ORDER BY latest.completed_at DESC, latest.created_at DESC
-           LIMIT 1
-         )
-         AND result.connector_id = ?
-         AND result.status IN ('failed', 'needs_user_action')
-         AND result.recovered_at IS NULL
-       ORDER BY batch.completed_at DESC, batch.created_at DESC
-       LIMIT 1`,
+  const orm = createDrizzle(db);
+  const latestBatch = alias(scheduledSyncBatches, "latest");
+  const latestCompletedId = orm
+    .select({ id: latestBatch.id })
+    .from(latestBatch)
+    .where(isNotNull(latestBatch.completedAt))
+    .orderBy(desc(latestBatch.completedAt), desc(latestBatch.createdAt))
+    .limit(1);
+  const row = await orm
+    .select({ batchId: scheduledSyncBatches.id })
+    .from(scheduledSyncBatches)
+    .innerJoin(
+      scheduledSyncBatchResults,
+      eq(scheduledSyncBatchResults.batchId, scheduledSyncBatches.id),
     )
-    .bind(connectorId)
-    .first<{ batchId: string }>();
+    .where(
+      and(
+        isNotNull(scheduledSyncBatches.completedAt),
+        eq(scheduledSyncBatches.id, latestCompletedId),
+        inArray(scheduledSyncBatchResults.status, [
+          "failed",
+          "needs_user_action",
+        ]),
+        isNull(scheduledSyncBatchResults.recoveredAt),
+        eq(scheduledSyncBatchResults.connectorId, connectorId),
+      ),
+    )
+    .orderBy(
+      desc(scheduledSyncBatches.completedAt),
+      desc(scheduledSyncBatches.createdAt),
+    )
+    .limit(1)
+    .get()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return row?.batchId ?? null;
 }
 
 export async function calculateCurrentFinancialSnapshot(
   db: D1Database,
 ): Promise<FinancialSnapshot> {
+  // 跨資產最新值、匯率與缺幣清單的 CTE 聚合保留 SQL；本批轉換一般讀取。
   const row = await db
     .prepare(
       `WITH latest_bank_balances AS (
@@ -275,72 +323,86 @@ export async function calculateCurrentFinancialSnapshot(
 }
 
 export async function hasCompletedFinancialBaseline(db: D1Database) {
-  const row = await db
-    .prepare(
-      `SELECT EXISTS (
-         SELECT 1
-         FROM scheduled_sync_batches batch
-         WHERE batch.completed_at IS NOT NULL
-           AND batch.assets_after_twd IS NOT NULL
-           AND batch.credit_card_debt_after_twd IS NOT NULL
-           AND EXISTS (
-             SELECT 1
-             FROM scheduled_sync_batch_results result
-             WHERE result.batch_id = batch.id AND result.status = 'success'
-           )
-           AND NOT EXISTS (
-             SELECT 1
-             FROM scheduled_sync_batch_results result
-             WHERE result.batch_id = batch.id
-               AND result.status IN ('failed', 'needs_user_action')
-           )
-       ) AS value`,
+  const row = await createDrizzle(db)
+    .select({ id: scheduledSyncBatches.id })
+    .from(scheduledSyncBatches)
+    .where(
+      and(
+        isNotNull(scheduledSyncBatches.completedAt),
+        isNotNull(scheduledSyncBatches.assetsAfterTwd),
+        isNotNull(scheduledSyncBatches.creditCardDebtAfterTwd),
+        sql`EXISTS (SELECT 1 FROM ${scheduledSyncBatchResults} WHERE ${scheduledSyncBatchResults.batchId} = ${scheduledSyncBatches.id} AND ${scheduledSyncBatchResults.status} = 'success')`,
+        sql`NOT EXISTS (SELECT 1 FROM ${scheduledSyncBatchResults} WHERE ${scheduledSyncBatchResults.batchId} = ${scheduledSyncBatches.id} AND ${scheduledSyncBatchResults.status} IN ('failed', 'needs_user_action'))`,
+      ),
     )
-    .first<{ value: number }>();
-  return Boolean(row?.value);
+    .limit(1)
+    .get()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
+  return row !== undefined;
 }
 
 export async function getLatestScheduledSyncReport(
   db: D1Database,
 ): Promise<ScheduledSyncReport | null> {
-  const batch = await db
-    .prepare(
-      `SELECT
-         id,
-         created_at AS startedAt,
-         completed_at AS completedAt,
-         is_baseline AS isBaseline,
-         assets_before_twd AS assetsBeforeTwd,
-         credit_card_debt_before_twd AS creditCardDebtBeforeTwd,
-         missing_currencies_before AS missingCurrenciesBefore,
-         assets_after_twd AS assetsAfterTwd,
-         credit_card_debt_after_twd AS creditCardDebtAfterTwd,
-         missing_currencies_after AS missingCurrenciesAfter
-       FROM scheduled_sync_batches
-       WHERE completed_at IS NOT NULL
-       ORDER BY completed_at DESC, created_at DESC
-       LIMIT 1`,
+  const batch = await createDrizzle(db)
+    .select({
+      id: sql<string>`${scheduledSyncBatches.id}`,
+      startedAt: scheduledSyncBatches.createdAt,
+      completedAt: sql<string>`${scheduledSyncBatches.completedAt}`,
+      isBaseline: scheduledSyncBatches.isBaseline,
+      assetsBeforeTwd: scheduledSyncBatches.assetsBeforeTwd,
+      creditCardDebtBeforeTwd: scheduledSyncBatches.creditCardDebtBeforeTwd,
+      missingCurrenciesBefore: scheduledSyncBatches.missingCurrenciesBefore,
+      assetsAfterTwd: scheduledSyncBatches.assetsAfterTwd,
+      creditCardDebtAfterTwd: scheduledSyncBatches.creditCardDebtAfterTwd,
+      missingCurrenciesAfter: scheduledSyncBatches.missingCurrenciesAfter,
+    })
+    .from(scheduledSyncBatches)
+    .where(isNotNull(scheduledSyncBatches.completedAt))
+    .orderBy(
+      desc(scheduledSyncBatches.completedAt),
+      desc(scheduledSyncBatches.createdAt),
     )
-    .first<CompletedBatchRow>();
+    .limit(1)
+    .get()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   if (!batch) return null;
 
-  const result = await db
-    .prepare(
-      `SELECT
-         connector_id AS connectorId,
-         status,
-         completed_at AS completedAt,
-         recovered_at AS recoveredAt,
-         new_invoices AS newInvoices,
-         new_bank_transactions AS newBankTransactions,
-         new_investment_transactions AS newInvestmentTransactions
-       FROM scheduled_sync_batch_results
-       WHERE batch_id = ? AND status IS NOT NULL AND completed_at IS NOT NULL
-       ORDER BY job_id ASC`,
+  const result = await createDrizzle(db)
+    .select({
+      connectorId: sql<
+        CompletedBatchResultRow["connectorId"]
+      >`${scheduledSyncBatchResults.connectorId}`,
+      status: sql<
+        CompletedBatchResultRow["status"]
+      >`${scheduledSyncBatchResults.status}`,
+      completedAt: sql<
+        CompletedBatchResultRow["completedAt"]
+      >`${scheduledSyncBatchResults.completedAt}`,
+      recoveredAt: scheduledSyncBatchResults.recoveredAt,
+      newInvoices: scheduledSyncBatchResults.newInvoices,
+      newBankTransactions: scheduledSyncBatchResults.newBankTransactions,
+      newInvestmentTransactions:
+        scheduledSyncBatchResults.newInvestmentTransactions,
+    })
+    .from(scheduledSyncBatchResults)
+    .where(
+      and(
+        eq(scheduledSyncBatchResults.batchId, batch.id),
+        isNotNull(scheduledSyncBatchResults.status),
+        isNotNull(scheduledSyncBatchResults.completedAt),
+      ),
     )
-    .bind(batch.id)
-    .all<CompletedBatchResultRow>();
-  const sources = result.results.map(mapSourceReport);
+    .orderBy(asc(scheduledSyncBatchResults.jobId))
+    .all()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
+  const sources = result.map(mapSourceReport);
   const status = summaryStatus(sources);
   const newRecords = sumNewRecords(sources);
   const missingCurrencies = [

@@ -9,13 +9,18 @@ import {
 function createDb(transactionExists = true) {
   const calls: Array<{ sql: string; values: unknown[] }> = [];
   const db = {
-    prepare(sql: string) {
+    prepare(query: string) {
+      const sql = query.replaceAll('"', "").toUpperCase();
       let values: unknown[] = [];
       return {
         bind(...nextValues: unknown[]) {
           values = nextValues;
           calls.push({ sql, values });
           return this;
+        },
+        async raw() {
+          const row = await this.first();
+          return row ? [Object.values(row)] : [];
         },
         async first() {
           return transactionExists ? { id: values[0] } : null;
@@ -48,7 +53,7 @@ describe("bank transaction calculation preferences", () => {
     });
     expect(
       calls.some(({ sql }) =>
-        sql.includes("INSERT INTO bank_transaction_preferences"),
+        sql.includes("INSERT INTO BANK_TRANSACTION_PREFERENCES"),
       ),
     ).toBe(true);
   });
@@ -67,7 +72,7 @@ describe("bank transaction calculation preferences", () => {
 
     expect(response.status).toBe(200);
     const preferenceWrite = calls.find(({ sql }) =>
-      sql.includes("INSERT INTO bank_transaction_preferences"),
+      sql.includes("INSERT INTO BANK_TRANSACTION_PREFERENCES"),
     );
     expect(preferenceWrite?.values[1]).toBe(0);
   });

@@ -1,3 +1,12 @@
+import {
+  createDrizzle,
+  sanitizeDatabaseError,
+  syncJobs,
+  syncScheduleSettings,
+  connectorSettings,
+  syncJobSelection,
+} from "@taiwan-fin-hub/db";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type {
   SyncJobRow,
   SyncScheduleMode,
@@ -15,29 +24,36 @@ export type DefaultSyncSchedule = {
 };
 
 export async function findDefaultSyncSchedule(db: D1Database) {
-  return db
-    .prepare(
-      `SELECT
-       interval_minutes AS intervalMinutes,
-       preferred_time AS preferredTime,
-       preferred_weekday AS preferredWeekday,
-       timezone,
-       updated_at AS updatedAt
-     FROM sync_schedule_settings
-     WHERE id = 'default'`,
-    )
-    .first<DefaultSyncSchedule>();
+  return (
+    (await createDrizzle(db)
+      .select({
+        intervalMinutes: syncScheduleSettings.intervalMinutes,
+        preferredTime: syncScheduleSettings.preferredTime,
+        preferredWeekday: syncScheduleSettings.preferredWeekday,
+        timezone: sql<
+          DefaultSyncSchedule["timezone"]
+        >`${syncScheduleSettings.timezone}`,
+        updatedAt: syncScheduleSettings.updatedAt,
+      })
+      .from(syncScheduleSettings)
+      .where(eq(syncScheduleSettings.id, "default"))
+      .limit(1)
+      .get()
+      .catch((error) => {
+        throw sanitizeDatabaseError(error);
+      })) ?? null
+  );
 }
 
 export async function listInheritedSyncJobs(db: D1Database) {
-  const rows = await db
-    .prepare(
-      `SELECT id, next_run_at AS nextRunAt
-     FROM sync_jobs
-     WHERE schedule_mode = 'inherit'`,
-    )
-    .all<{ id: string; nextRunAt: string }>();
-  return rows.results;
+  return createDrizzle(db)
+    .select({ id: sql<string>`${syncJobs.id}`, nextRunAt: syncJobs.nextRunAt })
+    .from(syncJobs)
+    .where(eq(syncJobs.scheduleMode, "inherit"))
+    .all()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
 export async function saveDefaultSyncSchedule(
@@ -89,68 +105,53 @@ export async function saveDefaultSyncSchedule(
 }
 
 export async function listSyncJobs(db: D1Database) {
-  const rows = await db
-    .prepare(
-      `SELECT
-       id,
-       connector_id AS connectorId,
-       EXISTS (
-         SELECT 1
-         FROM connector_settings
-         WHERE connector_settings.connector_id = sync_jobs.connector_id
-       ) AS configured,
-       scope,
-       enabled,
-       interval_minutes AS intervalMinutes,
-       next_run_at AS nextRunAt,
-       schedule_mode AS scheduleMode,
-       preferred_time AS preferredTime,
-       preferred_weekday AS preferredWeekday,
-       locked_until AS lockedUntil,
-       locked_by AS lockedBy,
-       lock_trigger AS lockTrigger,
-       lock_scope AS lockScope,
-       last_run_at AS lastRunAt,
-       last_success_at AS lastSuccessAt,
-       last_status AS lastStatus,
-       last_error AS lastError,
-       updated_at AS updatedAt
-     FROM sync_jobs
-     ORDER BY connector_id ASC, scope ASC`,
-    )
-    .all<{
-      id: string;
-      connectorId: ConnectorId;
-      configured: number;
-      scope: string;
-      enabled: number;
-      intervalMinutes: number;
-      nextRunAt: string;
-      scheduleMode: SyncScheduleMode;
-      preferredTime: string;
-      preferredWeekday: number;
-      lockedUntil: string | null;
-      lockedBy: string | null;
-      lockTrigger: SyncTrigger | null;
-      lockScope: string | null;
-      lastRunAt: string | null;
-      lastSuccessAt: string | null;
-      lastStatus: SyncStatus | null;
-      lastError: string | null;
-      updatedAt: string;
-    }>();
-  return rows.results;
+  return createDrizzle(db)
+    .select({
+      id: sql<string>`${syncJobs.id}`,
+      connectorId: sql<ConnectorId>`${syncJobs.connectorId}`,
+      configured: sql<number>`EXISTS (SELECT 1 FROM ${connectorSettings} WHERE ${connectorSettings.connectorId} = ${syncJobs.connectorId})`,
+      scope: syncJobs.scope,
+      enabled: syncJobs.enabled,
+      intervalMinutes: syncJobs.intervalMinutes,
+      nextRunAt: syncJobs.nextRunAt,
+      scheduleMode: sql<SyncScheduleMode>`${syncJobs.scheduleMode}`,
+      preferredTime: syncJobs.preferredTime,
+      preferredWeekday: syncJobs.preferredWeekday,
+      lockedUntil: syncJobs.lockedUntil,
+      lockedBy: syncJobs.lockedBy,
+      lockTrigger: sql<SyncTrigger | null>`${syncJobs.lockTrigger}`,
+      lockScope: syncJobs.lockScope,
+      lastRunAt: syncJobs.lastRunAt,
+      lastSuccessAt: syncJobs.lastSuccessAt,
+      lastStatus: sql<SyncStatus | null>`${syncJobs.lastStatus}`,
+      lastError: syncJobs.lastError,
+      updatedAt: syncJobs.updatedAt,
+    })
+    .from(syncJobs)
+    .orderBy(asc(syncJobs.connectorId), asc(syncJobs.scope))
+    .all()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
-export function findSyncJob(
+export async function findSyncJob(
   db: D1Database,
   connectorId: ConnectorId,
   scope: string,
 ) {
-  return db
-    .prepare("SELECT * FROM sync_jobs WHERE connector_id = ? AND scope = ?")
-    .bind(connectorId, scope)
-    .first<SyncJobRow<ConnectorId>>();
+  const row = await createDrizzle(db)
+    .select(syncJobSelection)
+    .from(syncJobs)
+    .where(
+      and(eq(syncJobs.connectorId, connectorId), eq(syncJobs.scope, scope)),
+    )
+    .limit(1)
+    .get()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
+  return (row as SyncJobRow<ConnectorId> | undefined) ?? null;
 }
 
 export async function updateSyncJob(

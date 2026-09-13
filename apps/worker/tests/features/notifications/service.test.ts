@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import webpush from "web-push";
+import { DrizzleQueryError } from "drizzle-orm";
 import type { Env } from "../../../src/platform/env";
 import { encryptJson } from "../../../src/platform/crypto";
-import { sendTestNotification } from "../../../src/features/notifications/service";
+import {
+  sendTestNotification,
+  safelySendSyncNotification,
+  safelySendScheduledSyncSummary,
+} from "../../../src/features/notifications/service";
+import * as repository from "../../../src/features/notifications/repository";
 
 const vapidPublicKey =
   "BGtkbcjrO12YMoDuq2sCQeHlu47uPx3SHTgFKZFYiBW8Qr0D9vgyZSZPdw6_4ZFEI9Snk1VEAj2qTYI1I1YxBXE";
@@ -26,8 +32,20 @@ function createDb(encryptedSubscription: string) {
         async all() {
           return { results: [row] };
         },
+        async raw() {
+          return [
+            [
+              row.id,
+              row.encrypted_subscription,
+              row.created_at,
+              row.updated_at,
+              row.last_success_at,
+              row.consecutive_failures,
+            ],
+          ];
+        },
         async run() {
-          return { meta: { changes: 1 } };
+          return { success: true, meta: { changes: 1 } };
         },
       };
       return statement;
@@ -54,6 +72,36 @@ describe("push notification delivery options", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  it.each(["single", "scheduled"])(
+    "redacts database diagnostics in %s notification failure logs",
+    async (kind) => {
+      vi.spyOn(repository, "getNotificationPreferences").mockRejectedValue(
+        new DrizzleQueryError(
+          "SELECT private_query",
+          ["private-fixture-value"],
+          new Error("private-fixture-cause"),
+        ),
+      );
+      const log = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      const event = {
+        connectorId: "sinopac" as const,
+        status: "success" as const,
+      };
+      if (kind === "single")
+        await safelySendSyncNotification(env(createDb("unused")), event);
+      else
+        await safelySendScheduledSyncSummary(env(createDb("unused")), [event]);
+      expect(log).toHaveBeenCalledOnce();
+      expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({
+        event: "push_notification_failed",
+        message: "Database query failed.",
+      });
+      expect(log.mock.calls[0][0]).not.toContain("private-fixture");
+    },
+  );
 
   it("does not send the semantic notification tag as a Web Push Topic", async () => {
     const encryptedSubscription = await encryptJson(

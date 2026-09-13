@@ -28,6 +28,32 @@ function transaction(
   };
 }
 
+function bankTransactionRawValues(row: BankTransactionPageRow) {
+  return [
+    row.id,
+    row.connectorId,
+    row.accountId,
+    row.accountSourceId,
+    row.accountName,
+    row.institutionName,
+    row.accountType,
+    row.bankCode,
+    row.accountLast4,
+    row.sourceId,
+    row.transferPeerId ?? null,
+    row.postedDate,
+    row.authorizedAt,
+    row.amount,
+    row.currency,
+    row.description,
+    row.counterparty,
+    row.status,
+    row.effectiveDate,
+    row.updatedAt,
+    row.calculationPreference,
+  ];
+}
+
 function createDb(
   visibleTransactions: BankTransactionPageRow[],
   candidateTransactions: BankTransactionPageRow[],
@@ -45,6 +71,14 @@ function createDb(
           values = nextValues;
           return statement;
         },
+        async raw() {
+          const { results } = await this.all();
+          return results.map((row) =>
+            "effectiveDate" in row && "accountSourceId" in row
+              ? bankTransactionRawValues(row as BankTransactionPageRow)
+              : Object.values(row),
+          );
+        },
         async all() {
           if (sql.includes("ABS(txn.amount)"))
             return { results: candidateTransactions };
@@ -53,7 +87,11 @@ function createDb(
           if (sql.includes("classification_overrides"))
             return { results: classificationOverrides };
           if (sql.includes("classification_rules")) return { results: [] };
-          if (sql.includes("FROM bank_accounts")) return { results: [] };
+          if (
+            sql.includes("bank_accounts") &&
+            !sql.includes("bank_transactions")
+          )
+            return { results: [] };
           throw new Error(`Unexpected query: ${sql} (${values.join(",")})`);
         },
       };
