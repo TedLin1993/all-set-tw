@@ -4,6 +4,7 @@ import {
   acquireSyncJobLock,
   renewSyncJobLock,
   releaseSyncJobLock,
+  findNextDueSyncJob,
 } from "@taiwan-fin-hub/db";
 import {
   acquireEinvoiceRunChunkLease,
@@ -12,6 +13,7 @@ import {
   createOrGetActiveEinvoiceRun,
   completeEinvoiceRun,
   claimEinvoiceRunSessionRefresh,
+  getEinvoiceRun,
 } from "../../../src/features/sync/einvoice-run-repository";
 import {
   acquireTdccRunLease,
@@ -29,6 +31,12 @@ import {
   promoteStagedSyncWrite,
 } from "../../../src/features/sync/persistence";
 import { connectorCursorStatement } from "../../../src/features/sync/repository";
+import {
+  findSyncJob,
+  findDefaultSyncSchedule,
+  listInheritedSyncJobs,
+  listSyncJobs,
+} from "../../../src/features/sync/schedule-repository";
 
 const now = "2026-09-13T00:00:00.000Z";
 
@@ -92,6 +100,89 @@ describe("階段 4：隔離 D1 lease 與 promotion", () => {
         runId: owner,
       }),
     ).toBe(false);
+  });
+
+  it("一般排程讀取保留 row shape、設定別名、排序及到期／lease 邊界", async () => {
+    const db = harness.binding;
+    await db
+      .prepare(
+        "INSERT INTO connector_settings (id, connector_id, encrypted_config, created_at, updated_at) VALUES ('tdcc', 'tdcc', 'synthetic', ?, ?)",
+      )
+      .bind(now, now)
+      .run();
+    for (const scope of ["bank", "all"]) {
+      await db
+        .prepare(
+          "INSERT INTO sync_jobs (id, connector_id, scope, interval_minutes, next_run_at, created_at, updated_at) VALUES (?, 'tdcc', ?, 1440, ?, ?, ?)",
+        )
+        .bind(`tdcc:${scope}`, scope, now, now, now)
+        .run();
+    }
+    const expected = await db
+      .prepare("SELECT * FROM sync_jobs WHERE id = 'tdcc:all'")
+      .first();
+    expect(await findSyncJob(db, "tdcc", "all")).toEqual(expected);
+    expect(await findSyncJob(db, "tdcc", "missing")).toBeNull();
+    expect(await findNextDueSyncJob(db, new Date(now), "inherit")).toEqual(
+      expected,
+    );
+    expect(await findNextDueSyncJob(db, new Date(now), "custom")).toBeNull();
+    expect(
+      await findNextDueSyncJob(db, new Date(Date.parse(now) - 1)),
+    ).toBeNull();
+    await db
+      .prepare("UPDATE sync_jobs SET locked_until = ? WHERE id = 'tdcc:all'")
+      .bind(now)
+      .run();
+    expect(await findNextDueSyncJob(db, new Date(now))).toMatchObject({
+      id: "tdcc:bank",
+    });
+    expect(
+      await findNextDueSyncJob(db, new Date(Date.parse(now) + 1)),
+    ).toMatchObject({ id: "tdcc:all" });
+    expect(
+      (await listSyncJobs(db)).map((row) => [row.id, row.configured]),
+    ).toEqual([
+      ["tdcc:all", 1],
+      ["tdcc:bank", 1],
+    ]);
+    expect(
+      (await listInheritedSyncJobs(db)).sort((a, b) =>
+        a.id.localeCompare(b.id),
+      ),
+    ).toEqual([
+      { id: "tdcc:all", nextRunAt: now },
+      { id: "tdcc:bank", nextRunAt: now },
+    ]);
+    expect(await findDefaultSyncSchedule(db)).toEqual(
+      await db
+        .prepare(
+          "SELECT interval_minutes AS intervalMinutes, preferred_time AS preferredTime, preferred_weekday AS preferredWeekday, timezone, updated_at AS updatedAt FROM sync_schedule_settings WHERE id = 'default'",
+        )
+        .first(),
+    );
+  });
+
+  it("run 查詢保留完整 snake_case row 與 null，查無資料仍回傳 null", async () => {
+    const db = harness.binding;
+    expect(await getEinvoiceRun(db, "missing")).toBeNull();
+    expect(await getTdccRun(db, "missing")).toBeNull();
+    await createOrGetActiveEinvoiceRun(db, {
+      id: "einvoice",
+      trigger: "manual",
+      now,
+    });
+    await createOrGetActiveTdccRun(db, { id: "tdcc", trigger: "manual", now });
+    expect(await getEinvoiceRun(db, "einvoice")).toEqual(
+      await db
+        .prepare("SELECT * FROM einvoice_sync_runs WHERE id = 'einvoice'")
+        .first(),
+    );
+    expect(await getTdccRun(db, "tdcc")).toEqual(
+      await db
+        .prepare("SELECT * FROM tdcc_sync_runs WHERE id = 'tdcc'")
+        .first(),
+    );
   });
 
   for (const run of [

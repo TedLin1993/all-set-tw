@@ -4,11 +4,10 @@ import {
   einvoiceSyncRuns,
   einvoiceSyncRunItems,
 } from "@taiwan-fin-hub/db";
-import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 
-// 階段 4 僅轉換獨立的 run lease／狀態 UPDATE。其餘 durable item SQL 保留：
-// claim、JSON merge、計數及 promotion 共享原生 statement composition；
-// row 查詢沿用 snake_case DTO，避免為此重寫整個 durable run mapper。
+// 讀取以明確 selection 維持 snake_case DTO；寫入的 claim、JSON merge、
+// 計數及 promotion 保留原生 statement composition 與原子邊界。
 // create-or-get 保留 partial unique index 衝突後讀取既有 active run 的流程。
 
 export type EinvoiceRunStatus =
@@ -86,6 +85,52 @@ export type MergeEinvoiceRunItemInput = {
   detailItems?: unknown[];
 };
 
+const runSelection = {
+  id: sql<EinvoiceRunRow["id"]>`${einvoiceSyncRuns.id}`,
+  connector_id: sql<
+    EinvoiceRunRow["connector_id"]
+  >`${einvoiceSyncRuns.connectorId}`,
+  trigger: sql<EinvoiceRunRow["trigger"]>`${einvoiceSyncRuns.trigger}`,
+  sync_job_id: einvoiceSyncRuns.syncJobId,
+  scheduled_batch_id: einvoiceSyncRuns.scheduledBatchId,
+  settings_version: einvoiceSyncRuns.settingsVersion,
+  status: sql<EinvoiceRunRow["status"]>`${einvoiceSyncRuns.status}`,
+  total_item_count: einvoiceSyncRuns.totalItemCount,
+  pending_item_count: einvoiceSyncRuns.pendingItemCount,
+  processing_item_count: einvoiceSyncRuns.processingItemCount,
+  done_item_count: einvoiceSyncRuns.doneItemCount,
+  line_item_count: einvoiceSyncRuns.lineItemCount,
+  new_invoice_count: einvoiceSyncRuns.newInvoiceCount,
+  session_refresh_count: einvoiceSyncRuns.sessionRefreshCount,
+  last_error: einvoiceSyncRuns.lastError,
+  chunk_lease_owner: einvoiceSyncRuns.chunkLeaseOwner,
+  chunk_lease_expires_at: einvoiceSyncRuns.chunkLeaseExpiresAt,
+  created_at: einvoiceSyncRuns.createdAt,
+  updated_at: einvoiceSyncRuns.updatedAt,
+  promoted_at: einvoiceSyncRuns.promotedAt,
+  completed_at: einvoiceSyncRuns.completedAt,
+};
+
+const itemSelection = {
+  id: sql<EinvoiceRunItemRow["id"]>`${einvoiceSyncRunItems.id}`,
+  run_id: einvoiceSyncRunItems.runId,
+  invoice_source_id: einvoiceSyncRunItems.invoiceSourceId,
+  header_json: einvoiceSyncRunItems.headerJson,
+  normalized_invoice_json: einvoiceSyncRunItems.normalizedInvoiceJson,
+  detail_key: einvoiceSyncRunItems.detailKey,
+  detail_metadata_json: einvoiceSyncRunItems.detailMetadataJson,
+  detail_items_json: einvoiceSyncRunItems.detailItemsJson,
+  line_item_count: einvoiceSyncRunItems.lineItemCount,
+  status: sql<EinvoiceRunItemRow["status"]>`${einvoiceSyncRunItems.status}`,
+  attempt_count: einvoiceSyncRunItems.attemptCount,
+  last_error: einvoiceSyncRunItems.lastError,
+  lease_token: einvoiceSyncRunItems.leaseToken,
+  lease_expires_at: einvoiceSyncRunItems.leaseExpiresAt,
+  created_at: einvoiceSyncRunItems.createdAt,
+  updated_at: einvoiceSyncRunItems.updatedAt,
+  completed_at: einvoiceSyncRunItems.completedAt,
+};
+
 const ACTIVE_RUN_STATUSES: EinvoiceRunStatus[] = [
   "queued",
   "initializing",
@@ -134,26 +179,42 @@ export async function createOrGetActiveEinvoiceRun(
   return { run: (await getEinvoiceRun(db, id))!, created: true };
 }
 
-export async function getActiveEinvoiceRun(db: D1Database) {
+export async function getActiveEinvoiceRun(
+  db: D1Database,
+): Promise<EinvoiceRunRow | null> {
   return (
-    (await db
-      .prepare(
-        `SELECT * FROM einvoice_sync_runs
-         WHERE connector_id = 'einvoice'
-           AND status IN ('queued', 'initializing', 'processing')
-         ORDER BY created_at ASC
-         LIMIT 1`,
+    (await createDrizzle(db)
+      .select(runSelection)
+      .from(einvoiceSyncRuns)
+      .where(
+        and(
+          eq(einvoiceSyncRuns.connectorId, "einvoice"),
+          inArray(einvoiceSyncRuns.status, ACTIVE_RUN_STATUSES),
+        ),
       )
-      .first<EinvoiceRunRow>()) ?? null
+      .orderBy(asc(einvoiceSyncRuns.createdAt))
+      .limit(1)
+      .get()
+      .catch((error) => {
+        throw sanitizeDatabaseError(error);
+      })) ?? null
   );
 }
 
-export async function getEinvoiceRun(db: D1Database, runId: string) {
+export async function getEinvoiceRun(
+  db: D1Database,
+  runId: string,
+): Promise<EinvoiceRunRow | null> {
   return (
-    (await db
-      .prepare("SELECT * FROM einvoice_sync_runs WHERE id = ?")
-      .bind(runId)
-      .first<EinvoiceRunRow>()) ?? null
+    (await createDrizzle(db)
+      .select(runSelection)
+      .from(einvoiceSyncRuns)
+      .where(eq(einvoiceSyncRuns.id, runId))
+      .limit(1)
+      .get()
+      .catch((error) => {
+        throw sanitizeDatabaseError(error);
+      })) ?? null
   );
 }
 
@@ -488,16 +549,24 @@ export async function claimEinvoiceRunItems(
       .bind(claimToken, leaseExpiresAt, nowIso, input.runId, nowIso, limit),
     refreshEinvoiceRunCountsStatement(db, input.runId, nowIso),
   ]);
-  return (
-    await db
-      .prepare(
-        `SELECT * FROM einvoice_sync_run_items
-         WHERE run_id = ? AND lease_token = ? AND status = 'processing'
-         ORDER BY created_at ASC, invoice_source_id ASC`,
-      )
-      .bind(input.runId, claimToken)
-      .all<EinvoiceRunItemRow>()
-  ).results;
+  return createDrizzle(db)
+    .select(itemSelection)
+    .from(einvoiceSyncRunItems)
+    .where(
+      and(
+        eq(einvoiceSyncRunItems.runId, input.runId),
+        eq(einvoiceSyncRunItems.leaseToken, claimToken),
+        eq(einvoiceSyncRunItems.status, "processing"),
+      ),
+    )
+    .orderBy(
+      asc(einvoiceSyncRunItems.createdAt),
+      asc(einvoiceSyncRunItems.invoiceSourceId),
+    )
+    .all()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
 /**
@@ -903,32 +972,46 @@ export async function listPendingEinvoiceRunItems(
   db: D1Database,
   runId: string,
 ) {
-  return (
-    await db
-      .prepare(
-        `SELECT * FROM einvoice_sync_run_items
-         WHERE run_id = ? AND status != 'done'
-         ORDER BY created_at ASC, invoice_source_id ASC`,
-      )
-      .bind(runId)
-      .all<EinvoiceRunItemRow>()
-  ).results;
+  return createDrizzle(db)
+    .select(itemSelection)
+    .from(einvoiceSyncRunItems)
+    .where(
+      and(
+        eq(einvoiceSyncRunItems.runId, runId),
+        ne(einvoiceSyncRunItems.status, "done"),
+      ),
+    )
+    .orderBy(
+      asc(einvoiceSyncRunItems.createdAt),
+      asc(einvoiceSyncRunItems.invoiceSourceId),
+    )
+    .all()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
 export async function listCompletedEinvoiceRunItems(
   db: D1Database,
   runId: string,
 ) {
-  return (
-    await db
-      .prepare(
-        `SELECT * FROM einvoice_sync_run_items
-         WHERE run_id = ? AND status = 'done'
-         ORDER BY created_at ASC, invoice_source_id ASC`,
-      )
-      .bind(runId)
-      .all<EinvoiceRunItemRow>()
-  ).results;
+  return createDrizzle(db)
+    .select(itemSelection)
+    .from(einvoiceSyncRunItems)
+    .where(
+      and(
+        eq(einvoiceSyncRunItems.runId, runId),
+        eq(einvoiceSyncRunItems.status, "done"),
+      ),
+    )
+    .orderBy(
+      asc(einvoiceSyncRunItems.createdAt),
+      asc(einvoiceSyncRunItems.invoiceSourceId),
+    )
+    .all()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
 function refreshEinvoiceRunCountsStatement(

@@ -125,6 +125,7 @@
 - `sync-jobs.ts` 的 lock acquisition／renewal／release、成功／失敗狀態，以及 einvoice／TDCC 的獨立 run lease、狀態 CAS、session refresh claim 與 completion／finalize 使用 `createDrizzle`。仍以單次條件 UPDATE 的 `meta.changes === 1` 判斷成功，保留 owner、active status、嚴格 `<` 到期條件與 unfinished item guard。
 - TDCC state 更新保留 undefined 不修改、明確 null 清除，以及明文 session 不落庫；transition 的 null error 仍保留原值。Drizzle 寫入錯誤沿用 `sanitizeDatabaseError`，避免綁定參數與 cause 進入同步錯誤紀錄。
 - 獨立 encrypted config 更新及 staging 過期／失敗清理使用 Drizzle；promotion batch 內的 cleanup 保留原生 statement。
+- 後續一般讀取亦已轉換：sync job 選取、排程設定／列表、einvoice／TDCC run 與 item 查詢（含 claim 後的獨立讀取）、通知批次與成員、最新報告與可修復來源及 baseline 存在檢查。使用明確 selection 維持 snake_case／別名、LEFT JOIN null、排序與查詢次數；讀取錯誤沿用 sanitizeDatabaseError。
 
 原生 SQL 審查結果（不以清除 `.prepare()` 為目的）：
 
@@ -132,10 +133,10 @@
 | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `persistence.ts` staging JSON upsert                                           | 每 100 筆以三個參數執行 set-based upsert；逐筆 values 會擴大參數數量。`persistence.test.ts` 驗證批次、upsert 與失敗清理。                                                                                                                                                                                                                       |
 | staging promotion 與 `repository.ts` statement factories、service／TDCC 呼叫端 | 依 ENTITY_ORDER、前置 statement 數量與 count offset 解讀結果；lifecycle reconciliation、finalize、cursor、cleanup 組成單一 D1 batch。保留整組以免跨檔案混入不同 query object。`persistence.test.ts`、identity migration tests 涵蓋偏好、ID、pending→posted、linked／separate；`drizzle-runtime.test.ts` 驗證中途失敗回滾與保留 staging 後重試。 |
-| einvoice／TDCC durable item、create-or-get 與 row 查詢                         | item claim、JSON merge、計數及五個 statement 的 einvoice promotion 共享原生 SQL；保留設定版本 CAS、partial unique conflict fallback 與 snake_case DTO，不為獨立 lease 更新重寫整個 durable run mapper。`einvoice-run-repository.test.ts`、`tdcc-run-repository.test.ts` 與各 sync-service tests 驗證重送與結案。                                |
-| schedule／notification-batch／report repositories 與 sync job 讀取             | 排程設定＋繼承工作更新、固定成員快照、notification claim、報告修復＋財務快照各有既有邊界；本批保留整組與 row shape，避免擴大到排程／報告重構。`notification-batch-repository.test.ts`、`report-repository.test.ts`、scheduler tests 持續驗證。                                                                                                  |
+| einvoice／TDCC durable item 寫入與 create-or-get insert                        | item claim、JSON merge、計數及五個 statement 的 einvoice promotion 保留原生 SQL 與設定版本 CAS；create-or-get 的 insert 保留 partial unique conflict fallback。run／item 及衝突後的 row 讀取已轉換。`einvoice-run-repository.test.ts`、`tdcc-run-repository.test.ts` 與各 sync-service tests 驗證重送與結案。                                   |
+| schedule／notification-batch／report 寫入與財務 CTE 聚合                       | 一般讀取已轉換；排程設定＋繼承工作更新、固定成員快照、notification claim、報告修復＋財務快照維持原生寫入邊界。`calculateCurrentFinancialSnapshot` 的跨資產最新值、匯率與缺幣清單 CTE 聚合另保留 SQL。`notification-batch-repository.test.ts`、`report-repository.test.ts`、scheduler tests 持續驗證。                                           |
 
-`apps/worker/tests/features/sync/drizzle-runtime.test.ts` 使用既有 Miniflare／workerd harness，實測三種 lease 競爭只有一方成功、舊 owner 無法續租／釋放、到期邊界、active run conflict、terminal guard、refresh claim 上限、敏感錯誤遮罩，以及 promotion 的回滾、count offset、cursor 與 cleanup。未改 schema、ID、migrations 或部署流程；未寫入正式 D1、未執行真實銀行同步。
+`apps/worker/tests/features/sync/drizzle-runtime.test.ts` 使用既有 Miniflare／workerd harness，實測三種 lease 競爭只有一方成功、舊 owner 無法續租／釋放、到期邊界、active run conflict、terminal guard、refresh claim 上限、敏感錯誤遮罩，以及 promotion 的回滾、count offset、cursor 與 cleanup；另驗證一般排程／run 讀取的 row shape、null、排序、設定別名與到期邊界。未改 schema、ID、migrations 或部署流程；未寫入正式 D1、未執行真實銀行同步。
 
 ### 階段 5：Drizzle Kit 接軌未來 schema migrations
 
