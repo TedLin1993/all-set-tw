@@ -14,8 +14,7 @@ export const SUPPORTED_EXCHANGE_CURRENCIES = ["USD", "JPY", "EUR"] as const;
 export async function listExchangeRates(db: D1Database) {
   return createDrizzle(db)
     .select({
-      // The IN predicate excludes the nullable legacy TEXT primary key.
-      currency: sql<string>`${exchangeRates.currency}`,
+      currency: exchangeRates.currency,
       rateTwd: exchangeRates.rateToTwd,
       updatedAt: exchangeRates.updatedAt,
     })

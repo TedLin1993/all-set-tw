@@ -24,7 +24,7 @@ export type ManualAssetHistoryRow = {
 export async function listManualAssets(db: D1Database) {
   return createDrizzle(db)
     .select({
-      id: sql<string>`${manualAssets.id}`,
+      id: manualAssets.id,
       name: manualAssets.name,
       category: manualAssets.category,
       note: manualAssets.note,
@@ -39,7 +39,7 @@ export async function listManualAssets(db: D1Database) {
 export async function listLatestManualAssetValues(db: D1Database) {
   return createDrizzle(db)
     .select({
-      assetId: sql<string>`${netWorthHistory.assetType}`,
+      assetId: netWorthHistory.assetType,
       value: netWorthHistory.netWorth,
       date: netWorthHistory.date,
     })

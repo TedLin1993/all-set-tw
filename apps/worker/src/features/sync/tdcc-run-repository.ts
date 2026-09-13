@@ -145,7 +145,7 @@ export type TdccRunLeaseInput = {
 };
 
 const runSelection = {
-  id: sql<TdccRunRow["id"]>`${tdccSyncRuns.id}`,
+  id: tdccSyncRuns.id,
   connector_id: sql<TdccRunRow["connector_id"]>`${tdccSyncRuns.connectorId}`,
   trigger: sql<TdccRunRow["trigger"]>`${tdccSyncRuns.trigger}`,
   scope: sql<TdccRunRow["scope"]>`${tdccSyncRuns.scope}`,
@@ -173,7 +173,7 @@ const runSelection = {
 };
 
 const itemSelection = {
-  id: sql<TdccRunItemRow["id"]>`${tdccSyncRunItems.id}`,
+  id: tdccSyncRunItems.id,
   run_id: tdccSyncRunItems.runId,
   task_type: tdccSyncRunItems.taskType,
   task_key: tdccSyncRunItems.taskKey,

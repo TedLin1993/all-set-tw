@@ -11,7 +11,7 @@ export async function bankTransactionExists(
 ) {
   return Boolean(
     await createDrizzle(db)
-      .select({ id: sql<string>`${bankTransactions.id}` })
+      .select({ id: bankTransactions.id })
       .from(bankTransactions)
       .where(
         and(

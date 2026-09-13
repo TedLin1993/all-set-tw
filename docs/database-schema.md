@@ -11,7 +11,7 @@
 - Tables：28
 - Explicit indexes：41
 - Other objects：0
-- Migrations：41
+- Migrations：42
 
 ## Tables
 
@@ -55,7 +55,7 @@
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 系統內部使用的穩定帳戶識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 系統內部使用的穩定帳戶識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 建立此記錄的外部連接器識別碼。 | TEXT | NO | — | — | — |
 | 3 | `source_id` | 外部銀行或連接器提供的帳戶識別碼。 | TEXT | NO | — | — | — |
 | 4 | `institution_name` | 銀行、發卡機構或金融機構名稱。 | TEXT | YES | — | — | — |
@@ -89,7 +89,7 @@
 
 ```sql
 CREATE TABLE "bank_accounts" (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   source_id TEXT NOT NULL,
   institution_name TEXT,
@@ -119,7 +119,7 @@ CREATE TABLE "bank_accounts" (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 餘額快照的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 餘額快照的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 產生此快照的外部連接器識別碼。 | TEXT | NO | — | — | — |
 | 3 | `account_id` | 所屬 bank_accounts 記錄的識別碼。 | TEXT | NO | — | — | — |
 | 4 | `source_id` | 外部來源對此餘額或帳戶的識別碼。 | TEXT | NO | — | — | — |
@@ -145,14 +145,14 @@ CREATE TABLE "bank_accounts" (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_bank_balance_snapshots_as_of` | 否 | 否 | `as_of_at` | `CREATE INDEX idx_bank_balance_snapshots_as_of<br>  ON bank_balance_snapshots (as_of_at)` |
 | `idx_bank_balance_snapshots_account_as_of` | 否 | 否 | `account_id`, `as_of_at` | `CREATE INDEX idx_bank_balance_snapshots_account_as_of<br>  ON bank_balance_snapshots (account_id, as_of_at)` |
+| `idx_bank_balance_snapshots_as_of` | 否 | 否 | `as_of_at` | `CREATE INDEX idx_bank_balance_snapshots_as_of<br>  ON bank_balance_snapshots (as_of_at)` |
 
 #### DDL
 
 ```sql
 CREATE TABLE "bank_balance_snapshots" (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   account_id TEXT NOT NULL REFERENCES "bank_accounts" (id),
   source_id TEXT NOT NULL,
@@ -180,7 +180,7 @@ CREATE TABLE "bank_balance_snapshots" (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `transaction_id` | 套用偏好的 bank_transactions 記錄識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `transaction_id` | 套用偏好的 bank_transactions 記錄識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `excluded_from_calculation` | 是否將此交易排除於計算，0 表示納入、1 表示排除。 | INTEGER | NO | 0 | — | — |
 | 3 | `created_at` | 偏好首次建立的時間。 | TEXT | NO | — | — | — |
 | 4 | `updated_at` | 偏好最後更新的時間。 | TEXT | NO | — | — | — |
@@ -198,8 +198,8 @@ CREATE TABLE "bank_balance_snapshots" (
 #### DDL
 
 ```sql
-CREATE TABLE bank_transaction_preferences (
-  transaction_id TEXT PRIMARY KEY,
+CREATE TABLE "bank_transaction_preferences" (
+  transaction_id TEXT NOT NULL PRIMARY KEY,
   excluded_from_calculation INTEGER NOT NULL DEFAULT 0 CHECK (excluded_from_calculation IN (0, 1)),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -215,7 +215,7 @@ CREATE TABLE bank_transaction_preferences (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 交易的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 交易的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 產生此交易的外部連接器識別碼。 | TEXT | NO | — | — | — |
 | 3 | `account_id` | 所屬 bank_accounts 記錄的識別碼。 | TEXT | NO | — | — | — |
 | 4 | `source_id` | 外部來源系統提供的交易識別碼。 | TEXT | NO | — | — | — |
@@ -243,18 +243,18 @@ CREATE TABLE bank_transaction_preferences (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_bank_transactions_matched_transaction` | 是 | 是 | `matched_transaction_id` | `CREATE UNIQUE INDEX idx_bank_transactions_matched_transaction<br>  ON bank_transactions(matched_transaction_id)<br>  WHERE matched_transaction_id IS NOT NULL` |
-| `idx_bank_transactions_transaction_day` | 否 | 否 | — | `CREATE INDEX idx_bank_transactions_transaction_day<br>  ON bank_transactions (<br>    CASE<br>      WHEN length(authorized_at) > 10<br>        THEN COALESCE(<br>          date(authorized_at, '+8 hours'),<br>          substr(authorized_at, 1, 10)<br>        )<br>      ELSE substr(COALESCE(authorized_at, posted_date), 1, 10)<br>    END<br>  )` |
-| `idx_bank_transactions_status` | 否 | 否 | `connector_id`, `account_id`, `status` | `CREATE INDEX idx_bank_transactions_status<br>  ON bank_transactions (connector_id, account_id, status)` |
-| `idx_bank_transactions_effective_updated` | 否 | 否 | `effective_date`, `updated_at`, `id` | `CREATE INDEX idx_bank_transactions_effective_updated<br>  ON bank_transactions (effective_date DESC, updated_at DESC, id DESC)` |
-| `idx_bank_transactions_posted_date` | 否 | 否 | `posted_date` | `CREATE INDEX idx_bank_transactions_posted_date<br>  ON bank_transactions (posted_date)` |
 | `idx_bank_transactions_account_posted_date` | 否 | 否 | `account_id`, `posted_date` | `CREATE INDEX idx_bank_transactions_account_posted_date<br>  ON bank_transactions (account_id, posted_date)` |
+| `idx_bank_transactions_posted_date` | 否 | 否 | `posted_date` | `CREATE INDEX idx_bank_transactions_posted_date<br>  ON bank_transactions (posted_date)` |
+| `idx_bank_transactions_effective_updated` | 否 | 否 | `effective_date`, `updated_at`, `id` | `CREATE INDEX idx_bank_transactions_effective_updated<br>  ON bank_transactions (effective_date DESC, updated_at DESC, id DESC)` |
+| `idx_bank_transactions_status` | 否 | 否 | `connector_id`, `account_id`, `status` | `CREATE INDEX idx_bank_transactions_status<br>  ON bank_transactions (connector_id, account_id, status)` |
+| `idx_bank_transactions_transaction_day` | 否 | 否 | — | `CREATE INDEX idx_bank_transactions_transaction_day<br>  ON bank_transactions (<br>    CASE<br>      WHEN length(authorized_at) > 10<br>        THEN COALESCE(<br>          date(authorized_at, '+8 hours'),<br>          substr(authorized_at, 1, 10)<br>        )<br>      ELSE substr(COALESCE(authorized_at, posted_date), 1, 10)<br>    END<br>  )` |
+| `idx_bank_transactions_matched_transaction` | 是 | 是 | `matched_transaction_id` | `CREATE UNIQUE INDEX idx_bank_transactions_matched_transaction<br>  ON bank_transactions(matched_transaction_id)<br>  WHERE matched_transaction_id IS NOT NULL` |
 
 #### DDL
 
 ```sql
 CREATE TABLE "bank_transactions" (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   account_id TEXT NOT NULL REFERENCES "bank_accounts" (id),
   source_id TEXT NOT NULL,
@@ -281,7 +281,7 @@ CREATE TABLE "bank_transactions" (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 分類的穩定識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 分類的穩定識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `label` | 前端顯示的分類名稱。 | TEXT | NO | — | — | — |
 | 3 | `sort_order` | 分類在介面中的排序順序。 | INTEGER | NO | 0 | — | — |
 | 4 | `is_system` | 是否為系統內建分類；1 表示不可視為一般使用者資料刪除。 | INTEGER | NO | 1 | — | — |
@@ -301,8 +301,8 @@ CREATE TABLE "bank_transactions" (
 #### DDL
 
 ```sql
-CREATE TABLE classification_categories (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "classification_categories" (
+  id TEXT NOT NULL PRIMARY KEY,
   label TEXT NOT NULL,
   sort_order INTEGER NOT NULL DEFAULT 0,
   is_system INTEGER NOT NULL DEFAULT 1,
@@ -320,7 +320,7 @@ CREATE TABLE classification_categories (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 覆寫記錄的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 覆寫記錄的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `target_type` | 被分類資料的類型，例如 bank_transaction。 | TEXT | NO | — | — | — |
 | 3 | `target_id` | 被分類資料的識別碼。 | TEXT | NO | — | — | — |
 | 4 | `category_id` | 指定的 classification_categories 識別碼。 | TEXT | NO | — | — | — |
@@ -342,11 +342,11 @@ CREATE TABLE classification_categories (
 #### DDL
 
 ```sql
-CREATE TABLE classification_overrides (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "classification_overrides" (
+  id TEXT NOT NULL PRIMARY KEY,
   target_type TEXT NOT NULL,
   target_id TEXT NOT NULL,
-  category_id TEXT NOT NULL REFERENCES classification_categories(id),
+  category_id TEXT NOT NULL REFERENCES "classification_categories" (id),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (target_type, target_id)
@@ -362,7 +362,7 @@ CREATE TABLE classification_overrides (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 規則的穩定識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 規則的穩定識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `category_id` | 符合規則時套用的分類識別碼。 | TEXT | NO | — | — | — |
 | 3 | `target_type` | 規則適用的資料類型；NULL 表示可套用於共用目標。 | TEXT | YES | — | — | — |
 | 4 | `field` | 要比對的欄位或欄位集合，例如 any_text。 | TEXT | NO | — | — | — |
@@ -387,15 +387,15 @@ CREATE TABLE classification_overrides (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_classification_rules_category` | 否 | 否 | `category_id` | `CREATE INDEX idx_classification_rules_category<br>  ON classification_rules (category_id)` |
 | `idx_classification_rules_enabled_priority` | 否 | 否 | `enabled`, `target_type`, `priority` | `CREATE INDEX idx_classification_rules_enabled_priority<br>  ON classification_rules (enabled, target_type, priority)` |
+| `idx_classification_rules_category` | 否 | 否 | `category_id` | `CREATE INDEX idx_classification_rules_category<br>  ON classification_rules (category_id)` |
 
 #### DDL
 
 ```sql
-CREATE TABLE classification_rules (
-  id TEXT PRIMARY KEY,
-  category_id TEXT NOT NULL REFERENCES classification_categories(id),
+CREATE TABLE "classification_rules" (
+  id TEXT NOT NULL PRIMARY KEY,
+  category_id TEXT NOT NULL REFERENCES "classification_categories" (id),
   target_type TEXT,
   field TEXT NOT NULL,
   operator TEXT NOT NULL,
@@ -420,7 +420,7 @@ CHECK (excluded_from_calculation IN (0, 1)))
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 設定記錄的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 設定記錄的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 連接器的穩定識別碼，每個連接器只有一筆設定。 | TEXT | NO | — | — | — |
 | 3 | `encrypted_config` | 使用 Worker 設定的金鑰加密後的認證與私密設定。 | TEXT | NO | — | — | — |
 | 4 | `sync_cursor` | 連接器下次增量同步使用的游標或狀態。 | TEXT | YES | — | — | — |
@@ -439,8 +439,8 @@ CHECK (excluded_from_calculation IN (0, 1)))
 #### DDL
 
 ```sql
-CREATE TABLE connector_settings (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "connector_settings" (
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   encrypted_config TEXT NOT NULL,
   sync_cursor TEXT,
@@ -459,7 +459,7 @@ CREATE TABLE connector_settings (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 帳單的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 帳單的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 產生此帳單的外部連接器識別碼。 | TEXT | NO | — | — | — |
 | 3 | `account_id` | 所屬信用卡帳戶的 bank_accounts 識別碼。 | TEXT | NO | — | — | — |
 | 4 | `source_id` | 外部來源系統提供的帳單識別碼。 | TEXT | NO | — | — | — |
@@ -485,14 +485,14 @@ CREATE TABLE connector_settings (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_credit_card_bills_page` | 否 | 否 | `billing_period`, `account_id`, `id` | `CREATE INDEX idx_credit_card_bills_page<br>  ON credit_card_bills (billing_period DESC, account_id ASC, id ASC)` |
 | `idx_credit_card_bills_account_period` | 否 | 否 | `account_id`, `billing_period` | `CREATE INDEX idx_credit_card_bills_account_period<br>  ON credit_card_bills (account_id, billing_period)` |
+| `idx_credit_card_bills_page` | 否 | 否 | `billing_period`, `account_id`, `id` | `CREATE INDEX idx_credit_card_bills_page<br>  ON credit_card_bills (billing_period DESC, account_id ASC, id ASC)` |
 
 #### DDL
 
 ```sql
 CREATE TABLE "credit_card_bills" (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   account_id TEXT NOT NULL REFERENCES "bank_accounts" (id),
   source_id TEXT NOT NULL,
@@ -520,7 +520,7 @@ CREATE TABLE "credit_card_bills" (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 發票同步項目的識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 發票同步項目的識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `run_id` | 所屬 einvoice_sync_runs 執行記錄；刪除執行記錄時一併刪除項目。 | TEXT | NO | — | — | — |
 | 3 | `invoice_source_id` | 外部來源的發票識別碼，用於同一輪同步內去重。 | TEXT | NO | — | — | — |
 | 4 | `header_json` | 取得發票清單時保存的發票表頭 JSON。 | TEXT | NO | — | — | — |
@@ -553,9 +553,9 @@ CREATE TABLE "credit_card_bills" (
 #### DDL
 
 ```sql
-CREATE TABLE einvoice_sync_run_items (
-  id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES einvoice_sync_runs(id) ON DELETE CASCADE,
+CREATE TABLE "einvoice_sync_run_items" (
+  id TEXT NOT NULL PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES "einvoice_sync_runs" (id) ON DELETE CASCADE,
   invoice_source_id TEXT NOT NULL,
   header_json TEXT NOT NULL,
   normalized_invoice_json TEXT NOT NULL,
@@ -584,7 +584,7 @@ CREATE TABLE einvoice_sync_run_items (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 此次電子發票同步執行的識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 此次電子發票同步執行的識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 連接器識別碼，固定為 einvoice。 | TEXT | NO | 'einvoice' | — | — |
 | 3 | `trigger` | 啟動來源：manual 手動同步或 scheduled 排程同步。 | TEXT | NO | — | — | — |
 | 4 | `sync_job_id` | 對應的 sync_jobs 工作；工作刪除時設為 NULL。 | TEXT | YES | — | — | — |
@@ -617,19 +617,19 @@ CREATE TABLE einvoice_sync_run_items (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_einvoice_sync_runs_completed` | 否 | 否 | `completed_at` | `CREATE INDEX idx_einvoice_sync_runs_completed<br>  ON einvoice_sync_runs (completed_at DESC)` |
 | `idx_einvoice_sync_runs_one_active` | 是 | 是 | `connector_id` | `CREATE UNIQUE INDEX idx_einvoice_sync_runs_one_active<br>  ON einvoice_sync_runs (connector_id)<br>  WHERE status IN ('queued', 'initializing', 'processing')` |
+| `idx_einvoice_sync_runs_completed` | 否 | 否 | `completed_at` | `CREATE INDEX idx_einvoice_sync_runs_completed<br>  ON einvoice_sync_runs (completed_at DESC)` |
 
 #### DDL
 
 ```sql
-CREATE TABLE einvoice_sync_runs (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "einvoice_sync_runs" (
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL DEFAULT 'einvoice'
     CHECK (connector_id = 'einvoice'),
   trigger TEXT NOT NULL CHECK (trigger IN ('manual', 'scheduled')),
-  sync_job_id TEXT REFERENCES sync_jobs(id) ON DELETE SET NULL,
-  scheduled_batch_id TEXT REFERENCES scheduled_sync_batches(id) ON DELETE SET NULL,
+  sync_job_id TEXT REFERENCES "sync_jobs" (id) ON DELETE SET NULL,
+  scheduled_batch_id TEXT REFERENCES "scheduled_sync_batches" (id) ON DELETE SET NULL,
   settings_version TEXT,
   status TEXT NOT NULL CHECK (status IN (
     'queued', 'initializing', 'processing', 'completed', 'failed', 'needs_user_action'
@@ -660,7 +660,7 @@ CREATE TABLE einvoice_sync_runs (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `currency` | 外幣幣別代碼，也是此表的主鍵。 | TEXT | YES | — | 1 | — |
+| 1 | `currency` | 外幣幣別代碼，也是此表的主鍵。 | TEXT | NO | — | 1 | — |
 | 2 | `rate_to_twd` | 一單位該幣別換算成 TWD 的匯率。 | REAL | NO | — | — | — |
 | 3 | `updated_at` | 匯率最後更新的時間。 | TEXT | NO | — | — | — |
 
@@ -675,8 +675,8 @@ CREATE TABLE einvoice_sync_runs (
 #### DDL
 
 ```sql
-CREATE TABLE exchange_rates (
-  currency TEXT PRIMARY KEY,
+CREATE TABLE "exchange_rates" (
+  currency TEXT NOT NULL PRIMARY KEY,
   rate_to_twd REAL NOT NULL,
   updated_at TEXT NOT NULL
 )
@@ -691,7 +691,7 @@ CREATE TABLE exchange_rates (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 持倉快照的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 持倉快照的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 產生此持倉的外部連接器識別碼。 | TEXT | NO | — | — | — |
 | 3 | `source_id` | 外部來源系統提供的持倉識別碼。 | TEXT | NO | — | — | — |
 | 4 | `asset_type` | 資產類型，目前限制為 stock、etf 或 fund。 | TEXT | NO | — | — | — |
@@ -714,16 +714,16 @@ CREATE TABLE exchange_rates (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_investment_positions_page` | 否 | 否 | `as_of_date`, `asset_type`, `name`, `id` | `CREATE INDEX idx_investment_positions_page<br>  ON investment_positions (as_of_date DESC, asset_type ASC, name ASC, id ASC)` |
-| `idx_investment_positions_latest_scope` | 否 | 否 | `connector_id`, `asset_type`, `as_of_date` | `CREATE INDEX idx_investment_positions_latest_scope<br>  ON investment_positions (connector_id, asset_type, as_of_date DESC)` |
-| `idx_investment_positions_asset_type` | 否 | 否 | `asset_type` | `CREATE INDEX idx_investment_positions_asset_type<br>  ON investment_positions (asset_type)` |
 | `idx_investment_positions_as_of_date` | 否 | 否 | `as_of_date` | `CREATE INDEX idx_investment_positions_as_of_date<br>  ON investment_positions (as_of_date)` |
+| `idx_investment_positions_asset_type` | 否 | 否 | `asset_type` | `CREATE INDEX idx_investment_positions_asset_type<br>  ON investment_positions (asset_type)` |
+| `idx_investment_positions_latest_scope` | 否 | 否 | `connector_id`, `asset_type`, `as_of_date` | `CREATE INDEX idx_investment_positions_latest_scope<br>  ON investment_positions (connector_id, asset_type, as_of_date DESC)` |
+| `idx_investment_positions_page` | 否 | 否 | `as_of_date`, `asset_type`, `name`, `id` | `CREATE INDEX idx_investment_positions_page<br>  ON investment_positions (as_of_date DESC, asset_type ASC, name ASC, id ASC)` |
 
 #### DDL
 
 ```sql
-CREATE TABLE investment_positions (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "investment_positions" (
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   source_id TEXT NOT NULL,
   asset_type TEXT NOT NULL CHECK (asset_type IN ('stock', 'etf', 'fund')),
@@ -750,7 +750,7 @@ CREATE TABLE investment_positions (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 投資交易的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 投資交易的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 產生此交易的外部連接器識別碼。 | TEXT | NO | — | — | — |
 | 3 | `account_id` | 外部券商或投資帳戶識別碼。 | TEXT | NO | — | — | — |
 | 4 | `source_id` | 外部來源系統提供的交易識別碼。 | TEXT | NO | — | — | — |
@@ -781,15 +781,15 @@ CREATE TABLE investment_positions (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_investment_transactions_effective_updated` | 否 | 否 | `effective_date`, `updated_at`, `id` | `CREATE INDEX idx_investment_transactions_effective_updated<br>  ON investment_transactions (effective_date DESC, updated_at DESC, id DESC)` |
-| `idx_investment_transactions_symbol` | 否 | 否 | `symbol` | `CREATE INDEX idx_investment_transactions_symbol<br>  ON investment_transactions (symbol)` |
 | `idx_investment_transactions_trade_date` | 否 | 否 | `trade_date` | `CREATE INDEX idx_investment_transactions_trade_date<br>  ON investment_transactions (trade_date)` |
+| `idx_investment_transactions_symbol` | 否 | 否 | `symbol` | `CREATE INDEX idx_investment_transactions_symbol<br>  ON investment_transactions (symbol)` |
+| `idx_investment_transactions_effective_updated` | 否 | 否 | `effective_date`, `updated_at`, `id` | `CREATE INDEX idx_investment_transactions_effective_updated<br>  ON investment_transactions (effective_date DESC, updated_at DESC, id DESC)` |
 
 #### DDL
 
 ```sql
-CREATE TABLE investment_transactions (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "investment_transactions" (
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   account_id TEXT NOT NULL,
   source_id TEXT NOT NULL,
@@ -822,7 +822,7 @@ CREATE TABLE investment_transactions (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 發票明細的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 發票明細的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `invoice_id` | 所屬 invoices 記錄的識別碼。 | TEXT | NO | — | — | — |
 | 3 | `connector_id` | 取得此明細的外部連接器識別碼。 | TEXT | NO | — | — | — |
 | 4 | `invoice_source_id` | 外部來源發票識別碼，用於同步比對。 | TEXT | NO | — | — | — |
@@ -846,14 +846,14 @@ CREATE TABLE investment_transactions (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_invoice_line_items_invoice_source` | 否 | 否 | `connector_id`, `invoice_source_id` | `CREATE INDEX idx_invoice_line_items_invoice_source<br>  ON invoice_line_items (connector_id, invoice_source_id)` |
 | `idx_invoice_line_items_invoice_id` | 否 | 否 | `invoice_id` | `CREATE INDEX idx_invoice_line_items_invoice_id<br>  ON invoice_line_items (invoice_id)` |
+| `idx_invoice_line_items_invoice_source` | 否 | 否 | `connector_id`, `invoice_source_id` | `CREATE INDEX idx_invoice_line_items_invoice_source<br>  ON invoice_line_items (connector_id, invoice_source_id)` |
 
 #### DDL
 
 ```sql
-CREATE TABLE invoice_line_items (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "invoice_line_items" (
+  id TEXT NOT NULL PRIMARY KEY,
   invoice_id TEXT NOT NULL,
   connector_id TEXT NOT NULL,
   invoice_source_id TEXT NOT NULL,
@@ -866,7 +866,7 @@ CREATE TABLE invoice_line_items (
   raw_payload TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+  FOREIGN KEY (invoice_id) REFERENCES "invoices" (id) ON DELETE CASCADE,
   UNIQUE (connector_id, invoice_source_id, source_id)
 )
 ```
@@ -880,7 +880,7 @@ CREATE TABLE invoice_line_items (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `invoice_id` | 套用決策的 invoices 記錄識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `invoice_id` | 套用決策的 invoices 記錄識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `transaction_id` | 被關聯的 bank_transactions 識別碼；separate 時為 NULL。 | TEXT | YES | — | — | — |
 | 3 | `decision` | 關聯決策，目前限制為 linked 或 separate。 | TEXT | NO | — | — | — |
 | 4 | `created_at` | 決策首次建立的時間。 | TEXT | NO | — | — | — |
@@ -899,8 +899,8 @@ CREATE TABLE invoice_line_items (
 #### DDL
 
 ```sql
-CREATE TABLE invoice_transaction_preferences (
-  invoice_id TEXT PRIMARY KEY,
+CREATE TABLE "invoice_transaction_preferences" (
+  invoice_id TEXT NOT NULL PRIMARY KEY,
   transaction_id TEXT,
   decision TEXT NOT NULL CHECK (decision IN ('linked', 'separate')),
   created_at TEXT NOT NULL,
@@ -921,7 +921,7 @@ CREATE TABLE invoice_transaction_preferences (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 發票的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 發票的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 取得此發票的外部連接器識別碼。 | TEXT | NO | — | — | — |
 | 3 | `source_id` | 外部來源系統提供的發票識別碼。 | TEXT | NO | — | — | — |
 | 4 | `invoice_number` | 發票字軌號碼或發票號碼。 | TEXT | YES | — | — | — |
@@ -940,14 +940,14 @@ CREATE TABLE invoice_transaction_preferences (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_invoices_page` | 否 | 否 | `invoice_date`, `updated_at`, `id` | `CREATE INDEX idx_invoices_page<br>  ON invoices (invoice_date DESC, updated_at DESC, id DESC)` |
 | `idx_invoices_invoice_date` | 否 | 否 | `invoice_date` | `CREATE INDEX idx_invoices_invoice_date<br>  ON invoices (invoice_date)` |
+| `idx_invoices_page` | 否 | 否 | `invoice_date`, `updated_at`, `id` | `CREATE INDEX idx_invoices_page<br>  ON invoices (invoice_date DESC, updated_at DESC, id DESC)` |
 
 #### DDL
 
 ```sql
-CREATE TABLE invoices (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "invoices" (
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   source_id TEXT NOT NULL,
   invoice_number TEXT,
@@ -970,7 +970,7 @@ CREATE TABLE invoices (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 手動資產的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 手動資產的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `name` | 前端顯示的資產名稱。 | TEXT | NO | — | — | — |
 | 3 | `category` | 資產分類，例如房產、現金或其他。 | TEXT | NO | — | — | — |
 | 4 | `note` | 使用者補充的備註。 | TEXT | YES | — | — | — |
@@ -988,8 +988,8 @@ CREATE TABLE invoices (
 #### DDL
 
 ```sql
-CREATE TABLE manual_assets (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "manual_assets" (
+  id TEXT NOT NULL PRIMARY KEY,
   name TEXT NOT NULL,
   category TEXT NOT NULL,
   note TEXT,
@@ -1006,7 +1006,7 @@ CREATE TABLE manual_assets (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 歷史點的系統識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 歷史點的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `date` | 此數值所代表的日期。 | TEXT | NO | — | — | — |
 | 3 | `net_worth` | 該日期與資產類型的金額；手動資產保留其設定幣別，其餘讀模型通常以 TWD 表示。 | INTEGER | NO | — | — | — |
 | 4 | `asset_type` | 資產類型，例如 total、deposit、stock、fund 或手動資產 id。 | TEXT | NO | 'total' | — | — |
@@ -1021,14 +1021,14 @@ CREATE TABLE manual_assets (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_net_worth_history_page` | 否 | 否 | `date`, `source`, `asset_type`, `id` | `CREATE INDEX idx_net_worth_history_page<br>  ON net_worth_history (date DESC, source ASC, asset_type ASC, id ASC)` |
 | `idx_net_worth_history_date` | 否 | 否 | `date` | `CREATE INDEX idx_net_worth_history_date<br>  ON net_worth_history (date)` |
+| `idx_net_worth_history_page` | 否 | 否 | `date`, `source`, `asset_type`, `id` | `CREATE INDEX idx_net_worth_history_page<br>  ON net_worth_history (date DESC, source ASC, asset_type ASC, id ASC)` |
 
 #### DDL
 
 ```sql
-CREATE TABLE net_worth_history (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "net_worth_history" (
+  id TEXT NOT NULL PRIMARY KEY,
   date TEXT NOT NULL,
   net_worth INTEGER NOT NULL,
   asset_type TEXT NOT NULL DEFAULT 'total',
@@ -1047,7 +1047,7 @@ CREATE TABLE net_worth_history (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 設定識別碼，固定為 default。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 設定識別碼，固定為 default。 | TEXT | NO | — | 1 | — |
 | 2 | `notify_success` | 是否在排程同步成功時顯示推播。 | INTEGER | NO | 0 | — | — |
 | 3 | `notify_failed` | 是否在排程同步失敗時顯示推播。 | INTEGER | NO | 1 | — | — |
 | 4 | `notify_needs_user_action` | 是否在同步需要 OTP、CAPTCHA 或重新登入時顯示推播。 | INTEGER | NO | 1 | — | — |
@@ -1064,8 +1064,8 @@ CREATE TABLE net_worth_history (
 #### DDL
 
 ```sql
-CREATE TABLE notification_preferences (
-  id TEXT PRIMARY KEY CHECK (id = 'default'),
+CREATE TABLE "notification_preferences" (
+  id TEXT NOT NULL PRIMARY KEY CHECK (id = 'default'),
   notify_success INTEGER NOT NULL DEFAULT 0,
   notify_failed INTEGER NOT NULL DEFAULT 1,
   notify_needs_user_action INTEGER NOT NULL DEFAULT 1,
@@ -1082,7 +1082,7 @@ CREATE TABLE notification_preferences (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 由 push endpoint 雜湊產生的裝置訂閱識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 由 push endpoint 雜湊產生的裝置訂閱識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `encrypted_subscription` | 加密保存的 endpoint、p256dh 與 auth 訂閱資料。 | TEXT | NO | — | — | — |
 | 3 | `created_at` | 裝置首次登記的時間。 | TEXT | NO | — | — | — |
 | 4 | `updated_at` | 裝置訂閱最後更新的時間。 | TEXT | NO | — | — | — |
@@ -1100,8 +1100,8 @@ CREATE TABLE notification_preferences (
 #### DDL
 
 ```sql
-CREATE TABLE push_subscriptions (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "push_subscriptions" (
+  id TEXT NOT NULL PRIMARY KEY,
   encrypted_subscription TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -1162,7 +1162,7 @@ CREATE TABLE scheduled_sync_batch_results (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 批次識別碼，由 default 與 UUID 組成。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 批次識別碼，由 default 與 UUID 組成。 | TEXT | NO | — | 1 | — |
 | 2 | `schedule_key` | 排程類型識別碼，目前固定為 default。 | TEXT | NO | 'default' | — | — |
 | 3 | `notification_claimed_at` | 彙總推播被 scheduler 取得發送權的時間。 | TEXT | YES | — | — | — |
 | 4 | `created_at` | 批次建立時間。 | TEXT | NO | — | — | — |
@@ -1183,14 +1183,14 @@ CREATE TABLE scheduled_sync_batch_results (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_scheduled_sync_batches_completed` | 否 | 否 | `completed_at` | `CREATE INDEX idx_scheduled_sync_batches_completed<br>  ON scheduled_sync_batches (completed_at DESC)` |
 | `idx_scheduled_sync_batches_open` | 是 | 是 | `schedule_key` | `CREATE UNIQUE INDEX idx_scheduled_sync_batches_open<br>  ON scheduled_sync_batches (schedule_key)<br>  WHERE notification_claimed_at IS NULL` |
+| `idx_scheduled_sync_batches_completed` | 否 | 否 | `completed_at` | `CREATE INDEX idx_scheduled_sync_batches_completed<br>  ON scheduled_sync_batches (completed_at DESC)` |
 
 #### DDL
 
 ```sql
-CREATE TABLE scheduled_sync_batches (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "scheduled_sync_batches" (
+  id TEXT NOT NULL PRIMARY KEY,
   schedule_key TEXT NOT NULL DEFAULT 'default' CHECK (schedule_key = 'default'),
   notification_claimed_at TEXT,
   created_at TEXT NOT NULL
@@ -1206,7 +1206,7 @@ CREATE TABLE scheduled_sync_batches (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 同步工作的系統識別碼，通常由 connector_id 與 scope 組成。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 同步工作的系統識別碼，通常由 connector_id 與 scope 組成。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 要執行同步的連接器識別碼。 | TEXT | NO | — | — | — |
 | 3 | `scope` | 同步範圍，例如 all 或特定帳戶範圍。 | TEXT | NO | — | — | — |
 | 4 | `enabled` | 是否啟用此同步工作。 | INTEGER | NO | 1 | — | — |
@@ -1239,8 +1239,8 @@ CREATE TABLE scheduled_sync_batches (
 #### DDL
 
 ```sql
-CREATE TABLE sync_jobs (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "sync_jobs" (
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   scope TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
@@ -1271,7 +1271,7 @@ CREATE TABLE sync_jobs (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 設定識別碼，固定為 default。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 設定識別碼，固定為 default。 | TEXT | NO | — | 1 | — |
 | 2 | `interval_minutes` | 預設同步間隔，單位為分鐘。 | INTEGER | NO | — | — | — |
 | 3 | `preferred_time` | 預設每日或每週執行時間，使用台北時間。 | TEXT | NO | — | — | — |
 | 4 | `timezone` | 排程使用的時區，目前為 Asia/Taipei。 | TEXT | NO | — | — | — |
@@ -1289,8 +1289,8 @@ CREATE TABLE sync_jobs (
 #### DDL
 
 ```sql
-CREATE TABLE sync_schedule_settings (
-  id TEXT PRIMARY KEY CHECK (id = 'default'),
+CREATE TABLE "sync_schedule_settings" (
+  id TEXT NOT NULL PRIMARY KEY CHECK (id = 'default'),
   interval_minutes INTEGER NOT NULL,
   preferred_time TEXT NOT NULL,
   timezone TEXT NOT NULL,
@@ -1346,7 +1346,7 @@ CREATE TABLE sync_write_staging (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 集保同步工作項目的識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 集保同步工作項目的識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `run_id` | 所屬 tdcc_sync_runs 執行記錄；刪除執行記錄時一併刪除項目。 | TEXT | NO | — | — | — |
 | 3 | `task_type` | 此項目負責的資料擷取任務類型，目前為 bank_page 或 trade_page。 | TEXT | NO | — | — | — |
 | 4 | `task_key` | 同一任務類型內用於區分工作範圍的識別鍵。 | TEXT | NO | '' | — | — |
@@ -1375,15 +1375,15 @@ CREATE TABLE sync_write_staging (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_tdcc_sync_run_items_account` | 否 | 否 | `run_id`, `account_id`, `task_type`, `page_number` | `CREATE INDEX idx_tdcc_sync_run_items_account<br>  ON tdcc_sync_run_items (run_id, account_id, task_type, page_number)` |
 | `idx_tdcc_sync_run_items_claim` | 否 | 否 | `run_id`, `status`, `lease_expires_at`, `created_at` | `CREATE INDEX idx_tdcc_sync_run_items_claim<br>  ON tdcc_sync_run_items (run_id, status, lease_expires_at, created_at)` |
+| `idx_tdcc_sync_run_items_account` | 否 | 否 | `run_id`, `account_id`, `task_type`, `page_number` | `CREATE INDEX idx_tdcc_sync_run_items_account<br>  ON tdcc_sync_run_items (run_id, account_id, task_type, page_number)` |
 
 #### DDL
 
 ```sql
-CREATE TABLE tdcc_sync_run_items (
-  id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES tdcc_sync_runs(id) ON DELETE CASCADE,
+CREATE TABLE "tdcc_sync_run_items" (
+  id TEXT NOT NULL PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES "tdcc_sync_runs" (id) ON DELETE CASCADE,
   task_type TEXT NOT NULL,
   task_key TEXT NOT NULL DEFAULT '',
   account_id TEXT,
@@ -1414,7 +1414,7 @@ CREATE TABLE tdcc_sync_run_items (
 
 | 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
 | ---: | --- | --- | --- | :---: | --- | ---: | --- |
-| 1 | `id` | 此次集保同步執行的識別碼。 | TEXT | YES | — | 1 | — |
+| 1 | `id` | 此次集保同步執行的識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 連接器識別碼，固定為 tdcc。 | TEXT | NO | 'tdcc' | — | — |
 | 3 | `trigger` | 啟動來源：manual 手動同步或 scheduled 排程同步。 | TEXT | NO | — | — | — |
 | 4 | `scope` | 同步範圍：all 全部、investments 持倉、bank 銀行資料或 trades 投資交易。 | TEXT | NO | 'all' | — | — |
@@ -1451,21 +1451,21 @@ CREATE TABLE tdcc_sync_run_items (
 
 | Index | Unique | Partial | 欄位 | 定義 |
 | --- | :---: | :---: | --- | --- |
-| `idx_tdcc_sync_runs_completed` | 否 | 否 | `completed_at` | `CREATE INDEX idx_tdcc_sync_runs_completed<br>  ON tdcc_sync_runs (completed_at DESC)` |
 | `idx_tdcc_sync_runs_one_active` | 是 | 是 | `connector_id` | `CREATE UNIQUE INDEX idx_tdcc_sync_runs_one_active<br>  ON tdcc_sync_runs (connector_id)<br>  WHERE status IN ('queued', 'initializing', 'processing', 'promoting')` |
+| `idx_tdcc_sync_runs_completed` | 否 | 否 | `completed_at` | `CREATE INDEX idx_tdcc_sync_runs_completed<br>  ON tdcc_sync_runs (completed_at DESC)` |
 
 #### DDL
 
 ```sql
-CREATE TABLE tdcc_sync_runs (
-  id TEXT PRIMARY KEY,
+CREATE TABLE "tdcc_sync_runs" (
+  id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL DEFAULT 'tdcc'
     CHECK (connector_id = 'tdcc'),
   trigger TEXT NOT NULL CHECK (trigger IN ('manual', 'scheduled')),
   scope TEXT NOT NULL DEFAULT 'all'
     CHECK (scope IN ('all', 'investments', 'bank', 'trades')),
-  sync_job_id TEXT REFERENCES sync_jobs(id) ON DELETE SET NULL,
-  scheduled_batch_id TEXT REFERENCES scheduled_sync_batches(id) ON DELETE SET NULL,
+  sync_job_id TEXT REFERENCES "sync_jobs" (id) ON DELETE SET NULL,
+  scheduled_batch_id TEXT REFERENCES "scheduled_sync_batches" (id) ON DELETE SET NULL,
   settings_version TEXT,
   phase TEXT NOT NULL DEFAULT 'initialize'
     CHECK (phase IN (
@@ -1546,6 +1546,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0041_time_deposit_lifecycle.sql`](../packages/db/migrations/0041_time_deposit_lifecycle.sql)
 - [`0042_bank_transaction_lifecycle.sql`](../packages/db/migrations/0042_bank_transaction_lifecycle.sql)
 - [`0043_merge_legacy_invoice_duplicates.sql`](../packages/db/migrations/0043_merge_legacy_invoice_duplicates.sql)
+- [`0044_text_primary_keys_not_null.sql`](../packages/db/migrations/0044_text_primary_keys_not_null.sql)
 
 ## 程式碼導覽
 

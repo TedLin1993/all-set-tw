@@ -57,8 +57,8 @@ export function hasConnectorSettings(db: ReturnType<typeof createDrizzle>) {
 }
 
 export const syncJobSelection = {
-  id: sql<SyncJobRow["id"]>`${syncJobs.id}`,
-  connector_id: sql<SyncJobRow["connector_id"]>`${syncJobs.connectorId}`,
+  id: syncJobs.id,
+  connector_id: syncJobs.connectorId,
   scope: syncJobs.scope,
   enabled: syncJobs.enabled,
   interval_minutes: syncJobs.intervalMinutes,

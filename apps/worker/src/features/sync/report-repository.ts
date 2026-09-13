@@ -89,7 +89,7 @@ export async function recoverLatestScheduledSyncSource(
     .limit(1);
   const latest = await orm
     .select({
-      batchId: sql<string>`${scheduledSyncBatches.id}`,
+      batchId: scheduledSyncBatches.id,
       jobId: scheduledSyncBatchResults.jobId,
     })
     .from(scheduledSyncBatches)
@@ -348,7 +348,7 @@ export async function getLatestScheduledSyncReport(
 ): Promise<ScheduledSyncReport | null> {
   const batch = await createDrizzle(db)
     .select({
-      id: sql<string>`${scheduledSyncBatches.id}`,
+      id: scheduledSyncBatches.id,
       startedAt: scheduledSyncBatches.createdAt,
       completedAt: sql<string>`${scheduledSyncBatches.completedAt}`,
       isBaseline: scheduledSyncBatches.isBaseline,

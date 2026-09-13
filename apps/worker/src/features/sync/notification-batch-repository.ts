@@ -47,7 +47,7 @@ export async function ensureDefaultScheduleBatch(db: D1Database) {
 
   const jobs = await createDrizzle(db)
     .select({
-      id: sql<string>`${syncJobs.id}`,
+      id: syncJobs.id,
       connector_id: sql<ConnectorId>`${syncJobs.connectorId}`,
     })
     .from(syncJobs)

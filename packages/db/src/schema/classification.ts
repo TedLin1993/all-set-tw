@@ -11,13 +11,12 @@ import {
   check,
 } from "drizzle-orm/sqlite-core";
 
-// Table-level primary keys preserve SQLite's existing nullable TEXT primary keys.
-// SQL migrations remain authoritative; do not add NOT NULL through ORM adoption.
+// SQL migrations remain authoritative for schema shape and constraints.
 
 export const classificationCategories = sqliteTable(
   "classification_categories",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     label: text("label").notNull(),
     sortOrder: integer("sort_order")
       .notNull()
@@ -39,7 +38,7 @@ export const classificationCategories = sqliteTable(
 export const classificationOverrides = sqliteTable(
   "classification_overrides",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     targetType: text("target_type").notNull(),
     targetId: text("target_id").notNull(),
     categoryId: text("category_id").notNull(),
@@ -60,7 +59,7 @@ export const classificationOverrides = sqliteTable(
 export const classificationRules = sqliteTable(
   "classification_rules",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     categoryId: text("category_id").notNull(),
     targetType: text("target_type"),
     field: text("field").notNull(),

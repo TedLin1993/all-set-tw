@@ -63,7 +63,7 @@ export async function listNetWorthHistory(
 ) {
   return createDrizzle(db)
     .select({
-      id: sql<string>`${history.id}`,
+      id: history.id,
       date: history.date,
       netWorth: history.netWorth,
       assetType: history.assetType,
