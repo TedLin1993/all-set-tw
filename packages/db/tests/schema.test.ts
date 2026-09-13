@@ -102,6 +102,78 @@ function inspect(database: DatabaseSync) {
   });
 }
 
+const TEXT_PRIMARY_KEY_COLUMNS: Array<{ table: string; column: string }> = [
+  { table: "bank_accounts", column: "id" },
+  { table: "bank_balance_snapshots", column: "id" },
+  { table: "bank_transaction_preferences", column: "transaction_id" },
+  { table: "bank_transactions", column: "id" },
+  { table: "classification_categories", column: "id" },
+  { table: "classification_overrides", column: "id" },
+  { table: "classification_rules", column: "id" },
+  { table: "connector_settings", column: "id" },
+  { table: "credit_card_bills", column: "id" },
+  { table: "einvoice_sync_run_items", column: "id" },
+  { table: "einvoice_sync_runs", column: "id" },
+  { table: "exchange_rates", column: "currency" },
+  { table: "investment_positions", column: "id" },
+  { table: "investment_transactions", column: "id" },
+  { table: "invoice_line_items", column: "id" },
+  { table: "invoice_transaction_preferences", column: "invoice_id" },
+  { table: "invoices", column: "id" },
+  { table: "manual_assets", column: "id" },
+  { table: "net_worth_history", column: "id" },
+  { table: "notification_preferences", column: "id" },
+  { table: "push_subscriptions", column: "id" },
+  { table: "scheduled_sync_batches", column: "id" },
+  { table: "sync_jobs", column: "id" },
+  { table: "sync_schedule_settings", column: "id" },
+  { table: "tdcc_sync_run_items", column: "id" },
+  { table: "tdcc_sync_runs", column: "id" },
+];
+
+describe("TEXT primary key NOT NULL constraints", () => {
+  it("requires NOT NULL on single-column TEXT primary keys after migrations", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      for (const migration of readMigrations()) database.exec(migration);
+      for (const { table, column } of TEXT_PRIMARY_KEY_COLUMNS) {
+        const info = database
+          .prepare(`PRAGMA table_xinfo('${table}')`)
+          .all()
+          .find((row) => row.name === column);
+        expect(info, `${table}.${column}`).toBeDefined();
+        expect(info?.pk, `${table}.${column} pk`).toBe(1);
+        expect(info?.notnull, `${table}.${column} notnull`).toBe(1);
+      }
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects NULL primary key inserts", () => {
+    const database = new DatabaseSync(":memory:");
+    try {
+      for (const migration of readMigrations()) database.exec(migration);
+      expect(() =>
+        database
+          .prepare(
+            "INSERT INTO bank_accounts (id, connector_id, source_id, created_at, updated_at) VALUES (NULL, 'c', 's', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z')",
+          )
+          .run(),
+      ).toThrow(/NOT NULL/i);
+      expect(() =>
+        database
+          .prepare(
+            "INSERT INTO exchange_rates (currency, rate_to_twd, updated_at) VALUES (NULL, 1.0, '2020-01-01T00:00:00.000Z')",
+          )
+          .run(),
+      ).toThrow(/NOT NULL/i);
+    } finally {
+      database.close();
+    }
+  });
+});
+
 describe("Drizzle schema parity", () => {
   it("preserves the migrated schema, including generated columns and index semantics", async () => {
     const migrated = new DatabaseSync(":memory:");

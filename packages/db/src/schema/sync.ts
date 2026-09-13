@@ -11,13 +11,12 @@ import {
   check,
 } from "drizzle-orm/sqlite-core";
 
-// Table-level primary keys preserve SQLite's existing nullable TEXT primary keys.
-// SQL migrations remain authoritative; do not add NOT NULL through ORM adoption.
+// SQL migrations remain authoritative for schema shape and constraints.
 
 export const syncJobs = sqliteTable(
   "sync_jobs",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     connectorId: text("connector_id").notNull(),
     scope: text("scope").notNull(),
     enabled: integer("enabled")
@@ -61,7 +60,7 @@ export const syncJobs = sqliteTable(
 export const syncScheduleSettings = sqliteTable(
   "sync_schedule_settings",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     intervalMinutes: integer("interval_minutes").notNull(),
     preferredTime: text("preferred_time").notNull(),
     timezone: text("timezone").notNull(),
@@ -99,7 +98,7 @@ export const syncWriteStaging = sqliteTable(
 export const scheduledSyncBatches = sqliteTable(
   "scheduled_sync_batches",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     scheduleKey: text("schedule_key")
       .notNull()
       .default(sql`'default'`),
@@ -165,7 +164,7 @@ export const scheduledSyncBatchResults = sqliteTable(
 export const einvoiceSyncRuns = sqliteTable(
   "einvoice_sync_runs",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     connectorId: text("connector_id")
       .notNull()
       .default(sql`'einvoice'`),
@@ -234,7 +233,7 @@ export const einvoiceSyncRuns = sqliteTable(
 export const einvoiceSyncRunItems = sqliteTable(
   "einvoice_sync_run_items",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     runId: text("run_id").notNull(),
     invoiceSourceId: text("invoice_source_id").notNull(),
     headerJson: text("header_json").notNull(),
@@ -279,7 +278,7 @@ export const einvoiceSyncRunItems = sqliteTable(
 export const tdccSyncRuns = sqliteTable(
   "tdcc_sync_runs",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     connectorId: text("connector_id")
       .notNull()
       .default(sql`'tdcc'`),
@@ -371,7 +370,7 @@ export const tdccSyncRuns = sqliteTable(
 export const tdccSyncRunItems = sqliteTable(
   "tdcc_sync_run_items",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     runId: text("run_id").notNull(),
     taskType: text("task_type").notNull(),
     taskKey: text("task_key")

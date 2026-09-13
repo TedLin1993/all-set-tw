@@ -11,13 +11,12 @@ import {
   check,
 } from "drizzle-orm/sqlite-core";
 
-// Table-level primary keys preserve SQLite's existing nullable TEXT primary keys.
-// SQL migrations remain authoritative; do not add NOT NULL through ORM adoption.
+// SQL migrations remain authoritative for schema shape and constraints.
 
 export const bankAccounts = sqliteTable(
   "bank_accounts",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     connectorId: text("connector_id").notNull(),
     sourceId: text("source_id").notNull(),
     institutionName: text("institution_name"),
@@ -62,7 +61,7 @@ export const bankAccounts = sqliteTable(
 export const bankBalanceSnapshots = sqliteTable(
   "bank_balance_snapshots",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     connectorId: text("connector_id").notNull(),
     accountId: text("account_id").notNull(),
     sourceId: text("source_id").notNull(),
@@ -98,7 +97,7 @@ export const bankBalanceSnapshots = sqliteTable(
 export const bankTransactions = sqliteTable(
   "bank_transactions",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     connectorId: text("connector_id").notNull(),
     accountId: text("account_id").notNull(),
     sourceId: text("source_id").notNull(),
@@ -165,7 +164,7 @@ export const bankTransactions = sqliteTable(
 export const bankTransactionPreferences = sqliteTable(
   "bank_transaction_preferences",
   {
-    transactionId: text("transaction_id"),
+    transactionId: text("transaction_id").notNull(),
     excludedFromCalculation: integer("excluded_from_calculation")
       .notNull()
       .default(sql`0`),
@@ -187,7 +186,7 @@ export const bankTransactionPreferences = sqliteTable(
 export const creditCardBills = sqliteTable(
   "credit_card_bills",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     connectorId: text("connector_id").notNull(),
     accountId: text("account_id").notNull(),
     sourceId: text("source_id").notNull(),

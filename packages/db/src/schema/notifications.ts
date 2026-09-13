@@ -7,13 +7,12 @@ import {
   check,
 } from "drizzle-orm/sqlite-core";
 
-// Table-level primary keys preserve SQLite's existing nullable TEXT primary keys.
-// SQL migrations remain authoritative; do not add NOT NULL through ORM adoption.
+// SQL migrations remain authoritative for schema shape and constraints.
 
 export const pushSubscriptions = sqliteTable(
   "push_subscriptions",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     encryptedSubscription: text("encrypted_subscription").notNull(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
@@ -28,7 +27,7 @@ export const pushSubscriptions = sqliteTable(
 export const notificationPreferences = sqliteTable(
   "notification_preferences",
   {
-    id: text("id"),
+    id: text("id").notNull(),
     notifySuccess: integer("notify_success")
       .notNull()
       .default(sql`0`),
