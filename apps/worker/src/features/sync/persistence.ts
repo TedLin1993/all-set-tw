@@ -1,3 +1,9 @@
+import {
+  createDrizzle,
+  sanitizeDatabaseError,
+  syncWriteStaging,
+} from "@taiwan-fin-hub/db";
+import { eq, lt } from "drizzle-orm";
 import type { SyncNewRecordCounts } from "@taiwan-fin-hub/core";
 
 export type SyncEntityType =
@@ -343,6 +349,7 @@ export async function stageSyncWriteRecords(
 ) {
   if (records.length === 0) return;
   const createdAt = new Date().toISOString();
+  // 保留 JSON set-based upsert：每 chunk 只綁定三個參數，避免逐筆 values 擴大參數量。
   for (let offset = 0; offset < records.length; offset += STAGING_CHUNK_SIZE) {
     const chunk = records.slice(offset, offset + STAGING_CHUNK_SIZE);
     await db
@@ -390,6 +397,8 @@ export async function promoteStagedSyncWrite(
       ),
     }));
   const countResultOffset = input.beforePromoteStatements?.length ?? 0;
+  // 保留整組原生 D1 batch：跨檔案 factories、計數 offset、promotion、
+  // lifecycle reconciliation、finalize/cursor 與 cleanup 必須維持順序及同一原子邊界。
   const batchResults = await db.batch([
     ...(input.beforePromoteStatements ?? []),
     ...newRecordCountStatements.map(({ statement }) => statement),
@@ -419,10 +428,18 @@ export async function persistStagedSyncWrite(
   },
 ) {
   const runId = crypto.randomUUID();
-  await db
-    .prepare("DELETE FROM sync_write_staging WHERE created_at < ?")
-    .bind(new Date(Date.now() - STAGING_RETENTION_MS).toISOString())
-    .run();
+  await createDrizzle(db)
+    .delete(syncWriteStaging)
+    .where(
+      lt(
+        syncWriteStaging.createdAt,
+        new Date(Date.now() - STAGING_RETENTION_MS).toISOString(),
+      ),
+    )
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 
   try {
     await stageSyncWriteRecords(db, runId, input.records);
@@ -434,9 +451,9 @@ export async function persistStagedSyncWrite(
       finalizeStatements: input.finalizeStatements,
     });
   } catch (error) {
-    await db
-      .prepare("DELETE FROM sync_write_staging WHERE run_id = ?")
-      .bind(runId)
+    await createDrizzle(db)
+      .delete(syncWriteStaging)
+      .where(eq(syncWriteStaging.runId, runId))
       .run()
       .catch(() => undefined);
     throw error;

@@ -1,3 +1,11 @@
+import {
+  createDrizzle,
+  sanitizeDatabaseError,
+  tdccSyncRuns,
+  tdccSyncRunItems,
+} from "@taiwan-fin-hub/db";
+import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+
 /**
  * Durable state for TDCC's paginated provider work.
  *
@@ -5,6 +13,11 @@
  * responsible for mapping a completed item into `sync_write_staging` and for
  * promoting that staging data after every item is done.
  */
+
+// 階段 4 僅轉換獨立的 run lease／狀態 UPDATE。其餘 durable item SQL 保留：
+// claim、JSON merge、計數及 promotion 共享原生 statement composition；
+// row 查詢沿用 snake_case DTO，避免為此重寫整個 durable run mapper。
+// create-or-get 保留 partial unique index 衝突後讀取既有 active run 的流程。
 
 export type TdccRunStatus =
   | "queued"
@@ -238,27 +251,25 @@ export async function transitionTdccRun(
       ? input.from
       : [input.from]
     : ACTIVE_RUN_STATUSES;
-  const placeholders = fromStatuses.map(() => "?").join(", ");
   const now = input.now ?? new Date().toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET status = ?,
-           phase = COALESCE(?, phase),
-           last_error = CASE WHEN ? IS NULL THEN last_error ELSE ? END,
-           updated_at = ?
-       WHERE id = ? AND status IN (${placeholders})`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      status: input.to,
+      phase: input.phase ?? undefined,
+      lastError: input.error ?? undefined,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        inArray(tdccSyncRuns.status, fromStatuses),
+      ),
     )
-    .bind(
-      input.to,
-      input.phase ?? null,
-      input.error ?? null,
-      input.error ?? null,
-      now,
-      input.runId,
-      ...fromStatuses,
-    )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -278,20 +289,28 @@ export async function acquireTdccRunLease(
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET lease_owner = ?, lease_expires_at = ?, updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing', 'promoting')
-         AND (
-           lease_owner IS NULL
-           OR lease_expires_at IS NULL
-           OR lease_expires_at < ?
-         )`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      leaseOwner: input.owner,
+      leaseExpiresAt: expiresAt,
+      updatedAt: nowIso,
+    })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        inArray(tdccSyncRuns.status, ACTIVE_RUN_STATUSES),
+        or(
+          isNull(tdccSyncRuns.leaseOwner),
+          isNull(tdccSyncRuns.leaseExpiresAt),
+          lt(tdccSyncRuns.leaseExpiresAt, nowIso),
+        ),
+      ),
     )
-    .bind(input.owner, expiresAt, nowIso, input.runId, nowIso)
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -302,16 +321,20 @@ export async function renewTdccRunLease(
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET lease_expires_at = ?, updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing', 'promoting')
-         AND lease_owner = ?`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({ leaseExpiresAt: expiresAt, updatedAt: nowIso })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        inArray(tdccSyncRuns.status, ACTIVE_RUN_STATUSES),
+        eq(tdccSyncRuns.leaseOwner, input.owner),
+      ),
     )
-    .bind(expiresAt, nowIso, input.runId, input.owner)
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -319,14 +342,23 @@ export async function releaseTdccRunLease(
   db: D1Database,
   input: { runId: string; owner: string; now?: string },
 ) {
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-       WHERE id = ? AND lease_owner = ?`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: input.now ?? new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        eq(tdccSyncRuns.leaseOwner, input.owner),
+      ),
     )
-    .bind(input.now ?? new Date().toISOString(), input.runId, input.owner)
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -350,39 +382,27 @@ export async function updateTdccRunState(
     now?: string;
   },
 ) {
-  const assignments: string[] = [];
-  const values: unknown[] = [];
-  if (input.settingsVersion !== undefined) {
-    assignments.push("settings_version = ?");
-    values.push(input.settingsVersion);
-  }
-  if (input.encryptedConfig !== undefined) {
-    assignments.push("encrypted_config = ?");
-    values.push(input.encryptedConfig);
-  }
-  if (input.encryptedSession !== undefined) {
-    assignments.push("encrypted_session = ?");
-    values.push(input.encryptedSession);
-  }
-  // `session` is intentionally not written: TDCC session tokens are secrets.
-  // Keep the optional input for source compatibility with the initialization
-  // helper; encryptedSession is the only persisted representation.
-  if (input.phase !== undefined) {
-    assignments.push("phase = ?");
-    values.push(input.phase);
-  }
-  if (input.status !== undefined) {
-    assignments.push("status = ?");
-    values.push(input.status);
-  }
-  if (assignments.length === 0) return false;
-  const now = input.now ?? new Date().toISOString();
-  assignments.push("updated_at = ?");
-  values.push(now, input.runId);
-  const result = await db
-    .prepare(`UPDATE tdcc_sync_runs SET ${assignments.join(", ")} WHERE id = ?`)
-    .bind(...values)
-    .run();
+  const updates = {
+    settingsVersion: input.settingsVersion,
+    encryptedConfig: input.encryptedConfig,
+    encryptedSession: input.encryptedSession,
+    phase: input.phase,
+    status: input.status,
+  };
+  // session is intentionally ignored; provider tokens only persist encrypted.
+  if (Object.values(updates).every((value) => value === undefined))
+    return false;
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      ...updates,
+      updatedAt: input.now ?? new Date().toISOString(),
+    })
+    .where(eq(tdccSyncRuns.id, input.runId))
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -393,20 +413,26 @@ export async function claimTdccRunSessionRefresh(
   db: D1Database,
   input: { runId: string; maxRefreshes?: number; now?: string },
 ) {
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET session_refresh_count = session_refresh_count + 1, updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing', 'promoting')
-         AND session_refresh_count < ?`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      sessionRefreshCount: sql`${tdccSyncRuns.sessionRefreshCount} + 1`,
+      updatedAt: input.now ?? new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        inArray(tdccSyncRuns.status, ACTIVE_RUN_STATUSES),
+        lt(
+          tdccSyncRuns.sessionRefreshCount,
+          Math.max(1, Math.floor(input.maxRefreshes ?? 1)),
+        ),
+      ),
     )
-    .bind(
-      input.now ?? new Date().toISOString(),
-      input.runId,
-      Math.max(1, Math.floor(input.maxRefreshes ?? 1)),
-    )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -784,38 +810,31 @@ export async function finalizeTdccRun(
   },
 ) {
   const now = input.now ?? new Date().toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE tdcc_sync_runs
-       SET status = ?,
-           phase = COALESCE(?, phase),
-           last_error = ?,
-           lease_owner = NULL,
-           lease_expires_at = NULL,
-           promoted_at = COALESCE(?, promoted_at),
-           completed_at = ?,
-           updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing', 'promoting')
-         AND (
-           ? != 'completed'
-           OR NOT EXISTS (
-             SELECT 1 FROM tdcc_sync_run_items
-             WHERE run_id = tdcc_sync_runs.id AND status != 'done'
-           )
-         )`,
+  const result = await createDrizzle(db)
+    .update(tdccSyncRuns)
+    .set({
+      status: input.status,
+      phase: input.phase ?? undefined,
+      lastError: input.error ?? null,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      promotedAt: input.promotedAt ?? undefined,
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(tdccSyncRuns.id, input.runId),
+        inArray(tdccSyncRuns.status, ACTIVE_RUN_STATUSES),
+        input.status === "completed"
+          ? sql`NOT EXISTS (SELECT 1 FROM ${tdccSyncRunItems} WHERE ${tdccSyncRunItems.runId} = ${tdccSyncRuns.id} AND ${tdccSyncRunItems.status} != 'done')`
+          : undefined,
+      ),
     )
-    .bind(
-      input.status,
-      input.phase ?? null,
-      input.error ?? null,
-      input.promotedAt ?? null,
-      now,
-      now,
-      input.runId,
-      input.status,
-    )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 

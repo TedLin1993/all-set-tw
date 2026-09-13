@@ -1,3 +1,16 @@
+import {
+  createDrizzle,
+  sanitizeDatabaseError,
+  einvoiceSyncRuns,
+  einvoiceSyncRunItems,
+} from "@taiwan-fin-hub/db";
+import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+
+// 階段 4 僅轉換獨立的 run lease／狀態 UPDATE。其餘 durable item SQL 保留：
+// claim、JSON merge、計數及 promotion 共享原生 statement composition；
+// row 查詢沿用 snake_case DTO，避免為此重寫整個 durable run mapper。
+// create-or-get 保留 partial unique index 衝突後讀取既有 active run 的流程。
+
 export type EinvoiceRunStatus =
   | "queued"
   | "initializing"
@@ -161,20 +174,28 @@ export async function acquireEinvoiceRunChunkLease(
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE einvoice_sync_runs
-       SET chunk_lease_owner = ?, chunk_lease_expires_at = ?, updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing')
-         AND (
-           chunk_lease_owner IS NULL
-           OR chunk_lease_expires_at IS NULL
-           OR chunk_lease_expires_at < ?
-         )`,
+  const result = await createDrizzle(db)
+    .update(einvoiceSyncRuns)
+    .set({
+      chunkLeaseOwner: input.owner,
+      chunkLeaseExpiresAt: expiresAt,
+      updatedAt: nowIso,
+    })
+    .where(
+      and(
+        eq(einvoiceSyncRuns.id, input.runId),
+        inArray(einvoiceSyncRuns.status, ACTIVE_RUN_STATUSES),
+        or(
+          isNull(einvoiceSyncRuns.chunkLeaseOwner),
+          isNull(einvoiceSyncRuns.chunkLeaseExpiresAt),
+          lt(einvoiceSyncRuns.chunkLeaseExpiresAt, nowIso),
+        ),
+      ),
     )
-    .bind(input.owner, expiresAt, nowIso, input.runId, nowIso)
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -191,16 +212,20 @@ export async function renewEinvoiceRunChunkLease(
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE einvoice_sync_runs
-       SET chunk_lease_expires_at = ?, updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing')
-         AND chunk_lease_owner = ?`,
+  const result = await createDrizzle(db)
+    .update(einvoiceSyncRuns)
+    .set({ chunkLeaseExpiresAt: expiresAt, updatedAt: nowIso })
+    .where(
+      and(
+        eq(einvoiceSyncRuns.id, input.runId),
+        inArray(einvoiceSyncRuns.status, ACTIVE_RUN_STATUSES),
+        eq(einvoiceSyncRuns.chunkLeaseOwner, input.owner),
+      ),
     )
-    .bind(expiresAt, nowIso, input.runId, input.owner)
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -209,15 +234,23 @@ export async function releaseEinvoiceRunChunkLease(
   db: D1Database,
   input: { runId: string; owner: string; now?: string },
 ) {
-  const result = await db
-    .prepare(
-      `UPDATE einvoice_sync_runs
-       SET chunk_lease_owner = NULL, chunk_lease_expires_at = NULL,
-           updated_at = ?
-       WHERE id = ? AND chunk_lease_owner = ?`,
+  const result = await createDrizzle(db)
+    .update(einvoiceSyncRuns)
+    .set({
+      chunkLeaseOwner: null,
+      chunkLeaseExpiresAt: null,
+      updatedAt: input.now ?? new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(einvoiceSyncRuns.id, input.runId),
+        eq(einvoiceSyncRuns.chunkLeaseOwner, input.owner),
+      ),
     )
-    .bind(input.now ?? new Date().toISOString(), input.runId, input.owner)
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -230,19 +263,19 @@ export async function transitionEinvoiceRunStatus(
     now?: string;
   },
 ) {
-  const result = await db
-    .prepare(
-      `UPDATE einvoice_sync_runs
-       SET status = ?, updated_at = ?
-       WHERE id = ? AND status = ?`,
+  const result = await createDrizzle(db)
+    .update(einvoiceSyncRuns)
+    .set({ status: input.to, updatedAt: input.now ?? new Date().toISOString() })
+    .where(
+      and(
+        eq(einvoiceSyncRuns.id, input.runId),
+        eq(einvoiceSyncRuns.status, input.from),
+      ),
     )
-    .bind(
-      input.to,
-      input.now ?? new Date().toISOString(),
-      input.runId,
-      input.from,
-    )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -326,20 +359,26 @@ export async function claimEinvoiceRunSessionRefresh(
   db: D1Database,
   input: { runId: string; maxRefreshes?: number; now?: string },
 ) {
-  const result = await db
-    .prepare(
-      `UPDATE einvoice_sync_runs
-       SET session_refresh_count = session_refresh_count + 1, updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing')
-         AND session_refresh_count < ?`,
+  const result = await createDrizzle(db)
+    .update(einvoiceSyncRuns)
+    .set({
+      sessionRefreshCount: sql`${einvoiceSyncRuns.sessionRefreshCount} + 1`,
+      updatedAt: input.now ?? new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(einvoiceSyncRuns.id, input.runId),
+        inArray(einvoiceSyncRuns.status, ACTIVE_RUN_STATUSES),
+        lt(
+          einvoiceSyncRuns.sessionRefreshCount,
+          Math.max(1, Math.floor(input.maxRefreshes ?? 1)),
+        ),
+      ),
     )
-    .bind(
-      input.now ?? new Date().toISOString(),
-      input.runId,
-      Math.max(1, Math.floor(input.maxRefreshes ?? 1)),
-    )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -681,6 +720,7 @@ export async function promoteEinvoiceRunRecords(
   )`;
   const invoiceRaw = jsonRawPayloadExpression("source.normalized_invoice_json");
   const lineItemRaw = jsonRawPayloadExpression("line.value");
+  // 五個 set-based statements 共用設定版本 CAS；計數、資料、cursor 與 promoted_at 不可拆開。
   const results = await db.batch([
     db
       .prepare(
@@ -835,29 +875,27 @@ export async function completeEinvoiceRun(
   },
 ) {
   const now = input.now ?? new Date().toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE einvoice_sync_runs
-       SET status = ?, last_error = ?, completed_at = ?, updated_at = ?
-       WHERE id = ?
-         AND status IN ('queued', 'initializing', 'processing')
-         AND (
-           ? != 'completed'
-           OR NOT EXISTS (
-             SELECT 1 FROM einvoice_sync_run_items
-             WHERE run_id = einvoice_sync_runs.id AND status != 'done'
-           )
-         )`,
+  const result = await createDrizzle(db)
+    .update(einvoiceSyncRuns)
+    .set({
+      status: input.status,
+      lastError: input.error ?? null,
+      completedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(einvoiceSyncRuns.id, input.runId),
+        inArray(einvoiceSyncRuns.status, ACTIVE_RUN_STATUSES),
+        input.status === "completed"
+          ? sql`NOT EXISTS (SELECT 1 FROM ${einvoiceSyncRunItems} WHERE ${einvoiceSyncRunItems.runId} = ${einvoiceSyncRuns.id} AND ${einvoiceSyncRunItems.status} != 'done')`
+          : undefined,
+      ),
     )
-    .bind(
-      input.status,
-      input.error ?? null,
-      now,
-      now,
-      input.runId,
-      input.status,
-    )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 

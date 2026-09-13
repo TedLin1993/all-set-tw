@@ -1,3 +1,8 @@
+import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { createDrizzle } from "./client";
+import { sanitizeDatabaseError } from "./errors";
+import { syncJobs } from "./schema";
+
 export type SyncTrigger = "manual" | "scheduled";
 export type SyncStatus = "success" | "failed" | "needs_user_action";
 export type SyncScheduleMode = "inherit" | "custom";
@@ -69,6 +74,7 @@ export function nextSyncRunAt(
   return new Date(candidate).toISOString();
 }
 
+// 排程讀取保留原生 row shape；本階段聚焦 lock 與狀態寫入，避免改動 scheduler DTO。
 export async function findNextDueSyncJob<TConnectorId extends string>(
   db: D1Database,
   now = new Date(),
@@ -114,27 +120,28 @@ export async function acquireSyncJobLock(
 ) {
   const now = new Date();
   const lockedUntil = new Date(now.getTime() + input.leaseMs).toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE sync_jobs
-     SET locked_by = ?,
-         locked_until = ?,
-         lock_trigger = ?,
-         lock_scope = ?,
-         updated_at = ?
-     WHERE id = ?
-       AND (locked_until IS NULL OR locked_until < ?)`,
-    )
-    .bind(
-      input.runId,
+  const result = await createDrizzle(db)
+    .update(syncJobs)
+    .set({
+      lockedBy: input.runId,
       lockedUntil,
-      input.trigger,
-      input.scope,
-      now.toISOString(),
-      input.lockRowId,
-      now.toISOString(),
+      lockTrigger: input.trigger,
+      lockScope: input.scope,
+      updatedAt: now.toISOString(),
+    })
+    .where(
+      and(
+        eq(syncJobs.id, input.lockRowId),
+        or(
+          isNull(syncJobs.lockedUntil),
+          lt(syncJobs.lockedUntil, now.toISOString()),
+        ),
+      ),
     )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -143,19 +150,19 @@ export async function renewSyncJobLock(
   input: { lockRowId: string; runId: string; leaseMs: number },
 ) {
   const now = new Date();
-  const result = await db
-    .prepare(
-      `UPDATE sync_jobs
-     SET locked_until = ?, updated_at = ?
-     WHERE id = ? AND locked_by = ?`,
+  const result = await createDrizzle(db)
+    .update(syncJobs)
+    .set({
+      lockedUntil: new Date(now.getTime() + input.leaseMs).toISOString(),
+      updatedAt: now.toISOString(),
+    })
+    .where(
+      and(eq(syncJobs.id, input.lockRowId), eq(syncJobs.lockedBy, input.runId)),
     )
-    .bind(
-      new Date(now.getTime() + input.leaseMs).toISOString(),
-      now.toISOString(),
-      input.lockRowId,
-      input.runId,
-    )
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
   return result.meta.changes === 1;
 }
 
@@ -164,18 +171,20 @@ export async function releaseSyncJobLock(
   lockRowId: string,
   runId: string,
 ) {
-  await db
-    .prepare(
-      `UPDATE sync_jobs
-     SET locked_by = NULL,
-         locked_until = NULL,
-         lock_trigger = NULL,
-         lock_scope = NULL,
-         updated_at = ?
-     WHERE id = ? AND locked_by = ?`,
-    )
-    .bind(new Date().toISOString(), lockRowId, runId)
-    .run();
+  await createDrizzle(db)
+    .update(syncJobs)
+    .set({
+      lockedBy: null,
+      lockedUntil: null,
+      lockTrigger: null,
+      lockScope: null,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(and(eq(syncJobs.id, lockRowId), eq(syncJobs.lockedBy, runId)))
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
 export async function completeSyncJob(db: D1Database, job: SyncJobRow) {
@@ -187,25 +196,21 @@ export async function completeSyncJob(db: D1Database, job: SyncJobRow) {
     job.next_run_at,
     job.preferred_weekday,
   );
-  await db
-    .prepare(
-      `UPDATE sync_jobs
-     SET last_status = 'success',
-         last_error = NULL,
-         last_run_at = ?,
-         last_success_at = ?,
-         next_run_at = ?,
-         updated_at = ?
-     WHERE id = ?`,
-    )
-    .bind(
-      now.toISOString(),
-      now.toISOString(),
+  await createDrizzle(db)
+    .update(syncJobs)
+    .set({
+      lastStatus: "success",
+      lastError: null,
+      lastRunAt: now.toISOString(),
+      lastSuccessAt: now.toISOString(),
       nextRunAt,
-      now.toISOString(),
-      job.id,
-    )
-    .run();
+      updatedAt: now.toISOString(),
+    })
+    .where(eq(syncJobs.id, job.id))
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
 export async function failSyncJob(
@@ -224,25 +229,20 @@ export async function failSyncJob(
           job.preferred_weekday,
         )
       : job.next_run_at;
-  await db
-    .prepare(
-      `UPDATE sync_jobs
-     SET last_status = ?,
-         last_error = ?,
-         last_run_at = ?,
-         next_run_at = ?,
-         updated_at = ?
-     WHERE id = ?`,
-    )
-    .bind(
-      input.status,
-      input.errorMessage,
-      now.toISOString(),
+  await createDrizzle(db)
+    .update(syncJobs)
+    .set({
+      lastStatus: input.status,
+      lastError: input.errorMessage,
+      lastRunAt: now.toISOString(),
       nextRunAt,
-      now.toISOString(),
-      job.id,
-    )
-    .run();
+      updatedAt: now.toISOString(),
+    })
+    .where(eq(syncJobs.id, job.id))
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
 
 export async function markManualSyncSuccess(
@@ -257,33 +257,7 @@ export async function markManualSyncSuccess(
     .first<SyncJobRow>();
   if (!job) return;
 
-  const now = new Date();
-  const nextRunAt = nextSyncRunAt(
-    job.interval_minutes,
-    job.preferred_time,
-    now,
-    job.next_run_at,
-    job.preferred_weekday,
-  );
-  await db
-    .prepare(
-      `UPDATE sync_jobs
-     SET last_status = 'success',
-         last_error = NULL,
-         last_run_at = ?,
-         last_success_at = ?,
-         next_run_at = ?,
-         updated_at = ?
-     WHERE id = ?`,
-    )
-    .bind(
-      now.toISOString(),
-      now.toISOString(),
-      nextRunAt,
-      now.toISOString(),
-      jobId,
-    )
-    .run();
+  await completeSyncJob(db, job);
 }
 
 export async function markManualSyncFailure(
@@ -293,15 +267,19 @@ export async function markManualSyncFailure(
   input: { status: SyncStatus; errorMessage: string },
 ) {
   const now = new Date().toISOString();
-  await db
-    .prepare(
-      `UPDATE sync_jobs
-     SET last_status = ?,
-         last_error = ?,
-         last_run_at = ?,
-         updated_at = ?
-     WHERE connector_id = ? AND scope = ?`,
+  await createDrizzle(db)
+    .update(syncJobs)
+    .set({
+      lastStatus: input.status,
+      lastError: input.errorMessage,
+      lastRunAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(eq(syncJobs.connectorId, connectorId), eq(syncJobs.scope, scope)),
     )
-    .bind(input.status, input.errorMessage, now, now, connectorId, scope)
-    .run();
+    .run()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
 }
