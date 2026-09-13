@@ -1,4 +1,15 @@
-import { and, asc, eq, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  exists,
+  isNull,
+  lt,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { createDrizzle } from "./client";
 import { sanitizeDatabaseError } from "./errors";
 import { syncJobs, connectorSettings } from "./schema";
@@ -27,6 +38,22 @@ export interface SyncJobRow<TConnectorId extends string = string> {
   last_error: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export const syncJobConfiguredJoin = eq(
+  connectorSettings.connectorId,
+  syncJobs.connectorId,
+);
+
+export const syncJobConfiguredSelection = sql<number>`CASE WHEN ${connectorSettings.connectorId} IS NOT NULL THEN 1 ELSE 0 END`;
+
+export function hasConnectorSettings(db: ReturnType<typeof createDrizzle>) {
+  return exists(
+    db
+      .select({ one: sql`1` })
+      .from(connectorSettings)
+      .where(syncJobConfiguredJoin),
+  );
 }
 
 export const syncJobSelection = {
@@ -107,7 +134,7 @@ export async function findNextDueSyncJob<TConnectorId extends string>(
     .where(
       and(
         eq(syncJobs.enabled, 1),
-        sql`EXISTS (SELECT 1 FROM ${connectorSettings} WHERE ${connectorSettings.connectorId} = ${syncJobs.connectorId})`,
+        hasConnectorSettings(createDrizzle(db)),
         or(
           isNull(syncJobs.lastStatus),
           ne(syncJobs.lastStatus, "needs_user_action"),
