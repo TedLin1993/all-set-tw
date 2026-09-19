@@ -35,3 +35,17 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Build browser deployment artifact
+        run: npm run release:build -- --version ci-${{ github.sha }}
+
+      - name: Verify browser deployment artifact
+        run: npm run release:verify -- dist/releases/ci-${{ github.sha }}
+
+      - name: Retain browser deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-release-${{ github.sha }}
+          path: dist/releases/ci-${{ github.sha }}/
+          if-no-files-found: error
+          retention-days: 7

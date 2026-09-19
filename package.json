@@ -13,16 +13,19 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces",
-    "test:unit": "npm run test:unit -w @taiwan-fin-hub/web",
-    "test:backend": "npm test -w @taiwan-fin-hub/worker && npm test -w @taiwan-fin-hub/db && npm run test:selfcheck -w @taiwan-fin-hub/connectors && npm run test:deploy",
-    "test:deploy": "node --test scripts/deploy-with-vapid.test.mjs scripts/sync-upstream.test.mjs",
+    "test:unit": "npm run test:unit -w @taiwan-fin-hub/web && npm run test:unit -w @taiwan-fin-hub/deployer-web",
+    "test:backend": "npm test -w @taiwan-fin-hub/worker && npm test -w @taiwan-fin-hub/db && npm run test:selfcheck -w @taiwan-fin-hub/connectors && npm test -w @taiwan-fin-hub/deployer-worker && npm run test:deploy",
+    "test:deploy": "node --test scripts/deploy-with-vapid.test.mjs scripts/sync-upstream.test.mjs scripts/release/artifact.test.mjs scripts/release/publish.test.mjs",
     "test:e2e": "npm run test:e2e -w @taiwan-fin-hub/web",
     "verify:web": "npm run typecheck -w @taiwan-fin-hub/web && npm run test:unit -w @taiwan-fin-hub/web && npm run test:e2e -w @taiwan-fin-hub/web && npm run build -w @taiwan-fin-hub/web",
     "dev": "npm run dev -w @taiwan-fin-hub/worker",
     "deploy": "npm run db:migrate:remote && XDG_CONFIG_HOME=.wrangler-config node scripts/deploy-with-vapid.mjs",
     "db:migrate:local": "XDG_CONFIG_HOME=.wrangler-config wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "XDG_CONFIG_HOME=.wrangler-config wrangler d1 migrations apply DB --remote",
-    "db:schema:docs": "node scripts/generate-database-schema.mjs"
+    "db:schema:docs": "node scripts/generate-database-schema.mjs",
+    "release:build": "node scripts/build-release.mjs",
+    "release:verify": "node scripts/verify-release.mjs",
+    "release:publish": "node scripts/publish-release.mjs"
   },
   "cloudflare": {
     "bindings": {
@@ -57,6 +60,7 @@
   },
   "devDependencies": {
     "@typescript/native": "npm:typescript@~7.0.2",
+    "blake3-wasm": "2.1.5",
     "esbuild": "^0.28.1",
     "prettier": "^3.9.5",
     "prettier-plugin-svelte": "^4.1.1",

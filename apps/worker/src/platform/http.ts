@@ -45,6 +45,34 @@ export function isDemoMode(env: Pick<Env, "DEMO_MODE">) {
   );
 }
 
+export function isDeployMaintenance(env: Pick<Env, "DEPLOY_MAINTENANCE">) {
+  if (env.DEPLOY_MAINTENANCE === true) return true;
+  if (typeof env.DEPLOY_MAINTENANCE !== "string") return false;
+  return ["1", "true", "yes", "on"].includes(
+    env.DEPLOY_MAINTENANCE.trim().toLowerCase(),
+  );
+}
+
+export const deployMaintenanceMiddleware: MiddlewareHandler<
+  AppBindings
+> = async (c, next) => {
+  if (!isDeployMaintenance(c.env)) {
+    await next();
+    return;
+  }
+
+  return c.json(
+    {
+      success: false as const,
+      error: {
+        code: "DEPLOY_MAINTENANCE",
+        message: "網站正在更新，暫時無法同步。請稍後再試。",
+      },
+    },
+    503,
+  );
+};
+
 export const demoReadOnlyMiddleware: MiddlewareHandler<AppBindings> = async (
   c,
   next,

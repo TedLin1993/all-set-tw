@@ -153,3 +153,37 @@ XDG_CONFIG_HOME=.wrangler-config node scripts/deploy-with-vapid.mjs \
 執行前請再次確認 `database_id`、Worker 名稱與所有 bindings 都指向預期環境。資料庫 migration 會修改遠端 schema，不要使用未確認的正式資料庫進行測試。
 
 若既有 D1 已儲存連接器設定，部署時也必須提供原本相同的 `CONFIG_ENCRYPTION_KEY`；新的隨機金鑰無法解密既有資料。
+
+## 全網頁部署版本包（開發中）
+
+目前已提供維護者的離線打包工具、發布乾跑腳本，以及部署網站的 session、帳戶預檢、首次安裝與手動更新編排。部署服務可從綁定的 `RELEASE_BUCKET` 載入已發布版本並驗證 SHA-256。正式 OAuth client、維護者帳戶實際寫入 R2 latest 與一般使用者端到端登入尚未完成，因此仍不可作為一般使用者的一鍵部署。現有 GitHub 部署方式仍可使用。進度與平台限制見 [實作計畫](006-browser-deployment-plan.md) 及 [能力驗證紀錄](006-stage0-capability-verification.md)。
+
+從乾淨且已安裝依賴的 checkout 執行：
+
+```bash
+npm run release:build -- --version v0.1.0
+npm run release:verify -- dist/releases/v0.1.0
+npm run release:publish -- dist/releases/v0.1.0
+```
+
+`release:build` 重新建置前端，使用專案固定版本的 Wrangler `deploy --dry-run` 產生 Worker modules，再打包原始 SQL migrations。過程不執行 Cloudflare build hook、不套用 migrations、不部署遠端資源。同名版本目錄已存在時拒絕覆寫。
+
+版本目錄包含：
+
+- `release.json`：來源 commit、版本、是否含未提交修改、bindings、Cron、Queue consumer、migrations 清單及所有產物的 SHA-256／大小。
+- `release.sha256`：manifest 本身的 SHA-256。
+- `worker/`：Wrangler 產生的執行期 modules 與對應 MIME 類型（記錄於 manifest）。
+- `assets/`、`assets-manifest.json`：前端資源及符合固定 Wrangler 演算法的 Direct Upload hash。
+- `migrations/`：保留原始位元組的 SQL；不切割 SQL、不在打包階段改寫 ledger。
+
+版本包中的 D1／Queue 為邏輯資源名稱，不含帳戶 ID、database ID、token 或金鑰。若 public config 出現目前打包器未支援的設定，會拒絕建置，必須先明確補上支援。第一版不打包 source maps，也尚未認證任何更新來源，因此 `allowedUpgradeFrom` 為空陣列。
+
+`release:verify` 檢查檔案摘要、大小、缺檔、多餘檔案、symlink、路徑穿越及 assets manifest。正式部署服務必須從可信版本目錄取得 manifest digest，並使用 `--sha256 <trusted-digest>` 或同等程式介面驗證；只比較版本包內的 checksum 不能證明發布者身分。
+
+`release:publish` 預設為乾跑：驗證版本包後列出即將寫入的 R2 物件鍵（`releases/<version>/…` 與最後的 `releases/latest`），不會呼叫 Cloudflare。版本物件不可覆寫；`releases/latest` 只在全部版本物件寫入後更新。實際寫入需明確傳 `--execute --bucket <name>`（或環境變數 `ALL_SET_RELEASE_BUCKET`），且不得指向正式金融帳戶。開發與 CI 只保留 GitHub artifact，不自動執行 `--execute`。
+
+部署服務讀取 R2 時，會計算 `release.json` 的 SHA-256，並與 `release.sha256` 及工作建立時固定的 digest 比對，再逐一核對 `files[].sha256`／大小後才載入 Worker modules、migrations 與 assets。資產上傳依 Cloudflare Direct Upload 回傳的 `session.buckets` 分批進行，完成憑證再交給 Worker 部署；不再假設單次 session 就能傳完整包。
+
+開發期間可加 `--allow-dirty` 產生本機驗證包，manifest 會標記 `sourceDirty: true`，不得發布給使用者。CI 在既有檢查及 build 通過後建置並保留版本 artifact；此 artifact 尚未自動發布到 R2，也不會觸發自動更新。
+
+部署服務本身位於 `apps/deployer-web` 與 `apps/deployer-worker`，使用獨立 D1／Queue。目前可建立 OAuth session、帳戶預檢，並以 Queue 逐步編排首次安裝與手動更新。更新會保留既有 D1、Access 與金鑰，先暫停同步並寫入金融 Worker secret `DEPLOY_MAINTENANCE`；失敗時記錄 D1 Time Travel bookmark，不自動倒跑 SQL。沒有綁定 `RELEASE_BUCKET` 且非本機 fixture 時，工作會停在 `awaiting_release`，不會對目標帳戶寫入。正式 OAuth live consent 與維護者帳戶實際寫入 R2 latest 尚未接上。現有 GitHub 部署路徑不受影響。

@@ -10,6 +10,7 @@ import {
   type SyncStatus,
 } from "@taiwan-fin-hub/db";
 import type { Env } from "../../platform/env";
+import { isDeployMaintenance } from "../../platform/http";
 import {
   canonicalSyncLockRowId,
   isUserActionError,
@@ -43,6 +44,8 @@ export async function runSchedulerTick(
   env: Env,
   controller: ScheduledController,
 ): Promise<boolean> {
+  if (isDeployMaintenance(env)) return false;
+
   const pendingSummary = await finalizeOpenDefaultScheduleBatch(env.DB);
   if (pendingSummary) {
     await safelySendScheduledSyncSummary(env, pendingSummary);

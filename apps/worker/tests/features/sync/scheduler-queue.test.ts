@@ -260,4 +260,36 @@ describe("scheduled sync queue", () => {
     expect(message.ack).not.toHaveBeenCalled();
     expect(mocks.failEinvoiceSyncRun).not.toHaveBeenCalled();
   });
+
+  it("acks scheduler kicks without chaining work during deploy maintenance", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const message = queueMessage({ type: "run-next-scheduled-sync" });
+
+    await consumeScheduledSyncQueue(queueBatch(message), {
+      ...env(send),
+      DEPLOY_MAINTENANCE: "1",
+    });
+
+    expect(mocks.runSchedulerTick).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledOnce();
+  });
+
+  it("finishes an in-flight e-invoice chunk without enqueueing more during maintenance", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const message = queueMessage({
+      type: "run-einvoice-chunk",
+      runId: "run-1",
+    });
+    mocks.processEinvoiceSyncChunk.mockResolvedValue({ status: "continue" });
+
+    await consumeScheduledSyncQueue(queueBatch(message), {
+      ...env(send),
+      DEPLOY_MAINTENANCE: "1",
+    });
+
+    expect(mocks.processEinvoiceSyncChunk).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(message.ack).toHaveBeenCalledOnce();
+  });
 });

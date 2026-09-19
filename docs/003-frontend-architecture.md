@@ -1,6 +1,8 @@
 # 前端架構
 
-`apps/web` 是 Svelte 5 + Vite 的 client-side application。Worker 提供 `/api` 與建置後的靜態資源；目前不使用 SvelteKit routing。
+`apps/web` 是財務網站的 Svelte 5 + Vite client-side application。Worker 提供 `/api` 與建置後的靜態資源；目前不使用 SvelteKit routing。
+
+`apps/deployer-web` 是獨立的部署網站，沿用 Svelte 5 與 feature-first（`app` / `data` / `features` / `shared`）。它不得依賴 `apps/web` 的 feature，也不讀取金融 API。目前畫面涵蓋授權說明、帳戶選擇、預檢、首次安裝進度（準備環境 → 設定登入保護 → 安裝版本 → 驗證完成），以及 ready 安裝的版本比較與更新進度（準備更新 → 暫停同步 → 安裝版本 → 恢復並驗證）。正式 OAuth live 驗證與維護者帳戶實際寫入 R2 latest 仍屬後續階段。
 
 ## 目錄責任
 

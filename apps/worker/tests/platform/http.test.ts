@@ -6,8 +6,10 @@ import type { AppBindings, Env } from "../../src/platform/env";
 import {
   apiErrorResponse,
   demoReadOnlyMiddleware,
+  deployMaintenanceMiddleware,
   encodePageCursor,
   isDemoMode,
+  isDeployMaintenance,
   parseKeysetPagination,
 } from "../../src/platform/http";
 
@@ -43,6 +45,27 @@ describe("demo read-only middleware", () => {
     expect(isDemoMode({ DEMO_MODE: true })).toBe(true);
     expect(isDemoMode({ DEMO_MODE: "YES" })).toBe(true);
     expect(isDemoMode({ DEMO_MODE: "false" })).toBe(false);
+  });
+});
+
+describe("deploy maintenance middleware", () => {
+  it("blocks writes while the site is being updated", async () => {
+    const app = new Hono<AppBindings>();
+    app.use("*", deployMaintenanceMiddleware);
+    app.put("/resource", (c) => c.json({ updated: true }));
+    const response = await app.request("/resource", { method: "PUT" }, {
+      DEPLOY_MAINTENANCE: "1",
+    } as Env);
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "DEPLOY_MAINTENANCE" },
+    });
+  });
+
+  it("recognizes supported maintenance flag values", () => {
+    expect(isDeployMaintenance({ DEPLOY_MAINTENANCE: true })).toBe(true);
+    expect(isDeployMaintenance({ DEPLOY_MAINTENANCE: "YES" })).toBe(true);
+    expect(isDeployMaintenance({ DEPLOY_MAINTENANCE: "false" })).toBe(false);
   });
 });
 

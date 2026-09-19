@@ -19,6 +19,7 @@ export interface Env {
   POLICY_AUD?: string;
   POLICY_AUDS?: string;
   DEMO_MODE?: string | boolean;
+  DEPLOY_MAINTENANCE?: string | boolean;
   LOCAL_DEV_MODE?: string | boolean;
   CTBC_API_RELAY_URL?: string;
   CTBC_API_RELAY_TOKEN?: string;

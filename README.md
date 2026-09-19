@@ -55,6 +55,8 @@
 
 **需要：** [Cloudflare 帳號](https://dash.cloudflare.com/signup)、[GitHub 帳號](https://github.com/signup)
 
+免 GitHub 的全網頁部署仍在開發中，目前請使用下方 GitHub 一鍵部署。進度見 [`docs/006-browser-deployment-plan.md`](docs/006-browser-deployment-plan.md)。
+
 > 玉山、國泰、永豐、台新、華南與第一銀行會使用 [Browser Run](https://developers.cloudflare.com/browser-run/pricing/)。Workers Free Plan 目前每日包含 10 分鐘瀏覽器使用量；實際額度以 Cloudflare 最新方案為準。
 
 ### 步驟一：一鍵部署

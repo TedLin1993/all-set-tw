@@ -35,7 +35,7 @@ import {
 } from "../../connectors/taishin";
 import type { AppBindings } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
-import { jsonError } from "../../platform/http";
+import { deployMaintenanceMiddleware, jsonError } from "../../platform/http";
 import { validationHook } from "../../platform/validation";
 import {
   NeedsUserActionError,
@@ -102,6 +102,8 @@ export const syncRoutes = honoFactory.createApp();
 registerSyncRoutes(syncRoutes);
 
 function registerSyncRoutes(api: Hono<AppBindings>) {
+  api.use("*", deployMaintenanceMiddleware);
+
   api.post("/connectors/einvoice/sync", async (c) => {
     try {
       const { cancelQueuedEinvoiceSyncRun, startEinvoiceSyncRun } =
