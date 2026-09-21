@@ -1,4 +1,5 @@
 import type { Env, ScheduledSyncQueueMessage } from "../../platform/env";
+import { isDeployMaintenance } from "../../platform/http";
 import { runSchedulerTick } from "./scheduler";
 import {
   failEinvoiceSyncRun,
@@ -77,6 +78,11 @@ export async function consumeScheduledSyncQueue(
       continue;
     }
 
+    if (isDeployMaintenance(env)) {
+      message.ack();
+      continue;
+    }
+
     const processed = await runSchedulerTick(env, queueController);
     if (processed) {
       await enqueueScheduledSync(env, SCHEDULED_SYNC_CHAIN_DELAY_SECONDS);
@@ -97,6 +103,10 @@ async function consumeTdccChunkMessage(
       message.id,
     );
     if (result.status === "busy") {
+      if (isDeployMaintenance(env)) {
+        message.ack();
+        return;
+      }
       try {
         await enqueueTdccSyncChunk(
           env,
@@ -109,7 +119,7 @@ async function consumeTdccChunkMessage(
       }
       return;
     }
-    if (result.status === "continue") {
+    if (result.status === "continue" && !isDeployMaintenance(env)) {
       await enqueueTdccSyncChunk(
         env,
         message.body.runId,
@@ -147,6 +157,10 @@ async function consumeEinvoiceChunkMessage(
       message.id,
     );
     if (result.status === "busy") {
+      if (isDeployMaintenance(env)) {
+        message.ack();
+        return;
+      }
       try {
         await enqueueEinvoiceSyncChunk(
           env,
@@ -159,7 +173,7 @@ async function consumeEinvoiceChunkMessage(
       }
       return;
     }
-    if (result.status === "continue") {
+    if (result.status === "continue" && !isDeployMaintenance(env)) {
       await enqueueEinvoiceSyncChunk(
         env,
         message.body.runId,

@@ -21,7 +21,11 @@ import { accessMiddleware } from "./middleware/access";
 import { connectorContextMiddleware } from "./middleware/connector-context";
 import type { Env, ScheduledSyncQueueMessage } from "./platform/env";
 import { honoFactory } from "./platform/hono";
-import { apiErrorResponse, demoReadOnlyMiddleware } from "./platform/http";
+import {
+  apiErrorResponse,
+  demoReadOnlyMiddleware,
+  isDeployMaintenance,
+} from "./platform/http";
 
 export const app = honoFactory.createApp();
 export const api = honoFactory.createApp();
@@ -53,6 +57,7 @@ app.get("*", async (c) => c.env.ASSETS.fetch(c.req.raw));
 export default {
   fetch: app.fetch,
   async scheduled(_controller, env, ctx) {
+    if (isDeployMaintenance(env)) return;
     ctx.waitUntil(enqueueScheduledSync(env));
   },
   async queue(batch: MessageBatch<ScheduledSyncQueueMessage>, env) {

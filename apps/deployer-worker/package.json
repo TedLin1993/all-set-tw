@@ -1,0 +1,24 @@
+{
+  "name": "@taiwan-fin-hub/deployer-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../../node_modules/@typescript/native/bin/tsc -p tsconfig.json",
+    "typecheck": "node ../../node_modules/@typescript/native/bin/tsc -p tsconfig.json",
+    "test": "vitest run tests",
+    "dev": "wrangler dev --port 8788"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.4.1",
+    "drizzle-orm": "0.45.2",
+    "hono": "^4.5.8",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260621.1",
+    "miniflare": "5.20260804.1-alpha",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.121.0"
+  }
+}

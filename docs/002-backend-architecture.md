@@ -20,26 +20,20 @@
 ```text
 apps/
 ├── web/
-└── worker/
+├── worker/
+├── deployer-web/      # 部署網站 UI；不得依賴 apps/web 的 feature
+└── deployer-worker/   # 部署服務 API；獨立 D1／Queue，不讀取金融資料
     ├── src/
     │   ├── index.ts
+    │   ├── db/
     │   ├── features/
-    │   │   ├── activity/
-    │   │   ├── bank/
-    │   │   ├── classification/
-    │   │   ├── connectors/
-    │   │   ├── dashboard/
-    │   │   ├── exchange-rates/
-    │   │   ├── investments/
-    │   │   ├── invoices/
-    │   │   ├── manual-assets/
-    │   │   ├── net-worth/
-    │   │   ├── notifications/
-    │   │   ├── ocr/
-    │   │   └── sync/
-    │   ├── connectors/
+    │   │   ├── auth/
+    │   │   ├── precheck/
+    │   │   ├── installations/
+    │   │   └── deployments/
     │   ├── middleware/
     │   └── platform/
+    ├── migrations/
     └── tests/
 
 packages/
@@ -48,6 +42,8 @@ packages/
 └── db/
     └── migrations/
 ```
+
+`apps/deployer-worker` 是維護者營運的獨立 Worker，負責 OAuth session、帳戶預檢、安裝／工作紀錄與 Queue consumer。它使用自己的 D1 schema（`apps/deployer-worker/migrations`），不得綁定使用者財務 D1，也不得把部署紀錄混入 `packages/db`。Queue 訊息只帶 job ID。首次安裝與網頁更新都由 Queue 每次 invocation 執行一個步驟；沒有 R2 版本來源時工作進入 `awaiting_release`，不會對目標帳戶建立資源。綁定 `RELEASE_BUCKET` 時會驗證 `release.json` 的 SHA-256 與 `files[].sha256`，再依 Direct Upload `session.buckets` 上傳資產。更新不得重建 D1／Access 或輪替 `CONFIG_ENCRYPTION_KEY`／VAPID。測試以 mock Cloudflare API 與記憶體 R2 進行，不得指向正式 `taiwan-fin-hub` 資源。
 
 ## 相依方向
 
@@ -522,7 +518,10 @@ Cron trigger 只負責向 `SYNC_QUEUE` 送出 scheduler 啟動訊息。Queue con
 invocation 因此不必等待下一個 10 分鐘 Cron，且擁有獨立的 Worker CPU、subrequest 與執行時間額度。
 初始 Cron kick 不延遲。Queue consumer 使用 batch size 1 與 concurrency 1，維持 connector
 逐一執行。是否到期仍由 D1 sync job 狀態判斷；沒有可執行工作時 consumer 不再送出訊息，
-結束本次串接。
+結束本次串接。金融 Worker 若存在 secret `DEPLOY_MAINTENANCE`（由部署服務在網頁更新期間寫入），
+Cron 不會再送出 scheduler 啟動訊息，Queue 對 `run-next-scheduled-sync` 直接 ack，手動同步 API
+回 503。已在途的電子發票／集保分段仍處理當下這段，但不再 enqueue continuation，讓 Queue inflight
+可以結束；更新流程不會自動倒跑 SQL。
 
 電子發票不在單一 connector invocation 內擷取所有品項明細。它使用
 `einvoice_sync_runs` / `einvoice_sync_run_items` 作為 durable work queue：手動或排程

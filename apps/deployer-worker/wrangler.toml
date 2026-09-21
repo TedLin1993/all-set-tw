@@ -1,0 +1,34 @@
+name = "all-set-deployer"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = true
+preview_urls = false
+
+assets = { directory = "../deployer-web/dist", binding = "ASSETS" }
+
+[[queues.producers]]
+binding = "DEPLOY_QUEUE"
+queue = "all-set-deployer-jobs"
+
+[[queues.consumers]]
+queue = "all-set-deployer-jobs"
+max_batch_size = 1
+max_batch_timeout = 1
+max_concurrency = 1
+
+[[d1_databases]]
+binding = "DB"
+database_name = "all-set-deployer"
+# database_id is omitted from this public configuration.
+migrations_dir = "migrations"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# Optional maintainer binding for published release artifacts.
+# [[r2_buckets]]
+# binding = "RELEASE_BUCKET"
+# bucket_name = "all-set-deployer-releases"

@@ -805,3 +805,30 @@ describe("First Bank web sync routes", () => {
     });
   });
 });
+
+describe("deploy maintenance", () => {
+  it("rejects manual connector sync before the handler runs", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/esun/sync",
+      { method: "POST" },
+      { DEPLOY_MAINTENANCE: "1" } as Env,
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "DEPLOY_MAINTENANCE" },
+    });
+    expect(mocks.syncEsun).not.toHaveBeenCalled();
+  });
+
+  it("rejects a new e-invoice run while the worker is being updated", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/einvoice/sync",
+      { method: "POST" },
+      { DEPLOY_MAINTENANCE: "1" } as Env,
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.startEinvoiceSyncRun).not.toHaveBeenCalled();
+  });
+});

@@ -406,4 +406,19 @@ describe("scheduled sync rounds", () => {
       false,
     );
   });
+
+  it("does not start scheduled work during deploy maintenance", async () => {
+    mocks.findNextDueSyncJob.mockResolvedValue(syncJob());
+    mocks.findOpenDefaultScheduleBatchId.mockResolvedValue(null);
+
+    await expect(
+      runSchedulerTick(
+        { ...env(), DEPLOY_MAINTENANCE: "1" },
+        scheduledController,
+      ),
+    ).resolves.toBe(false);
+
+    expect(mocks.finalizeOpenDefaultScheduleBatch).not.toHaveBeenCalled();
+    expect(mocks.findNextDueSyncJob).not.toHaveBeenCalled();
+  });
 });
