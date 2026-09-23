@@ -150,7 +150,7 @@ export function createKgibankConnector(
 
       const browserInstance = await acquireBrowser(
         browserFetcher,
-        config.browserSessionId,
+        hasManualCaptcha ? config.browserSessionId : undefined,
       );
       let appFrame: Frame | undefined;
       let authHeaders: Record<string, string> | undefined;
@@ -446,7 +446,12 @@ async function submitLoginAndWait(
         if (!disabled) setTimeout(() => button.click(), 0);
         return { found: true, disabled, fields };
       }, LOGIN_BUTTON_SELECTOR),
-    );
+    ).catch((error: unknown) => {
+      throw new KgibankConnectionError(
+        "凱基登入送出狀態不明，為避免重複送出帳密，已停止同步。",
+        error,
+      );
+    });
     logKgibankEvent("kgibank_login_stage", {
       stage: "login_submitted",
       buttonFound: submission.found,

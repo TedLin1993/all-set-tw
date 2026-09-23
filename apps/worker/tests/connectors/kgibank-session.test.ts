@@ -30,6 +30,7 @@ function browserScenario(
   outcomes: LoginOutcome[],
   captchaRenderer: CaptchaRenderer = "legacy",
   submitButtonState: SubmitButtonState = "enabled",
+  submissionError?: Error,
 ) {
   const listeners = new Map<string, Set<(value: unknown) => void>>();
   let submitCount = 0;
@@ -85,6 +86,7 @@ function browserScenario(
             source.includes("setTimeout") &&
             source.includes("button.click")
           ) {
+            if (submissionError) throw submissionError;
             const fields = {
               userId: {
                 present: true,
@@ -362,6 +364,45 @@ describe("KGI Bank automatic CAPTCHA login", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it("starts a fresh automatic browser instead of reconnecting a prepared manual session", async () => {
+    const scenario = browserScenario(["success"]);
+    puppeteerMock.sessions.mockResolvedValue([
+      { sessionId: "prepared-session", startTime: Date.now() },
+    ]);
+    puppeteerMock.launch.mockResolvedValue(scenario.browser);
+    const recognize = vi.fn().mockResolvedValue("123456");
+
+    await createKgibankConnector({} as Fetcher, recognize).sync({
+      ...credentials,
+      browserSessionId: "prepared-session",
+      browserSessionExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    expect(puppeteerMock.launch).toHaveBeenCalledOnce();
+    expect(puppeteerMock.connect).not.toHaveBeenCalled();
+  });
+
+  it("does not retry when submitting credentials throws", async () => {
+    const scenario = browserScenario(
+      ["unknown"],
+      "legacy",
+      "enabled",
+      new Error("Protocol error after click"),
+    );
+    puppeteerMock.launch.mockResolvedValue(scenario.browser);
+    const recognize = vi.fn().mockResolvedValue("123456");
+
+    await expect(
+      createKgibankConnector({} as Fetcher, recognize).sync(credentials),
+    ).rejects.toMatchObject({
+      name: KgibankConnectionError.name,
+      message: expect.stringContaining("登入送出狀態不明"),
+    });
+
+    expect(recognize).toHaveBeenCalledOnce();
+    expect(scenario.page.goto).toHaveBeenCalledOnce();
   });
 
   it("does not resubmit credentials when the login result is unknown", async () => {
