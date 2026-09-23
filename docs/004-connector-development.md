@@ -107,6 +107,23 @@ session 重連、瀏覽器建立後的操作與銀行登入不在此重試範圍
 則等待原查詢回應，不重複送出。三種預期 API 回應仍須完整取得才算成功；
 入口失敗以 `card-entry-*` log 區分，錯誤內容須遮罩。
 
+玉山網銀已改走新版 `/esb/`。登入欄位是 `input[name="id"]`、
+`input[name="userName"]`、`input[name="pxssword"]`；重複登入代碼 `9005`
+要再送一次「確定登入」。信用卡即時消費與近一年明細來自
+`iesc.esunbank.com` 的 `realTime/getDetailResult` 與
+`creditLastYear/getFilterResult`，存款明細要先呼叫任務 `home/init` 再查詢。
+即時授權與之後入帳必須沿用原本的消費日期、商店、金額與卡片組成 `sourceId`，
+授權時間只補在 `authorizedAt`。每筆卡片交易的 `raw.esunFeed` 標記來源為
+`realtime` 或 `history`；同名的即時紀錄併入明細並補上時間，不另產生流水號。
+
+即時紀錄常以支付通道命名（如 `LINEPAY*…`），明細則是特店名稱，因此每次同步後
+另在 `bank_transactions` 以 `matched_transaction_id` 把未配對的即時授權連到明細：
+限同卡、同消費日、同幣別、同金額，不比對名稱，依授權時間與 `sourceId` 順序一對一
+分配。明細（未入帳或已入帳）保留正式名稱，只補入授權時間；首次配對時移轉授權的
+個別分類、計算偏好與發票關係。已配對關係不重新分配，被連到的明細不再接受其他授權。
+沒有 `esunFeed` 的舊資料，以「待入帳且 `authorized_at` 含時間」判定為即時授權。
+同日多筆同額消費可能對調刷卡時間，但筆數與金額正確；找不到明細的授權照常顯示。
+
 ## 正規化資料契約
 
 - Connector 回傳 `SyncResult`，資料必須符合 `@taiwan-fin-hub/core`。

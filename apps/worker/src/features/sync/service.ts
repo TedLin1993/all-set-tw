@@ -1,5 +1,6 @@
 import { beginActivityRun } from "./activity-detail-repository";
 import { prepareCtbcAuthorizationWrite } from "./ctbc-authorizations";
+import { prepareEsunAuthorizationWrite } from "./esun-authorizations";
 import { prepareSinopacAuthorizationWrite } from "./sinopac-authorizations";
 import { prepareObankTimeDepositWrite } from "./obank-time-deposits";
 import {
@@ -494,19 +495,20 @@ export async function syncEsun(
     );
   }
 
+  const authorizationStatements = await prepareEsunAuthorizationWrite(
+    env.DB,
+    records,
+  );
   const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
-    afterPromoteStatements:
-      bankAccounts.length > 0
-        ? [
-            linkCanonicalBankAccountsStatement(env.DB),
-            ...reconcileEsunLifecycleShadowStatements(env.DB),
-            ...reconcileEsunSingleCardSummaryAccountStatements(env.DB),
-          ]
-        : [
-            ...reconcileEsunLifecycleShadowStatements(env.DB),
-            ...reconcileEsunSingleCardSummaryAccountStatements(env.DB),
-          ],
+    afterPromoteStatements: [
+      ...(bankAccounts.length > 0
+        ? [linkCanonicalBankAccountsStatement(env.DB)]
+        : []),
+      ...reconcileEsunLifecycleShadowStatements(env.DB),
+      ...reconcileEsunSingleCardSummaryAccountStatements(env.DB),
+      ...authorizationStatements,
+    ],
     finalizeStatements,
   });
 
