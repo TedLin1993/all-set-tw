@@ -24,10 +24,12 @@ const credentials = {
 
 type LoginOutcome = "captcha" | "credential" | "success" | "unknown";
 type CaptchaRenderer = "ionic" | "legacy";
+type SubmitButtonState = "enabled" | "disabled" | "missing";
 
 function browserScenario(
   outcomes: LoginOutcome[],
   captchaRenderer: CaptchaRenderer = "legacy",
+  submitButtonState: SubmitButtonState = "enabled",
 ) {
   const listeners = new Map<string, Set<(value: unknown) => void>>();
   let submitCount = 0;
@@ -83,6 +85,12 @@ function browserScenario(
             source.includes("setTimeout") &&
             source.includes("button.click")
           ) {
+            if (submitButtonState === "missing") {
+              return { found: false, disabled: false };
+            }
+            if (submitButtonState === "disabled") {
+              return { found: true, disabled: true };
+            }
             currentOutcome = outcomes[submitCount] ?? "captcha";
             submitCount += 1;
             if (currentOutcome === "credential") {
@@ -113,7 +121,7 @@ function browserScenario(
                 ),
               );
             }
-            return undefined;
+            return { found: true, disabled: false };
           }
           if (source.includes("innerText")) {
             return currentOutcome === "captcha" ? "驗證碼有誤" : "";
@@ -337,6 +345,25 @@ describe("KGI Bank automatic CAPTCHA login", () => {
       vi.useRealTimers();
     }
   });
+
+  it.each([
+    ["missing", "沒有找到登入按鈕"],
+    ["disabled", "登入表單尚未完成"],
+  ] as const)(
+    "stops before waiting when the submit button is %s",
+    async (buttonState, message) => {
+      const scenario = browserScenario(["unknown"], "legacy", buttonState);
+      puppeteerMock.launch.mockResolvedValue(scenario.browser);
+      const recognize = vi.fn().mockResolvedValue("123456");
+
+      await expect(
+        createKgibankConnector({} as Fetcher, recognize).sync(credentials),
+      ).rejects.toThrow(message);
+
+      expect(recognize).toHaveBeenCalledOnce();
+      expect(scenario.submitCount).toBe(0);
+    },
+  );
 
   it("keeps the prepared manual CAPTCHA session as a fallback", async () => {
     const scenario = browserScenario(["success"]);

@@ -382,33 +382,76 @@ async function submitLoginAndWait(
   let tokenRequested = false;
   let tokenStatus: number | undefined;
   let tokenBody: Record<string, unknown> | undefined;
+  let tokenBodyReady = false;
+  let tokenResponseSequence = 0;
   const onRequest = (request: HTTPRequest) => {
-    if (request.url().includes(TOKEN_PATH)) tokenRequested = true;
+    if (!request.url().includes(TOKEN_PATH)) return;
+    if (!tokenRequested) {
+      logKgibankEvent("kgibank_login_stage", {
+        stage: "token_requested",
+      });
+    }
+    tokenRequested = true;
   };
-  const onResponse = async (response: HTTPResponse) => {
+  const onResponse = (response: HTTPResponse) => {
     if (!response.url().includes(TOKEN_PATH)) return;
-    const body = await response.json().catch(() => undefined);
-    tokenBody = isRecord(body) ? body : undefined;
+    const sequence = ++tokenResponseSequence;
     tokenStatus = response.status();
+    tokenBody = undefined;
+    tokenBodyReady = false;
+    logKgibankEvent("kgibank_login_stage", {
+      stage: "token_response",
+      tokenStatus,
+    });
+    void response
+      .json()
+      .then((body) => {
+        if (sequence === tokenResponseSequence) {
+          tokenBody = isRecord(body) ? body : undefined;
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (sequence === tokenResponseSequence) tokenBodyReady = true;
+      });
   };
   page.on("request", onRequest);
   page.on("response", onResponse);
   try {
     await fillInput(frame, 'input[formcontrolname="verifyCode"]', captcha);
-    await withActionTimeout(
+    const submission = await withActionTimeout(
       frame.evaluate(() => {
         const button = document.querySelector<HTMLButtonElement>(
           'button[type="submit"]',
         );
-        if (button) setTimeout(() => button.click(), 0);
+        if (!button) return { found: false, disabled: false };
+        const disabled =
+          button.disabled || button.getAttribute("aria-disabled") === "true";
+        if (!disabled) setTimeout(() => button.click(), 0);
+        return { found: true, disabled };
       }),
     );
+    logKgibankEvent("kgibank_login_stage", {
+      stage: "login_submitted",
+      buttonFound: submission.found,
+      buttonDisabled: submission.disabled,
+      framePath: describeKgibankUrl(frame.url()),
+    });
+    if (!submission.found) {
+      throw new KgibankConnectionError("凱基登入頁沒有找到登入按鈕。");
+    }
+    if (submission.disabled) {
+      throw new KgibankConnectionError(
+        "凱基登入表單尚未完成，為避免重複送出帳密，已停止同步。",
+      );
+    }
 
     let takeoverConfirmed = false;
+    let lastPageOutcome: ReturnType<typeof classifyKgibankLoginText> =
+      "unknown";
     const deadline = Date.now() + LOGIN_RESULT_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      if (tokenStatus === 200) return "success";
-      if (tokenStatus !== undefined) {
+      if (tokenStatus !== undefined && tokenBodyReady) {
         if (tokenBody?.isSSOExsit === true && !takeoverConfirmed) {
           // 已在其他裝置登入：與使用者手動操作相同，確認「繼續登入」接管。
           takeoverConfirmed = await confirmSessionTakeover(frame);
@@ -418,21 +461,41 @@ async function submitLoginAndWait(
             });
             tokenStatus = undefined;
             tokenBody = undefined;
+            tokenBodyReady = false;
           }
+        } else if (tokenStatus === 200) {
+          return "success";
         } else {
           return "credential";
         }
       }
       const pageText = await readFrameText(frame);
       const classified = classifyKgibankLoginText(pageText);
+      lastPageOutcome = classified;
       if (classified === "credential") return "credential";
       if (classified === "captcha" && !tokenRequested) return "captcha";
       await delay(LOGIN_RESULT_POLL_MS);
     }
-    return tokenStatus === 200 ? "success" : "unknown";
+    logKgibankEvent("kgibank_login_timeout", {
+      tokenRequested,
+      tokenStatus: tokenStatus ?? null,
+      tokenBodyReady,
+      takeoverConfirmed,
+      pageOutcome: lastPageOutcome,
+      framePath: describeKgibankUrl(frame.url()),
+    });
+    return "unknown";
   } finally {
     page.off("request", onRequest);
     page.off("response", onResponse);
+  }
+}
+
+function describeKgibankUrl(value: string) {
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return "unrecognized";
   }
 }
 
