@@ -719,14 +719,29 @@ async function readFrameText(frame: Frame) {
 async function fillInput(frame: Frame, selector: string, value: string) {
   await frame.waitForSelector(selector, { timeout: LOGIN_FORM_TIMEOUT_MS });
   await withActionTimeout(
-    frame.evaluate((target) => {
-      const input = document.querySelector<HTMLInputElement>(target);
-      if (!input) return;
-      input.value = "";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    }, selector),
+    frame.evaluate(
+      (target, nextValue) => {
+        const input = document.querySelector<HTMLInputElement>(target);
+        if (!input) return;
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        if (!setter) return;
+        setter.call(input, nextValue);
+        input.dispatchEvent(
+          new InputEvent("input", {
+            bubbles: true,
+            inputType: "insertText",
+            data: nextValue,
+          }),
+        );
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+      selector,
+      value,
+    ),
   );
-  await frame.type(selector, value, { delay: 20 });
 }
 
 /** 近 3 個月（含今日），以台灣時間表示，格式與網銀前端相同。 */

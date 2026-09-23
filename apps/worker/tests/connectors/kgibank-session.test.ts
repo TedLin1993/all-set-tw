@@ -266,6 +266,12 @@ describe("KGI Bank automatic CAPTCHA login", () => {
       6,
     );
     expect(result.bankAccounts).toHaveLength(1);
+    expect(scenario.frame.type).not.toHaveBeenCalled();
+    expect(scenario.frame.evaluate).toHaveBeenCalledWith(
+      expect.any(Function),
+      "#loginInputIdNo",
+      credentials.userId,
+    );
   });
 
   it("loads a fresh CAPTCHA after rejection and succeeds on the next OCR attempt", async () => {
