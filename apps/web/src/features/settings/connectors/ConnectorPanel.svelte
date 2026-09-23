@@ -101,8 +101,6 @@
       connectorId === "hncb" ||
       connectorId === "kgibank",
   );
-  // 凱基不自動辨識驗證碼，每次同步都由使用者輸入。
-  const manualCaptchaOnly = $derived(connectorId === "kgibank");
   const browserBankSessionAvailable = $derived(
     browserBank && Boolean($settings.data?.sessionAvailable),
   );
@@ -784,20 +782,6 @@
             ><KeyRound class="size-4" />{$prepareBrowserBank.isPending
               ? "取得中…"
               : "人工重新驗證"}</Button
-          >
-        {:else if manualCaptchaOnly}
-          <Button
-            size="sm"
-            disabled={demoMode ||
-              $prepareBrowserBank.isPending ||
-              $verifyBrowserBank.isPending}
-            onclick={() => {
-              error = "";
-              $prepareBrowserBank.mutate();
-            }}
-            ><KeyRound class="size-4" />{$prepareBrowserBank.isPending
-              ? "取得中…"
-              : "取得驗證碼並同步"}</Button
           >
         {:else}
           <Button

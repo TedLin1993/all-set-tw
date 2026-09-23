@@ -188,8 +188,8 @@ session 重連、瀏覽器建立後的操作與銀行登入不在此重試範圍
 - 華南分頁必須常駐 dialog 自動關閉 handler。未預期的 `alert` 會凍結頁面 JavaScript 並使自動化停止回應；送出登入時另有 handler 記錄訊息做成敗分類，兩者並存。
 - 台新登入後若出現「訊息通知／每三個月變更一次密碼」彈窗，必須點「關閉」後再抓資料。不得點「前往修改」或「3個月後提醒」，也不得停在彈窗卻因為 session API 仍可用而回報同步成功。
 - 新 connector 必須透過 D1 migration 建立 `<connectorId>:all` sync job，預設停用。
-- 凱基只支援人工輸入 6 位數圖形驗證碼：`prepareChallenge` 以 Browser Run 開啟登入頁、填入帳密並回傳驗證碼圖片，同步時接回同一 Browser session 送出。每次同步都需要驗證碼，因此排程會直接標記 `needs_user_action`，不會自動登入。
-- 凱基同一身分證只允許單一登入。遇到 `connect/token` 回應 `isSSOExsit` 時，手動同步比照使用者操作確認「繼續登入」，會登出行動銀行 App；同步結束（成功或失敗）都呼叫 `Account/AccountLogout/Logout` 釋放登入。
+- 凱基每次同步都需要 6 位數圖形驗證碼。手動與排程同步預設以 Workers AI 自動辨識，每次登入最多嘗試三張新驗證碼；連續失敗時標記 `needs_user_action`。`prepareChallenge` 保留人工 fallback，以 Browser Run 開啟登入頁、填入帳密並回傳驗證碼圖片，同步時接回同一 Browser session 送出。
+- 凱基同一身分證只允許單一登入。遇到 `connect/token` 回應 `isSSOExsit` 時，手動與排程同步都比照使用者操作確認「繼續登入」，會登出行動銀行 App；同步結束（成功或失敗）都呼叫 `Account/AccountLogout/Logout` 釋放登入。
 - 凱基連續三次密碼錯誤會停權。`connect/token` 被拒絕或頁面顯示密碼／代號錯誤時一律標記 `needs_user_action` 並清除驗證狀態，不得重試；只有尚未送出帳密且頁面明確顯示驗證碼錯誤時才視為驗證碼錯誤。
 - 凱基資料由登入後頁面自身 API 請求的授權 header（`authorization`、`ocp-apim-subscription-key`、`x-c-*`）於頁面內呼叫 `TwdDemandDepositDetail/AcctQuery` 與 `TxnQuery`；交易 `sourceId` 以帳號、秒精度交易時間、金額與交易後餘額雜湊，不依賴 `recNo`。
 
