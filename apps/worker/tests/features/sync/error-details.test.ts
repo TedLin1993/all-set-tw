@@ -40,7 +40,25 @@ describe("sync error details", () => {
     expect(safeErrorMessage(new Error("連線   暫時\n失敗"))).toBe(
       "連線 暫時 失敗",
     );
-    expect(safeErrorMessage(new Error("a".repeat(301)))).toHaveLength(300);
+    expect(safeErrorMessage(new Error("失".repeat(301)))).toHaveLength(300);
+  });
+
+  it("redacts identifiers and secrets from the persisted message", () => {
+    const message = safeErrorMessage(
+      new Error(
+        "登入失敗 A123456789 帳號 0012345678901 手機 0912345678 password=hunter2 token abcdefghijklmnopqrstuvwxyz https://bank.example/login?id=A123456789",
+      ),
+    );
+
+    expect(message).toBe(
+      "登入失敗 [redacted] 帳號 [redacted] 手機 [redacted] password=[redacted] token [redacted] [URL]",
+    );
+  });
+
+  it("keeps short numbers such as amounts and dates readable", () => {
+    expect(safeErrorMessage(new Error("金額 1,234,567 日期 20260923"))).toBe(
+      "金額 1,234,567 日期 20260923",
+    );
   });
 
   it("redacts sensitive values from structured log diagnostics", () => {
