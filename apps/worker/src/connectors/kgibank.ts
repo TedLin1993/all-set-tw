@@ -423,27 +423,50 @@ async function submitLoginAndWait(
     await fillInput(frame, 'input[formcontrolname="verifyCode"]', captcha);
     const submission = await withActionTimeout(
       frame.evaluate((buttonSelector) => {
+        const fieldState = (selector: string) => {
+          const input = document.querySelector<HTMLInputElement>(selector);
+          return {
+            present: Boolean(input),
+            hasValue: Boolean(input?.value),
+            valid: Boolean(input?.classList.contains("ng-valid")),
+            invalid: Boolean(input?.classList.contains("ng-invalid")),
+          };
+        };
+        const fields = {
+          userId: fieldState("#loginInputIdNo"),
+          account: fieldState("#loginInputUserNo"),
+          password: fieldState("#loginInputPassword"),
+          captcha: fieldState('input[formcontrolname="verifyCode"]'),
+        };
         const button =
           document.querySelector<HTMLButtonElement>(buttonSelector);
-        if (!button) return { found: false, disabled: false };
+        if (!button) return { found: false, disabled: false, fields };
         const disabled =
           button.disabled || button.getAttribute("aria-disabled") === "true";
         if (!disabled) setTimeout(() => button.click(), 0);
-        return { found: true, disabled };
+        return { found: true, disabled, fields };
       }, LOGIN_BUTTON_SELECTOR),
     );
     logKgibankEvent("kgibank_login_stage", {
       stage: "login_submitted",
       buttonFound: submission.found,
       buttonDisabled: submission.disabled,
+      fields: submission.fields,
       framePath: describeKgibankUrl(frame.url()),
     });
     if (!submission.found) {
       throw new KgibankConnectionError("凱基登入頁沒有找到登入按鈕。");
     }
     if (submission.disabled) {
+      const invalidFields = Object.entries(submission.fields)
+        .filter(
+          ([, state]) => !state.present || !state.hasValue || state.invalid,
+        )
+        .map(([field]) => field);
       throw new KgibankConnectionError(
-        "凱基登入表單尚未完成，為避免重複送出帳密，已停止同步。",
+        invalidFields.length > 0
+          ? `凱基登入表單未通過格式檢查（${invalidFields.join(", ")}），請重新確認該欄位。`
+          : "凱基登入表單尚未完成，為避免重複送出帳密，已停止同步。",
       );
     }
 

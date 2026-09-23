@@ -24,7 +24,7 @@ const credentials = {
 
 type LoginOutcome = "captcha" | "credential" | "success" | "unknown";
 type CaptchaRenderer = "ionic" | "legacy";
-type SubmitButtonState = "enabled" | "disabled" | "missing";
+type SubmitButtonState = "enabled" | "disabled" | "invalid-account" | "missing";
 
 function browserScenario(
   outcomes: LoginOutcome[],
@@ -85,15 +85,46 @@ function browserScenario(
             source.includes("setTimeout") &&
             source.includes("button.click")
           ) {
+            const fields = {
+              userId: {
+                present: true,
+                hasValue: true,
+                valid: true,
+                invalid: false,
+              },
+              account: {
+                present: true,
+                hasValue: true,
+                valid: true,
+                invalid: false,
+              },
+              password: {
+                present: true,
+                hasValue: true,
+                valid: true,
+                invalid: false,
+              },
+              captcha: {
+                present: true,
+                hasValue: true,
+                valid: true,
+                invalid: false,
+              },
+            };
             const buttonSelector = String(args[0] ?? "");
             if (
               submitButtonState === "missing" ||
               !buttonSelector.includes("button.btn.btn-primary.w-100")
             ) {
-              return { found: false, disabled: false };
+              return { found: false, disabled: false, fields };
             }
             if (submitButtonState === "disabled") {
-              return { found: true, disabled: true };
+              return { found: true, disabled: true, fields };
+            }
+            if (submitButtonState === "invalid-account") {
+              fields.account.valid = false;
+              fields.account.invalid = true;
+              return { found: true, disabled: true, fields };
             }
             currentOutcome = outcomes[submitCount] ?? "captcha";
             submitCount += 1;
@@ -125,7 +156,7 @@ function browserScenario(
                 ),
               );
             }
-            return { found: true, disabled: false };
+            return { found: true, disabled: false, fields };
           }
           if (source.includes("innerText")) {
             return currentOutcome === "captcha" ? "驗證碼有誤" : "";
@@ -353,6 +384,7 @@ describe("KGI Bank automatic CAPTCHA login", () => {
   it.each([
     ["missing", "沒有找到登入按鈕"],
     ["disabled", "登入表單尚未完成"],
+    ["invalid-account", "未通過格式檢查（account）"],
   ] as const)(
     "stops before waiting when the submit button is %s",
     async (buttonState, message) => {
