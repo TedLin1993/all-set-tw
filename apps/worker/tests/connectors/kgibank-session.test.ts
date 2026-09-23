@@ -137,7 +137,7 @@ function browserScenario(
                   "https://ib.kgibank.com.tw/gateway/prod-oidc/connect/token",
                 ),
               );
-              emit("response", response(400));
+              emit("response", response(400, { error: "invalid_grant" }));
             }
             if (currentOutcome === "success") {
               emit(
@@ -274,6 +274,11 @@ describe("KGI Bank automatic CAPTCHA login", () => {
       "#loginInputIdNo",
       credentials.userId,
     );
+    const submissionCallback = scenario.frame.evaluate.mock.calls.find(([fn]) =>
+      String(fn).includes("button.click"),
+    )?.[0];
+    expect(String(submissionCallback)).not.toContain("fieldState");
+    expect(String(submissionCallback)).not.toContain("__name");
   });
 
   it("loads a fresh CAPTCHA after rejection and succeeds on the next OCR attempt", async () => {

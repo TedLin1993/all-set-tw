@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseKgibankData } from "@taiwan-fin-hub/connectors";
 import {
   classifyKgibankLoginText,
+  classifyKgibankTokenResponse,
   createKgibankConnector,
   kgibankCaptchaDataUrl,
   KgibankVerificationRequiredError,
@@ -152,6 +153,28 @@ describe("KGI Bank login classification", () => {
   it("does not classify unrelated page text", () => {
     expect(classifyKgibankLoginText("歡迎使用凱基網路銀行")).toBe("unknown");
   });
+
+  it.each([
+    [400, { error: "invalid_grant" }],
+    [401, { message: "使用者代號錯誤" }],
+  ])(
+    "treats an explicit token credential rejection as credential",
+    (status, body) => {
+      expect(classifyKgibankTokenResponse(status, body)).toBe("credential");
+    },
+  );
+
+  it.each([
+    [400, { error: "temporarily_unavailable" }],
+    [429, { error: "invalid_grant" }],
+    [500, { message: "upstream unavailable" }],
+    [503, undefined],
+  ])(
+    "does not report a non-credential token failure as bad credentials",
+    (status, body) => {
+      expect(classifyKgibankTokenResponse(status, body)).toBe("unknown");
+    },
+  );
 });
 
 describe("KGI Bank sync window", () => {

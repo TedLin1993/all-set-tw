@@ -423,21 +423,34 @@ async function submitLoginAndWait(
     await fillInput(frame, 'input[formcontrolname="verifyCode"]', captcha);
     const submission = await withActionTimeout(
       frame.evaluate((buttonSelector) => {
-        const fieldState = (selector: string) => {
-          const input = document.querySelector<HTMLInputElement>(selector);
-          return {
-            present: Boolean(input),
-            hasValue: Boolean(input?.value),
-            valid: Boolean(input?.classList.contains("ng-valid")),
-            invalid: Boolean(input?.classList.contains("ng-invalid")),
-          };
+        const selectors = {
+          userId: "#loginInputIdNo",
+          account: "#loginInputUserNo",
+          password: "#loginInputPassword",
+          captcha: 'input[formcontrolname="verifyCode"]',
         };
-        const fields = {
-          userId: fieldState("#loginInputIdNo"),
-          account: fieldState("#loginInputUserNo"),
-          password: fieldState("#loginInputPassword"),
-          captcha: fieldState('input[formcontrolname="verifyCode"]'),
-        };
+        const fields = Object.fromEntries(
+          Object.entries(selectors).map(([name, selector]) => {
+            const input = document.querySelector<HTMLInputElement>(selector);
+            return [
+              name,
+              {
+                present: Boolean(input),
+                hasValue: Boolean(input?.value),
+                valid: Boolean(input?.classList.contains("ng-valid")),
+                invalid: Boolean(input?.classList.contains("ng-invalid")),
+              },
+            ];
+          }),
+        ) as Record<
+          keyof typeof selectors,
+          {
+            present: boolean;
+            hasValue: boolean;
+            valid: boolean;
+            invalid: boolean;
+          }
+        >;
         const button =
           document.querySelector<HTMLButtonElement>(buttonSelector);
         if (!button) return { found: false, disabled: false, fields };
@@ -495,7 +508,7 @@ async function submitLoginAndWait(
         } else if (tokenStatus === 200) {
           return "success";
         } else {
-          return "credential";
+          return classifyKgibankTokenResponse(tokenStatus, tokenBody);
         }
       }
       const pageText = await readFrameText(frame);
@@ -518,6 +531,20 @@ async function submitLoginAndWait(
     page.off("request", onRequest);
     page.off("response", onResponse);
   }
+}
+
+export function classifyKgibankTokenResponse(
+  status: number,
+  body: Record<string, unknown> | undefined,
+): "success" | "credential" | "unknown" {
+  if (status === 200) return "success";
+  if (status === 429 || status >= 500 || !body) return "unknown";
+  const evidence = JSON.stringify(body).toLowerCase();
+  return /invalid[_ -]?grant|invalid[_ -]?credentials?|credential.*(?:invalid|reject)|密碼錯誤|使用者代號錯誤|帳號密碼不符|停權|已鎖定/.test(
+    evidence,
+  )
+    ? "credential"
+    : "unknown";
 }
 
 function describeKgibankUrl(value: string) {
