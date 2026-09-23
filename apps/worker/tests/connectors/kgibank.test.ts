@@ -4,6 +4,7 @@ import {
   classifyKgibankLoginText,
   createKgibankConnector,
   KgibankVerificationRequiredError,
+  parseCaptchaDataUrl,
   syncDateRange,
 } from "../../src/connectors/kgibank";
 
@@ -173,7 +174,7 @@ describe("KGI Bank sync preconditions", () => {
   };
   const fetcher = {} as Fetcher;
 
-  it("requires a user-entered captcha before opening a browser", async () => {
+  it("requires an OCR recognizer or a user-entered captcha before opening a browser", async () => {
     await expect(
       createKgibankConnector(fetcher).sync(credentials),
     ).rejects.toBeInstanceOf(KgibankVerificationRequiredError);
@@ -194,5 +195,19 @@ describe("KGI Bank sync preconditions", () => {
     await expect(
       createKgibankConnector(fetcher).sync({ captcha: "123456" }),
     ).rejects.toThrow("請填寫身分證字號");
+  });
+});
+
+describe("KGI Bank captcha image", () => {
+  it("decodes the login data URL for Workers AI", () => {
+    const result = parseCaptchaDataUrl("data:image/png;base64,AQID");
+    expect(result.contentType).toBe("image/png");
+    expect([...new Uint8Array(result.bytes)]).toEqual([1, 2, 3]);
+  });
+
+  it("rejects unsupported captcha image formats", () => {
+    expect(() => parseCaptchaDataUrl("data:image/svg+xml;base64,AQID")).toThrow(
+      "格式無法辨識",
+    );
   });
 });

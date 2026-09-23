@@ -15,8 +15,8 @@ import {
 } from "@taiwan-fin-hub/connectors";
 import type { SyncResult } from "@taiwan-fin-hub/core";
 
-// 凱基網銀僅支援人工輸入圖形驗證碼：prepareKgibankCaptcha 開啟登入頁並回傳
-// 驗證碼圖片，使用者輸入後由 sync 接回同一個 Browser session 送出登入。
+// 凱基網銀預設由 Workers AI 辨識圖形驗證碼；prepareKgibankCaptcha
+// 保留人工 fallback，會讓 sync 接回同一個 Browser session 送出登入。
 const LOGIN_URL = "https://ib.kgibank.com.tw/ibank/";
 const APP_ORIGIN = "https://ib.kgibank.com.tw";
 const GATEWAY_PATH = "/gateway/prod-aggregators/api/";
@@ -26,6 +26,7 @@ const ACCOUNTS_PATH = `${GATEWAY_PATH}Deposit/TwdDemandDepositDetail/AcctQuery`;
 const TRANSACTIONS_PATH = `${GATEWAY_PATH}Deposit/TwdDemandDepositDetail/TxnQuery`;
 const SYNC_MONTHS = 3;
 
+export const KGIBANK_AUTO_LOGIN_ATTEMPTS = 3;
 const CAPTCHA_KEEP_ALIVE_MS = 150_000;
 const CAPTCHA_VALIDITY_MS = 120_000;
 const LOGIN_FORM_TIMEOUT_MS = 30_000;
@@ -104,7 +105,14 @@ type PreparedKgibankCaptcha = {
   captchaDigitCount: number;
 };
 
-export function createKgibankConnector(browserFetcher?: Fetcher) {
+export function createKgibankConnector(
+  browserFetcher?: Fetcher,
+  recognizeCaptcha?: (
+    imageBytes: ArrayBuffer,
+    contentType: string,
+    digitCount: number,
+  ) => Promise<string>,
+) {
   return {
     id: "kgibank" as const,
     async sync(
@@ -115,20 +123,24 @@ export function createKgibankConnector(browserFetcher?: Fetcher) {
       if (!browserFetcher) {
         throw new KgibankConnectionError("Browser binding is unavailable.");
       }
-      if (!config.browserSessionId || !config.captcha) {
+      const hasManualCaptcha = Boolean(
+        config.browserSessionId && config.captcha,
+      );
+      if (hasManualCaptcha) {
+        if (
+          !config.browserSessionExpiresAt ||
+          new Date(config.browserSessionExpiresAt) <= new Date()
+        ) {
+          throw new KgibankVerificationRequiredError(
+            "凱基圖形驗證碼已逾時，請重新取得驗證碼。",
+          );
+        }
+        assertCaptcha(config.captcha ?? "");
+      } else if (!recognizeCaptcha) {
         throw new KgibankVerificationRequiredError(
-          "凱基銀行每次同步都需要輸入圖形驗證碼，請先取得驗證碼。",
+          "凱基圖形驗證碼無法自動辨識，請改用人工輸入。",
         );
       }
-      if (
-        !config.browserSessionExpiresAt ||
-        new Date(config.browserSessionExpiresAt) <= new Date()
-      ) {
-        throw new KgibankVerificationRequiredError(
-          "凱基圖形驗證碼已逾時，請重新取得驗證碼。",
-        );
-      }
-      assertCaptcha(config.captcha);
 
       const browserInstance = await acquireBrowser(
         browserFetcher,
@@ -142,27 +154,20 @@ export function createKgibankConnector(browserFetcher?: Fetcher) {
         await configurePage(page);
         const headerWatch = watchAuthHeaders(page);
         try {
-          const loginFrame = await findLoginFrame(page);
-          const outcome = await submitLoginAndWait(
-            page,
-            loginFrame,
-            config.captcha,
-          );
-          logKgibankEvent("kgibank_login_result", { outcome });
-          if (outcome === "credential") {
-            throw new KgibankCredentialRejectedError(
-              "凱基銀行拒絕登入：身分證字號、使用者代號或密碼錯誤。為避免帳號停權，已停止同步，請確認帳密後再試。",
+          if (hasManualCaptcha) {
+            const loginFrame = await findLoginFrame(page);
+            const outcome = await submitLoginAndWait(
+              page,
+              loginFrame,
+              config.captcha ?? "",
             );
-          }
-          if (outcome === "captcha") {
-            throw new KgibankCaptchaRejectedError(
-              "凱基圖形驗證碼錯誤，請重新取得驗證碼。",
-            );
-          }
-          if (outcome !== "success") {
-            throw new KgibankConnectionError(
-              "凱基登入沒有在期限內完成，請稍後再試。",
-            );
+            logKgibankEvent("kgibank_login_result", {
+              mode: "manual",
+              outcome,
+            });
+            assertSuccessfulLogin(outcome);
+          } else {
+            await loginWithOcr(page, config, recognizeCaptcha!);
           }
           authHeaders = await waitForAuthHeaders(headerWatch);
         } finally {
@@ -256,7 +261,7 @@ export async function prepareKgibankCaptcha(
     await fillInput(frame, "#loginInputIdNo", config.userId ?? "");
     await fillInput(frame, "#loginInputUserNo", config.account ?? "");
     await fillInput(frame, "#loginInputPassword", config.password ?? "");
-    const captchaImage = await readCaptchaImage(frame);
+    const captcha = await readCaptchaImage(frame);
     const sessionId = browserInstance.sessionId();
     await browserInstance.disconnect();
     preserved = true;
@@ -266,13 +271,103 @@ export async function prepareKgibankCaptcha(
         Date.now() + CAPTCHA_VALIDITY_MS,
       ).toISOString(),
       captchaDigitCount: KGIBANK_CAPTCHA_DIGIT_COUNT,
-      captchaImage,
+      captchaImage: captcha.dataUrl,
     };
   } catch (error) {
     throw mapKgibankError(error);
   } finally {
     if (!preserved) await closeKgibankBrowser(browserInstance);
   }
+}
+
+async function loginWithOcr(
+  page: Page,
+  config: KgibankConfig,
+  recognizeCaptcha: (
+    imageBytes: ArrayBuffer,
+    contentType: string,
+    digitCount: number,
+  ) => Promise<string>,
+) {
+  for (let attempt = 1; attempt <= KGIBANK_AUTO_LOGIN_ATTEMPTS; attempt += 1) {
+    try {
+      const { frame, captcha } = await openLoginAndCaptureCaptcha(page, config);
+      logKgibankEvent("kgibank_login_stage", {
+        attempt,
+        stage: "captcha_captured",
+      });
+      const answer = await recognizeCaptcha(
+        captcha.bytes,
+        captcha.contentType,
+        KGIBANK_CAPTCHA_DIGIT_COUNT,
+      );
+      assertCaptcha(answer);
+      logKgibankEvent("kgibank_login_stage", {
+        attempt,
+        stage: "captcha_recognized",
+      });
+      const outcome = await submitLoginAndWait(page, frame, answer);
+      logKgibankEvent("kgibank_login_result", {
+        attempt,
+        mode: "automatic",
+        outcome,
+      });
+      if (outcome === "success") return;
+      if (outcome === "credential") throw credentialRejectedError();
+      if (outcome === "unknown") {
+        throw new KgibankConnectionError(
+          "凱基登入沒有在期限內完成，為避免重複送出帳密，已停止同步。",
+        );
+      }
+      throw new KgibankCaptchaRejectedError(
+        "凱基圖形驗證碼錯誤，請重新取得驗證碼。",
+      );
+    } catch (error) {
+      // 帳密錯誤會累計停權次數，絕對不可因 OCR retry 重送。
+      if (
+        error instanceof KgibankCredentialRejectedError ||
+        error instanceof KgibankConnectionError
+      ) {
+        throw error;
+      }
+      logKgibankEvent("kgibank_auto_login_attempt_failed", {
+        attempt,
+        errorName: error instanceof Error ? error.name : typeof error,
+        message: safeKgibankMessage(
+          error instanceof Error ? error.message : String(error),
+        ),
+      });
+    }
+  }
+  throw new KgibankVerificationRequiredError(
+    `凱基自動驗證連續失敗 ${KGIBANK_AUTO_LOGIN_ATTEMPTS} 次，請改用人工驗證。`,
+  );
+}
+
+async function openLoginAndCaptureCaptcha(page: Page, config: KgibankConfig) {
+  await gotoAllowingTimeout(page, LOGIN_URL);
+  const frame = await findLoginFrame(page);
+  await fillInput(frame, "#loginInputIdNo", config.userId ?? "");
+  await fillInput(frame, "#loginInputUserNo", config.account ?? "");
+  await fillInput(frame, "#loginInputPassword", config.password ?? "");
+  return { frame, captcha: await readCaptchaImage(frame) };
+}
+
+function assertSuccessfulLogin(outcome: KgibankLoginOutcome) {
+  if (outcome === "success") return;
+  if (outcome === "credential") throw credentialRejectedError();
+  if (outcome === "captcha") {
+    throw new KgibankCaptchaRejectedError(
+      "凱基圖形驗證碼錯誤，請重新取得驗證碼。",
+    );
+  }
+  throw new KgibankConnectionError("凱基登入沒有在期限內完成，請稍後再試。");
+}
+
+function credentialRejectedError() {
+  return new KgibankCredentialRejectedError(
+    "凱基銀行拒絕登入：身分證字號、使用者代號或密碼錯誤。為避免帳號停權，已停止同步，請確認帳密後再試。",
+  );
 }
 
 async function submitLoginAndWait(
@@ -468,7 +563,27 @@ async function readCaptchaImage(frame: Frame) {
   if (!/^data:image\/[a-z]+;base64,/.test(src)) {
     throw new KgibankConnectionError("凱基登入頁的驗證碼格式無法辨識。");
   }
-  return src;
+  return parseCaptchaDataUrl(src);
+}
+
+export function parseCaptchaDataUrl(dataUrl: string) {
+  const match =
+    /^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(
+      dataUrl,
+    );
+  if (!match?.[1] || !match[2]) {
+    throw new KgibankConnectionError("凱基登入頁的驗證碼格式無法辨識。");
+  }
+  const binary = atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return {
+    dataUrl,
+    contentType: match[1],
+    bytes: bytes.buffer,
+  };
 }
 
 async function findLoginFrame(page: Page): Promise<Frame> {

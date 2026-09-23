@@ -1634,10 +1634,18 @@ export async function syncKgibank(
     ReturnType<ReturnType<typeof createKgibankConnector>["sync"]>
   >;
   try {
-    result = await createKgibankConnector(env.BROWSER).sync(
-      config,
-      settings.sync_cursor ?? undefined,
-    );
+    result = await createKgibankConnector(
+      env.BROWSER,
+      async (imageBytes, contentType, digitCount) =>
+        (
+          await recognizeNumericCaptcha(
+            env.AI,
+            imageBytes,
+            contentType,
+            digitCount,
+          )
+        ).number,
+    ).sync(config, settings.sync_cursor ?? undefined);
   } catch (error) {
     await updateConnectorEncryptedConfig(
       env.DB,
