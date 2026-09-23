@@ -85,7 +85,11 @@ function browserScenario(
             source.includes("setTimeout") &&
             source.includes("button.click")
           ) {
-            if (submitButtonState === "missing") {
+            const buttonSelector = String(args[0] ?? "");
+            if (
+              submitButtonState === "missing" ||
+              !buttonSelector.includes("button.btn.btn-primary.w-100")
+            ) {
               return { found: false, disabled: false };
             }
             if (submitButtonState === "disabled") {

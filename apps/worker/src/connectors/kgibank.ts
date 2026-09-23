@@ -36,6 +36,8 @@ const AUTH_HEADERS_TIMEOUT_MS = 20_000;
 const GOTO_ALLOW_TIMEOUT_MS = 10_000;
 const NAVIGATION_TIMEOUT_MS = 30_000;
 const ACTION_TIMEOUT_MS = 15_000;
+const LOGIN_BUTTON_SELECTOR =
+  'button.btn.btn-primary.w-100, button[type="submit"]';
 const CAPTCHA_SELECTORS = {
   ionic: "ion-img.recaptcha-image",
   legacy: 'img[src^="data:image"]',
@@ -420,16 +422,15 @@ async function submitLoginAndWait(
   try {
     await fillInput(frame, 'input[formcontrolname="verifyCode"]', captcha);
     const submission = await withActionTimeout(
-      frame.evaluate(() => {
-        const button = document.querySelector<HTMLButtonElement>(
-          'button[type="submit"]',
-        );
+      frame.evaluate((buttonSelector) => {
+        const button =
+          document.querySelector<HTMLButtonElement>(buttonSelector);
         if (!button) return { found: false, disabled: false };
         const disabled =
           button.disabled || button.getAttribute("aria-disabled") === "true";
         if (!disabled) setTimeout(() => button.click(), 0);
         return { found: true, disabled };
-      }),
+      }, LOGIN_BUTTON_SELECTOR),
     );
     logKgibankEvent("kgibank_login_stage", {
       stage: "login_submitted",
