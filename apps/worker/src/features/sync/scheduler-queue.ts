@@ -18,6 +18,7 @@ export const EINVOICE_SYNC_CHAIN_DELAY_SECONDS = 1;
 export const TDCC_SYNC_CHAIN_DELAY_SECONDS = 1;
 const EINVOICE_MAX_QUEUE_ATTEMPTS = 3;
 const TDCC_MAX_QUEUE_ATTEMPTS = 3;
+export const DEMO_MODE_PARKED_CHUNK_DELAY_SECONDS = 60 * 60;
 
 export async function enqueueScheduledSync(env: Env, delaySeconds = 0) {
   // Demo deployments are read-only showcases; never start background syncs.
@@ -61,14 +62,9 @@ export async function consumeScheduledSyncQueue(
   env: Env,
 ) {
   if (isDemoMode(env)) {
-    // Drop messages left over from before demo mode was enabled.
-    console.info(
-      JSON.stringify({
-        event: "scheduled_sync_queue_skipped_demo_mode",
-        messageCount: batch.messages.length,
-      }),
-    );
-    for (const message of batch.messages) message.ack();
+    for (const message of batch.messages) {
+      await parkMessageInDemoMode(message, env);
+    }
     return;
   }
 
@@ -97,6 +93,38 @@ export async function consumeScheduledSyncQueue(
       await enqueueScheduledSync(env, SCHEDULED_SYNC_CHAIN_DELAY_SECONDS);
     }
     message.ack();
+  }
+}
+
+// Demo mode must not contact external services. Scheduler kicks are stateless
+// and are dropped; durable run chunks are re-sent later so active runs resume
+// once demo mode is turned off instead of staying stuck without a continuation.
+async function parkMessageInDemoMode(
+  message: Message<ScheduledSyncQueueMessage>,
+  env: Env,
+) {
+  const body = message.body;
+  const parked =
+    body.type === "run-einvoice-chunk" || body.type === "run-tdcc-chunk";
+  console.info(
+    JSON.stringify({
+      event: "scheduled_sync_queue_skipped_demo_mode",
+      messageId: message.id,
+      messageType: body.type,
+      parked,
+    }),
+  );
+  if (!parked) {
+    message.ack();
+    return;
+  }
+  try {
+    await env.SYNC_QUEUE.send(body, {
+      delaySeconds: DEMO_MODE_PARKED_CHUNK_DELAY_SECONDS,
+    });
+    message.ack();
+  } catch {
+    message.retry({ delaySeconds: DEMO_MODE_PARKED_CHUNK_DELAY_SECONDS });
   }
 }
 

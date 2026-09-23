@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env, ScheduledSyncQueueMessage } from "../../../src/platform/env";
 
 const mocks = vi.hoisted(() => ({
@@ -27,6 +27,7 @@ vi.mock("../../../src/features/sync/tdcc-sync-service", () => ({
 
 import {
   consumeScheduledSyncQueue,
+  DEMO_MODE_PARKED_CHUNK_DELAY_SECONDS,
   enqueueScheduledSync,
   enqueueTdccSyncChunk,
 } from "../../../src/features/sync/scheduler-queue";
@@ -63,6 +64,10 @@ beforeEach(() => {
   mocks.isEinvoiceUserActionError.mockReturnValue(false);
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("scheduled sync queue", () => {
   it("enqueues the scheduler kick message", async () => {
     const send = vi.fn().mockResolvedValue(undefined);
@@ -80,16 +85,17 @@ describe("scheduled sync queue", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("acks queued sync messages without running them in demo mode", async () => {
+  it("parks durable run chunks without running them in demo mode", async () => {
     const send = vi.fn().mockResolvedValue(undefined);
-    const messages = [
-      queueMessage({ type: "run-next-scheduled-sync" }),
-      queueMessage({ type: "run-tdcc-chunk", runId: "tdcc-run-1" }),
-      queueMessage({ type: "run-einvoice-chunk", runId: "einvoice-run-1" }),
-    ];
+    const kick = queueMessage({ type: "run-next-scheduled-sync" });
+    const tdcc = queueMessage({ type: "run-tdcc-chunk", runId: "tdcc-run-1" });
+    const einvoice = queueMessage({
+      type: "run-einvoice-chunk",
+      runId: "einvoice-run-1",
+    });
     const batch = {
-      ...queueBatch(messages[0]!),
-      messages,
+      ...queueBatch(kick),
+      messages: [kick, tdcc, einvoice],
     } as unknown as MessageBatch<ScheduledSyncQueueMessage>;
     vi.spyOn(console, "info").mockImplementation(() => undefined);
 
@@ -98,14 +104,42 @@ describe("scheduled sync queue", () => {
       DEMO_MODE: "true",
     } as Env);
 
-    for (const message of messages) {
+    for (const message of [kick, tdcc, einvoice]) {
       expect(message.ack).toHaveBeenCalledOnce();
       expect(message.retry).not.toHaveBeenCalled();
     }
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledWith(
+      { type: "run-tdcc-chunk", runId: "tdcc-run-1" },
+      { delaySeconds: DEMO_MODE_PARKED_CHUNK_DELAY_SECONDS },
+    );
+    expect(send).toHaveBeenCalledWith(
+      { type: "run-einvoice-chunk", runId: "einvoice-run-1" },
+      { delaySeconds: DEMO_MODE_PARKED_CHUNK_DELAY_SECONDS },
+    );
     expect(mocks.runSchedulerTick).not.toHaveBeenCalled();
     expect(mocks.processTdccSyncChunk).not.toHaveBeenCalled();
     expect(mocks.processEinvoiceSyncChunk).not.toHaveBeenCalled();
-    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("retries a parked chunk when re-sending fails in demo mode", async () => {
+    const send = vi.fn().mockRejectedValue(new Error("queue unavailable"));
+    const message = queueMessage({
+      type: "run-einvoice-chunk",
+      runId: "einvoice-run-1",
+    });
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await consumeScheduledSyncQueue(queueBatch(message), {
+      ...env(send),
+      DEMO_MODE: "true",
+    } as Env);
+
+    expect(message.ack).not.toHaveBeenCalled();
+    expect(message.retry).toHaveBeenCalledWith({
+      delaySeconds: DEMO_MODE_PARKED_CHUNK_DELAY_SECONDS,
+    });
+    expect(mocks.processEinvoiceSyncChunk).not.toHaveBeenCalled();
   });
 
   it("enqueues a TDCC chunk message", async () => {
