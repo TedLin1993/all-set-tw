@@ -13,6 +13,7 @@ const CONNECTOR_BANK_CODES: Record<string, string> = {
   esun: "808",
   taishin: "812",
   ctbc: "822",
+  kgibank: "809",
 };
 
 export interface InstitutionAssetGroup {

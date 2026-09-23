@@ -73,6 +73,11 @@ export const connectorFields = {
     { key: "account", label: "使用者代號", type: "text" },
     { key: "password", label: "網路銀行密碼", type: "password" },
   ],
+  kgibank: [
+    { key: "userId", label: "身分證字號", type: "text" },
+    { key: "account", label: "使用者代號", type: "text" },
+    { key: "password", label: "網路銀行密碼", type: "password" },
+  ],
   firstbank: [
     { key: "userId", label: "身分證字號／統編", type: "text" },
     { key: "account", label: "登入代號", type: "text" },

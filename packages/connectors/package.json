@@ -9,7 +9,7 @@
   "scripts": {
     "build": "node ../../node_modules/@typescript/native/bin/tsc -p tsconfig.json",
     "typecheck": "node ../../node_modules/@typescript/native/bin/tsc -p tsconfig.json",
-    "test:selfcheck": "tsx tests/selfcheck/tdcc.selfcheck.ts && tsx tests/selfcheck/einvoice.selfcheck.ts && tsx tests/selfcheck/einvoice-v2.selfcheck.ts && tsx tests/selfcheck/taishin.selfcheck.ts && tsx tests/selfcheck/ctbc.selfcheck.ts && tsx tests/selfcheck/skbank.selfcheck.ts && tsx tests/selfcheck/obank.selfcheck.ts && tsx tests/selfcheck/firstbank.selfcheck.ts && tsx tests/selfcheck/hncb.selfcheck.ts"
+    "test:selfcheck": "tsx tests/selfcheck/tdcc.selfcheck.ts && tsx tests/selfcheck/einvoice.selfcheck.ts && tsx tests/selfcheck/einvoice-v2.selfcheck.ts && tsx tests/selfcheck/taishin.selfcheck.ts && tsx tests/selfcheck/ctbc.selfcheck.ts && tsx tests/selfcheck/skbank.selfcheck.ts && tsx tests/selfcheck/obank.selfcheck.ts && tsx tests/selfcheck/firstbank.selfcheck.ts && tsx tests/selfcheck/hncb.selfcheck.ts && tsx tests/selfcheck/kgibank.selfcheck.ts"
   },
   "dependencies": {
     "@taiwan-fin-hub/core": "0.1.0",

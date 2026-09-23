@@ -98,7 +98,8 @@
       connectorId === "taishin" ||
       connectorId === "obank" ||
       connectorId === "firstbank" ||
-      connectorId === "hncb",
+      connectorId === "hncb" ||
+      connectorId === "kgibank",
   );
   const browserBankSessionAvailable = $derived(
     browserBank && Boolean($settings.data?.sessionAvailable),
@@ -868,7 +869,9 @@
             ? "華南"
             : connectorId === "firstbank"
               ? "第一銀行"
-              : "永豐"}
+              : connectorId === "kgibank"
+                ? "凱基"
+                : "永豐"}
       bind:captcha={bankCaptcha}
       captchaImage={bankCaptchaImage}
       digitCount={bankCaptchaDigitCount}
@@ -1358,10 +1361,12 @@
         ? "王道手動與排程同步都會在必要時接管其他登入中的裝置；同步會直接使用 App API，並由 Gemma 4 自動辨識四位英數驗證碼。"
         : connectorId === "firstbank"
           ? "第一銀行網銀 session 失效時會自動辨識圖形驗證碼並登入；也可改用人工輸入。"
-          : connectorId === "tdcc"
-            ? "排程同步不會在背景寄送驗證碼；登入失效時會標記為需要重新驗證。"
-            : connectorId === "cathaybk"
-              ? "首次驗證會加入信任裝置；信任失效時需在手動同步中重新取得驗證碼。"
-              : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
+          : connectorId === "kgibank"
+            ? "凱基每次同步都會自動辨識 6 位數圖形驗證碼，連續失敗後可改用人工輸入。同一帳號僅允許單一登入，同步會登出行動銀行 App；同步完成後會自動登出網銀。"
+            : connectorId === "tdcc"
+              ? "排程同步不會在背景寄送驗證碼；登入失效時會標記為需要重新驗證。"
+              : connectorId === "cathaybk"
+                ? "首次驗證會加入信任裝置；信任失效時需在手動同步中重新取得驗證碼。"
+                : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
   </p>
 </Card>
