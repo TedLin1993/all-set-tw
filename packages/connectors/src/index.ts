@@ -182,6 +182,18 @@ export { hncbConfigSchema, parseHncbConfig, parseHncbData } from "./hncb";
 export type { HncbConfig, HncbData, HncbPayloads } from "./hncb";
 import { hncbConfigSchema } from "./hncb";
 
+export {
+  KGIBANK_CAPTCHA_DIGIT_COUNT,
+  KgibankProtocolError,
+  kgibankAccountSourceId,
+  kgibankConfigSchema,
+  parseKgibankAccounts,
+  parseKgibankConfig,
+  parseKgibankData,
+} from "./kgibank";
+export type { KgibankConfig, KgibankData, KgibankPayloads } from "./kgibank";
+import { kgibankConfigSchema } from "./kgibank";
+
 const invoiceRecordSchema = z.object({
   sourceId: z.string().min(1),
   invoiceNumber: z.string().optional(),
@@ -791,6 +803,7 @@ export const connectorConfigSchemas = {
   obank: obankConfigSchema,
   firstbank: firstbankConfigSchema,
   hncb: hncbConfigSchema,
+  kgibank: kgibankConfigSchema,
 } satisfies Record<ConnectorId, z.ZodTypeAny>;
 
 export function parseConnectorConfig(

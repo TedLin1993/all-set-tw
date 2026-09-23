@@ -22,6 +22,11 @@ import {
   HncbVerificationRequiredError,
 } from "../../connectors/hncb";
 import {
+  KgibankBrowserCapacityError,
+  KgibankConnectionError,
+  KgibankVerificationRequiredError,
+} from "../../connectors/kgibank";
+import {
   CathayOtpChannelRequiredError,
   CathayOtpInvalidError,
   CathayOtpRequiredError,
@@ -76,6 +81,13 @@ const hncbSyncBodySchema = z.object({
   captcha: z
     .string()
     .regex(/^\d{4,8}$/)
+    .optional(),
+});
+
+const kgibankSyncBodySchema = z.object({
+  captcha: z
+    .string()
+    .regex(/^\d{6}$/)
     .optional(),
 });
 
@@ -387,6 +399,56 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     },
   );
 
+  api.post("/connectors/kgibank/captcha", async (c) => {
+    try {
+      return c.json(await prepareConnectorChallenge(c.env, "kgibank"));
+    } catch (error) {
+      if (error instanceof SyncAlreadyRunningError) {
+        return jsonError(
+          "SYNC_ALREADY_RUNNING",
+          "凱基銀行已有驗證或同步作業正在進行。",
+          409,
+        );
+      }
+      if (error instanceof KgibankBrowserCapacityError) {
+        const response = jsonError("KGIBANK_BROWSER_BUSY", error.message, 429);
+        response.headers.set("Retry-After", String(error.retryAfterSeconds));
+        return response;
+      }
+      if (
+        error instanceof NeedsUserActionError ||
+        error instanceof KgibankVerificationRequiredError
+      ) {
+        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      }
+      return jsonError("KGIBANK_CAPTCHA_FAILED", safeErrorMessage(error), 502);
+    }
+  });
+
+  api.post(
+    "/connectors/kgibank/sync",
+    zValidator(
+      "json",
+      kgibankSyncBodySchema,
+      validationHook("INVALID_REQUEST", "KGI Bank sync options are invalid."),
+    ),
+    async (c) => {
+      const overrides = c.req.valid("json");
+      return syncRouteResponse(
+        c,
+        withManualSyncLock(c.env, "kgibank", SYNC_SCOPE_ALL, () =>
+          runConnectorSync(
+            c.env,
+            "kgibank",
+            "manual",
+            SYNC_SCOPE_ALL,
+            overrides,
+          ),
+        ),
+      );
+    },
+  );
+
   api.post("/connectors/obank/captcha", async (c) => {
     try {
       return c.json(await prepareConnectorChallenge(c.env, "obank"));
@@ -641,6 +703,18 @@ async function syncRouteResponse(
       error instanceof ObankProtocolError
     ) {
       return jsonError("OBANK_CONNECTION_FAILED", safeErrorMessage(error), 502);
+    }
+    if (error instanceof KgibankBrowserCapacityError) {
+      const response = jsonError("KGIBANK_BROWSER_BUSY", error.message, 429);
+      response.headers.set("Retry-After", String(error.retryAfterSeconds));
+      return response;
+    }
+    if (error instanceof KgibankConnectionError) {
+      return jsonError(
+        "KGIBANK_CONNECTION_FAILED",
+        safeErrorMessage(error),
+        502,
+      );
     }
     if (error instanceof FirstbankBrowserCapacityError) {
       const response = jsonError("FIRSTBANK_BROWSER_BUSY", error.message, 429);

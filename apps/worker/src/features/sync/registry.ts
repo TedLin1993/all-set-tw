@@ -4,6 +4,7 @@ import type { Env } from "../../platform/env";
 import {
   prepareSinopacCaptchaSession,
   prepareHncbCaptchaSession,
+  prepareKgibankCaptchaSession,
   prepareTaishinCaptchaSession,
   prepareObankCaptchaSession,
   prepareFirstbankCaptchaSession,
@@ -15,6 +16,7 @@ import {
   syncObank,
   syncFirstbank,
   syncHncb,
+  syncKgibank,
   syncTaishin,
   syncTdcc,
   SYNC_SCOPE_ALL,
@@ -27,6 +29,7 @@ import {
   type SyncOutcome,
   type SyncScope,
   type HncbSyncOverrides,
+  type KgibankSyncOverrides,
   type TaishinSyncOverrides,
   type TdccSyncOverrides,
   type CathaySyncOverrides,
@@ -99,6 +102,11 @@ export const connectorRuntimeRegistry: Record<
     run: (env, trigger, _scope, overrides) =>
       syncFirstbank(env, trigger, overrides as FirstbankSyncOverrides),
     prepareChallenge: prepareFirstbankCaptchaSession,
+  },
+  kgibank: {
+    run: (env, trigger, _scope, overrides) =>
+      syncKgibank(env, trigger, overrides as KgibankSyncOverrides),
+    prepareChallenge: prepareKgibankCaptchaSession,
   },
 };
 

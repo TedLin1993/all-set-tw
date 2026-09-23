@@ -13,6 +13,10 @@ import {
   HncbConnectionError,
 } from "../../../src/connectors/hncb";
 import {
+  KgibankBrowserCapacityError,
+  KgibankConnectionError,
+} from "../../../src/connectors/kgibank";
+import {
   CathayOtpChannelRequiredError,
   CathayOtpInvalidError,
   CathayOtpRequiredError,
@@ -31,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   enqueueTdccSyncChunk: vi.fn(),
   prepareTaishinCaptchaSession: vi.fn(),
   prepareHncbCaptchaSession: vi.fn(),
+  prepareKgibankCaptchaSession: vi.fn(),
   prepareObankCaptchaSession: vi.fn(),
   prepareFirstbankCaptchaSession: vi.fn(),
   startEinvoiceSyncRun: vi.fn(),
@@ -41,6 +46,7 @@ const mocks = vi.hoisted(() => ({
   syncObank: vi.fn(),
   syncFirstbank: vi.fn(),
   syncHncb: vi.fn(),
+  syncKgibank: vi.fn(),
   syncTaishin: vi.fn(),
   syncSkbank: vi.fn(),
 }));
@@ -64,6 +70,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   NeedsUserActionError: class NeedsUserActionError extends Error {},
   prepareSinopacCaptchaSession: vi.fn(),
   prepareHncbCaptchaSession: mocks.prepareHncbCaptchaSession,
+  prepareKgibankCaptchaSession: mocks.prepareKgibankCaptchaSession,
   prepareTaishinCaptchaSession: mocks.prepareTaishinCaptchaSession,
   prepareObankCaptchaSession: mocks.prepareObankCaptchaSession,
   prepareFirstbankCaptchaSession: mocks.prepareFirstbankCaptchaSession,
@@ -77,6 +84,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncObank: mocks.syncObank,
   syncFirstbank: mocks.syncFirstbank,
   syncHncb: mocks.syncHncb,
+  syncKgibank: mocks.syncKgibank,
   syncTaishin: mocks.syncTaishin,
   syncSkbank: mocks.syncSkbank,
   syncTdcc: vi.fn(),
@@ -121,6 +129,24 @@ beforeEach(() => {
     expiresAt: "2026-08-19T08:02:00.000Z",
     digitCount: 4,
     captchaKind: "numeric",
+  });
+  mocks.prepareKgibankCaptchaSession.mockResolvedValue({
+    captchaImage: "data:image/png;base64,AQID",
+    expiresAt: "2026-09-23T08:02:00.000Z",
+    digitCount: 6,
+    captchaKind: "numeric",
+  });
+  mocks.syncKgibank.mockResolvedValue({
+    success: true,
+    connectorId: "kgibank",
+    scope: "all",
+    records: 3,
+    newRecords: {
+      invoices: 0,
+      bankTransactions: 1,
+      investmentTransactions: 0,
+    },
+    cursorUpdated: true,
   });
   mocks.syncHncb.mockResolvedValue({
     success: true,
@@ -648,6 +674,75 @@ describe("HNCB sync routes", () => {
     expect(failed.status).toBe(502);
     await expect(failed.json()).resolves.toMatchObject({
       error: { code: "HNCB_CONNECTION_FAILED" },
+    });
+  });
+});
+
+describe("KGI Bank sync routes", () => {
+  it("returns the manual CAPTCHA metadata", async () => {
+    const response = await syncRoutes.request(
+      "/connectors/kgibank/captcha",
+      { method: "POST" },
+      env,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      digitCount: 6,
+      captchaKind: "numeric",
+    });
+  });
+
+  it("accepts six numeric digits and rejects malformed input", async () => {
+    const valid = await syncRoutes.request(
+      "/connectors/kgibank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "123456" }),
+      },
+      env,
+    );
+    expect(valid.status).toBe(200);
+    expect(mocks.syncKgibank).toHaveBeenCalledWith(env, "manual", {
+      captcha: "123456",
+    });
+
+    const invalid = await syncRoutes.request(
+      "/connectors/kgibank/sync",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ captcha: "1234" }),
+      },
+      env,
+    );
+    expect(invalid.status).toBe(400);
+    expect(mocks.syncKgibank).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps Browser Rendering capacity and connection failures", async () => {
+    mocks.prepareKgibankCaptchaSession.mockRejectedValueOnce(
+      new KgibankBrowserCapacityError("browser busy", 9),
+    );
+    const busy = await syncRoutes.request(
+      "/connectors/kgibank/captcha",
+      { method: "POST" },
+      env,
+    );
+    expect(busy.status).toBe(429);
+    expect(busy.headers.get("Retry-After")).toBe("9");
+
+    mocks.syncKgibank.mockRejectedValueOnce(
+      new KgibankConnectionError("schema drift"),
+    );
+    const failed = await syncRoutes.request(
+      "/connectors/kgibank/sync",
+      { method: "POST" },
+      env,
+    );
+    expect(failed.status).toBe(502);
+    await expect(failed.json()).resolves.toMatchObject({
+      error: { code: "KGIBANK_CONNECTION_FAILED" },
     });
   });
 });

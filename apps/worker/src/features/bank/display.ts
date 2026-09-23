@@ -6,6 +6,7 @@ const CTBC_BANK_CODE = "822";
 const SKBANK_BANK_CODE = "103";
 const OBANK_BANK_CODE = "048";
 const HNCB_BANK_CODE = "008";
+const KGIBANK_BANK_CODE = "809";
 const FIRSTBANK_BANK_CODE = "007";
 const TAIWAN_BANK_NAMES: Record<string, string> = {
   "004": "台灣銀行",
@@ -90,6 +91,10 @@ export function deriveBankMatchKey(
     const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
     return { bankCode: HNCB_BANK_CODE, last4: last4 || null };
   }
+  if (connectorId === "kgibank" && sourceId.startsWith("bank:kgibank:")) {
+    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
+    return { bankCode: KGIBANK_BANK_CODE, last4: last4 || null };
+  }
   const match = sourceId.match(/^settlement:([^:]+):([^:]+)/);
   const last4 = match?.[2]?.replace(/\D/g, "").slice(-4) ?? "";
   return match
@@ -129,7 +134,9 @@ function normalizeDepositDisplay<T extends BankDisplayRow>(row: T): T {
                 ? FIRSTBANK_BANK_CODE
                 : row.connectorId === "hncb"
                   ? HNCB_BANK_CODE
-                  : undefined);
+                  : row.connectorId === "kgibank"
+                    ? KGIBANK_BANK_CODE
+                    : undefined);
   const accountSuffix = accountSuffixFromSourceId(sourceId);
   return {
     ...row,
@@ -167,6 +174,8 @@ function parseBankAccountSource(sourceId: string): {
     return { bankCode: FIRSTBANK_BANK_CODE, account: firstbank[1] };
   const hncb = sourceId.match(/^bank:hncb:([^:]+)/);
   if (hncb) return { bankCode: HNCB_BANK_CODE, account: hncb[1] };
+  const kgibank = sourceId.match(/^bank:kgibank:([^:]+)/);
+  if (kgibank) return { bankCode: KGIBANK_BANK_CODE, account: kgibank[1] };
   return {};
 }
 
