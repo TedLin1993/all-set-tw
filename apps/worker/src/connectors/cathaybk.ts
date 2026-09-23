@@ -884,7 +884,9 @@ export function isCathayAuthenticatedUrl(value: string) {
   try {
     const path = new URL(value).pathname.replace(/\/+$/, "").toLowerCase();
     return (
-      path.startsWith("/onlinebanking/") || path === "/mybank/quicklinks/home"
+      path === "/onlinebanking" ||
+      path.startsWith("/onlinebanking/") ||
+      path === "/mybank/quicklinks/home"
     );
   } catch {
     return false;
@@ -938,6 +940,7 @@ export async function loginCathay(
           .toLowerCase();
 
         return (
+          currentPath === "/onlinebanking" ||
           currentPath.startsWith("/onlinebanking/") ||
           currentPath === "/mybank/quicklinks/home" ||
           document.querySelector(

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const puppeteerMock = vi.hoisted(() => ({
   connect: vi.fn(),
@@ -33,6 +33,8 @@ const credentials = {
   account: "test-user",
   password: "test-password",
 };
+
+afterEach(() => vi.unstubAllGlobals());
 
 function verificationPage() {
   return {
@@ -208,6 +210,7 @@ describe("Cathay browser session lifecycle", () => {
 
 describe("Cathay login result", () => {
   it.each([
+    "https://www.cathaybk.com.tw/OnlineBanking/",
     "https://www.cathaybk.com.tw/OnlineBanking/Home",
     "https://www.cathaybk.com.tw/MyBank/Quicklinks/Home",
   ])("recognizes an authenticated home URL: %s", (url) => {
@@ -222,29 +225,47 @@ describe("Cathay login result", () => {
     expect(isCathayAuthenticatedUrl(url)).toBe(false);
   });
 
-  it("accepts the current MyBank home after submitting credentials", async () => {
-    const page = {
-      $: vi.fn().mockResolvedValue(null),
-      click: vi.fn().mockResolvedValue(undefined),
-      evaluate: vi
+  it.each([
+    [
+      "/MyBank/Quicklinks/Home",
+      "https://www.cathaybk.com.tw/MyBank/Quicklinks/Home",
+    ],
+    ["/OnlineBanking/", "https://www.cathaybk.com.tw/OnlineBanking/"],
+  ])(
+    "accepts an authenticated path in the login wait predicate: %s",
+    async (pathname, url) => {
+      const waitForFunction = vi
         .fn()
-        .mockResolvedValueOnce(false)
-        .mockResolvedValueOnce(true),
-      goto: vi.fn().mockResolvedValue(undefined),
-      on: vi.fn(),
-      type: vi.fn().mockResolvedValue(undefined),
-      url: vi
-        .fn()
-        .mockReturnValue("https://www.cathaybk.com.tw/MyBank/Quicklinks/Home"),
-      waitForFunction: vi.fn().mockResolvedValue(undefined),
-      waitForSelector: vi.fn().mockResolvedValue(null),
-    };
+        .mockImplementation(async (predicate: () => boolean) => {
+          vi.stubGlobal("window", { location: { pathname } });
+          vi.stubGlobal("document", {
+            body: { innerText: "" },
+            querySelectorAll: () => [],
+            querySelector: () => null,
+          });
+          expect(predicate()).toBe(true);
+        });
+      const page = {
+        $: vi.fn().mockResolvedValue(null),
+        click: vi.fn().mockResolvedValue(undefined),
+        evaluate: vi
+          .fn()
+          .mockResolvedValueOnce(false)
+          .mockResolvedValueOnce(true),
+        goto: vi.fn().mockResolvedValue(undefined),
+        on: vi.fn(),
+        type: vi.fn().mockResolvedValue(undefined),
+        url: vi.fn().mockReturnValue(url),
+        waitForFunction,
+        waitForSelector: vi.fn().mockResolvedValue(null),
+      };
 
-    await expect(loginCathay(page, credentials)).resolves.toBeUndefined();
-    expect(page.waitForFunction).toHaveBeenCalledWith(expect.any(Function), {
-      timeout: 45_000,
-    });
-  });
+      await expect(loginCathay(page, credentials)).resolves.toBeUndefined();
+      expect(waitForFunction).toHaveBeenCalledWith(expect.any(Function), {
+        timeout: 45_000,
+      });
+    },
+  );
 
   it("invokes the bank login handler directly", async () => {
     const page = {
