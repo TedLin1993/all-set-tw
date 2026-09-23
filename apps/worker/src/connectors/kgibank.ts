@@ -36,6 +36,10 @@ const AUTH_HEADERS_TIMEOUT_MS = 20_000;
 const GOTO_ALLOW_TIMEOUT_MS = 10_000;
 const NAVIGATION_TIMEOUT_MS = 30_000;
 const ACTION_TIMEOUT_MS = 15_000;
+const CAPTCHA_SELECTORS = {
+  ionic: "ion-img.recaptcha-image",
+  legacy: 'img[src^="data:image"]',
+};
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -541,29 +545,40 @@ async function gatewayRequest(
 async function readCaptchaImage(frame: Frame) {
   try {
     await frame.waitForFunction(
-      () =>
-        Boolean(
-          document
-            .querySelector<HTMLImageElement>('img[src^="data:image"]')
-            ?.getAttribute("src"),
-        ),
+      kgibankCaptchaDataUrl,
       { timeout: LOGIN_FORM_TIMEOUT_MS },
+      CAPTCHA_SELECTORS,
     );
   } catch {
     throw new KgibankConnectionError("凱基登入頁沒有在期限內顯示驗證碼。");
   }
   const src = await withActionTimeout(
-    frame.evaluate(
-      () =>
-        document
-          .querySelector<HTMLImageElement>('img[src^="data:image"]')
-          ?.getAttribute("src") ?? "",
-    ),
+    frame.evaluate(kgibankCaptchaDataUrl, CAPTCHA_SELECTORS),
   );
   if (!/^data:image\/[a-z]+;base64,/.test(src)) {
     throw new KgibankConnectionError("凱基登入頁的驗證碼格式無法辨識。");
   }
   return parseCaptchaDataUrl(src);
+}
+
+export function kgibankCaptchaDataUrl(selectors: {
+  ionic: string;
+  legacy: string;
+}) {
+  const ionicImage = document.querySelector<HTMLElement & { src?: string }>(
+    selectors.ionic,
+  );
+  const shadowImage =
+    ionicImage?.shadowRoot?.querySelector<HTMLImageElement>("img");
+  const legacyImage = document.querySelector<HTMLImageElement>(
+    selectors.legacy,
+  );
+  return (
+    ionicImage?.src ||
+    shadowImage?.getAttribute("src") ||
+    legacyImage?.getAttribute("src") ||
+    ""
+  );
 }
 
 export function parseCaptchaDataUrl(dataUrl: string) {

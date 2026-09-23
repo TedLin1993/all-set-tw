@@ -1,14 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseKgibankData } from "@taiwan-fin-hub/connectors";
 import {
   classifyKgibankLoginText,
   createKgibankConnector,
+  kgibankCaptchaDataUrl,
   KgibankVerificationRequiredError,
   parseCaptchaDataUrl,
   syncDateRange,
 } from "../../src/connectors/kgibank";
 
 const ACCOUNT_NO = "00012345678901";
+
+afterEach(() => vi.unstubAllGlobals());
 
 function transaction(overrides: Record<string, unknown> = {}) {
   return {
@@ -199,6 +202,50 @@ describe("KGI Bank sync preconditions", () => {
 });
 
 describe("KGI Bank captcha image", () => {
+  function stubCaptchaDocument(options: {
+    host?: string;
+    shadow?: string;
+    legacy?: string;
+  }) {
+    vi.stubGlobal("document", {
+      querySelector: (selector: string) => {
+        if (selector === "ion-img.recaptcha-image") {
+          return {
+            src: options.host,
+            shadowRoot: {
+              querySelector: () =>
+                options.shadow ? { getAttribute: () => options.shadow } : null,
+            },
+          };
+        }
+        if (selector === 'img[src^="data:image"]' && options.legacy) {
+          return { getAttribute: () => options.legacy };
+        }
+        return null;
+      },
+    });
+  }
+
+  const selectors = {
+    ionic: "ion-img.recaptcha-image",
+    legacy: 'img[src^="data:image"]',
+  };
+
+  it.each([
+    ["Ionic host", { host: "data:image/png;base64,HOST" }, "HOST"],
+    [
+      "Ionic shadow image",
+      { shadow: "data:image/png;base64,SHADOW" },
+      "SHADOW",
+    ],
+    ["legacy image", { legacy: "data:image/png;base64,LEGACY" }, "LEGACY"],
+  ])("reads the CAPTCHA from the %s", (_label, options, suffix) => {
+    stubCaptchaDocument(options);
+    expect(kgibankCaptchaDataUrl(selectors)).toBe(
+      `data:image/png;base64,${suffix}`,
+    );
+  });
+
   it("decodes the login data URL for Workers AI", () => {
     const result = parseCaptchaDataUrl("data:image/png;base64,AQID");
     expect(result.contentType).toBe("image/png");

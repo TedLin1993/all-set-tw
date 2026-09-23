@@ -23,8 +23,12 @@ const credentials = {
 };
 
 type LoginOutcome = "captcha" | "credential" | "success" | "unknown";
+type CaptchaRenderer = "ionic" | "legacy";
 
-function browserScenario(outcomes: LoginOutcome[]) {
+function browserScenario(
+  outcomes: LoginOutcome[],
+  captchaRenderer: CaptchaRenderer = "legacy",
+) {
   const listeners = new Map<string, Set<(value: unknown) => void>>();
   let submitCount = 0;
   let currentOutcome: LoginOutcome | undefined;
@@ -46,7 +50,29 @@ function browserScenario(outcomes: LoginOutcome[]) {
     url: () => "https://ib.kgibank.com.tw/internalbank/",
     $: vi.fn().mockResolvedValue({}),
     type: vi.fn().mockResolvedValue(undefined),
-    waitForFunction: vi.fn().mockResolvedValue(undefined),
+    waitForFunction: vi
+      .fn()
+      .mockImplementation(
+        async (
+          _fn: (...args: unknown[]) => unknown,
+          _options: unknown,
+          ...args: unknown[]
+        ) => {
+          const selectors = args.find(
+            (value): value is { ionic: string; legacy: string } =>
+              typeof value === "object" &&
+              value !== null &&
+              "ionic" in value &&
+              "legacy" in value,
+          );
+          if (
+            captchaRenderer === "ionic" &&
+            selectors?.ionic !== "ion-img.recaptcha-image"
+          ) {
+            throw new Error("CAPTCHA selector did not reach Ionic host");
+          }
+        },
+      ),
     waitForSelector: vi.fn().mockResolvedValue(undefined),
     evaluate: vi
       .fn()
@@ -92,10 +118,20 @@ function browserScenario(outcomes: LoginOutcome[]) {
           if (source.includes("innerText")) {
             return currentOutcome === "captcha" ? "驗證碼有誤" : "";
           }
-          if (
-            source.includes("getAttribute") &&
-            source.includes("data:image")
-          ) {
+          const selectors = args.find(
+            (value): value is { ionic: string; legacy: string } =>
+              typeof value === "object" &&
+              value !== null &&
+              "ionic" in value &&
+              "legacy" in value,
+          );
+          if (selectors?.legacy === 'img[src^="data:image"]') {
+            if (
+              captchaRenderer === "ionic" &&
+              selectors.ionic !== "ion-img.recaptcha-image"
+            ) {
+              return "";
+            }
             return "data:image/png;base64,AQID";
           }
           if (source.includes("fetch(url")) {
@@ -172,6 +208,23 @@ beforeEach(() => {
 });
 
 describe("KGI Bank automatic CAPTCHA login", () => {
+  it("reads the current Ionic ion-img CAPTCHA host", async () => {
+    const scenario = browserScenario(["success"], "ionic");
+    puppeteerMock.launch.mockResolvedValue(scenario.browser);
+    const recognize = vi.fn().mockResolvedValue("123456");
+
+    const result = await createKgibankConnector({} as Fetcher, recognize).sync(
+      credentials,
+    );
+
+    expect(recognize).toHaveBeenCalledWith(
+      expect.any(ArrayBuffer),
+      "image/png",
+      6,
+    );
+    expect(result.bankAccounts).toHaveLength(1);
+  });
+
   it("loads a fresh CAPTCHA after rejection and succeeds on the next OCR attempt", async () => {
     const scenario = browserScenario(["captcha", "success"]);
     puppeteerMock.launch.mockResolvedValue(scenario.browser);
