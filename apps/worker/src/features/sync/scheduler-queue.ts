@@ -1,4 +1,5 @@
 import type { Env, ScheduledSyncQueueMessage } from "../../platform/env";
+import { isDemoMode } from "../../platform/http";
 import { runSchedulerTick } from "./scheduler";
 import {
   failEinvoiceSyncRun,
@@ -19,6 +20,8 @@ const EINVOICE_MAX_QUEUE_ATTEMPTS = 3;
 const TDCC_MAX_QUEUE_ATTEMPTS = 3;
 
 export async function enqueueScheduledSync(env: Env, delaySeconds = 0) {
+  // Demo deployments are read-only showcases; never start background syncs.
+  if (isDemoMode(env)) return;
   const message = { type: "run-next-scheduled-sync" } as const;
   if (delaySeconds > 0) {
     await env.SYNC_QUEUE.send(message, { delaySeconds });
@@ -57,6 +60,18 @@ export async function consumeScheduledSyncQueue(
   batch: MessageBatch<ScheduledSyncQueueMessage>,
   env: Env,
 ) {
+  if (isDemoMode(env)) {
+    // Drop messages left over from before demo mode was enabled.
+    console.info(
+      JSON.stringify({
+        event: "scheduled_sync_queue_skipped_demo_mode",
+        messageCount: batch.messages.length,
+      }),
+    );
+    for (const message of batch.messages) message.ack();
+    return;
+  }
+
   for (const message of batch.messages) {
     if (message.body.type === "run-einvoice-chunk") {
       await consumeEinvoiceChunkMessage(message, env);

@@ -524,6 +524,10 @@ invocation 因此不必等待下一個 10 分鐘 Cron，且擁有獨立的 Worke
 逐一執行。是否到期仍由 D1 sync job 狀態判斷；沒有可執行工作時 consumer 不再送出訊息，
 結束本次串接。
 
+Demo 模式（`DEMO_MODE`）不執行背景同步：Cron 不送出 scheduler 啟動訊息，Queue consumer
+對收到的所有訊息（包含電子發票與集保分段訊息）直接 ack 而不處理，避免啟用 Demo 前殘留的訊息
+繼續以已儲存的憑證登入外部服務。
+
 電子發票不在單一 connector invocation 內擷取所有品項明細。它使用
 `einvoice_sync_runs` / `einvoice_sync_run_items` 作為 durable work queue：手動或排程
 建立 run 後 enqueue `run-einvoice-chunk`，每個 Queue invocation 最多 claim 並取得 35
