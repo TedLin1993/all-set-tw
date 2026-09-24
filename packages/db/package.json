@@ -12,13 +12,13 @@
     "test": "vitest run tests"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240620.0",
-    "drizzle-kit": "0.31.10",
-    "miniflare": "5.20260804.1-alpha",
+    "@cloudflare/workers-types": "^5.20260924.1",
+    "drizzle-kit": "0.31.11",
+    "miniflare": "5.20260921.0-alpha",
     "vitest": "^4.1.10",
-    "wrangler": "4.121.0"
+    "wrangler": "4.137.0"
   },
   "dependencies": {
-    "drizzle-orm": "0.45.2"
+    "drizzle-orm": "0.45.3"
   }
 }

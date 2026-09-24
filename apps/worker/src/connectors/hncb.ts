@@ -34,6 +34,8 @@ const FRAME_READ_RETRY_MS = 250;
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const HNCB_LOGIN_READY_TIMEOUT_MS = 15_000;
+const HNCB_SYNC_TIMEOUT_MS = 120_000;
+const HNCB_CAPTCHA_PREPARATION_TIMEOUT_MS = 35_000;
 
 export class HncbVerificationRequiredError extends Error {
   constructor(message: string) {
@@ -121,124 +123,148 @@ export function createHncbConnector(
       let browserInstance: Browser | undefined;
       let page: Page | undefined;
       let authenticated = false;
-      try {
-        if (config.browserSessionId && config.captcha) {
-          if (
-            !config.browserSessionExpiresAt ||
-            new Date(config.browserSessionExpiresAt) <= new Date()
-          ) {
-            throw new HncbVerificationRequiredError(
-              "華南圖形驗證碼已逾時，請重新取得驗證碼。",
-            );
-          }
-          assertCaptcha(config.captcha, config.captchaDigitCount);
-        }
-
-        browserInstance = await acquireBrowser(
+      let closingBrowser: Promise<void> | undefined;
+      const closeBrowser = () => {
+        if (!browserInstance) return Promise.resolve();
+        return (closingBrowser ??= closeHncbBrowser(
+          browserInstance,
           browserFetcher,
-          config.browserSessionId,
-        );
-        const pages = await browserInstance.pages();
-        page = pages[0] ?? (await browserInstance.newPage());
-        await configurePage(page);
+        ));
+      };
+      return withHncbBrowserDeadline(
+        async (signal) => {
+          try {
+            if (config.browserSessionId && config.captcha) {
+              if (
+                !config.browserSessionExpiresAt ||
+                new Date(config.browserSessionExpiresAt) <= new Date()
+              ) {
+                throw new HncbVerificationRequiredError(
+                  "華南圖形驗證碼已逾時，請重新取得驗證碼。",
+                );
+              }
+              assertCaptcha(config.captcha, config.captchaDigitCount);
+            }
 
-        let loggedIn = false;
-        if (config.browserSessionId && config.captcha) {
-          const dialogMessage = await submitLogin(page, config.captcha);
-          const outcome = await waitForLoginResult(page, dialogMessage);
-          if (outcome === "credential") {
-            throw new HncbCredentialRejectedError(
-              "華南銀行身分證字號、代號或密碼錯誤。",
+            browserInstance = await acquireBrowser(
+              browserFetcher,
+              config.browserSessionId,
             );
+            signal.throwIfAborted();
+            const pages = await browserInstance.pages();
+            page = pages[0] ?? (await browserInstance.newPage());
+            await configurePage(page);
+
+            let loggedIn = false;
+            if (config.browserSessionId && config.captcha) {
+              const dialogMessage = await submitLogin(page, config.captcha);
+              const outcome = await waitForLoginResult(page, dialogMessage);
+              if (outcome === "credential") {
+                throw new HncbCredentialRejectedError(
+                  "華南銀行身分證字號、代號或密碼錯誤。",
+                );
+              }
+              if (outcome === "captcha") {
+                throw new HncbCaptchaRejectedError(
+                  "華南圖形驗證碼錯誤，請重新取得驗證碼。",
+                );
+              }
+              if (outcome !== "success") {
+                throw new HncbConnectionError(
+                  "華南登入後沒有取得明確回應，已停止重試，請稍後再試。",
+                );
+              }
+              loggedIn = true;
+            } else if (config.sessionCookies) {
+              await importCookies(page, config.sessionCookies);
+              await gotoAllowingTimeout(page, PERSONAL_JSP);
+              // 失效 session 仍可能停在 personal.jsp，必須看到 main 頁框才算登入成功。
+              loggedIn = await hasMainFrame(page, SESSION_FRAME_TIMEOUT_MS);
+            }
+
+            if (!loggedIn) {
+              if (!recognizeCaptcha) {
+                throw new HncbVerificationRequiredError(
+                  "華南銀行 session 已失效，需要重新登入。",
+                );
+              }
+              await loginWithOcr(page, config, recognizeCaptcha, signal);
+            }
+            authenticated = true;
+            await waitForMainFrame(page);
+
+            const depositOverviewHtml = await fetchDepositOverview(page);
+            const unbilledHtml = await fetchCreditCardBill(page, "0");
+            const billsHtml: string[] = [];
+            for (const range of CREDIT_CARD_BILL_RANGES.slice(1)) {
+              const billHtml = await fetchCreditCardBill(page, range);
+              if (billHtml) billsHtml.push(billHtml);
+            }
+
+            if (
+              !depositOverviewHtml &&
+              !unbilledHtml &&
+              billsHtml.length === 0
+            ) {
+              throw new HncbConnectionError(
+                "未能從華南網銀載入帳戶或帳單頁面，請確認登入狀態或重試。",
+              );
+            }
+
+            const data = parseHncbData({
+              depositOverviewHtml,
+              unbilledHtml,
+              billsHtml,
+            });
+
+            if (
+              data.bankAccounts.length === 0 &&
+              data.bankTransactions.length === 0 &&
+              data.creditCardBills.length === 0
+            ) {
+              throw new HncbConnectionError(
+                "華南網銀頁面解析結果為空，請確認網頁結構。",
+              );
+            }
+
+            const now = new Date();
+            return {
+              records: [],
+              ...data,
+              cursor: JSON.stringify({
+                sessionCookies: JSON.stringify(await page.cookies()),
+                sessionCreatedAt: now.toISOString(),
+                syncedAt: now.toISOString(),
+              }),
+            };
+          } catch (error) {
+            const normalized = mapHncbError(error);
+            if (
+              authenticated &&
+              normalized instanceof HncbConnectionError &&
+              page
+            ) {
+              const sessionCookies = await page
+                .cookies()
+                .then((cookies) => JSON.stringify(cookies))
+                .catch(() => undefined);
+              if (sessionCookies) {
+                throw new HncbConnectionError(
+                  normalized.message,
+                  sessionCookies,
+                  new Date().toISOString(),
+                  normalized.cause,
+                );
+              }
+            }
+            throw normalized;
+          } finally {
+            await closeBrowser();
           }
-          if (outcome !== "success") {
-            throw new HncbCaptchaRejectedError(
-              "華南圖形驗證碼錯誤，請重新取得驗證碼。",
-            );
-          }
-          loggedIn = true;
-        } else if (config.sessionCookies) {
-          await importCookies(page, config.sessionCookies);
-          await gotoAllowingTimeout(page, PERSONAL_JSP);
-          // 失效 session 仍可能停在 personal.jsp，必須看到 main 頁框才算登入成功。
-          loggedIn = await hasMainFrame(page, SESSION_FRAME_TIMEOUT_MS);
-        }
-
-        if (!loggedIn) {
-          if (!recognizeCaptcha) {
-            throw new HncbVerificationRequiredError(
-              "華南銀行 session 已失效，需要重新登入。",
-            );
-          }
-          await loginWithOcr(page, config, recognizeCaptcha);
-        }
-        authenticated = true;
-        await waitForMainFrame(page);
-
-        const depositOverviewHtml = await fetchDepositOverview(page);
-        const unbilledHtml = await fetchCreditCardBill(page, "0");
-        const billsHtml: string[] = [];
-        for (const range of CREDIT_CARD_BILL_RANGES.slice(1)) {
-          const billHtml = await fetchCreditCardBill(page, range);
-          if (billHtml) billsHtml.push(billHtml);
-        }
-
-        if (!depositOverviewHtml && !unbilledHtml && billsHtml.length === 0) {
-          throw new HncbConnectionError(
-            "未能從華南網銀載入帳戶或帳單頁面，請確認登入狀態或重試。",
-          );
-        }
-
-        const data = parseHncbData({
-          depositOverviewHtml,
-          unbilledHtml,
-          billsHtml,
-        });
-
-        if (
-          data.bankAccounts.length === 0 &&
-          data.bankTransactions.length === 0 &&
-          data.creditCardBills.length === 0
-        ) {
-          throw new HncbConnectionError(
-            "華南網銀頁面解析結果為空，請確認網頁結構。",
-          );
-        }
-
-        const now = new Date();
-        return {
-          records: [],
-          ...data,
-          cursor: JSON.stringify({
-            sessionCookies: JSON.stringify(await page.cookies()),
-            sessionCreatedAt: now.toISOString(),
-            syncedAt: now.toISOString(),
-          }),
-        };
-      } catch (error) {
-        const normalized = mapHncbError(error);
-        if (
-          authenticated &&
-          normalized instanceof HncbConnectionError &&
-          page
-        ) {
-          const sessionCookies = await page
-            .cookies()
-            .then((cookies) => JSON.stringify(cookies))
-            .catch(() => undefined);
-          if (sessionCookies) {
-            throw new HncbConnectionError(
-              normalized.message,
-              sessionCookies,
-              new Date().toISOString(),
-              normalized.cause,
-            );
-          }
-        }
-        throw normalized;
-      } finally {
-        if (browserInstance) await closeHncbBrowser(browserInstance);
-      }
+        },
+        closeBrowser,
+        HNCB_SYNC_TIMEOUT_MS,
+      );
     },
   };
 }
@@ -257,30 +283,48 @@ export async function prepareHncbCaptcha(
     throw new HncbConnectionError("Browser binding is unavailable.");
   }
 
-  const browserInstance = await acquireBrowser(
-    browserFetcher,
-    config.browserSessionId,
-  );
-  const pages = await browserInstance.pages();
-  const page = pages[0] ?? (await browserInstance.newPage());
+  let browserInstance: Browser | undefined;
   let preserved = false;
-  try {
-    await configurePage(page);
-    const captcha = await openLoginAndCaptureCaptcha(page, config);
-    const sessionId = browserInstance.sessionId();
-    await browserInstance.disconnect();
-    preserved = true;
-    return {
-      browserSessionId: sessionId,
-      browserSessionExpiresAt: new Date(
-        Date.now() + CAPTCHA_VALIDITY_MS,
-      ).toISOString(),
-      captchaDigitCount: HNCB_CAPTCHA_DIGIT_COUNT,
-      captchaImage: `data:image/jpeg;base64,${bytesToBase64(captcha.bytes)}`,
-    };
-  } finally {
-    if (!preserved) await closeHncbBrowser(browserInstance);
-  }
+  let closingBrowser: Promise<void> | undefined;
+  const closeBrowser = () => {
+    if (!browserInstance || preserved) return Promise.resolve();
+    return (closingBrowser ??= closeHncbBrowser(
+      browserInstance,
+      browserFetcher,
+    ));
+  };
+  return withHncbBrowserDeadline(
+    async (signal) => {
+      try {
+        browserInstance = await acquireBrowser(
+          browserFetcher,
+          config.browserSessionId,
+          CAPTCHA_KEEP_ALIVE_MS,
+        );
+        signal.throwIfAborted();
+        const pages = await browserInstance.pages();
+        const page = pages[0] ?? (await browserInstance.newPage());
+        await configurePage(page);
+        const captcha = await openLoginAndCaptureCaptcha(page, config);
+        signal.throwIfAborted();
+        const sessionId = browserInstance.sessionId();
+        await browserInstance.disconnect();
+        preserved = true;
+        return {
+          browserSessionId: sessionId,
+          browserSessionExpiresAt: new Date(
+            Date.now() + CAPTCHA_VALIDITY_MS,
+          ).toISOString(),
+          captchaDigitCount: HNCB_CAPTCHA_DIGIT_COUNT,
+          captchaImage: `data:image/jpeg;base64,${bytesToBase64(captcha.bytes)}`,
+        };
+      } finally {
+        await closeBrowser();
+      }
+    },
+    closeBrowser,
+    HNCB_CAPTCHA_PREPARATION_TIMEOUT_MS,
+  );
 }
 
 async function loginWithOcr(
@@ -290,11 +334,14 @@ async function loginWithOcr(
     imageBytes: ArrayBuffer,
     digitCount: number,
   ) => Promise<string>,
+  signal: AbortSignal,
 ) {
   let lastError: unknown;
   for (let attempt = 1; attempt <= HNCB_AUTO_LOGIN_ATTEMPTS; attempt += 1) {
+    signal.throwIfAborted();
     try {
       const captcha = await openLoginAndCaptureCaptcha(page, config);
+      signal.throwIfAborted();
       logHncbEvent("hncb_login_stage", { attempt, stage: "captcha_captured" });
       const answer = await recognizeCaptcha(
         toArrayBuffer(captcha.bytes),
@@ -325,6 +372,11 @@ async function loginWithOcr(
           "華南銀行身分證字號、代號或密碼錯誤。",
         );
       }
+      if (outcome !== "captcha") {
+        throw new HncbConnectionError(
+          "華南登入後沒有取得明確回應，已停止重試，請稍後再試。",
+        );
+      }
       lastError = new HncbCaptchaRejectedError(
         "華南圖形驗證碼錯誤，請重新取得驗證碼。",
       );
@@ -335,18 +387,22 @@ async function loginWithOcr(
         errorName: error instanceof Error ? error.name : typeof error,
         message: safeHncbLogMessage(error),
       });
+      if (signal.aborted) throw signal.reason;
+      if (isLoginPageUnavailable(error)) {
+        throw new HncbConnectionError(
+          "華南登入頁沒有在期限內載入完整表單，請稍後再試。",
+          undefined,
+          undefined,
+          error,
+        );
+      }
+      if (!(error instanceof HncbCaptchaRejectedError)) {
+        throw mapHncbError(error);
+      }
       lastError = error;
     }
   }
   if (lastError instanceof HncbVerificationRequiredError) throw lastError;
-  if (isLoginPageUnavailable(lastError)) {
-    throw new HncbConnectionError(
-      "華南登入頁沒有在期限內載入完整表單，請稍後再試。",
-      undefined,
-      undefined,
-      lastError,
-    );
-  }
   throw new HncbVerificationRequiredError(
     `華南自動驗證連續失敗 ${HNCB_AUTO_LOGIN_ATTEMPTS} 次，請改用人工驗證。`,
   );
@@ -372,10 +428,18 @@ async function openLoginAndCaptureCaptcha(page: Page, config: HncbConfig) {
 }
 
 async function openLoginAndFill(page: Page, config: HncbConfig) {
-  const failedRequests: string[] = [];
-  const onRequestFailed = (request: { url: () => string }) => {
+  const failedRequests: { path: string; errorText: string }[] = [];
+  const onRequestFailed = (request: {
+    url: () => string;
+    failure: () => { errorText: string } | null;
+  }) => {
     const path = describeHncbUrl(request.url());
-    if (path !== "unrecognized") failedRequests.push(path);
+    if (path !== "unrecognized") {
+      failedRequests.push({
+        path,
+        errorText: request.failure()?.errorText ?? "unknown",
+      });
+    }
   };
   page.on("requestfailed", onRequestFailed);
   try {
@@ -409,11 +473,14 @@ async function openLoginAndFill(page: Page, config: HncbConfig) {
 }
 
 async function waitForHncbLoginReady(page: Page, timeoutMs: number) {
-  await page.waitForFunction(
-    () =>
-      typeof (window as unknown as { doSubmit?: () => void }).doSubmit ===
-        "function" && Boolean(document.getElementById("USERIDTEXT")),
-    { timeout: timeoutMs },
+  await withActionTimeout(
+    page.waitForFunction(
+      () =>
+        typeof (window as unknown as { doSubmit?: () => void }).doSubmit ===
+          "function" && Boolean(document.getElementById("USERIDTEXT")),
+      { timeout: timeoutMs },
+    ),
+    timeoutMs + 1_000,
   );
 }
 
@@ -632,7 +699,10 @@ async function submitMainFrameAction(
   return readMainFrameHtml(page);
 }
 
-async function withActionTimeout<T>(action: Promise<T>): Promise<T> {
+async function withActionTimeout<T>(
+  action: Promise<T>,
+  timeoutMs = ACTION_TIMEOUT_MS,
+): Promise<T> {
   action.catch(() => {});
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -641,7 +711,7 @@ async function withActionTimeout<T>(action: Promise<T>): Promise<T> {
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(
           () => reject(new HncbActionTimeoutError()),
-          ACTION_TIMEOUT_MS,
+          timeoutMs,
         );
       }),
     ]);
@@ -754,13 +824,17 @@ async function gotoAllowingTimeout(page: Page, url: string) {
     // Cloudflare Puppeteer 不支援 waitUntil: "commit"。短 timeout 的
     // DOMContentLoaded 只用來探測導覽是否卡住；真正就緒條件是後續的
     // USERIDTEXT / 頁框，避免 parser-blocking 登入腳本把整個 20 秒耗完。
-    const response = await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout: GOTO_ALLOW_TIMEOUT_MS,
-    });
+    const response = await withActionTimeout(
+      page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: GOTO_ALLOW_TIMEOUT_MS,
+      }),
+      GOTO_ALLOW_TIMEOUT_MS + 1_000,
+    );
     status = response?.status();
   } catch (error) {
-    timedOut = isNavigationTimeout(error);
+    timedOut =
+      isNavigationTimeout(error) || error instanceof HncbActionTimeoutError;
     if (!timedOut) throw error;
   }
   const snapshot = await readHncbLoginSnapshot(page);
@@ -771,23 +845,31 @@ async function gotoAllowingTimeout(page: Page, url: string) {
     timedOut,
     ...snapshot,
   });
+  if (snapshot.href === "chromewebdata/" && !snapshot.hasUser) {
+    throw new HncbConnectionError(
+      "華南登入頁載入失敗，已停止重試，請稍後再試。",
+    );
+  }
 }
 
 async function readHncbLoginSnapshot(page: Page) {
   const href = describeHncbUrl(page.url());
   try {
-    const snapshot = await page.evaluate(
-      (submitName: string) => ({
-        href: location.href,
-        title: document.title.slice(0, 80),
-        readyState: document.readyState,
-        hasUser: Boolean(document.getElementById("USERIDTEXT")),
-        hasSubmit:
-          typeof (window as unknown as Record<string, unknown>)[submitName] ===
-          "function",
-        htmlLength: (document.documentElement?.outerHTML ?? "").length,
-      }),
-      "doSubmit",
+    const snapshot = await withActionTimeout(
+      page.evaluate(
+        (submitName: string) => ({
+          href: location.href,
+          title: document.title.slice(0, 80),
+          readyState: document.readyState,
+          hasUser: Boolean(document.getElementById("USERIDTEXT")),
+          hasSubmit:
+            typeof (window as unknown as Record<string, unknown>)[
+              submitName
+            ] === "function",
+          htmlLength: (document.documentElement?.outerHTML ?? "").length,
+        }),
+        "doSubmit",
+      ),
     );
     return {
       href: describeHncbUrl(snapshot.href) || href,
@@ -839,16 +921,13 @@ function safeHncbLogMessage(error: unknown) {
 }
 
 function isLoginPageUnavailable(error: unknown) {
-  if (
-    error instanceof HncbCaptchaUnavailableError ||
-    error instanceof HncbCaptchaRejectedError
-  ) {
-    return false;
-  }
+  if (error instanceof HncbCaptchaUnavailableError) return true;
+  if (error instanceof HncbCaptchaRejectedError) return false;
   const message = error instanceof Error ? error.message : String(error);
   return (
+    error instanceof HncbActionTimeoutError ||
     isNavigationTimeout(error) ||
-    /waiting for function failed|timeout \d+ ms exceeded/i.test(message)
+    /waiting (?:for function )?failed|timeout \d+ ?ms exceeded/i.test(message)
   );
 }
 
@@ -890,6 +969,7 @@ function isDetachedFrame(frame: Frame) {
 async function acquireBrowser(
   browserFetcher: Fetcher,
   preferredSessionId?: string,
+  keepAliveMs = 60_000,
 ) {
   if (preferredSessionId) {
     const sessions = await puppeteer.sessions(browserFetcher).catch(() => []);
@@ -924,13 +1004,16 @@ async function acquireBrowser(
       ),
     );
   }
-  return launchBrowser(browserFetcher);
+  return launchBrowser(browserFetcher, keepAliveMs);
 }
 
-async function launchBrowser(browserFetcher: Fetcher): Promise<Browser> {
+async function launchBrowser(
+  browserFetcher: Fetcher,
+  keepAliveMs: number,
+): Promise<Browser> {
   try {
     return await launchBrowserWithRetry(browserFetcher, {
-      keep_alive: CAPTCHA_KEEP_ALIVE_MS,
+      keep_alive: keepAliveMs,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -949,22 +1032,60 @@ async function launchBrowser(browserFetcher: Fetcher): Promise<Browser> {
   }
 }
 
-async function closeHncbBrowser(browser: Browser) {
+async function closeHncbBrowser(browser: Browser, browserFetcher: Fetcher) {
   try {
-    await browser.close();
+    await withActionTimeout(browser.close());
   } catch (error) {
-    console.warn(
-      JSON.stringify({
-        event: "hncb_browser_cleanup_failed",
-        connectorId: "hncb",
-        stage: "close_browser",
-        errorName: error instanceof Error ? error.name : typeof error,
-        message:
-          error instanceof Error
-            ? error.message
-            : "瀏覽器關閉失敗，但未取得錯誤原因。",
+    try {
+      const sessionId = browser.sessionId();
+      const response = await withActionTimeout(
+        browserFetcher.fetch(
+          `https://fake.host/v1/devtools/browser/${encodeURIComponent(sessionId)}`,
+          { method: "DELETE" },
+        ),
+        5_000,
+      );
+      if (!response.ok)
+        throw new Error(`Browser close HTTP ${response.status}`);
+      logHncbEvent("hncb_browser_cleanup_fallback", {
+        closeError: safeHncbLogMessage(error),
+      });
+    } catch (fallbackError) {
+      logHncbEvent("hncb_browser_cleanup_failed", {
+        closeError: safeHncbLogMessage(error),
+        fallbackError: safeHncbLogMessage(fallbackError),
+      });
+    } finally {
+      await browser.disconnect().catch(() => undefined);
+    }
+  }
+}
+
+async function withHncbBrowserDeadline<T>(
+  action: (signal: AbortSignal) => Promise<T>,
+  closeBrowser: () => Promise<void>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
+  try {
+    return await Promise.race([
+      action(controller.signal),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          const error = new HncbConnectionError(
+            "華南瀏覽器工作超過期限，已停止，請稍後再試。",
+          );
+          controller.abort(error);
+          reject(error);
+        }, timeoutMs);
       }),
-    );
+    ]);
+  } catch (error) {
+    if (controller.signal.aborted) await closeBrowser();
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

@@ -201,7 +201,7 @@ session 重連、瀏覽器建立後的操作與銀行登入不在此重試範圍
 - 排程不得主動寄送 OTP；需要互動時標記 `needs_user_action`。
 - 若外部服務支援接管其他登入中的裝置，必須明確定義手動與排程的 `force` policy，並在介面與使用文件提示可能中斷使用者目前的工作階段。
 - 第一銀行同一帳號同時只能有一個操作中的網路銀行登入。同步若遇到「已登入導致無法操作」等占用訊息，會先嘗試一次確認／接管；仍無法進入時標記 `needs_user_action`，不得再當成圖形驗證碼失敗而重試 OCR。排程與手動都不強制登出其他裝置上的工作階段。
-- 華南登入頁以一般導覽載入即可：CDP 實測 Browser Run 於 1.5 秒內 `readyState` 為 `complete`，`USERIDTEXT` 與 `doSubmit` 皆就緒且無網路失敗，不需要繞過 bot 標頭。改動登入頁載入方式前必須先以 CDP 取樣確認實際停滯點，不得以推測為依據：`setRequestInterception` 會讓導覽停在 `about:blank`、`setJavaScriptEnabled(false)` 會讓 `waitForFunction`／`evaluate` 失效、`document.write` 移植會摧毀執行環境，三者都已實測不可行。Worker `fetch` 若用於輔助抓取必須設 `AbortSignal.timeout`，否則會在有 proxy 的環境無限等待。登入表單沒出現時記導覽狀態並以連線失敗處理，不得當成驗證碼失敗請使用者人工輸入。
+- 華南登入頁沿用一般導覽：先前 CDP 取樣曾在 1.5 秒內看到 `readyState` 為 `complete`，`USERIDTEXT` 與 `doSubmit` 皆就緒，但遠端 Browser Run 仍可能停在 `chromewebdata/` 錯誤頁。改動登入頁載入方式前必須先以 CDP 取樣確認實際停滯點，不得以推測為依據：`setRequestInterception` 會讓導覽停在 `about:blank`、`setJavaScriptEnabled(false)` 會讓 `waitForFunction`／`evaluate` 失效、`document.write` 移植會摧毀執行環境，三者都已實測不可行。Worker `fetch` 若用於輔助抓取必須設 `AbortSignal.timeout`，否則會在有 proxy 的環境無限等待。導覽的 Puppeteer timeout 外另設 6 秒硬逾時，避免 CDP 操作超時卻持續等待。登入表單或驗證碼沒出現時記導覽狀態及失敗請求的網路錯誤，並立即以連線失敗結束；只有明確的驗證碼錯誤才重試 OCR，不明登入結果不重送帳密。驗證碼準備工作限 35 秒、同步工作限 120 秒，逾時先清理 Browser session 再回報失敗（清理可能另需 15 秒）；Puppeteer 關閉失敗時以 Browser binding 關閉 session。新建的自動同步 session 使用 60 秒閒置期限，準備人工驗證碼則保留 150 秒。
 - 華南分頁必須常駐 dialog 自動關閉 handler。未預期的 `alert` 會凍結頁面 JavaScript 並使自動化停止回應；送出登入時另有 handler 記錄訊息做成敗分類，兩者並存。
 - 台新登入後若出現「訊息通知／每三個月變更一次密碼」彈窗，必須點「關閉」後再抓資料。不得點「前往修改」或「3個月後提醒」，也不得停在彈窗卻因為 session API 仍可用而回報同步成功。
 - 新 connector 必須透過 D1 migration 建立 `<connectorId>:all` sync job，預設停用。
