@@ -64,6 +64,8 @@ function page(options?: {
   startLoggedIn?: boolean;
   navigationTimeout?: boolean;
   blankLoginPage?: boolean;
+  errorPage?: boolean;
+  hangNavigation?: boolean;
 }) {
   let currentUrl = options?.startLoggedIn
     ? PERSONAL_JSP
@@ -116,6 +118,11 @@ function page(options?: {
         currentUrl.includes("personal") ? [frame] : [],
       ),
     goto: vi.fn().mockImplementation(async (url: string) => {
+      if (options?.hangNavigation) return new Promise(() => {});
+      if (options?.errorPage) {
+        currentUrl = "chrome-error://chromewebdata/";
+        throw new Error("Navigation timeout of 5000 ms exceeded");
+      }
       if (options?.blankLoginPage) {
         currentUrl = "about:blank";
         throw new Error("Navigation timeout of 20000 ms exceeded");
@@ -174,6 +181,51 @@ beforeEach(() => {
 });
 
 describe("HNCB browser session lifecycle", () => {
+  it("closes a browser when CAPTCHA preparation stalls past its deadline", async () => {
+    vi.useFakeTimers();
+    const browserPage = page();
+    const browserInstance = browser(browserPage);
+    browserInstance.pages.mockImplementation(() => new Promise(() => {}));
+    puppeteerMock.launch.mockResolvedValue(browserInstance);
+
+    const preparation = prepareHncbCaptcha({} as Fetcher, credentials);
+    const rejected = expect(preparation).rejects.toMatchObject({
+      name: "HncbConnectionError",
+      message: "華南瀏覽器工作超過期限，已停止，請稍後再試。",
+    });
+    await vi.advanceTimersByTimeAsync(35_000);
+    await rejected;
+    expect(browserInstance.close).toHaveBeenCalledOnce();
+  });
+
+  it("waits for direct session cleanup when Puppeteer close stalls", async () => {
+    vi.useFakeTimers();
+    const browserPage = page();
+    const browserInstance = browser(browserPage);
+    browserInstance.pages.mockImplementation(() => new Promise(() => {}));
+    browserInstance.close.mockImplementation(() => new Promise(() => {}));
+    puppeteerMock.launch.mockResolvedValue(browserInstance);
+    const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+
+    const preparation = prepareHncbCaptcha(
+      { fetch } as unknown as Fetcher,
+      credentials,
+    );
+    const rejected =
+      expect(preparation).rejects.toBeInstanceOf(HncbConnectionError);
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(fetch).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejected;
+
+    expect(browserInstance.close).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledWith(
+      "https://fake.host/v1/devtools/browser/hncb-session",
+      { method: "DELETE" },
+    );
+    expect(browserInstance.disconnect).toHaveBeenCalledOnce();
+  });
+
   it("disconnects after capturing CAPTCHA and stores the session id", async () => {
     const browserPage = page();
     const browserInstance = browser(browserPage);
@@ -182,6 +234,9 @@ describe("HNCB browser session lifecycle", () => {
     const result = await prepareHncbCaptcha({} as Fetcher, credentials);
 
     expect(puppeteerMock.launch).toHaveBeenCalledOnce();
+    expect(puppeteerMock.launch).toHaveBeenCalledWith(expect.anything(), {
+      keep_alive: 150_000,
+    });
     expect(browserInstance.sessionId).toHaveBeenCalledOnce();
     expect(browserInstance.disconnect).toHaveBeenCalledOnce();
     expect(browserInstance.close).not.toHaveBeenCalled();
@@ -488,6 +543,33 @@ describe("HNCB browser session lifecycle", () => {
     expect(browserInstance.disconnect).not.toHaveBeenCalled();
   });
 
+  it("does not call an indeterminate prepared login a CAPTCHA error", async () => {
+    vi.useFakeTimers();
+    const browserPage = page();
+    browserPage.waitForNavigation.mockResolvedValue(undefined);
+    browserPage.evaluate.mockResolvedValue(undefined);
+    const browserInstance = browser(browserPage);
+    puppeteerMock.sessions.mockResolvedValue([
+      { sessionId: "hncb-session", startTime: Date.now() },
+    ]);
+    puppeteerMock.connect.mockResolvedValue(browserInstance);
+
+    const sync = createHncbConnector({} as Fetcher).sync({
+      ...credentials,
+      browserSessionId: "hncb-session",
+      browserSessionExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      captchaDigitCount: 4,
+      captcha: "1234",
+    });
+    const rejected = expect(sync).rejects.toMatchObject({
+      name: "HncbConnectionError",
+      message: "華南登入後沒有取得明確回應，已停止重試，請稍後再試。",
+    });
+    await vi.advanceTimersByTimeAsync(6_000);
+    await rejected;
+    expect(browserInstance.close).toHaveBeenCalledOnce();
+  });
+
   it("reloads a new captcha after OCR rejection and can succeed on a later attempt", async () => {
     const browserPage = page();
     let submits = 0;
@@ -522,6 +604,42 @@ describe("HNCB browser session lifecycle", () => {
     expect(recognize).toHaveBeenCalledTimes(2);
     expect(browserPage.goto).toHaveBeenCalledTimes(2);
     expect(result.bankAccounts).toHaveLength(1);
+  });
+
+  it("stops after an indeterminate login response without another OCR attempt", async () => {
+    vi.useFakeTimers();
+    const browserPage = page();
+    browserPage.waitForNavigation.mockResolvedValue(undefined);
+    const evaluate = browserPage.evaluate.getMockImplementation()!;
+    browserPage.evaluate.mockImplementation(
+      async (fn: (...args: never[]) => unknown) => {
+        if (
+          String(fn).includes("setTimeout") &&
+          String(fn).includes("doSubmit")
+        ) {
+          return undefined;
+        }
+        return evaluate(fn);
+      },
+    );
+    const browserInstance = browser(browserPage);
+    puppeteerMock.launch.mockResolvedValue(browserInstance);
+    const recognize = vi.fn().mockResolvedValue("1234");
+
+    const sync = createHncbConnector({} as Fetcher, recognize).sync(
+      credentials,
+    );
+    const rejected = expect(sync).rejects.toMatchObject({
+      name: "HncbConnectionError",
+      message: "華南登入後沒有取得明確回應，已停止重試，請稍後再試。",
+    });
+    await vi.advanceTimersByTimeAsync(6_000);
+    await rejected;
+    expect(recognize).toHaveBeenCalledOnce();
+    expect(puppeteerMock.launch).toHaveBeenCalledWith(expect.anything(), {
+      keep_alive: 60_000,
+    });
+    expect(browserInstance.close).toHaveBeenCalledOnce();
   });
 
   it("stops after credential rejection without retrying OCR", async () => {
@@ -559,7 +677,8 @@ describe("HNCB browser session lifecycle", () => {
     });
 
     expect(recognize).not.toHaveBeenCalled();
-    expect(browserPage.goto).toHaveBeenCalledTimes(3);
+    expect(browserPage.goto).toHaveBeenCalledOnce();
+    expect(browserInstance.close).toHaveBeenCalledOnce();
     expect(browserPage.goto).toHaveBeenCalledWith(
       LOGIN_URL,
       expect.objectContaining({
@@ -589,6 +708,44 @@ describe("HNCB browser session lifecycle", () => {
       ),
     ).toBe(true);
     warn.mockRestore();
+  });
+
+  it("stops immediately on Chromium's failed login page", async () => {
+    const browserPage = page({ errorPage: true });
+    const browserInstance = browser(browserPage);
+    puppeteerMock.launch.mockResolvedValue(browserInstance);
+    const recognize = vi.fn();
+
+    await expect(
+      createHncbConnector({} as Fetcher, recognize).sync(credentials),
+    ).rejects.toMatchObject({
+      name: "HncbConnectionError",
+      message: "華南登入頁載入失敗，已停止重試，請稍後再試。",
+    });
+    expect(browserPage.goto).toHaveBeenCalledOnce();
+    expect(browserPage.waitForFunction).not.toHaveBeenCalled();
+    expect(recognize).not.toHaveBeenCalled();
+    expect(browserInstance.close).toHaveBeenCalledOnce();
+  });
+
+  it("does not let a stalled navigation consume the whole browser deadline", async () => {
+    vi.useFakeTimers();
+    const browserPage = page({ blankLoginPage: true, hangNavigation: true });
+    const browserInstance = browser(browserPage);
+    puppeteerMock.launch.mockResolvedValue(browserInstance);
+    const recognize = vi.fn();
+
+    const sync = createHncbConnector({} as Fetcher, recognize).sync(
+      credentials,
+    );
+    const rejected = expect(sync).rejects.toMatchObject({
+      name: "HncbConnectionError",
+      message: "華南登入頁沒有在期限內載入完整表單，請稍後再試。",
+    });
+    await vi.advanceTimersByTimeAsync(7_000);
+    await rejected;
+    expect(recognize).not.toHaveBeenCalled();
+    expect(browserInstance.close).toHaveBeenCalledOnce();
   });
 
   it("throws when logged-in pages parse to empty data", async () => {
