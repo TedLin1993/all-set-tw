@@ -112,6 +112,8 @@ session 重連、瀏覽器建立後的操作與銀行登入不在此重試範圍
 要再送一次「確定登入」。信用卡即時消費與近一年明細來自
 `iesc.esunbank.com` 的 `realTime/getDetailResult` 與
 `creditLastYear/getFilterResult`，存款明細要先呼叫任務 `home/init` 再查詢。
+信用卡 `getCardOverview` 的 `creditCardFeePaid` 為 `true` 時，將本期帳單標為已繳；
+否則繳款狀態維持未知。
 即時授權與之後入帳必須沿用原本的消費日期、商店、金額與卡片組成 `sourceId`，
 授權時間只補在 `authorizedAt`。每筆卡片交易的 `raw.esunFeed` 標記來源為
 `realtime` 或 `history`；同名的即時紀錄併入明細並補上時間，不另產生流水號。

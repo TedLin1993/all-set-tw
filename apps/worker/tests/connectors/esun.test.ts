@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildEsunCreditTimelinePages } from "../../src/connectors/esun-portal";
+import {
+  buildEsunCreditTimelinePages,
+  readEsunCardBalances,
+  type EsunSnapshot,
+} from "../../src/connectors/esun-portal";
 import {
   appendEsunDepositTransactions,
   esunCreditBalanceAccountId,
@@ -35,6 +39,28 @@ function transaction(
     ...overrides,
   };
 }
+
+describe("E.SUN bill payment status", () => {
+  it.each([
+    [true, true],
+    [false, undefined],
+  ])("maps creditCardFeePaid %s to %s", (overviewPaid, isPaid) => {
+    const snapshot: EsunSnapshot = {
+      cardOverview: {
+        resultCode: "0000",
+        resultBody: { creditCardFeePaid: overviewPaid },
+      },
+      billSummary: { body: { billInfo: {} } },
+      billPeriod: "202608",
+      realtime: {},
+      creditHistory: [],
+      twDeposits: [],
+      frDeposits: [],
+    };
+
+    expect(readEsunCardBalances(snapshot).isPaid).toBe(isPaid);
+  });
+});
 
 describe("E.SUN credit card timeline normalization", () => {
   it("uses the physical card for a single card and keeps an aggregate for multiple cards", () => {
