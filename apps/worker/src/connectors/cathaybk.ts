@@ -880,6 +880,19 @@ export async function submitCathayLoginForm(
   if (!invokedBankHandler) await page.click(".js-login");
 }
 
+export function isCathayAuthenticatedUrl(value: string) {
+  try {
+    const path = new URL(value).pathname.replace(/\/+$/, "").toLowerCase();
+    return (
+      path === "/onlinebanking" ||
+      path.startsWith("/onlinebanking/") ||
+      path === "/mybank/quicklinks/home"
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function loginCathay(
   page: CathayLoginPage,
   config: CathaybkConfig,
@@ -922,9 +935,14 @@ export async function loginCathay(
           .join(" ");
         const pageText = `${document.body?.innerText ?? ""} ${controlsText}`;
         const normalizedText = pageText.replace(/\s+/g, "");
+        const currentPath = window.location.pathname
+          .replace(/\/+$/, "")
+          .toLowerCase();
 
         return (
-          window.location.href.includes("/OnlineBanking/") ||
+          currentPath === "/onlinebanking" ||
+          currentPath.startsWith("/onlinebanking/") ||
+          currentPath === "/mybank/quicklinks/home" ||
           document.querySelector(
             ".js-otp-view, #js-otp-send, #js-otp-email-send",
           ) !== null ||
@@ -945,7 +963,7 @@ export async function loginCathay(
       throw error;
     }
 
-    if (page.url().includes("/OnlineBanking/")) {
+    if (isCathayAuthenticatedUrl(page.url())) {
       console.log("[cathaybk] login succeeded");
       return;
     }
