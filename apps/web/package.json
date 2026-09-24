@@ -22,7 +22,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "layerchart": "^2.0.1",
-    "svelte": "^5.56.4",
+    "svelte": "^5.57.1",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
