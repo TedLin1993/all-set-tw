@@ -748,12 +748,15 @@ function toTimelineTransaction(
 }
 
 function signedCardAmount(detail: IescDetail) {
-  const raw = Math.abs(
+  const value =
     numberOrUndefined(
       detail.paymentAmount ?? detail.transAmount ?? detail.amount,
-    ) ?? 0,
-  );
-  return detail.positiveTrans === false ? -raw : raw;
+    ) ?? 0;
+  // 近一年消費與帳單明細 API 以負數表示退款且不帶 positiveTrans，
+  // 取絕對值會把退款誤判成消費，因此保留原始負號。
+  return detail.positiveTrans === false || value < 0
+    ? -Math.abs(value)
+    : Math.abs(value);
 }
 
 function lifecycleFromStatus(detail: IescDetail) {

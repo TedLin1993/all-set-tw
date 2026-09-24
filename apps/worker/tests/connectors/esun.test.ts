@@ -168,6 +168,48 @@ describe("E.SUN credit card timeline normalization", () => {
     ]);
   });
 
+  it("keeps negative history amounts as refunds instead of purchases", () => {
+    const rows = normalizeEsunTimelineTransactions(
+      buildEsunCreditTimelinePages({
+        realtime: { body: { transList: [] } },
+        creditHistory: [
+          {
+            body: {
+              transList: [
+                {
+                  year: "2026",
+                  month: "09",
+                  transDetailList: [
+                    {
+                      merchantName: "優食台灣股份有限公司",
+                      cardNo: "4751-XXXX-XXXX-0412",
+                      transMonthDay: "0906",
+                      paymentAmount: 199,
+                      paymentCurrency: "TWD",
+                      statusName: "已入帳",
+                    },
+                    {
+                      merchantName: "優食台灣股份有限公司",
+                      cardNo: "4751-XXXX-XXXX-0412",
+                      transMonthDay: "0906",
+                      paymentAmount: -199,
+                      paymentCurrency: "TWD",
+                      statusName: "已入帳",
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(rows.map((row) => row.amount).sort((a, b) => a - b)).toEqual([
+      -199, 199,
+    ]);
+  });
+
   it("maps a realtime authorization onto the posted copy without changing its source id", () => {
     const rows = normalizeEsunTimelineTransactions(
       buildEsunCreditTimelinePages({
