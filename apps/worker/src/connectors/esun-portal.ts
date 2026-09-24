@@ -131,6 +131,7 @@ interface DepositQueryBody {
 }
 
 interface CardOverviewBody {
+  creditCardFeePaid?: boolean;
   currentStatement?: Array<{
     currency?: string;
     totalAmountDue?: number | string;
@@ -149,7 +150,6 @@ interface BillSummaryBody {
   billInfo?: {
     billDate?: string;
     paymentDueDate?: string;
-    isBillPaidShow?: boolean | string;
     billTotalInfoList?: Array<{
       billTotalCurrency?: string;
       billTotalAmount?: number | string;
@@ -329,7 +329,7 @@ export function readEsunCardBalances(snapshot: EsunSnapshot) {
     ),
     outstanding: (statementBalance ?? 0) + unposted,
     currency: statement?.currency || billTotal?.billTotalCurrency || "TWD",
-    isPaid: bill?.isBillPaidShow === true || bill?.isBillPaidShow === "Y",
+    isPaid: overview?.creditCardFeePaid === true ? true : undefined,
     billingPeriod:
       parseBillPeriod(snapshot.billPeriod) ??
       parseFlexibleDate(bill?.billDate)?.slice(0, 7),
