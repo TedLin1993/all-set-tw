@@ -21,6 +21,7 @@ import {
   isCathayAuthenticatedUrl,
   loginCathay,
   normalizeCathayAuthorizedAt,
+  parseCathayCardOverview,
   restoreCathayTrustedState,
   sendCathayOtp,
   scrapeCreditCards,
@@ -540,16 +541,7 @@ describe("Cathay credit cards", () => {
   it("returns no card data when the overview has no card number", async () => {
     vi.useFakeTimers();
     const page = {
-      evaluate: vi.fn().mockResolvedValue({
-        cardDetected: false,
-        last4: "",
-        cardName: "國泰信用卡",
-        creditLimit: 0,
-        availableCredit: 0,
-        unpaidAmount: 0,
-        paymentDueDate: null,
-        noPaymentNeeded: false,
-      }),
+      evaluate: vi.fn().mockResolvedValue("信用卡帳戶總覽 立即線上辦卡"),
       goto: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -708,5 +700,58 @@ describe("Cathay trusted device state", () => {
 
     await expect(completeCathayTrustedDeviceSetup(page)).resolves.toBe(false);
     expect(page.click).not.toHaveBeenCalled();
+  });
+});
+
+describe("Cathay credit card overview", () => {
+  const overview = [
+    "信用卡 > 信用卡帳戶總覽",
+    "最近一期帳單",
+    "繳款截止日",
+    "2026/10/06",
+    "2026年09月",
+    "臺幣帳單",
+    "TWD",
+    "12,345",
+    "我要繳費",
+    "下期帳單",
+    "未出帳明細",
+    "TWD",
+    "0",
+    "我的額度",
+    "剩餘可用額度",
+    "TWD",
+    "180,000",
+    "永久信用額度",
+    "TWD",
+    "200,000",
+    "CUBE卡Visa 正卡 卡片末四碼：1234",
+  ].join("\n");
+
+  it("reads the unpaid statement from the current 臺幣帳單 layout", () => {
+    expect(parseCathayCardOverview(overview)).toMatchObject({
+      cardDetected: true,
+      last4: "1234",
+      unpaidAmount: 12345,
+      paymentDueDate: "2026-10-06",
+      creditLimit: 200000,
+      availableCredit: 180000,
+      noPaymentNeeded: false,
+    });
+  });
+
+  it("keeps the older 應繳金額 wording", () => {
+    expect(
+      parseCathayCardOverview(
+        "應繳金額 TWD 5,678 繳款截止日 2026/10/06 卡片末四碼：1234",
+      ).unpaidAmount,
+    ).toBe(5678);
+  });
+
+  it("reports no amount due when the bank says no payment is needed", () => {
+    expect(parseCathayCardOverview(`${overview}\n無需繳費`)).toMatchObject({
+      unpaidAmount: 0,
+      noPaymentNeeded: true,
+    });
   });
 });
