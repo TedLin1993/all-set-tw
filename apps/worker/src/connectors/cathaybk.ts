@@ -1106,52 +1106,101 @@ function periodLabel(days: number): string {
   return "近 1 年";
 }
 
+type CathayCombobox = "account" | "period";
+
+/**
+ * The transaction page uses react-select comboboxes: the menu opens from the
+ * keyboard and options render as `[id*='-option-']` elements.
+ */
+export async function chooseCathayComboboxOption(
+  page: Page,
+  kind: CathayCombobox,
+  optionMatch: string,
+): Promise<boolean> {
+  const marked = await page.evaluate((target: CathayCombobox) => {
+    // react-select keeps the input empty and renders the chosen label in the
+    // surrounding control, so identify each combobox by that control's text.
+    const labelOf = (input: HTMLInputElement) => {
+      let node: HTMLElement | null = input;
+      for (let depth = 0; depth < 5 && node; depth += 1) {
+        node = node.parentElement;
+        const text = (node?.innerText ?? "").replace(/\s+/g, "");
+        if (text) return text;
+      }
+      return "";
+    };
+    const input = Array.from(
+      document.querySelectorAll<HTMLInputElement>("input[role='combobox']"),
+    ).find((candidate) => {
+      const label = labelOf(candidate);
+      return target === "period"
+        ? /^近\d+(天|個?月|年)$/.test(label)
+        : /\d{10,}/.test(label);
+    });
+    if (!input) return false;
+    input.dataset.cathayCombobox = target;
+    return true;
+  }, kind);
+  if (!marked) return false;
+
+  await page.focus(`[data-cathay-combobox="${kind}"]`);
+  await page.keyboard.press("ArrowDown");
+  await page
+    .waitForFunction(
+      () =>
+        document.querySelectorAll("[role='option'], [id*='-option-']").length >
+        0,
+      { timeout: 5000 },
+    )
+    .catch(() => null);
+  return page.evaluate(
+    (match: string, exactAccount: boolean) => {
+      const normalize = (value: string) => value.replace(/\s+/g, "");
+      const option = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          "[role='option'], [id*='-option-']",
+        ),
+      ).find((candidate) => {
+        const text = normalize(candidate.textContent ?? "");
+        // Account options start with the account number; compare it exactly
+        // so one account number cannot match inside another.
+        return exactAccount
+          ? text.match(/\d{10,}/)?.[0] === match
+          : text === normalize(match);
+      });
+      option?.click();
+      return Boolean(option);
+    },
+    optionMatch,
+    kind === "account",
+  );
+}
+
 async function selectTransactionPeriod(
   page: Page,
   days: number,
 ): Promise<void> {
   const label = periodLabel(days);
   if (label === "近 30 天") return; // default, no action needed
-
-  // Open the period dropdown (find the one showing days/天)
-  const opened = await page.evaluate(() => {
-    const dropdowns = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        "[role='combobox'], button[aria-haspopup]",
-      ),
-    ).filter(
-      (el) =>
-        (el as HTMLElement).innerText?.includes("天") ||
-        (el as HTMLElement).innerText?.includes("月"),
-    );
-    if (!dropdowns[0]) return false;
-    dropdowns[0].click();
-    return true;
-  });
-
-  if (!opened) {
-    console.log("[cathaybk] could not open period dropdown, using default");
-    return;
+  if (!(await chooseCathayComboboxOption(page, "period", label))) {
+    throw new Error(`Cathay Bank period option "${label}" was not found.`);
   }
-
-  await new Promise((r) => setTimeout(r, 500));
-
-  const clicked = await page.evaluate((targetLabel: string) => {
-    const opts = Array.from(
-      document.querySelectorAll<HTMLElement>("[role='option'], li"),
-    ).filter((el) => el.textContent?.trim() === targetLabel);
-    if (!opts[0]) return false;
-    opts[0].click();
-    return true;
-  }, label);
-
-  if (!clicked) {
-    console.log(`[cathaybk] period option "${label}" not found, using default`);
-    return;
-  }
-
-  await new Promise((r) => setTimeout(r, 300));
   console.log(`[cathaybk] set period to "${label}"`);
+}
+
+function waitForDepositTransactions(page: Page) {
+  return page
+    .waitForResponse(
+      (r) => r.url().includes(API_DEPOSIT_TX) && r.status() === 200,
+      { timeout: 30000 },
+    )
+    .catch(() => null);
+}
+
+function assertCathayNotLoggedOut(page: Pick<Page, "url">) {
+  if (page.url().toLowerCase().includes("/logout/")) {
+    throw new Error("Cathay Bank forced logout on transaction page.");
+  }
 }
 
 async function scrapeDeposits(
@@ -1168,7 +1217,7 @@ async function scrapeDeposits(
     timeout: 60000,
   });
   console.log("[cathaybk] deposit page opened");
-  if (page.url().includes("/logout/")) {
+  if (page.url().toLowerCase().includes("/logout/")) {
     throw new Error("Cathay Bank forced logout on deposit page.");
   }
 
@@ -1207,67 +1256,88 @@ async function scrapeDeposits(
       asOfAt,
       raw: acct,
     });
+  }
 
-    // Click account button → navigates to B0103 (transaction detail page)
-    const initialTxPromise = page
-      .waitForResponse(
-        (r) => r.url().includes(API_DEPOSIT_TX) && r.status() === 200,
-        { timeout: 30000 },
-      )
-      .catch(() => null);
-
-    const clicked = await page.evaluate((acctNo: string) => {
-      const btn = Array.from(
-        document.querySelectorAll<HTMLButtonElement>("button"),
-      ).find((b) => b.textContent?.trim() === acctNo);
-      if (btn) {
-        btn.click();
-        return true;
-      }
-      return false;
-    }, acct.acctNo);
-
-    if (!clicked) {
-      console.log(
-        `[cathaybk] no button found for account ${maskAccountNumber(acct.acctNo)}`,
-      );
-      continue;
-    }
-
-    await page
-      .waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 })
-      .catch(() => null);
-
-    let txRsp = null;
-
-    if (lookbackDays > 30) {
-      // Initial page load triggered API with default 30-day period; re-query with desired period
-      const reTxPromise = page
-        .waitForResponse(
-          (r) => r.url().includes(API_DEPOSIT_TX) && r.status() === 200,
-          { timeout: 30000 },
-        )
-        .catch(() => null);
-
-      await selectTransactionPeriod(page, lookbackDays);
-
-      await page.evaluate(() => {
+  // Open the transaction page once from the first account, then switch
+  // accounts in place: returning to the overview between accounts makes
+  // Cathay end the session (/OnlineBanking/Logout/SystemError).
+  let detailPageOpen = false;
+  for (const acct of accounts) {
+    const sourceId = `bank:cathaybk:${acct.acctNo}`;
+    if (!detailPageOpen) {
+      // Opening the page queries the default 30 days; consume that response
+      // so it cannot be mistaken for this account's own query below.
+      const initialQuery = waitForDepositTransactions(page);
+      const clicked = await page.evaluate((acctNo: string) => {
         const btn = Array.from(
           document.querySelectorAll<HTMLButtonElement>("button"),
-        ).find((b) => b.textContent?.trim() === "查詢");
+        ).find((b) => b.textContent?.trim() === acctNo);
         btn?.click();
-      });
-
-      txRsp = await reTxPromise;
-    } else {
-      txRsp = await initialTxPromise;
+        return Boolean(btn);
+      }, acct.acctNo);
+      if (!clicked) {
+        console.log(
+          `[cathaybk] no button found for account ${maskAccountNumber(acct.acctNo)}`,
+        );
+        continue;
+      }
+      await page
+        .waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 })
+        .catch(() => null);
+      await initialQuery;
+      await page
+        .waitForFunction(
+          () => document.querySelectorAll("input[role='combobox']").length > 0,
+          { timeout: 15000 },
+        )
+        .catch(() => null);
+      detailPageOpen = true;
+    } else if (
+      !(await chooseCathayComboboxOption(page, "account", acct.acctNo))
+    ) {
+      assertCathayNotLoggedOut(page);
+      throw new Error(
+        "Cathay Bank account was not found in the transaction account selector.",
+      );
     }
+    assertCathayNotLoggedOut(page);
 
-    const txData: TransferDetailResponse = txRsp
-      ? ((await txRsp.json().catch(() => ({}))) as TransferDetailResponse)
-      : {};
+    await selectTransactionPeriod(page, lookbackDays);
+    // Let any query triggered by switching the selectors settle first.
+    await page
+      .waitForNetworkIdle({ idleTime: 500, timeout: 10000 })
+      .catch(() => null);
+    const txRsp = waitForDepositTransactions(page);
+    await page.evaluate(() => {
+      const btn = Array.from(
+        document.querySelectorAll<HTMLButtonElement>("button"),
+      ).find((b) => b.textContent?.trim() === "查詢");
+      btn?.click();
+    });
+    const response = await txRsp;
+    assertCathayNotLoggedOut(page);
+    if (!response) {
+      throw new Error("Cathay Bank transaction query did not respond.");
+    }
+    const txData = (await response.json().catch(() => {
+      throw new Error("Cathay Bank transaction response was not JSON.");
+    })) as TransferDetailResponse;
 
     const datas = txData.content?.datas ?? [];
+    // The API zero-pads the account number (e.g. 16 digits for a 12-digit
+    // account shown on the page). Every entry must belong to this account.
+    const belongsToAccount = (accountNumber: string | undefined) => {
+      const digits = (accountNumber ?? "").replace(/\D/g, "");
+      return (
+        digits.endsWith(acct.acctNo) &&
+        /^0*$/.test(digits.slice(0, -acct.acctNo.length))
+      );
+    };
+    if (!datas.every((data) => belongsToAccount(data.accountNumber))) {
+      throw new Error(
+        "Cathay Bank returned transactions for a different account.",
+      );
+    }
     const details: TransferDetail[] = datas.flatMap((d) => d.details ?? []);
     console.log(
       `[cathaybk] account ${maskAccountNumber(acct.acctNo)}: ${details.length} tx (period=${periodLabel(lookbackDays)})`,
@@ -1279,21 +1349,6 @@ async function scrapeDeposits(
       sourceId,
       acct.currency,
     );
-
-    // Return to deposit overview for next account
-    await page.goto(DEPOSIT_OVERVIEW_URL, {
-      waitUntil: "networkidle2",
-      timeout: 60000,
-    });
-    await page
-      .waitForFunction(
-        () =>
-          Array.from(document.querySelectorAll("button")).some((b) =>
-            /^\d{10,}$/.test(b.textContent?.trim() ?? ""),
-          ),
-        { timeout: 10000 },
-      )
-      .catch(() => null);
   }
 
   return {
@@ -1378,7 +1433,14 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
     timeout: 60000,
   });
   console.log("[cathaybk] credit card overview opened");
-  await new Promise((r) => setTimeout(r, 2000));
+  // The overview renders after load; a fixed delay sometimes read the page
+  // before the card block appeared and reported no card. Customers without a
+  // card wait for the timeout.
+  await page
+    .waitForFunction(() => /卡片末四碼/.test(document.body?.innerText ?? ""), {
+      timeout: 15000,
+    })
+    .catch(() => null);
 
   const cardOverview = await page.evaluate(() => {
     const text = document.body.innerText;
