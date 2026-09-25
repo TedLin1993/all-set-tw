@@ -88,8 +88,16 @@ Connector 不得依賴 Hono、D1、Worker `Env`，也不得直接寫入資料庫
 `POST /v1/devtools/browser` 請求依 HTTP status `503` 判斷重試，不比對錯誤文案。
 預設等待 2 秒、5 秒後重試，
 最多嘗試 3 次；耗盡後保留原始錯誤，交由既有同步失敗流程處理。結構化 log
-只記錄狀態碼、嘗試次數與重試延遲。`429` 額度／限流錯誤維持既有處理，
+只記錄狀態碼、嘗試次數與重試延遲。`429` 額度／限流錯誤不重試；
 session 重連、瀏覽器建立後的操作與銀行登入不在此重試範圍內。
+
+建立瀏覽器時遇到 Browser Run 每日額度用完或限流，adapter 應轉成使用者看得懂的
+capacity error，不要讓原始 Puppeteer 訊息寫入同步紀錄。新的 adapter 使用
+`browser.ts` 的 `launchBrowserOrCapacityError`，它會呼叫 `launchBrowserWithRetry`，
+並以 `classifyBrowserCapacityError` 將錯誤轉成 `BrowserCapacityError`；同步 route
+會回應 `429 BROWSER_BUSY` 與 `Retry-After`。此類錯誤維持 `failed` 狀態，不視為需要
+使用者處理。永豐、台新、華南、第一、凱基仍沿用各自的 capacity error 類別，以保留
+前端依錯誤代碼處理驗證碼流程的行為。
 
 ## 正規化資料契約
 

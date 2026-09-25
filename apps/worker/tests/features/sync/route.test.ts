@@ -22,6 +22,7 @@ import {
   CathayOtpRequiredError,
   CathayOtpSessionExpiredError,
 } from "../../../src/connectors/cathaybk";
+import { BrowserCapacityError } from "../../../src/connectors/browser";
 import {
   TaishinBrowserCapacityError,
   TaishinConnectionError,
@@ -443,6 +444,30 @@ describe("E.SUN sync route", () => {
         code: "SYNC_FAILED",
         message:
           "E.SUN browser login: duplicate-login dialog kept reappearing.",
+      },
+    });
+  });
+
+  it.each([
+    ["esun", mocks.syncEsun],
+    ["cathaybk", mocks.syncCathaybk],
+  ])("maps %s Browser Run capacity failures", async (connectorId, sync) => {
+    sync.mockRejectedValueOnce(
+      new BrowserCapacityError("Cloudflare 瀏覽器暫時達到使用上限。", 20),
+    );
+
+    const response = await syncRoutes.request(
+      `/connectors/${connectorId}/sync`,
+      { method: "POST" },
+      env,
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("20");
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_BUSY",
+        message: "Cloudflare 瀏覽器暫時達到使用上限。",
       },
     });
   });
