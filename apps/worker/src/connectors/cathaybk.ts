@@ -1365,6 +1365,41 @@ interface MonthDetail {
   sections: BillDetailSection[];
 }
 
+/** Parses the Cathay credit card overview (C0101) page text. */
+export function parseCathayCardOverview(text: string) {
+  const parseAmt = (s: string | undefined) =>
+    parseInt((s ?? "").replace(/[^\d]/g, ""), 10) || 0;
+  const last4Match = text.match(/卡片末四碼[：:]\s*(\d{4})/);
+  const cardNameMatch = text.match(
+    /([^\n]+?(?:MasterCard|VISA|JCB|銀聯)[^\n]*)/,
+  );
+  const limitMatch = text.match(/永久信用額度\s*(?:TWD\s*)?([\d,]+)/);
+  const availMatch = text.match(/剩餘可用額度[\s\S]{0,20}?(?:TWD\s*)?([\d,]+)/);
+  const dueDateMatch = text.match(
+    /繳款截止日[\s\S]{0,10}?(\d{4}[\/\-]\d{2}[\/\-]\d{2})/,
+  );
+  const noPaymentNeeded = text.includes("無需繳費");
+  // The current overview shows the latest statement as "臺幣帳單 TWD 12,345"
+  // without an 應繳金額 label; keep the older wording as the first choice.
+  const unpaidMatch = !noPaymentNeeded
+    ? (text.match(
+        /(?:應繳|未繳)(?:金額|餘額)?[\s\S]{0,20}?(?:TWD\s*)?([\d,]+)/,
+      ) ?? text.match(/臺幣帳單\s*(?:TWD\s*)?([\d,]+)/))
+    : null;
+  return {
+    cardDetected: Boolean(last4Match),
+    last4: last4Match?.[1] ?? "",
+    cardName: last4Match
+      ? `國泰信用卡 末四碼 ${last4Match[1]}`
+      : (cardNameMatch?.[1]?.trim() ?? "國泰信用卡"),
+    creditLimit: parseAmt(limitMatch?.[1]),
+    availableCredit: parseAmt(availMatch?.[1]),
+    unpaidAmount: noPaymentNeeded ? 0 : parseAmt(unpaidMatch?.[1]),
+    paymentDueDate: dueDateMatch?.[1]?.replace(/\//g, "-") ?? null,
+    noPaymentNeeded,
+  };
+}
+
 export async function scrapeCreditCards(page: Page): Promise<Scraped> {
   const bankAccounts: Scraped["bankAccounts"] = [];
   const bankBalanceSnapshots: Scraped["bankBalanceSnapshots"] = [];
@@ -1380,40 +1415,9 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
   console.log("[cathaybk] credit card overview opened");
   await new Promise((r) => setTimeout(r, 2000));
 
-  const cardOverview = await page.evaluate(() => {
-    const text = document.body.innerText;
-    const parseAmt = (s: string | undefined) =>
-      parseInt((s ?? "").replace(/[^\d]/g, ""), 10) || 0;
-    const last4Match = text.match(/卡片末四碼[：:]\s*(\d{4})/);
-    const cardNameMatch = text.match(
-      /([^\n]+?(?:MasterCard|VISA|JCB|銀聯)[^\n]*)/,
-    );
-    const limitMatch = text.match(/永久信用額度\s*(?:TWD\s*)?([\d,]+)/);
-    const availMatch = text.match(
-      /剩餘可用額度[\s\S]{0,20}?(?:TWD\s*)?([\d,]+)/,
-    );
-    const dueDateMatch = text.match(
-      /繳款截止日[\s\S]{0,10}?(\d{4}[\/\-]\d{2}[\/\-]\d{2})/,
-    );
-    const noPaymentNeeded = text.includes("無需繳費");
-    const unpaidMatch = !noPaymentNeeded
-      ? text.match(
-          /(?:應繳|未繳)(?:金額|餘額)?[\s\S]{0,20}?(?:TWD\s*)?([\d,]+)/,
-        )
-      : null;
-    return {
-      cardDetected: Boolean(last4Match),
-      last4: last4Match?.[1] ?? "",
-      cardName: last4Match
-        ? `國泰信用卡 末四碼 ${last4Match[1]}`
-        : (cardNameMatch?.[1]?.trim() ?? "國泰信用卡"),
-      creditLimit: parseAmt(limitMatch?.[1]),
-      availableCredit: parseAmt(availMatch?.[1]),
-      unpaidAmount: noPaymentNeeded ? 0 : parseAmt(unpaidMatch?.[1]),
-      paymentDueDate: dueDateMatch?.[1]?.replace(/\//g, "-") ?? null,
-      noPaymentNeeded,
-    };
-  });
+  const cardOverview = parseCathayCardOverview(
+    await page.evaluate(() => document.body.innerText),
+  );
 
   console.log(
     JSON.stringify({
