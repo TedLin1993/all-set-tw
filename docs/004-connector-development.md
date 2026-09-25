@@ -212,6 +212,13 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 要再送一次「確定登入」。信用卡即時消費與近一年明細來自
 `iesc.esunbank.com` 的 `realTime/getDetailResult` 與
 `creditLastYear/getFilterResult`，存款明細要先呼叫任務 `home/init` 再查詢。
+並非每位使用者都有信用卡或外幣帳戶：同步先呼叫 IESC `common/isCardholder`，
+只有成功回傳 `rtnCode: "S"` 且 `credit: false` 時才略過全部信用卡請求，也不建立
+信用卡帳戶；請求失敗或其他回應都維持原本的信用卡流程。外幣存款查詢回傳 `S001`
+且說明為「查無外幣帳號，或您尚未開立外幣帳戶」時視為沒有外幣帳戶；`S001` 也用於
+其他提示頁，說明不符時仍使同步失敗。瀏覽器登入後，刷卡明細頁要同時具備 IESC
+`accessToken` 與「未入帳」選單或「尚未持有本行信用卡」提示才算就緒，避免在頁面
+自己的初始化請求輪替 token 時送出額外請求。
 信用卡 `getCardOverview` 的 `creditCardFeePaid` 為 `true` 時，將本期帳單標為已繳；
 否則繳款狀態維持未知。
 即時授權與之後入帳必須沿用原本的消費日期、商店、金額與卡片組成 `sourceId`，
