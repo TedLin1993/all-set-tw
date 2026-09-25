@@ -469,6 +469,12 @@ class CtbcMobileSession {
         "中國信託登入需要重新驗證，請先至官方 App 完成驗證。",
       );
     }
+    if (isLogin && isAppUpdateRequired(response)) {
+      console.warn(JSON.stringify({ event: "ctbc_app_update_required" }));
+      throw new CtbcConnectionError(
+        "中國信託目前不接受連接器的登入方式，需等待連接器更新後才能同步；不需要更新 App 或重設密碼，也請先不要重試。",
+      );
+    }
     throw new CtbcConnectionError("中國信託資料同步暫時無法完成。");
   }
 }
@@ -756,6 +762,17 @@ function isVerificationFlagKey(key: string) {
     /(?:otp|verify|verification|binddevice|twostage).*(?:required|pending|challenge)$/i.test(
       key,
     )
+  );
+}
+
+/**
+ * CTBC answers an outdated App login with code 0131 and a forced-update page
+ * ("請更新至最新版本使用"), apparently after the credentials were accepted.
+ */
+function isAppUpdateRequired(response: JsonRecord) {
+  return (
+    stringValue(response.code) === "0131" &&
+    /更新至最新版本/.test(stringValue(response.desc))
   );
 }
 
