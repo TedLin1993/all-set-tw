@@ -50,7 +50,7 @@ import {
   safeErrorMessage,
   NeedsUserActionError,
   SyncAlreadyRunningError,
-  SYNC_LOCK_LEASE_MS,
+  DURABLE_SYNC_LOCK_LEASE_MS,
 } from "./service";
 
 export const EINVOICE_DETAIL_CHUNK_SIZE = 35;
@@ -628,7 +628,7 @@ async function holdEinvoiceRunLock(
     )
     .bind(
       runId,
-      new Date(now.getTime() + SYNC_LOCK_LEASE_MS).toISOString(),
+      new Date(now.getTime() + DURABLE_SYNC_LOCK_LEASE_MS).toISOString(),
       trigger,
       now.toISOString(),
       EINVOICE_JOB_ID,

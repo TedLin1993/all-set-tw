@@ -143,8 +143,13 @@ export const SYNC_SCOPE_ALL = "all";
 export const TDCC_SCOPE_INVESTMENTS = "investments";
 export const TDCC_SCOPE_BANK = "bank";
 export const TDCC_SCOPE_TRADES = "trades";
-export const SYNC_LOCK_LEASE_MS = 30 * 60 * 1000;
-const SYNC_LOCK_HEARTBEAT_MS = 5 * 60 * 1000;
+// Single-invocation syncs renew their lease while running, so an interrupted
+// invocation that never reaches `finally` blocks retries for at most one lease.
+export const SYNC_LOCK_LEASE_MS = 10 * 60 * 1000;
+const SYNC_LOCK_HEARTBEAT_MS = 2 * 60 * 1000;
+// Durable runs hold the connector lock across Queue invocations without a
+// heartbeat, so they keep the longer lease between chunks.
+export const DURABLE_SYNC_LOCK_LEASE_MS = 30 * 60 * 1000;
 
 export type SyncOutcome = {
   success: true;

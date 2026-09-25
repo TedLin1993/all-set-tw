@@ -511,8 +511,10 @@ sequenceDiagram
 
 目前同步 lock：
 
-- Lease 為 30 分鐘。
-- 執行期間每 5 分鐘續租。
+- 單次 invocation 的手動與排程同步 lease 為 10 分鐘，執行期間每 2 分鐘續租。
+  Invocation 若在 `finally` 之前被中斷，殘留鎖最多在一個 lease 後到期，之後即可重新同步。
+- 電子發票與集保的 durable run 在 Queue chunk 之間沒有心跳，connector lock 維持
+  30 分鐘 lease，由每個 chunk 開始時延長。
 - 一般同步工作完成或失敗後必須在 `finally` 釋放。durable run 的 connector lock 跨 invocation 維持，由成功寫入或失敗結案流程釋放；每段另有 owner-scoped run lease。
 - Lock acquisition 失敗時回傳或記錄「已有同步執行中」，不得平行執行同一 connector。
 
