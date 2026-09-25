@@ -72,7 +72,7 @@ import {
   NeedsUserActionError,
   safeErrorMessage,
   SyncAlreadyRunningError,
-  SYNC_LOCK_LEASE_MS,
+  DURABLE_SYNC_LOCK_LEASE_MS,
 } from "./service";
 import {
   serializePublicConnectorConfig,
@@ -1033,7 +1033,7 @@ async function holdTdccRunLock(
     )
     .bind(
       runId,
-      new Date(now.getTime() + SYNC_LOCK_LEASE_MS).toISOString(),
+      new Date(now.getTime() + DURABLE_SYNC_LOCK_LEASE_MS).toISOString(),
       trigger,
       scope,
       now.toISOString(),

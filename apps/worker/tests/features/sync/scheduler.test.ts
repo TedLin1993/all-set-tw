@@ -81,7 +81,7 @@ vi.mock("../../../src/features/sync/service", () => ({
   syncTaishin: mocks.syncTaishin,
   syncSkbank: mocks.syncSkbank,
   syncTdcc: vi.fn(),
-  SYNC_LOCK_LEASE_MS: 30 * 60 * 1000,
+  SYNC_LOCK_LEASE_MS: 10 * 60 * 1000,
 }));
 
 vi.mock("../../../src/features/notifications/service", () => ({
