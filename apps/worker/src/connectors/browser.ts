@@ -48,3 +48,46 @@ export async function launchBrowserWithRetry(
     options,
   );
 }
+
+/** Browser Run rejected a new browser because of daily quota or rate limits. */
+export class BrowserCapacityError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterSeconds = 20,
+  ) {
+    super(message);
+    this.name = "BrowserCapacityError";
+  }
+}
+
+/** Map a failed browser launch to a user-facing capacity error, if applicable. */
+export function classifyBrowserCapacityError(
+  error: unknown,
+): BrowserCapacityError | undefined {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/Browser time limit exceeded for today/i.test(message)) {
+    return new BrowserCapacityError(
+      "Cloudflare 瀏覽器今日使用額度已用完，請於額度重置後再試。",
+      60,
+    );
+  }
+  if (/code:\s*429|rate limit exceeded/i.test(message)) {
+    return new BrowserCapacityError(
+      "Cloudflare 瀏覽器暫時達到使用上限，請稍後再試。",
+      20,
+    );
+  }
+  return undefined;
+}
+
+/** Launch a browser, converting Browser Run capacity failures. */
+export async function launchBrowserOrCapacityError(
+  binding: Parameters<typeof puppeteer.launch>[0],
+  options?: Parameters<typeof puppeteer.launch>[1],
+) {
+  try {
+    return await launchBrowserWithRetry(binding, options);
+  } catch (error) {
+    throw classifyBrowserCapacityError(error) ?? error;
+  }
+}

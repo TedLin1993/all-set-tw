@@ -33,6 +33,7 @@ import {
   CathayOtpSessionExpiredError,
   CathayVerificationRequiredError,
 } from "../../connectors/cathaybk";
+import { BrowserCapacityError } from "../../connectors/browser";
 import { SinopacBrowserCapacityError } from "../../connectors/sinopac";
 import {
   TaishinBrowserCapacityError,
@@ -727,6 +728,11 @@ async function syncRouteResponse(
         safeErrorMessage(error),
         502,
       );
+    }
+    if (error instanceof BrowserCapacityError) {
+      const response = jsonError("BROWSER_BUSY", safeErrorMessage(error), 429);
+      response.headers.set("Retry-After", String(error.retryAfterSeconds));
+      return response;
     }
     return jsonError("SYNC_FAILED", safeErrorMessage(error), 500);
   }
