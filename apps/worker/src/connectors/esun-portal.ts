@@ -6,6 +6,7 @@ const IESC_ORIGIN = "https://iesc.esunbank.com";
 const CARD_OVERVIEW_INIT_PATH = "mib-ccm-portal/ccmB1/ccmB1001/home/init";
 const CARD_OVERVIEW_PATH = "mib-ccm-portal/ccmB1/ccmB1001/home/getCardOverview";
 const DEPOSIT_TASK_INIT_PATH = "mib-ctw-portal/ctw01/ctw01002/home/init";
+const NO_FOREIGN_ACCOUNT_RESULT_CODE = "S001";
 const TW_DEPOSIT_PREQUERY_PATH =
   "mib-ctw-portal/ctw01/ctw01002/home/preQueryTWTransactionDetail";
 const FR_DEPOSIT_PREQUERY_PATH =
@@ -49,6 +50,7 @@ export interface EsunDepositSnapshot {
 }
 
 export interface EsunSnapshot {
+  hasCreditCard: boolean;
   cardOverview: unknown;
   realtime: unknown;
   creditHistory: unknown[];
@@ -104,6 +106,7 @@ interface IescMonth {
 
 interface IescCardBody {
   rtnCode?: string;
+  credit?: boolean;
   cursor?: number;
   transList?: IescMonth[];
   cardInfoList?: Array<{ cardNo?: string }>;
@@ -210,6 +213,19 @@ export async function collectEsunBrowserSnapshot(
 export async function collectEsunSnapshot(
   api: EsunPortalApi,
 ): Promise<EsunSnapshot> {
+  const hasCreditCard = await loadCreditCardholder(api);
+  if (!hasCreditCard) {
+    logEsunStep("credit-card-not-held");
+    return {
+      hasCreditCard,
+      cardOverview: null,
+      realtime: null,
+      creditHistory: [],
+      billSummary: null,
+      billPeriod: null,
+      ...(await loadAllDeposits(api)),
+    };
+  }
   const realtime = (await api.readRealtime()).payload;
   assertIescOk(realtime, "realtime");
   const creditHistory = await loadCreditHistory(api);
@@ -234,6 +250,35 @@ export async function collectEsunSnapshot(
   }
 
   logEsunStep("card-bill-loaded");
+
+  return {
+    hasCreditCard,
+    cardOverview,
+    realtime,
+    creditHistory,
+    billSummary,
+    billPeriod,
+    ...(await loadAllDeposits(api)),
+  };
+}
+
+/** Only an explicit `credit: false` skips cards; anything else keeps the card flow. */
+async function loadCreditCardholder(api: EsunPortalApi) {
+  try {
+    const body = iescData(await api.postIesc("common/isCardholder", {}));
+    return !(body?.rtnCode === "S" && body.credit === false);
+  } catch (error) {
+    console.log(
+      JSON.stringify({
+        event: "esun_cardholder_check_failed",
+        errorType: error instanceof Error ? error.name : "UNKNOWN_ERROR",
+      }),
+    );
+    return true;
+  }
+}
+
+async function loadAllDeposits(api: EsunPortalApi) {
   const range = depositSearchRange();
   const twDeposits = await loadDeposits(api, {
     prequeryPath: TW_DEPOSIT_PREQUERY_PATH,
@@ -248,16 +293,7 @@ export async function collectEsunSnapshot(
     ...range,
   });
   logEsunStep("deposits-loaded");
-
-  return {
-    cardOverview,
-    realtime,
-    creditHistory,
-    billSummary,
-    billPeriod,
-    twDeposits,
-    frDeposits,
-  };
+  return { twDeposits, frDeposits };
 }
 
 export function buildEsunCreditTimelinePages(
@@ -349,10 +385,14 @@ async function openIescCardPage(browser: Browser, portalPage: Page) {
   }
   if (!iescPage) throw new Error("E.SUN credit card page did not open.");
   logEsunStep("iesc-page-opened");
+  // Wait until the page finished its own start-up requests, which rotate the
+  // IESC token: cardholders see the unposted menu, others a no-card notice.
   await iescPage.waitForFunction(
     () =>
-      Boolean(document.querySelector('input[placeholder*="未入帳"]')) ||
-      document.body.innerText.includes("未入帳"),
+      Boolean(sessionStorage.getItem("accessToken")) &&
+      (Boolean(document.querySelector('input[placeholder*="未入帳"]')) ||
+        document.body.innerText.includes("未入帳") ||
+        document.body.innerText.includes("尚未持有本行信用卡")),
     { timeout: 20000 },
   );
   logEsunStep("iesc-page-ready");
@@ -389,6 +429,13 @@ async function clickVisibleControl(page: Page, label: string) {
 }
 
 async function readIescRealtime(page: Page) {
+  await page.waitForFunction(
+    () =>
+      Boolean(document.querySelector('input[placeholder*="未入帳"]')) ||
+      document.body.innerText.includes("未入帳"),
+    { timeout: 20000 },
+  );
+  logEsunStep("iesc-card-ui-ready");
   const opened = await page.evaluate(() => {
     const input = document.querySelector<HTMLInputElement>(
       'input[placeholder*="未入帳"]',
@@ -565,6 +612,10 @@ async function loadDeposits(
   const firstRaw = await api.postPortal(options.prequeryPath, {
     account: null,
   });
+  if (options.kind === "fr" && isNoForeignAccount(firstRaw)) {
+    logEsunStep("foreign-deposit-not-held");
+    return [];
+  }
   assertPortalOk(firstRaw, "deposit-prequery");
   const first = portalData<DepositQueryBody>(firstRaw) ?? {};
   const snapshots: EsunDepositSnapshot[] = [];
@@ -584,6 +635,20 @@ async function loadDeposits(
     snapshots.push(...depositSnapshots(body, options.kind, transactions));
   }
   return snapshots.filter((item) => item.accountNo);
+}
+
+/**
+ * E.SUN uses S001 for several notice pages, so only its "no foreign account"
+ * wording counts; other S001 notices still fail the sync.
+ */
+function isNoForeignAccount(value: unknown) {
+  const envelope = value as PortalEnvelope<unknown> & {
+    resultDescription?: string;
+  };
+  return (
+    envelope?.resultCode === NO_FOREIGN_ACCOUNT_RESULT_CODE &&
+    /查無外幣帳號|尚未開立外幣帳戶/.test(envelope.resultDescription ?? "")
+  );
 }
 
 async function reloadDepositAccount(

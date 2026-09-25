@@ -46,6 +46,7 @@ describe("E.SUN bill payment status", () => {
     [false, undefined],
   ])("maps creditCardFeePaid %s to %s", (overviewPaid, isPaid) => {
     const snapshot: EsunSnapshot = {
+      hasCreditCard: true,
       cardOverview: {
         resultCode: "0000",
         resultBody: { creditCardFeePaid: overviewPaid },
