@@ -21,6 +21,10 @@ type ConnectorFieldMap = {
 };
 
 export const connectorFields = {
+  firstrade: [
+    { key: "username", label: "Firstrade 使用者名稱", type: "text" },
+    { key: "password", label: "Firstrade 密碼", type: "password" },
+  ],
   einvoice: [
     { key: "mobile", label: "手機號碼（電子發票帳號）", type: "text" },
     { key: "password", label: "電子發票 App 登入密碼", type: "password" },

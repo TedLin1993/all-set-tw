@@ -15,6 +15,7 @@
     Smartphone,
   } from "@lucide/svelte";
   import BrowserBankConnectionHelp from "./BrowserBankConnectionHelp.svelte";
+  import FirstradeConnection from "./FirstradeConnection.svelte";
   import ConnectionProgress from "./ConnectionProgress.svelte";
   import Card from "@/shared/ui/Card.svelte";
   import Button from "@/shared/ui/Button.svelte";
@@ -732,7 +733,10 @@
       </p>
     </div>
     <div class="flex flex-wrap gap-2">
-      {#if connectorId === "tdcc" && tdccConnectionReady}
+      {#if connectorId === "firstrade"}
+        <span class="text-sm text-muted-foreground">請於下方完成驗證與同步</span
+        >
+      {:else if connectorId === "tdcc" && tdccConnectionReady}
         <Button
           size="sm"
           disabled={demoMode ||
@@ -925,7 +929,9 @@
       {#if job}<Button
           size="sm"
           variant="outline"
-          disabled={demoMode || $updateJob.isPending}
+          disabled={demoMode ||
+            $updateJob.isPending ||
+            (connectorId === "firstrade" && !job.enabled)}
           onclick={() => $updateJob.mutate({ enabled: !job.enabled })}
           >{job.enabled ? "關閉" : "開啟"}</Button
         >{/if}
@@ -1146,6 +1152,14 @@
   {#if $save.isError}<p class="mt-2 text-sm font-medium text-coral">
       儲存失敗：{error}
     </p>{/if}
+  {#if connectorId === "firstrade"}
+    <FirstradeConnection
+      {api}
+      disabled={demoMode ||
+        !$settings.data?.credentialsComplete ||
+        $save.isPending}
+    />
+  {/if}
   {#if connectorId === "tdcc" && (tdccSetupStep === "email" || tdccSetupStep === "sms")}<div
       class="mt-3 overflow-hidden rounded-xl border border-steel/20 bg-steel/[0.055]"
     >

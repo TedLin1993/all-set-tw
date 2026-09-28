@@ -1,6 +1,7 @@
 import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/core";
 import type { SyncTrigger } from "@taiwan-fin-hub/db";
 import type { Env } from "../../platform/env";
+import { prepareFirstradeSession, syncFirstrade } from "./firstrade-service";
 import {
   prepareSinopacCaptchaSession,
   prepareHncbCaptchaSession,
@@ -52,6 +53,11 @@ export const connectorRuntimeRegistry: Record<
   ConnectorId,
   ConnectorRuntimeDefinition
 > = {
+  firstrade: {
+    run: (env, trigger, _scope, overrides) =>
+      syncFirstrade(env, trigger, overrides),
+    prepareChallenge: prepareFirstradeSession,
+  },
   einvoice: {
     run: async () => {
       throw new Error(

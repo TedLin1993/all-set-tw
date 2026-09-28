@@ -307,6 +307,18 @@ export interface ConnectorCatalogEntry {
 }
 
 export const connectorCatalog = {
+  firstrade: {
+    id: "firstrade",
+    title: "Firstrade 第一證券",
+    description: "美股、ETF 持倉與美元現金；每次同步需人工驗證",
+    connectionMode: "api_device_otp",
+    scopes: ["all"],
+    capabilities: ["investment_position"],
+    publicFields: [],
+    credentialFields: ["username", "password"],
+    secretStateFields: ["pendingSession"],
+    resetOnCredentialChangeFields: ["pendingSession"],
+  },
   einvoice: {
     id: "einvoice",
     title: "電子發票",

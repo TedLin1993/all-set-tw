@@ -5,6 +5,14 @@ import type {
   InvoiceLineItem,
 } from "@taiwan-fin-hub/core";
 import { z } from "zod";
+import { firstradeConfigSchema } from "./firstrade";
+export {
+  firstradeConfigSchema,
+  parseFirstradeConfig,
+  parseFirstradePortfolio,
+} from "./firstrade";
+export { FirstradeApiClient, FirstradeApiError } from "./firstrade-api";
+export type { FirstradeChallenge, FirstradeSession } from "./firstrade-api";
 import { currentPeriodIndex, periodFromIndex } from "./invoice-data";
 import { EINVOICE_SYNC_PERIODS } from "./sync-window";
 import { EInvoiceV2Client, type EInvoiceV2Session } from "./tw-einvoice-v2";
@@ -812,6 +820,7 @@ function dedupeInvoiceLineItems(
 }
 
 export const connectorConfigSchemas = {
+  firstrade: firstradeConfigSchema,
   einvoice: invoiceConfigSchema,
   tdcc: tdccConfigSchema,
   esun: esunConfigSchema,

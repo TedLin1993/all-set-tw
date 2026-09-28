@@ -60,6 +60,7 @@ import { prepareConnectorChallenge, runConnectorSync } from "./registry";
 import { cancelQueuedTdccSyncRun, startTdccSyncRun } from "./tdcc-sync-service";
 import { enqueueTdccSyncChunk } from "./scheduler-queue";
 import type { TdccRunScope } from "./tdcc-run-repository";
+import { prepareFirstradeSession } from "./firstrade-service";
 
 const tdccSyncBodySchema = z.object({
   otp: z.string().min(1).optional(),
@@ -124,6 +125,58 @@ export const syncRoutes = honoFactory.createApp();
 registerSyncRoutes(syncRoutes);
 
 function registerSyncRoutes(api: Hono<AppBindings>) {
+  api.post(
+    "/connectors/firstrade/challenge",
+    zValidator(
+      "json",
+      z.object({ recipientIndex: z.number().int().nonnegative().optional() }),
+      validationHook("INVALID_REQUEST", "驗證方式無效。"),
+    ),
+    async (c) => {
+      try {
+        return c.json(
+          await prepareFirstradeSession(
+            c.env,
+            c.req.valid("json").recipientIndex,
+          ),
+        );
+      } catch (error) {
+        if (error instanceof SyncAlreadyRunningError)
+          return jsonError("SYNC_ALREADY_RUNNING", error.message, 409);
+        return jsonError(
+          "FIRSTRADE_VERIFICATION_FAILED",
+          safeErrorMessage(error),
+          400,
+        );
+      }
+    },
+  );
+  api.post(
+    "/connectors/firstrade/sync",
+    zValidator(
+      "json",
+      z.object({
+        otp: z
+          .string()
+          .regex(/^\d{6}$/)
+          .optional(),
+      }),
+      validationHook("INVALID_REQUEST", "請輸入六位驗證碼。"),
+    ),
+    async (c) =>
+      syncRouteResponse(
+        c,
+        withManualSyncLock(c.env, "firstrade", "all", () =>
+          runConnectorSync(
+            c.env,
+            "firstrade",
+            "manual",
+            "all",
+            c.req.valid("json"),
+          ),
+        ),
+      ),
+  );
   api.post("/connectors/einvoice/sync", async (c) => {
     try {
       const { cancelQueuedEinvoiceSyncRun, startEinvoiceSyncRun } =

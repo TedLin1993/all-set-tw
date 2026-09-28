@@ -155,6 +155,14 @@ npm run build
 
 ## 各來源特殊行為
 
+### Firstrade 第一證券
+
+使用 `api_device_otp` 及加密的五分鐘 `pendingSession`。每次人工登入後，由使用者選擇簡訊／Email 並主動寄送一次驗證碼；亦支援驗證器 App。排程只回報需要人工操作，不登入或寄送驗證碼。尚未建立可重用 trusted-device 契約。
+
+所有 challenge 動作使用 canonical lock 與設定 CAS，使用前先消耗，OTP、失敗及查詢結束不保留可用 session。cursor 只保存同步時間。持倉完整分頁並驗證總額後才以 staging 寫入當日完整快照；原子替換當日 Firstrade 記錄以移除已賣出部位，保留舊日期歷史。資產清單為空或含未支援商品時不覆寫既有資料；有帳戶、零持倉時保留現金快照。
+
+具體證據、原幣語意及限制見 [整合紀錄](firstrade-integration.md)。
+
 ### 電子發票
 
 #### 分段明細同步

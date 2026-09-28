@@ -17,6 +17,7 @@ export type PushNotificationPayload = {
 };
 
 const connectorLabels: Record<ConnectorId, string> = {
+  firstrade: "Firstrade 第一證券",
   einvoice: "電子發票",
   tdcc: "集保 e 存摺",
   esun: "玉山銀行",

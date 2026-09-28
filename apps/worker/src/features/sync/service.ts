@@ -153,6 +153,7 @@ export const SYNC_LOCK_LEASE_MS = 30 * 60 * 1000;
 const SYNC_LOCK_HEARTBEAT_MS = 5 * 60 * 1000;
 
 export type SyncOutcome = {
+  warnings?: string[];
   success: true;
   connectorId: ConnectorId;
   scope: SyncScope;
