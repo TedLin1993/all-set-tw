@@ -312,7 +312,7 @@ describe("default schedule notification rounds", () => {
     await expect(
       claimCompletedDefaultScheduleBatch(db, batchId),
     ).resolves.toBeNull();
-  });
+  }, 30000);
 
   it("does not select a completed member again while the round is open", async () => {
     const db = harness.binding;

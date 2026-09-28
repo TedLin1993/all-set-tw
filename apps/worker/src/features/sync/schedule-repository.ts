@@ -21,6 +21,7 @@ export type DefaultSyncSchedule = {
   intervalMinutes: number;
   preferredTime: string;
   preferredWeekday: number;
+  preferredWeekdays?: number[] | null;
   timezone: "Asia/Taipei";
   updatedAt: string;
 };
@@ -32,6 +33,7 @@ export async function findDefaultSyncSchedule(db: D1Database) {
         intervalMinutes: syncScheduleSettings.intervalMinutes,
         preferredTime: syncScheduleSettings.preferredTime,
         preferredWeekday: syncScheduleSettings.preferredWeekday,
+        preferredWeekdays: syncScheduleSettings.preferredWeekdays,
         timezone: sql<
           DefaultSyncSchedule["timezone"]
         >`${syncScheduleSettings.timezone}`,
@@ -64,6 +66,7 @@ export async function saveDefaultSyncSchedule(
     intervalMinutes: number;
     preferredTime: string;
     preferredWeekday: number;
+    preferredWeekdays?: number[] | null;
     updatedAt: string;
     inheritedJobs: Array<{ id: string; nextRunAt: string }>;
   },
@@ -72,12 +75,13 @@ export async function saveDefaultSyncSchedule(
     db
       .prepare(
         `INSERT INTO sync_schedule_settings (
-         id, interval_minutes, preferred_time, preferred_weekday, timezone, updated_at
-       ) VALUES ('default', ?, ?, ?, 'Asia/Taipei', ?)
+         id, interval_minutes, preferred_time, preferred_weekday, preferred_weekdays, timezone, updated_at
+       ) VALUES ('default', ?, ?, ?, ?, 'Asia/Taipei', ?)
        ON CONFLICT(id) DO UPDATE SET
          interval_minutes = excluded.interval_minutes,
          preferred_time = excluded.preferred_time,
          preferred_weekday = excluded.preferred_weekday,
+         preferred_weekdays = excluded.preferred_weekdays,
          timezone = excluded.timezone,
          updated_at = excluded.updated_at`,
       )
@@ -85,19 +89,21 @@ export async function saveDefaultSyncSchedule(
         input.intervalMinutes,
         input.preferredTime,
         input.preferredWeekday,
+        JSON.stringify(input.preferredWeekdays ?? [input.preferredWeekday]),
         input.updatedAt,
       ),
     ...input.inheritedJobs.map((job) =>
       db
         .prepare(
           `UPDATE sync_jobs
-         SET interval_minutes = ?, preferred_time = ?, preferred_weekday = ?, next_run_at = ?, updated_at = ?
+         SET interval_minutes = ?, preferred_time = ?, preferred_weekday = ?, preferred_weekdays = ?, next_run_at = ?, updated_at = ?
          WHERE id = ?`,
         )
         .bind(
           input.intervalMinutes,
           input.preferredTime,
           input.preferredWeekday,
+          JSON.stringify(input.preferredWeekdays ?? [input.preferredWeekday]),
           job.nextRunAt,
           input.updatedAt,
           job.id,
@@ -119,6 +125,7 @@ export async function listSyncJobs(db: D1Database) {
       scheduleMode: sql<SyncScheduleMode>`${syncJobs.scheduleMode}`,
       preferredTime: syncJobs.preferredTime,
       preferredWeekday: syncJobs.preferredWeekday,
+      preferredWeekdays: syncJobs.preferredWeekdays,
       lockedUntil: syncJobs.lockedUntil,
       lockedBy: syncJobs.lockedBy,
       lockTrigger: sql<SyncTrigger | null>`${syncJobs.lockTrigger}`,
@@ -168,6 +175,7 @@ export async function updateSyncJob(
     scheduleMode: SyncScheduleMode;
     preferredTime: string;
     preferredWeekday: number;
+    preferredWeekdays?: number[] | null;
     updatedAt: string;
   },
 ) {
@@ -179,7 +187,7 @@ export async function updateSyncJob(
          interval_minutes = ?,
          schedule_mode = ?,
          preferred_time = ?,
-         preferred_weekday = ?,
+         preferred_weekday = ?, preferred_weekdays = ?,
          updated_at = ?
      WHERE connector_id = ?
        AND scope = ?`,
@@ -191,6 +199,7 @@ export async function updateSyncJob(
       input.scheduleMode,
       input.preferredTime,
       input.preferredWeekday,
+      JSON.stringify(input.preferredWeekdays ?? [input.preferredWeekday]),
       input.updatedAt,
       connectorId,
       scope,

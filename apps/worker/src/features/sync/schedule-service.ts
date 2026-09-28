@@ -25,6 +25,7 @@ export async function setDefaultSyncSchedule(
     intervalMinutes: number;
     preferredTime: string;
     preferredWeekday: number;
+    preferredWeekdays?: number[];
   },
 ) {
   const now = new Date();
@@ -40,6 +41,7 @@ export async function setDefaultSyncSchedule(
         now,
         job.nextRunAt,
         input.preferredWeekday,
+        input.preferredWeekdays,
       ),
     })),
   });
@@ -70,6 +72,7 @@ export type UpdateSyncJobInput = {
   intervalMinutes?: number;
   preferredTime?: string;
   preferredWeekday?: number;
+  preferredWeekdays?: number[];
   scheduleMode?: SyncScheduleMode;
 };
 
@@ -95,11 +98,18 @@ export async function editSyncJob(
     defaultSchedule?.preferredWeekday ??
     input.preferredWeekday ??
     job.preferred_weekday;
+  const preferredWeekdays = defaultSchedule
+    ? (defaultSchedule.preferredWeekdays ?? [defaultSchedule.preferredWeekday])
+    : (input.preferredWeekdays ??
+      (input.preferredWeekday !== undefined
+        ? [input.preferredWeekday]
+        : (job.preferred_weekdays ?? [job.preferred_weekday])));
   const scheduleChanged =
     input.scheduleMode !== undefined ||
     input.intervalMinutes !== undefined ||
     input.preferredTime !== undefined ||
-    input.preferredWeekday !== undefined;
+    input.preferredWeekday !== undefined ||
+    input.preferredWeekdays !== undefined;
   const nextRunAt =
     input.nextRunAt ??
     (scheduleChanged || input.enabled === true
@@ -109,6 +119,7 @@ export async function editSyncJob(
           now,
           job.next_run_at,
           preferredWeekday,
+          preferredWeekdays,
         )
       : job.next_run_at);
   if (
@@ -119,6 +130,7 @@ export async function editSyncJob(
       scheduleMode,
       preferredTime,
       preferredWeekday,
+      preferredWeekdays,
       updatedAt: now.toISOString(),
     }))
   )
@@ -131,6 +143,7 @@ export async function editSyncJob(
     intervalMinutes,
     preferredTime,
     preferredWeekday,
+    preferredWeekdays,
     scheduleMode,
     nextRunAt,
   };

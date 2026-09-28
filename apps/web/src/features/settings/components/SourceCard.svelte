@@ -59,7 +59,7 @@
         : job.intervalMinutes === 1440
           ? `每天 ${job.preferredTime}`
           : job.intervalMinutes === 10080
-            ? `每${weekdays[job.preferredWeekday] ?? "週一"} ${job.preferredTime}`
+            ? `每${(job.preferredWeekdays ?? [job.preferredWeekday]).map((day) => weekdays[day]).join("、")} ${job.preferredTime}`
             : `每 ${job.intervalMinutes / 60} 小時`,
   );
   const SourceIcon = $derived(

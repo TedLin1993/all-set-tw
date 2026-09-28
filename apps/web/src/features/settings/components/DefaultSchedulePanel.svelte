@@ -1,4 +1,5 @@
 <script lang="ts">
+  import WeekdayPicker from "./WeekdayPicker.svelte";
   import { onMount } from "svelte";
   import {
     createMutation,
@@ -39,18 +40,9 @@
     { label: "每天", minutes: 1440 },
     { label: "每週", minutes: 10080 },
   ];
-  const weekdayOptions = [
-    "週日",
-    "週一",
-    "週二",
-    "週三",
-    "週四",
-    "週五",
-    "週六",
-  ];
   let intervalMinutes = $state(1440);
   let preferredTime = $state("06:00");
-  let preferredWeekday = $state(1);
+  let preferredWeekdays = $state([1]);
   const inheritedJobs = $derived(
     jobs.filter((job) => job.scheduleMode === "inherit").length,
   );
@@ -60,7 +52,9 @@
       if (!result.data) return;
       intervalMinutes = result.data.intervalMinutes;
       preferredTime = result.data.preferredTime;
-      preferredWeekday = result.data.preferredWeekday;
+      preferredWeekdays = result.data.preferredWeekdays ?? [
+        result.data.preferredWeekday,
+      ];
     }),
   );
 
@@ -69,7 +63,8 @@
       api.put<SyncScheduleSettings>("/api/sync-schedule", {
         intervalMinutes,
         preferredTime,
-        preferredWeekday,
+        preferredWeekday: preferredWeekdays[0],
+        preferredWeekdays,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.syncSchedule });
@@ -123,14 +118,11 @@
       </Select>
     </label>
     {#if intervalMinutes === 10080}
-      <label class="grid gap-1.5 text-sm font-medium md:w-36">
-        執行日
-        <Select bind:value={preferredWeekday}>
-          {#each weekdayOptions as weekday, index (weekday)}
-            <option value={index}>{weekday}</option>
-          {/each}
-        </Select>
-      </label>
+      <WeekdayPicker
+        value={preferredWeekdays}
+        disabled={demoMode || $save.isPending}
+        onchange={(days) => (preferredWeekdays = days)}
+      />
     {/if}
     {#if intervalMinutes >= 1440}
       <label class="grid gap-1.5 text-sm font-medium md:w-44">

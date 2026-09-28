@@ -103,7 +103,7 @@
       : inheritedJob.intervalMinutes === 1440
         ? `每天 ${inheritedJob.preferredTime}`
         : inheritedJob.intervalMinutes === 10080
-          ? `每${weekdayLabels[inheritedJob.preferredWeekday] ?? "週一"} ${inheritedJob.preferredTime}`
+          ? `每${(inheritedJob.preferredWeekdays ?? [inheritedJob.preferredWeekday]).map((day) => weekdayLabels[day]).join("、")} ${inheritedJob.preferredTime}`
           : `每 ${inheritedJob.intervalMinutes / 60} 小時`,
   );
   const ratesSummary = $derived(

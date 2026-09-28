@@ -174,7 +174,7 @@ describe("階段 4：隔離 D1 lease 與 promotion", () => {
     expect(await findDefaultSyncSchedule(db)).toEqual(
       await db
         .prepare(
-          "SELECT interval_minutes AS intervalMinutes, preferred_time AS preferredTime, preferred_weekday AS preferredWeekday, timezone, updated_at AS updatedAt FROM sync_schedule_settings WHERE id = 'default'",
+          "SELECT interval_minutes AS intervalMinutes, preferred_time AS preferredTime, preferred_weekday AS preferredWeekday, preferred_weekdays AS preferredWeekdays, timezone, updated_at AS updatedAt FROM sync_schedule_settings WHERE id = 'default'",
         )
         .first(),
     );

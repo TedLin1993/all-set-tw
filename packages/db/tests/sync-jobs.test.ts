@@ -42,3 +42,38 @@ describe("nextSyncRunAt", () => {
     ).toBe("2026-07-19T22:50:00.000Z");
   });
 });
+
+describe("weekly multiple days", () => {
+  it("selects the next day across Taipei midnight and skips the exact run time", () => {
+    expect(
+      nextSyncRunAt(
+        10080,
+        "06:00",
+        new Date("2026-09-27T22:00:00Z"),
+        undefined,
+        1,
+        [1, 3, 5],
+      ),
+    ).toBe("2026-09-29T22:00:00.000Z");
+    expect(
+      nextSyncRunAt(
+        10080,
+        "06:00",
+        new Date("2026-10-02T22:00:00Z"),
+        undefined,
+        1,
+        [1, 3, 5],
+      ),
+    ).toBe("2026-10-04T22:00:00.000Z");
+    expect(
+      nextSyncRunAt(
+        10080,
+        "06:00",
+        new Date("2026-09-27T21:59:00Z"),
+        undefined,
+        1,
+        [1, 3, 5],
+      ),
+    ).toBe("2026-09-27T22:00:00.000Z");
+  });
+});

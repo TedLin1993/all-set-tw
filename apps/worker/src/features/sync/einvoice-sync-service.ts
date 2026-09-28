@@ -446,6 +446,7 @@ async function finalizeEinvoiceRun(
           now,
           job.next_run_at,
           job.preferred_weekday,
+          job.preferred_weekdays,
         )
       : job.next_run_at;
   const activeGuard = `EXISTS (

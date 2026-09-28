@@ -719,3 +719,7 @@ npm run build
 - 所有未知錯誤必須在 API 邊界被消毒。
 - 資料庫 schema 與預設資料只能透過 migration 管理。
 - 文件與實際程式不一致時，以程式與測試為準，並在同一個變更中更新本文件。
+
+## 每週多日排程
+
+預設與自訂排程均可選擇多個星期，至少保留一天；以 Asia/Taipei 計算下一個選定日的開始時間。`preferred_weekdays` 保存 JSON 陣列，舊資料為 NULL 時沿用 `preferred_weekday`。成功、失敗與分段同步完成後均依同一規則重新排程。

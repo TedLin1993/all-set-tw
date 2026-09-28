@@ -1,4 +1,5 @@
 <script lang="ts">
+  import WeekdayPicker from "../components/WeekdayPicker.svelte";
   import { onDestroy, onMount } from "svelte";
   import { toStore } from "svelte/store";
   import {
@@ -955,8 +956,13 @@
             <span class="font-semibold">跟隨預設：</span>
             {#if $defaultSchedule.data}
               {#if $defaultSchedule.data.intervalMinutes === 10080}
-                每{weekdayOptions[$defaultSchedule.data.preferredWeekday] ??
-                  "週一"}
+                每{(
+                  $defaultSchedule.data.preferredWeekdays ?? [
+                    $defaultSchedule.data.preferredWeekday,
+                  ]
+                )
+                  .map((day) => weekdayOptions[day])
+                  .join("、")}
                 {$defaultSchedule.data.preferredTime} 起
               {:else}
                 {intervalLabel(
@@ -987,23 +993,15 @@
             </Select>
           </label>
           {#if job.intervalMinutes === 10080}
-            <label class="grid gap-1 text-sm font-semibold text-ink/70">
-              執行日
-              <Select
-                value={job.preferredWeekday}
-                disabled={demoMode || $updateJob.isPending}
-                onchange={(event: Event) =>
-                  $updateJob.mutate({
-                    preferredWeekday: Number(
-                      (event.currentTarget as HTMLSelectElement).value,
-                    ),
-                  })}
-              >
-                {#each weekdayOptions as weekday, index (weekday)}
-                  <option value={index}>{weekday}</option>
-                {/each}
-              </Select>
-            </label>
+            <WeekdayPicker
+              value={job.preferredWeekdays ?? [job.preferredWeekday]}
+              disabled={demoMode || $updateJob.isPending}
+              onchange={(preferredWeekdays) =>
+                $updateJob.mutate({
+                  preferredWeekdays,
+                  preferredWeekday: preferredWeekdays[0],
+                })}
+            />
           {/if}
           {#if job.intervalMinutes >= 1440}
             <label class="grid gap-1 text-sm font-semibold text-ink/70">

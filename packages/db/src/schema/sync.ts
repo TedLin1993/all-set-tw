@@ -43,6 +43,9 @@ export const syncJobs = sqliteTable(
     preferredWeekday: integer("preferred_weekday")
       .notNull()
       .default(sql`1`),
+    preferredWeekdays: text("preferred_weekdays", {
+      mode: "json",
+    }).$type<number[]>(),
   },
   (table) => [
     primaryKey({ columns: [table.id] }),
@@ -68,6 +71,9 @@ export const syncScheduleSettings = sqliteTable(
     preferredWeekday: integer("preferred_weekday")
       .notNull()
       .default(sql`1`),
+    preferredWeekdays: text("preferred_weekdays", {
+      mode: "json",
+    }).$type<number[]>(),
   },
   (table) => [
     primaryKey({ columns: [table.id] }),

@@ -27,6 +27,7 @@ export interface SyncJobRow {
   scheduleMode: "inherit" | "custom";
   preferredTime: string;
   preferredWeekday: number;
+  preferredWeekdays?: number[] | null;
   lockedUntil: string | null;
   lockedBy: string | null;
   lockTrigger: "manual" | "scheduled" | null;
@@ -43,6 +44,7 @@ export interface SyncScheduleSettings {
   intervalMinutes: number;
   preferredTime: string;
   preferredWeekday: number;
+  preferredWeekdays?: number[] | null;
   timezone: "Asia/Taipei";
   updatedAt: string;
 }
