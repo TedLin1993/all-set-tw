@@ -173,6 +173,29 @@ describe("e-invoice chunk sync service", () => {
     mocks.releaseEinvoiceRunClaimForRetry.mockResolvedValue(0);
   });
 
+  it("holds the connector lock with the durable lease between chunks", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-25T00:00:00.000Z"));
+    try {
+      await processEinvoiceSyncChunk(env(), "run-1");
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const hold = preparedStatements.find(({ sql }) =>
+      sql.includes("SET locked_by = ?, locked_until = ?"),
+    );
+    expect(hold?.bind).toHaveBeenCalledWith(
+      "run-1",
+      "2026-09-25T00:30:00.000Z",
+      "manual",
+      "2026-09-25T00:00:00.000Z",
+      expect.any(String),
+      "2026-09-25T00:00:00.000Z",
+      "run-1",
+    );
+  });
+
   it("claims no more than the configured safe detail batch size", async () => {
     await expect(processEinvoiceSyncChunk(env(), "run-1")).resolves.toEqual({
       status: "continue",
