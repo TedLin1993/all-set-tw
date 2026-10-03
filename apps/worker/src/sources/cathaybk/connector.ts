@@ -851,18 +851,38 @@ async function dismissInterstitialIfPresent(
 export async function dismissCathaySystemMessageIfPresent(
   page: Pick<CathayLoginPage, "$" | "waitForSelector">,
 ): Promise<boolean> {
-  const dismissButton = await page.$(
-    "#divSystemLoginMsgList.show button.btn-fill",
-  );
+  const selector = "#divSystemLoginMsgList.show button.btn-fill";
+  let dismissButton = await page.$(selector);
   if (!dismissButton) return false;
 
   console.log("[cathaybk] dismissing system message modal");
-  await dismissButton.click();
-  await page.waitForSelector("#divSystemLoginMsgList.show", {
-    hidden: true,
-    timeout: 5000,
-  });
-  return true;
+  // ponytail: cap at 20 notices; fail closed if the bank page loops or changes unexpectedly.
+  for (let count = 0; count < 20; count++) {
+    const buttonText = await dismissButton.evaluate((button) =>
+      button.textContent?.replace(/\s+/g, "").trim(),
+    );
+    if (buttonText !== "下一則" && buttonText !== "我知道了") {
+      throw new Error("Cathay system message action changed.");
+    }
+
+    await dismissButton.click();
+    if (buttonText === "我知道了") {
+      await page.waitForSelector("#divSystemLoginMsgList.show", {
+        hidden: true,
+        timeout: 5000,
+      });
+      return true;
+    }
+
+    dismissButton = await page.$(selector);
+    if (!dismissButton) {
+      throw new Error(
+        "Cathay system message list closed before the final notice.",
+      );
+    }
+  }
+
+  throw new Error("Cathay system message list exceeded 20 notices.");
 }
 
 export async function submitCathayLoginForm(
