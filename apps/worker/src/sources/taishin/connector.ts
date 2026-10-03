@@ -28,6 +28,8 @@ const CAPTCHA_KEEP_ALIVE_MS = 150_000;
 const CAPTCHA_VALIDITY_MS = 120_000;
 const CAPTCHA_IMAGE_TIMEOUT_MS = 10_000;
 const CAPTCHA_PAGE_RETRY_ATTEMPTS = 1;
+const TAISHIN_CAPTCHA_IMAGE_HINT =
+  /captcha|驗證|validate|check.?code|verify.?code/i;
 const LOGIN_RESULT_ATTEMPTS = 10;
 const LOGIN_RESULT_POLL_MS = 500;
 const REQUIRED_API_TIMEOUT_MS = 8_000;
@@ -39,6 +41,18 @@ const USER_AGENT =
 
 type JsonRecord = Record<string, unknown>;
 type BrowserPage = Page | Frame;
+type TaishinCaptchaImageCandidate = {
+  index: number;
+  hint: string;
+  complete: boolean;
+  naturalWidth: number;
+  width: number;
+  height: number;
+  top: number;
+  left: number;
+  inputTop: number;
+  inputRight: number;
+};
 type SessionCheckDiagnostic = {
   result?: string;
   httpStatus?: number;
@@ -796,7 +810,7 @@ async function openLoginAndFill(page: Page, config: TaishinConfig) {
         find(/使用者密碼|password|passwd/i) ??
         candidateInputs.find((input) => input.type === "password");
       const captcha =
-        find(/驗證碼|captcha|validate|check.?code/i) ??
+        find(/驗證碼|captcha|validate|check.?code|verification\s*code/i) ??
         candidateInputs.find(
           (input) =>
             input !== password &&
@@ -811,13 +825,15 @@ async function openLoginAndFill(page: Page, config: TaishinConfig) {
           input !== captcha &&
           ["", "text", "tel"].includes(input.type),
       );
-      const matchedUserId = find(/身分證|統一編號|cust(?:omer)?id/i);
+      const matchedUserId = find(
+        /身分證|統一編號|cust(?:omer)?\s*id|\b(?:id|identity)(?:\s+card)?\s*(?:number|no\.?)(?:\b|$)/i,
+      );
       const userId =
         matchedUserId && matchedUserId !== password && matchedUserId !== captcha
           ? matchedUserId
           : identityInputs[0];
       const matchedAccount = find(
-        /使用者代(?:號|碼)|登入代(?:號|碼)|user(?:id|code)/i,
+        /使用者代(?:號|碼)|登入代(?:號|碼)|user\s*(?:id|code)|username/i,
       );
       const account =
         matchedAccount &&
@@ -879,7 +895,7 @@ async function typeInput(page: BrowserPage, selector: string, value: string) {
 async function captureCaptcha(page: BrowserPage) {
   try {
     await page.waitForFunction(
-      () => {
+      (hintPattern) => {
         const captchaInput = document.querySelector<HTMLInputElement>(
           'input[data-taishin-field="captcha"]',
         );
@@ -887,80 +903,107 @@ async function captureCaptcha(page: BrowserPage) {
         const images = Array.from(
           document.querySelectorAll<HTMLImageElement>("img"),
         );
-        const isHinted = (image: HTMLImageElement) => {
-          const hint = [image.id, image.className, image.alt, image.src].join(
-            " ",
-          );
-          return /captcha|驗證|validate|check.?code|verify.?code|shuffle/i.test(
-            hint,
-          );
-        };
-        const hasHintedImage = images.some(isHinted);
+        const captchaHint = new RegExp(hintPattern, "i");
         return images.some((image) => {
+          const source = image.getAttribute("src") ?? "";
+          const hint = [
+            image.id,
+            image.className,
+            image.alt,
+            source.startsWith("data:") ? "" : source.split(/[?#]/, 1)[0],
+          ]
+            .join(" ")
+            .slice(0, 256);
+          if (!captchaHint.test(hint)) return false;
           if (!image.complete || image.naturalWidth <= 0) return false;
           const rect = image.getBoundingClientRect();
-          if (rect.width < 50 || rect.height < 20) return false;
-          if (hasHintedImage && !isHinted(image)) return false;
-          return true;
+          return rect.width >= 50 && rect.height >= 20;
         });
       },
       { timeout: CAPTCHA_IMAGE_TIMEOUT_MS },
+      TAISHIN_CAPTCHA_IMAGE_HINT.source,
     );
   } catch {
     throw new TaishinCaptchaUnavailableError(
       "台新登入頁沒有在期限內取得圖形驗證碼。",
     );
   }
-  const target = await page.evaluate(() => {
+  const capture = await page.evaluate(() => {
     const captchaInput = document.querySelector<HTMLInputElement>(
       'input[data-taishin-field="captcha"]',
     );
     if (!captchaInput) return undefined;
     const inputRect = captchaInput.getBoundingClientRect();
-    const images = Array.from(
+    const candidates = Array.from(
       document.querySelectorAll<HTMLImageElement>("img"),
-    )
-      .filter((image) => image.complete && image.naturalWidth > 0)
-      .map((image) => {
-        const rect = image.getBoundingClientRect();
-        const hint = [image.id, image.className, image.alt, image.src].join(
-          " ",
-        );
-        return {
-          image,
-          score:
-            (/captcha|驗證|validate|check.?code|verify.?code|shuffle/i.test(
-              hint,
-            )
-              ? 1000
-              : 0) -
-            Math.abs(rect.top - inputRect.top) -
-            Math.abs(rect.left - inputRect.right),
-          width: rect.width,
-          height: rect.height,
-        };
-      })
-      .filter(({ width, height }) => width >= 50 && height >= 20)
-      .sort((left, right) => right.score - left.score);
-    const image = images[0]?.image;
-    if (!image) return undefined;
-    image.dataset.taishinCaptcha = "image";
+    ).map((image, index) => {
+      const source = image.getAttribute("src") ?? "";
+      const hint = [
+        image.id,
+        image.className,
+        image.alt,
+        source.startsWith("data:") ? "" : source.split(/[?#]/, 1)[0],
+      ]
+        .join(" ")
+        .slice(0, 256);
+      image.dataset.taishinCaptchaCandidate = String(index);
+      const rect = image.getBoundingClientRect();
+      return {
+        index,
+        hint,
+        complete: image.complete,
+        naturalWidth: image.naturalWidth,
+        width: rect.width,
+        height: rect.height,
+        top: rect.top,
+        left: rect.left,
+        inputTop: inputRect.top,
+        inputRight: inputRect.right,
+      };
+    });
     const declaredLength = captchaInput.maxLength;
     return {
-      selector: 'img[data-taishin-captcha="image"]',
+      candidates,
       digitCount:
         declaredLength >= 4 && declaredLength <= 8 ? declaredLength : 6,
     };
   });
-  if (!target) {
+  const candidateIndex = capture
+    ? selectTaishinCaptchaImage(capture.candidates)
+    : undefined;
+  if (candidateIndex === undefined) {
     throw new TaishinCaptchaUnavailableError(
       "台新登入頁沒有在期限內取得圖形驗證碼。",
     );
   }
-  const image = await page.$(target.selector);
+  const image = await page.$(
+    `img[data-taishin-captcha-candidate="${candidateIndex}"]`,
+  );
   if (!image) throw new TaishinConnectionError("台新圖形驗證碼已失效。");
   const bytes = await image.screenshot({ type: "jpeg" });
-  return { bytes, digitCount: target.digitCount };
+  return { bytes, digitCount: capture?.digitCount ?? 6 };
+}
+
+function selectTaishinCaptchaImage(candidates: TaishinCaptchaImageCandidate[]) {
+  return candidates
+    .filter(
+      (candidate) =>
+        TAISHIN_CAPTCHA_IMAGE_HINT.test(candidate.hint) &&
+        candidate.complete &&
+        candidate.naturalWidth > 0 &&
+        candidate.width >= 50 &&
+        candidate.height >= 20,
+    )
+    .sort(
+      (left, right) => captchaImageDistance(left) - captchaImageDistance(right),
+    )[0]?.index;
+}
+
+function captchaImageDistance(candidate: TaishinCaptchaImageCandidate) {
+  return (
+    Math.abs(candidate.top - candidate.inputTop) +
+    Math.abs(candidate.left - candidate.inputRight)
+  );
 }
 
 async function submitLogin(
