@@ -389,6 +389,8 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 
 真實無卡帳號點擊信用卡功能後，銀行不顯示無卡文案，而是經 `/cmsweb/conn/netbanktrust` → `/cmsweb/Detail/BillingQuery` 轉到 `/cmsweb/Home/Logout`（「您已登出信用卡會員服務系統」），之後不會有任何信用卡 API 回應。信用卡階段尚未取得任何信用卡回應時被導到此登出頁，視為無卡並記錄 `card-member-logout`；已取得任一信用卡回應後才出現登出頁時不視為無卡，仍依未回應規則失敗，避免丟棄已取得的帳務。
 
+同一個無卡帳號從 Cloudflare Browser Run 連線時，銀行不轉到登出頁，而是停在 `BillingQuery`：帳單月份清單 `/cmsweb/Common/sendCMSQRY9999` 回 `ResultCount: "0"` 且 `Result` 為空，頁面因此不送 `CMSQRY0014`。帳單月份為空只代表沒有可查的帳單，記錄 `card-bill-dates-empty` 後繼續查近期繳款與未出帳；`CMSQRY0006` 的 `REFRETURNDESC`「查無卡人」或 `CMSQRY0008` 的 `RETURNDESC`「查無卡片資訊」才視為無卡。同一帳號、同一 Chrome 版本、同樣的 Browser Run 請求標頭從住宅網路連線仍走登出頁，兩種回應的差異來自連線來源，本機重現 Cloudflare 行為需把 `BROWSER` binding 設為 `remote = true`。
+
 信用卡會員系統登出後，網銀 session 已無法續用，但銀行仍保留約十分鐘的單一登入鎖，期間重新登入會收到 `MULTI_SESSION_LOGIN`。此情況在擷取結束時呼叫網銀頁框自己的 `logout()`（送出至 `/NetBank/logout.html`）釋放登入並記錄 `netbank-logout`；有卡帳號維持既有的 session 續用，不主動登出。
 
 交易明細頁的說明文字（如「帳戶交易明細查詢提供交易時間資訊」）可能比「帳號 …」先出現，解析頁面帳號時逐一檢查每個帳號／帳戶標籤，取第一個帶帳號數字的值；多個存款帳戶時才能正確對應明細。

@@ -64,6 +64,11 @@ const CARD_RESPONSE_TIMEOUT_MS = 30_000;
 // Live no-card account: the card bridge goes netbanktrust -> BillingQuery ->
 // Home/Logout ("您已登出信用卡會員服務系統") without any card API or no-card text.
 const CARD_MEMBER_LOGOUT_PATH = "/cmsweb/Home/Logout";
+// From Browser Run the same account instead stays on BillingQuery: its bill
+// date list (CMSQRY9999) is empty, so the page never sends CMSQRY0014, while
+// 0006 and 0008 answer "查無卡人" (REFRETURNDESC) and "查無卡片資訊".
+const CARD_BILL_DATES_PATH = "/cmsweb/Common/sendCMSQRY9999";
+const FIRSTBANK_NO_CARD_DESCRIPTIONS = new Set(["查無卡人", "查無卡片資訊"]);
 // The query page lists one account per option and returns one account per
 // search; cap the loop so an unexpected option list cannot run unbounded.
 const MAX_TRANSACTION_QUERY_ACCOUNTS = 10;
@@ -95,6 +100,7 @@ type CardPayloadKey = "cardBill" | "recentPayments" | "cardUnbilled";
 type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>> & {
   noCreditCard?: boolean;
   cardMemberLoggedOut?: boolean;
+  noBillDates?: boolean;
 };
 
 type DepositResponseCapture = {
@@ -1151,6 +1157,15 @@ async function collectFirstbankPayloads(
         status: httpStatus(response),
       });
     }
+    if (
+      collectingCards &&
+      urlPathname(response.url()) === CARD_BILL_DATES_PATH
+    ) {
+      const task = captureCardBillDates(response, captured);
+      responseTasks.push(task);
+      void task.catch(() => undefined);
+      return;
+    }
     const key = cardResponseKey(response.url());
     if (!key) return;
     cardResponseObserved = true;
@@ -1613,7 +1628,8 @@ async function waitForCardResponse(
   const deadline = Date.now() + CARD_RESPONSE_TIMEOUT_MS;
   while (
     !captured.noCreditCard &&
-    !Object.prototype.hasOwnProperty.call(captured, key)
+    !Object.prototype.hasOwnProperty.call(captured, key) &&
+    !(key === "cardBill" && captured.noBillDates)
   ) {
     if (Date.now() >= deadline) {
       throw new FirstbankActionTimeoutError();
@@ -1643,6 +1659,38 @@ async function captureCardResponse(
   }
 }
 
+// An empty bill date list only means there is no statement to query; whether
+// the account has a card is decided by the 0006 and 0008 responses that follow.
+async function captureCardBillDates(
+  response: BrowserResponse,
+  captured: CapturedCardResponses,
+) {
+  const status = httpStatus(response);
+  if (status !== undefined && (status < 200 || status >= 300)) return;
+  const payload = await response.json().catch(() => undefined);
+  if (!isRecord(payload)) return;
+  const content = isRecord(payload.CONTENT) ? payload.CONTENT : payload.content;
+  if (
+    isRecord(content) &&
+    String(content.ResultCount ?? "") === "0" &&
+    !String(content.Result ?? "").trim()
+  ) {
+    captured.noBillDates = true;
+    logFirstbankStage("card-bill-dates-empty", {
+      path: CARD_BILL_DATES_PATH,
+      status,
+    });
+  }
+}
+
+function isFirstbankNoCardDescription(value: unknown) {
+  return (
+    isNoCreditCardMessage(value) ||
+    (typeof value === "string" &&
+      FIRSTBANK_NO_CARD_DESCRIPTIONS.has(value.trim()))
+  );
+}
+
 function storeCardResponse(
   captured: CapturedCardResponses,
   key: CardPayloadKey,
@@ -1659,7 +1707,10 @@ function storeCardResponse(
       const messageId = String(head.MSGID ?? head.msgid ?? "");
       if (
         (!messageId || messageId.includes(expectedCode)) &&
-        isNoCreditCardMessage(head.RETURNDESC ?? head.returndesc)
+        (isFirstbankNoCardDescription(head.RETURNDESC ?? head.returndesc) ||
+          isFirstbankNoCardDescription(
+            head.REFRETURNDESC ?? head.refreturndesc,
+          ))
       )
         captured.noCreditCard = true;
     }
