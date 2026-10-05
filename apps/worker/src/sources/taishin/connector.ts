@@ -1,5 +1,9 @@
 import type { SyncResult } from "../types";
-import { BrowserRunCapacityError, launchBrowserWithRetry } from "../browser.js";
+import {
+  BrowserRunCapacityError,
+  launchBrowserWithRetry,
+  connectBrowserWithCancellation,
+} from "../browser.js";
 import puppeteer, {
   type Browser,
   type Frame,
@@ -1373,7 +1377,10 @@ async function acquireBrowser(browser: Fetcher, preferredSessionId?: string) {
     }
     if (preferred) {
       try {
-        return await puppeteer.connect(browser, preferred.sessionId);
+        return await connectBrowserWithCancellation(
+          browser,
+          preferred.sessionId,
+        );
       } catch {
         throw new TaishinBrowserCapacityError(
           "前一個台新驗證工作階段尚未釋放，請稍候再試。",

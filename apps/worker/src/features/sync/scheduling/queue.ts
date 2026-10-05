@@ -10,7 +10,8 @@ import {
   failTdccSyncRun,
   processTdccSyncChunk,
 } from "../../../sources/tdcc/sync";
-import { isUserActionError } from "../errors";
+import { isUserActionError, safeErrorMessage } from "../errors";
+import { recoverStalledSyncRuns } from "./recovery";
 
 const queueController = {
   cron: "queue:scheduled-sync",
@@ -26,6 +27,15 @@ export const DEMO_MODE_PARKED_CHUNK_DELAY_SECONDS = 60 * 60;
 export async function enqueueScheduledSync(env: Env, delaySeconds = 0) {
   // Demo deployments are read-only showcases; never start background syncs.
   if (isDemoMode(env)) return;
+  if (delaySeconds === 0)
+    await recoverStalledSyncRuns(env).catch((error) => {
+      console.error(
+        JSON.stringify({
+          event: "sync_recovery_failed",
+          error: safeErrorMessage(error),
+        }),
+      );
+    });
   const message = { type: "run-next-scheduled-sync" } as const;
   if (delaySeconds > 0) {
     await env.SYNC_QUEUE.send(message, { delaySeconds });
@@ -137,11 +147,7 @@ async function consumeTdccChunkMessage(
 ) {
   if (message.body.type !== "run-tdcc-chunk") return;
   try {
-    const result = await processTdccSyncChunk(
-      env,
-      message.body.runId,
-      message.id,
-    );
+    const result = await processTdccSyncChunk(env, message.body.runId);
     if (result.status === "busy") {
       try {
         await enqueueTdccSyncChunk(
@@ -187,11 +193,7 @@ async function consumeEinvoiceChunkMessage(
 ) {
   if (message.body.type !== "run-einvoice-chunk") return;
   try {
-    const result = await processEinvoiceSyncChunk(
-      env,
-      message.body.runId,
-      message.id,
-    );
+    const result = await processEinvoiceSyncChunk(env, message.body.runId);
     if (result.status === "busy") {
       try {
         await enqueueEinvoiceSyncChunk(

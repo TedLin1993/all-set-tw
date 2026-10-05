@@ -77,6 +77,7 @@ export type EPassbookClientOptions = {
   devType: string;
   devModel: string;
   session?: EPassbookSession;
+  signal?: AbortSignal;
 };
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -135,6 +136,7 @@ function makeSequence(ts: string): string {
 }
 
 export class EPassbookClient {
+  private readonly signal?: AbortSignal;
   private tokenId: string | null;
   private richUrl: string | null;
   private readonly devId: string;
@@ -142,6 +144,7 @@ export class EPassbookClient {
   private readonly devModel: string;
 
   constructor(options: EPassbookClientOptions) {
+    this.signal = options.signal;
     this.devId = options.devId;
     this.devType = options.devType;
     this.devModel = options.devModel;
@@ -184,6 +187,7 @@ export class EPassbookClient {
     };
 
     const response = await fetch(`${BASE_URL}${endpoint}`, {
+      signal: this.signal,
       method: "POST",
       headers: {
         "Content-Type": "application/json; charset=utf-8",
@@ -326,6 +330,7 @@ export class EPassbookClient {
       : "";
     const url = `${BASE_URL}TR087${qs}&type=${type}`;
     const response = await fetch(url, {
+      signal: this.signal,
       headers: {
         Referer: "https://digitalprocesssys-epassbook.cdn.hinet.net/",
         "User-Agent": "okhttp/4.9.3",

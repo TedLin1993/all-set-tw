@@ -1,5 +1,9 @@
 import type { SyncResult } from "../types";
-import { BrowserRunCapacityError, launchBrowserWithRetry } from "../browser.js";
+import {
+  BrowserRunCapacityError,
+  launchBrowserWithRetry,
+  connectBrowserWithCancellation,
+} from "../browser.js";
 import puppeteer, {
   type Browser,
   type Frame,
@@ -827,7 +831,10 @@ async function acquireBrowser(
       );
     }
     try {
-      return await puppeteer.connect(browserFetcher, preferred.sessionId);
+      return await connectBrowserWithCancellation(
+        browserFetcher,
+        preferred.sessionId,
+      );
     } catch {
       throw new KgibankBrowserCapacityError(
         "前一個凱基驗證工作階段尚未釋放，請稍候再試。",

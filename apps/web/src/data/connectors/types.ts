@@ -37,6 +37,10 @@ export interface SyncJobRow {
   lastError: string | null;
   updatedAt: string;
   running: boolean;
+  runId: string | null;
+  phase: string | null;
+  lastProgressAt: string | null;
+  retryAfterSeconds: number;
 }
 
 export interface SyncScheduleSettings {

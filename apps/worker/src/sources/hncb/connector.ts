@@ -1,5 +1,9 @@
 import type { SyncResult } from "../types";
-import { BrowserRunCapacityError, launchBrowserWithRetry } from "../browser.js";
+import {
+  BrowserRunCapacityError,
+  launchBrowserWithRetry,
+  connectBrowserWithCancellation,
+} from "../browser.js";
 import puppeteer, {
   type Browser,
   type Dialog,
@@ -990,7 +994,10 @@ async function acquireBrowser(
     }
     if (preferred) {
       try {
-        return await puppeteer.connect(browserFetcher, preferred.sessionId);
+        return await connectBrowserWithCancellation(
+          browserFetcher,
+          preferred.sessionId,
+        );
       } catch {
         throw new HncbBrowserCapacityError(
           "前一個華南驗證工作階段尚未釋放，請稍候再試。",

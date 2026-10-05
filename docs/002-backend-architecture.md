@@ -568,6 +568,7 @@ sources/
 | `config.ts`、`connector-state.ts`                | 取得設定、加密敏感欄位，區分公開偏好、敏感 session 與安全 cursor。                                                                         |
 | `connector-repository.ts`                        | 共用設定／cursor 寫入、設定版本 guard 與跨來源帳戶關聯；銀行專用修復放在來源目錄。                                                         |
 | `lock.ts`、`errors.ts`                           | 共用 lease／heartbeat、使用者操作判定與錯誤訊息／log 脫敏。                                                                                |
+| `execution.ts`、`run-state.ts`                   | 每次同步的期限、失鎖取消、D1 owner guard，以及 durable run 的停滯／重試狀態。                                                              |
 | `record-mapper.ts`、`persistence.ts`             | 將 connector result 轉成 write record，透過 staging table 與 D1 batch 寫入正式資料表。                                                     |
 | `transaction-merge.ts`、`card-reconciliation.ts` | 共用舊交易合併與單卡摘要帳戶修復；保留使用者偏好、分類與發票關聯。                                                                         |
 
@@ -611,12 +612,17 @@ sequenceDiagram
 
 目前同步 lock：
 
-- Lease 為 30 分鐘。
+- 一般同步與 durable run 的 connector lease 為 10 分鐘；CAPTCHA preparation 維持 3 分鐘。
 - 執行期間每 5 分鐘續租。
+- 一般同步自執行開始最多 10 分鐘；電子發票與集保自 run 建立起最多 10 分鐘，包含 Queue 等待與所有分段，heartbeat 不延長整體期限。CAPTCHA preparation 最多 3 分鐘，來源既有的較短期限仍適用。
+- 續租只允許未過期的 owner。續租失敗或達到期限會透過 AbortSignal 停止等待，關閉仍連線的 Browser session，並中止電子發票／集保 HTTP 請求；未支援取消的外部請求即使遲到完成，也不能寫入 D1。
+- `execution.ts` 為本次 invocation 包裝 D1 binding，所有 prepared write 與 batch 都在同一 transaction 前置 canonical owner／有效期限 guard；durable chunk 另核對 chunk owner。正式金融資料、設定／cursor、同步結果與報告皆使用受保護的 binding。失鎖時整個 batch 回滾，不能只在寫入前單獨查鎖。
 - 一般同步工作完成或失敗後必須在 `finally` 釋放。durable run 的 connector lock 跨 invocation 維持，由成功寫入或失敗結案流程釋放；每段另有 owner-scoped run lease。
 - Lock acquisition 失敗時回傳或記錄「已有同步執行中」，不得平行執行同一 connector。
 
-Cron trigger 只負責向 `SYNC_QUEUE` 送出 scheduler 啟動訊息。Queue consumer
+每次 10 分鐘 Cron kick 先恢復停滯的電子發票／集保 run：沒有有效 chunk lease 且 3 分鐘未更新者補送 continuation，超過整體期限者先以 owner guard 結案。有效 chunk lease 不會被 Cron 中止；該 invocation 自行受執行期限限制。一般同步的過期殘留鎖會標記失敗並清除，保留最後成功時間。單一 run 的恢復失敗只記錄 log，不阻擋其他 run 與 scheduler kick；20 秒的 scheduler 串接不重複執行恢復。
+
+Cron trigger 向 `SYNC_QUEUE` 送出 scheduler 啟動訊息。Queue consumer
 每次 invocation 最多處理一個 connector，完成後若確實處理了工作便以 20 秒延遲送出下一個訊息，
 避免連續啟動 Browser session 時撞上 Browser Run 的 acquisition rate limit；下一次 consumer
 invocation 因此不必等待下一個 10 分鐘 Cron，且擁有獨立的 Worker CPU、subrequest 與執行時間額度。
@@ -627,7 +633,7 @@ invocation 因此不必等待下一個 10 分鐘 Cron，且擁有獨立的 Worke
 Demo 模式（`DEMO_MODE`）不執行背景同步：Cron 不送出 scheduler 啟動訊息，Queue consumer
 不處理任何訊息，避免啟用 Demo 前殘留的訊息繼續以已儲存的憑證登入外部服務。scheduler 啟動訊息
 直接 ack；電子發票與集保分段訊息則以 1 小時延遲重新送出以保留 continuation，關閉 Demo 後會
-重新嘗試處理進行中的 durable run。若期間 session 過期或設定變更，仍可能需要重新驗證或重新啟動同步。
+重新檢查進行中的 durable run；已超過整體期限者結案，需要重新啟動同步。若期間 session 過期或設定變更，仍可能需要重新驗證。
 
 電子發票不在單一 connector invocation 內擷取所有品項明細。它使用
 `einvoice_sync_runs` / `einvoice_sync_run_items` 作為 durable work queue：手動或排程
@@ -636,12 +642,14 @@ Demo 模式（`DEMO_MODE`）不執行背景同步：Cron 不送出 scheduler 啟
 `public_config`、HTTP request 或 catalog 可選的 `fetchDetails` 偏好。
 
 電子發票 run 與 item 都以 owner-scoped rolling lease 防止 Queue delivery 重送時平行處理。
+每次 delivery 使用獨立 UUID 作為 chunk owner；3 分鐘 chunk lease 每分鐘續租，明細處理也每五張續租，續租不更新業務進度時間。
 只有全部 item 成功後，service 才把 durable run items 當作 staging source，以固定五個
 set-based D1 statements promotion 至正式表並更新 cursor；這個 batch 以設定版本 CAS 防止
 憑證更新競態。後續 finalize path 更新 `sync_jobs`、排程批次結果與通知；`promoted_at` 讓
 promotion 前後的重送皆可冪等。
 暫時錯誤由 Queue retry，session 失效會清除 session 後重新初始化；需要使用者操作或重試
 耗盡才將 run 結案為 `needs_user_action` 或 `failed`，不寫入部分完成的明細。
+建立 run 後的初始狀態寫入或首次 Queue enqueue 失敗會補償結案並清鎖；重試既有 run 會重新 enqueue，不會只回傳 202 而沒有 continuation。手動重試可補送既有排程 run，保留原 trigger 與批次。逾時且無有效 chunk lease 的舊 run 先結案，再建立新 run。成功／失敗 finalize 同時核對 canonical owner 與 chunk owner／無有效 chunk lease，並在同一 batch 更新結果與釋放鎖。
 
 ### 集保分段同步
 
@@ -652,14 +660,19 @@ promotion 前後的重送皆可冪等。
 
 手動啟動會先初始化登入以回報 OTP 等互動需求；排程由 Queue 初始化且不主動寄送
 OTP。API 的排入同步回應不代表全部資料已完成，前端須追蹤 sync job lifecycle。
+手動初始化也取得獨立 run lease，避免同一 run 的 Queue delivery 同時登入。
 每個 chunk 取得 owner-scoped run lease、更新 connector lock，最多 claim 一個
 分頁 item；仍有 pending 或 processing work 時 enqueue 下一段。item 更新使用
 claim token，chunk 的 `finally` 只釋放該 owner 的 run lease。
+3 分鐘 run lease 每分鐘續租；既有 run 重試會補送 continuation，逾時 run 與停滯恢復沿用電子發票的判斷。
 
 分頁結果完成後彙整並透過 `sync_write_staging` 與 staged persistence 寫入正式表，
 寫入前檢查設定版本，並在 promotion batch 更新 connector 狀態、cursor 與 sync job。
 後續處理排程結果、手動報告修復與 run 結案；`promoting`、`promoted_at` 用於辨識
 promotion 與 finalize 的進度。暫時錯誤使用 Queue retry，需要互動或重試耗盡時結案。
+connector lock 保留到報告結果寫入及 run 成功結案；失敗的 run transition、sync job、排程結果、staging 清理與清鎖使用同一個 owner／idle lease guard batch。
+
+`GET /api/sync-jobs` 統一以有效 connector lock 或電子發票／集保 active run 判斷 `running`，並提供 `runId`、`phase`、`lastProgressAt`、`retryAfterSeconds`。durable run 的 `phase = stalled` 表示可補送；有效 chunk lease 的剩餘時間是最短重試等待，不是預估完成時間。一般同步的 `lastProgressAt` 沿用 job 狀態更新時間，可能來自 heartbeat；durable run 則不將 lease renewal 當成進度。
 
 ## 同步結果通知
 

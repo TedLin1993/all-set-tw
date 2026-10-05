@@ -50,7 +50,18 @@ import {
   NeedsUserActionError,
   SyncAlreadyRunningError,
 } from "../../features/sync/errors";
-import { SYNC_LOCK_LEASE_MS } from "../../features/sync/lock";
+import {
+  SYNC_LOCK_LEASE_MS,
+  SYNC_MAX_DURATION_MS,
+} from "../../features/sync/lock";
+import {
+  createSyncExecution,
+  type SyncEnv,
+  SyncLockLostError,
+  SyncTimeoutError,
+} from "../../features/sync/execution";
+import { durableRunState } from "../../features/sync/run-state";
+import { syncLockGuardStatement } from "../../db/sync-jobs";
 
 export const EINVOICE_DETAIL_CHUNK_SIZE = 35;
 const EINVOICE_LEASE_MS = 3 * 60 * 1000;
@@ -85,7 +96,16 @@ export async function startEinvoiceSyncRun(
   });
   const { run, created } = result;
   if (
-    run.trigger !== input.trigger ||
+    !created &&
+    durableRunState(run).expired &&
+    !durableRunState(run).leased
+  ) {
+    if (await failEinvoiceSyncRun(env, run.id, new SyncTimeoutError(), true))
+      return startEinvoiceSyncRun(env, input);
+    throw new SyncAlreadyRunningError("einvoice");
+  }
+  if (
+    (run.trigger !== input.trigger && input.trigger !== "manual") ||
     (input.scheduledBatchId &&
       run.scheduled_batch_id !== input.scheduledBatchId)
   ) {
@@ -100,16 +120,31 @@ export async function startEinvoiceSyncRun(
       });
       throw new SyncAlreadyRunningError("einvoice");
     }
-    await beginActivityRun(
-      env.DB,
-      run.id,
-      run.scheduled_batch_id ??
-        (run.trigger === "manual"
-          ? await findLatestRecoverableScheduledBatchId(env.DB, "einvoice")
-          : null),
-      "einvoice",
-    );
-    await updateEinvoiceProgressCursor(env.DB, run, "queued");
+    const execution = createSyncExecution(env, {
+      lockRowId: EINVOICE_JOB_ID,
+      runId: run.id,
+    });
+    try {
+      await execution.run(async (syncEnv) => {
+        await beginActivityRun(
+          syncEnv.DB,
+          run.id,
+          run.scheduled_batch_id ??
+            (run.trigger === "manual"
+              ? await findLatestRecoverableScheduledBatchId(env.DB, "einvoice")
+              : null),
+          "einvoice",
+        );
+        await updateEinvoiceProgressCursor(syncEnv.DB, run, "queued");
+      });
+    } catch (error) {
+      await failEinvoiceSyncRun(env, run.id, error, true).catch(
+        () => undefined,
+      );
+      throw error;
+    } finally {
+      execution.stop();
+    }
   }
   return { run, created };
 }
@@ -134,7 +169,32 @@ export async function processEinvoiceSyncChunk(
     };
   }
   try {
-    return await processLeasedEinvoiceSyncChunk(env, run, chunkOwner);
+    if (!(await holdEinvoiceRunLock(env.DB, run.id, run.trigger)))
+      throw new SyncLockLostError();
+    const execution = createSyncExecution(
+      env,
+      { lockRowId: EINVOICE_JOB_ID, runId },
+      {
+        deadline: Date.parse(run.created_at) + SYNC_MAX_DURATION_MS,
+        chunk: {
+          connectorId: "einvoice",
+          owner: chunkOwner,
+          renew: () =>
+            renewEinvoiceRunChunkLease(env.DB, {
+              runId,
+              owner: chunkOwner,
+              leaseMs: EINVOICE_LEASE_MS,
+            }),
+        },
+      },
+    );
+    try {
+      return await execution.run((syncEnv) =>
+        processLeasedEinvoiceSyncChunk(syncEnv, run, chunkOwner, env),
+      );
+    } finally {
+      execution.stop();
+    }
   } finally {
     await releaseEinvoiceRunChunkLease(env.DB, {
       runId,
@@ -144,18 +204,17 @@ export async function processEinvoiceSyncChunk(
 }
 
 async function processLeasedEinvoiceSyncChunk(
-  env: Env,
+  env: SyncEnv,
   initialRun: EinvoiceRunRow,
   chunkOwner: string,
+  finalizeEnv: Env,
 ): Promise<EinvoiceChunkResult> {
   let run = initialRun;
   const runId = run.id;
   const client = new EInvoiceV2Client({
     timeoutMs: EINVOICE_REQUEST_TIMEOUT_MS,
+    signal: env.syncSignal,
   });
-  if (!(await holdEinvoiceRunLock(env.DB, run.id, run.trigger))) {
-    throw new Error("Electronic invoice sync lost its connector lock.");
-  }
 
   let settings = await loadEinvoiceSettings(env);
   if (run.settings_version && settings.updatedAt !== run.settings_version) {
@@ -306,7 +365,15 @@ async function processLeasedEinvoiceSyncChunk(
     await promoteCompletedEinvoiceRun(env, run);
     run = (await getEinvoiceRun(env.DB, runId))!;
   }
-  const finalized = await finalizeEinvoiceRun(env, run, "success");
+  env.syncSignal?.throwIfAborted();
+  const finalized = await finalizeEinvoiceRun(
+    finalizeEnv,
+    run,
+    "success",
+    null,
+    chunkOwner,
+    env.syncSignal,
+  );
   return finalized ? { status: "completed" } : { status: "terminal" };
 }
 
@@ -318,6 +385,13 @@ export async function failEinvoiceSyncRun(
 ) {
   const run = await getEinvoiceRun(env.DB, runId);
   if (!run || isTerminal(run)) return false;
+  if (
+    run.chunk_lease_owner &&
+    run.chunk_lease_expires_at &&
+    Date.parse(run.chunk_lease_expires_at) > Date.now()
+  )
+    return false;
+  if (!(await holdEinvoiceRunLock(env.DB, run.id, run.trigger))) return false;
   const status: Exclude<SyncNotificationStatus, "success"> =
     !forceFailed && isEinvoiceUserActionError(error)
       ? "needs_user_action"
@@ -407,8 +481,11 @@ async function finalizeEinvoiceRun(
   run: EinvoiceRunRow,
   status: SyncNotificationStatus,
   error: string | null = null,
+  chunkOwner?: string,
+  signal?: AbortSignal,
 ) {
   const job = await findSyncJob(env.DB, "einvoice", "all");
+  signal?.throwIfAborted();
   if (!job) {
     await completeEinvoiceRun(env.DB, {
       runId: run.id,
@@ -452,6 +529,11 @@ async function finalizeEinvoiceRun(
     WHERE id = ? AND status IN ('queued', 'initializing', 'processing')
   )`;
   const statements: D1PreparedStatement[] = [
+    syncLockGuardStatement(
+      env.DB,
+      { lockRowId: EINVOICE_JOB_ID, runId: run.id },
+      { connectorId: "einvoice", owner: chunkOwner ?? null },
+    ),
     env.DB.prepare(
       `UPDATE sync_jobs
        SET last_status = ?,
@@ -464,7 +546,7 @@ async function finalizeEinvoiceRun(
            lock_trigger = NULL,
            lock_scope = NULL,
            updated_at = ?
-       WHERE id = ? AND ${activeGuard}`,
+       WHERE id = ? AND locked_by = ? AND ${activeGuard}`,
     ).bind(
       status,
       error,
@@ -474,6 +556,7 @@ async function finalizeEinvoiceRun(
       nextRunAt,
       nowIso,
       job.id,
+      run.id,
       run.id,
     ),
   ];
@@ -520,6 +603,7 @@ async function finalizeEinvoiceRun(
       success ? "completed" : status,
     ),
   );
+  signal?.throwIfAborted();
   const results = await env.DB.batch(statements);
   const finalized = results.at(-1)?.meta.changes === 1;
   if (!finalized) return false;

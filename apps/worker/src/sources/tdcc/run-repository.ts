@@ -4,7 +4,18 @@ import {
   tdccSyncRuns,
   tdccSyncRunItems,
 } from "../../db";
-import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 
 /**
  * Durable state for TDCC's paginated provider work.
@@ -382,12 +393,13 @@ export async function renewTdccRunLease(
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
   const result = await createDrizzle(db)
     .update(tdccSyncRuns)
-    .set({ leaseExpiresAt: expiresAt, updatedAt: nowIso })
+    .set({ leaseExpiresAt: expiresAt })
     .where(
       and(
         eq(tdccSyncRuns.id, input.runId),
         inArray(tdccSyncRuns.status, ACTIVE_RUN_STATUSES),
         eq(tdccSyncRuns.leaseOwner, input.owner),
+        gt(tdccSyncRuns.leaseExpiresAt, nowIso),
       ),
     )
     .run()

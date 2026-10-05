@@ -3,6 +3,7 @@ import {
   asc,
   eq,
   exists,
+  gt,
   isNull,
   lt,
   lte,
@@ -17,6 +18,49 @@ import { syncJobs, connectorSettings } from "./schema";
 export type SyncTrigger = "manual" | "scheduled";
 export type SyncStatus = "success" | "failed" | "needs_user_action";
 export type SyncScheduleMode = "inherit" | "custom";
+
+export type SyncLockOwner = { lockRowId: string; runId: string };
+
+export function syncLockGuardStatement(
+  db: Pick<D1Database, "prepare">,
+  owner: SyncLockOwner,
+  chunk?: { connectorId: "einvoice" | "tdcc"; owner: string | null },
+) {
+  const now = new Date().toISOString();
+  const chunkGuard = chunk
+    ? chunk.owner === null
+      ? chunk.connectorId === "einvoice"
+        ? " AND EXISTS (SELECT 1 FROM einvoice_sync_runs WHERE id = ? AND status IN ('queued', 'initializing', 'processing') AND (chunk_lease_owner IS NULL OR chunk_lease_expires_at IS NULL OR chunk_lease_expires_at <= ?))"
+        : " AND EXISTS (SELECT 1 FROM tdcc_sync_runs WHERE id = ? AND status IN ('queued', 'initializing', 'processing', 'promoting') AND (lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ?))"
+      : chunk.connectorId === "einvoice"
+        ? " AND EXISTS (SELECT 1 FROM einvoice_sync_runs WHERE id = ? AND chunk_lease_owner = ? AND chunk_lease_expires_at > ? AND status IN ('queued', 'initializing', 'processing'))"
+        : " AND EXISTS (SELECT 1 FROM tdcc_sync_runs WHERE id = ? AND lease_owner = ? AND lease_expires_at > ? AND status IN ('queued', 'initializing', 'processing', 'promoting'))"
+    : "";
+  // 與既有 settings guard 相同：失鎖時用無效 JSON 中止整個 D1 batch，
+  // 保證 owner 檢查與金融資料／cursor 寫入位於同一個 transaction。
+  return db
+    .prepare(
+      `SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM sync_jobs WHERE id = ? AND locked_by = ? AND locked_until > ?
+  )${chunkGuard} THEN 1 ELSE json('sync lock lost') END AS valid`,
+    )
+    .bind(
+      owner.lockRowId,
+      owner.runId,
+      now,
+      ...(chunk
+        ? chunk.owner === null
+          ? [owner.runId, now]
+          : [owner.runId, chunk.owner, now]
+        : []),
+    );
+}
+
+function syncOwnerCondition(job: SyncJobRow, runId: string, now?: string) {
+  return sql`EXISTS (SELECT 1 FROM sync_jobs AS owner
+    WHERE owner.id = ${`${job.connector_id}:all`} AND owner.locked_by = ${runId}
+    ${now ? sql`AND owner.locked_until > ${now}` : sql``})`;
+}
 
 export interface SyncJobRow<TConnectorId extends string = string> {
   id: string;
@@ -207,7 +251,11 @@ export async function renewSyncJobLock(
       updatedAt: now.toISOString(),
     })
     .where(
-      and(eq(syncJobs.id, input.lockRowId), eq(syncJobs.lockedBy, input.runId)),
+      and(
+        eq(syncJobs.id, input.lockRowId),
+        eq(syncJobs.lockedBy, input.runId),
+        gt(syncJobs.lockedUntil, now.toISOString()),
+      ),
     )
     .run()
     .catch((error) => {
@@ -237,7 +285,11 @@ export async function releaseSyncJobLock(
     });
 }
 
-export async function completeSyncJob(db: D1Database, job: SyncJobRow) {
+export async function completeSyncJob(
+  db: D1Database,
+  job: SyncJobRow,
+  runId: string,
+) {
   const now = new Date();
   const nextRunAt = nextSyncRunAt(
     job.interval_minutes,
@@ -246,7 +298,7 @@ export async function completeSyncJob(db: D1Database, job: SyncJobRow) {
     job.next_run_at,
     job.preferred_weekday,
   );
-  await createDrizzle(db)
+  const result = await createDrizzle(db)
     .update(syncJobs)
     .set({
       lastStatus: "success",
@@ -256,17 +308,24 @@ export async function completeSyncJob(db: D1Database, job: SyncJobRow) {
       nextRunAt,
       updatedAt: now.toISOString(),
     })
-    .where(eq(syncJobs.id, job.id))
+    .where(
+      and(
+        eq(syncJobs.id, job.id),
+        syncOwnerCondition(job, runId, now.toISOString()),
+      ),
+    )
     .run()
     .catch((error) => {
       throw sanitizeDatabaseError(error);
     });
+  return result.meta.changes === 1;
 }
 
 export async function failSyncJob(
   db: D1Database,
   job: SyncJobRow,
   input: { status: SyncStatus; errorMessage: string },
+  runId: string,
 ) {
   const now = new Date();
   const nextRunAt =
@@ -279,7 +338,7 @@ export async function failSyncJob(
           job.preferred_weekday,
         )
       : job.next_run_at;
-  await createDrizzle(db)
+  const result = await createDrizzle(db)
     .update(syncJobs)
     .set({
       lastStatus: input.status,
@@ -288,17 +347,19 @@ export async function failSyncJob(
       nextRunAt,
       updatedAt: now.toISOString(),
     })
-    .where(eq(syncJobs.id, job.id))
+    .where(and(eq(syncJobs.id, job.id), syncOwnerCondition(job, runId)))
     .run()
     .catch((error) => {
       throw sanitizeDatabaseError(error);
     });
+  return result.meta.changes === 1;
 }
 
 export async function markManualSyncSuccess(
   db: D1Database,
   connectorId: string,
   scope: string,
+  runId: string,
 ) {
   const jobId = `${connectorId}:${scope}`;
   const job = await createDrizzle(db)
@@ -312,7 +373,7 @@ export async function markManualSyncSuccess(
     });
   if (!job) return;
 
-  await completeSyncJob(db, job);
+  return completeSyncJob(db, job, runId);
 }
 
 export async function markManualSyncFailure(
@@ -320,6 +381,7 @@ export async function markManualSyncFailure(
   connectorId: string,
   scope: string,
   input: { status: SyncStatus; errorMessage: string },
+  runId: string,
 ) {
   const now = new Date().toISOString();
   await createDrizzle(db)
@@ -331,7 +393,11 @@ export async function markManualSyncFailure(
       updatedAt: now,
     })
     .where(
-      and(eq(syncJobs.connectorId, connectorId), eq(syncJobs.scope, scope)),
+      and(
+        eq(syncJobs.connectorId, connectorId),
+        eq(syncJobs.scope, scope),
+        sql`EXISTS (SELECT 1 FROM sync_jobs AS owner WHERE owner.id = ${`${connectorId}:all`} AND owner.locked_by = ${runId})`,
+      ),
     )
     .run()
     .catch((error) => {

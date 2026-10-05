@@ -1,3 +1,4 @@
+import { createSyncExecution } from "../../features/sync/execution";
 import type { Env } from "../../platform/env";
 import { canonicalSyncLockRowId } from "../../features/sync/lock";
 import {
@@ -62,49 +63,57 @@ export async function prepareNextbankCaptchaSession(env: Env) {
     leaseMs: 180_000,
   });
   if (!locked) throw new SyncAlreadyRunningError(connectorId);
+  const execution = createSyncExecution(
+    env,
+    { lockRowId, runId },
+    { deadline: Date.now() + 3 * 60 * 1000 },
+  );
   try {
-    const settings = await requireConnectorSettings(env.DB, connectorId);
-    const stored = await decryptJson<Record<string, unknown>>(
-      settings.encrypted_config,
-      configEncryptionKey(env),
-    );
-    const config = nextbankConfigSchema.parse(stored);
-    if (!config.userId || !config.account || !config.password)
-      throw new NeedsUserActionError("請先儲存將來銀行帳密。");
-    const cleared = await encryptJson(
-      nextbankCleanConfig(stored),
-      configEncryptionKey(env),
-    );
-    const clearedAt = new Date().toISOString();
-    await compareAndSetConnectorSecret(
-      env.DB,
-      connectorId,
-      settings,
-      cleared,
-      clearedAt,
-    );
-    const prepared = await new NextbankApiClient().prepareCaptcha();
-    await compareAndSetConnectorSecret(
-      env.DB,
-      connectorId,
-      { encrypted_config: cleared, updated_at: clearedAt },
-      await encryptJson(
-        {
-          ...nextbankCleanConfig(stored),
-          captchaUuid: prepared.uuid,
-          captchaExpiresAt: prepared.expiresAt,
-        },
+    return await execution.run(async (env) => {
+      const settings = await requireConnectorSettings(env.DB, connectorId);
+      const stored = await decryptJson<Record<string, unknown>>(
+        settings.encrypted_config,
         configEncryptionKey(env),
-      ),
-      new Date().toISOString(),
-    );
-    return {
-      captchaImage: `data:image/png;base64,${prepared.imageBase64}`,
-      expiresAt: new Date(prepared.expiresAt).toISOString(),
-      captchaLength: 5,
-      captchaKind: "alphanumeric" as const,
-    };
+      );
+      const config = nextbankConfigSchema.parse(stored);
+      if (!config.userId || !config.account || !config.password)
+        throw new NeedsUserActionError("請先儲存將來銀行帳密。");
+      const cleared = await encryptJson(
+        nextbankCleanConfig(stored),
+        configEncryptionKey(env),
+      );
+      const clearedAt = new Date().toISOString();
+      await compareAndSetConnectorSecret(
+        env.DB,
+        connectorId,
+        settings,
+        cleared,
+        clearedAt,
+      );
+      const prepared = await new NextbankApiClient().prepareCaptcha();
+      await compareAndSetConnectorSecret(
+        env.DB,
+        connectorId,
+        { encrypted_config: cleared, updated_at: clearedAt },
+        await encryptJson(
+          {
+            ...nextbankCleanConfig(stored),
+            captchaUuid: prepared.uuid,
+            captchaExpiresAt: prepared.expiresAt,
+          },
+          configEncryptionKey(env),
+        ),
+        new Date().toISOString(),
+      );
+      return {
+        captchaImage: `data:image/png;base64,${prepared.imageBase64}`,
+        expiresAt: new Date(prepared.expiresAt).toISOString(),
+        captchaLength: 5,
+        captchaKind: "alphanumeric" as const,
+      };
+    });
   } finally {
+    execution.stop();
     await releaseSyncJobLock(env.DB, lockRowId, runId);
   }
 }

@@ -1,5 +1,9 @@
 import type { SyncResult } from "../types";
-import { BrowserRunCapacityError, launchBrowserWithRetry } from "../browser.js";
+import {
+  BrowserRunCapacityError,
+  launchBrowserWithRetry,
+  connectBrowserWithCancellation,
+} from "../browser.js";
 import puppeteer, {
   type Browser,
   type Dialog,
@@ -118,7 +122,7 @@ export function createSinopacConnector(
           );
         }
         try {
-          browserInstance = await puppeteer.connect(
+          browserInstance = await connectBrowserWithCancellation(
             browser,
             config.browserSessionId,
           );
@@ -525,7 +529,10 @@ async function getCaptchaBrowser(
     }
     if (preferred) {
       try {
-        return await puppeteer.connect(browser, preferred.sessionId);
+        return await connectBrowserWithCancellation(
+          browser,
+          preferred.sessionId,
+        );
       } catch {
         throw new SinopacBrowserCapacityError(
           "前一個永豐驗證工作階段尚未釋放，請稍候再試。",

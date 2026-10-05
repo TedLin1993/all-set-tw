@@ -10,11 +10,12 @@ import {
   type SyncStatus,
 } from "../../../db";
 import type { Env } from "../../../platform/env";
+import { canonicalSyncLockRowId, SYNC_LOCK_LEASE_MS } from "../lock";
 import {
-  canonicalSyncLockRowId,
-  startSyncLockHeartbeat,
-  SYNC_LOCK_LEASE_MS,
-} from "../lock";
+  createSyncExecution,
+  guardSyncDatabase,
+  SyncLockLostError,
+} from "../execution";
 import {
   isUserActionError,
   safeErrorLogDetails,
@@ -95,16 +96,11 @@ async function runCustomScheduleJob(
     const { run, created } = await startEinvoiceSyncRun(env, {
       trigger: "scheduled",
     });
-    if (created) {
-      try {
-        await env.SYNC_QUEUE.send({
-          type: "run-einvoice-chunk",
-          runId: run.id,
-        });
-      } catch (error) {
-        await cancelQueuedEinvoiceSyncRun(env, run.id, error);
-        throw error;
-      }
+    try {
+      await env.SYNC_QUEUE.send({ type: "run-einvoice-chunk", runId: run.id });
+    } catch (error) {
+      if (created) await cancelQueuedEinvoiceSyncRun(env, run.id, error);
+      throw error;
     }
     return true;
   }
@@ -142,16 +138,11 @@ async function runDefaultScheduleBatchJob(
       trigger: "scheduled",
       scheduledBatchId: batchId,
     });
-    if (created) {
-      try {
-        await env.SYNC_QUEUE.send({
-          type: "run-einvoice-chunk",
-          runId: run.id,
-        });
-      } catch (error) {
-        await cancelQueuedEinvoiceSyncRun(env, run.id, error);
-        throw error;
-      }
+    try {
+      await env.SYNC_QUEUE.send({ type: "run-einvoice-chunk", runId: run.id });
+    } catch (error) {
+      if (created) await cancelQueuedEinvoiceSyncRun(env, run.id, error);
+      throw error;
     }
     return true;
   }
@@ -183,8 +174,8 @@ async function runDefaultScheduleBatchJob(
     env,
     controller,
     job,
-    async (result, runId) => {
-      const recorded = await recordDefaultScheduleBatchResult(env.DB, {
+    async (result, runId, db) => {
+      const recorded = await recordDefaultScheduleBatchResult(db, {
         batchId,
         jobId: job.id,
         notification: result,
@@ -218,6 +209,7 @@ async function runScheduledJob(
   beforeRelease?: (
     notification: SyncNotificationEvent,
     runId: string,
+    db: D1Database,
   ) => Promise<void>,
   onSuccess?: (outcome: Awaited<ReturnType<typeof runDueSyncJob>>) => void,
   batchId?: string,
@@ -233,65 +225,97 @@ async function runScheduledJob(
   });
   if (!locked) return;
 
-  const stopHeartbeat = startSyncLockHeartbeat(env.DB, lockRowId, runId);
+  const execution = createSyncExecution(env, { lockRowId, runId });
   const startedAt = Date.now();
   try {
-    await beginActivityRun(env.DB, runId, batchId, due.connector_id);
-    let notification: SyncNotificationEvent;
-    try {
-      const outcome = await runDueSyncJob(env, due);
-      onSuccess?.(outcome);
-      await completeSyncJob(env.DB, due);
-      console.log(
-        JSON.stringify({
-          event: "sync_run_finished",
-          runId,
-          cron: controller.cron,
+    return await execution.run(async (syncEnv) => {
+      await beginActivityRun(syncEnv.DB, runId, batchId, due.connector_id);
+      let notification: SyncNotificationEvent;
+      try {
+        const outcome = await runDueSyncJob(syncEnv, due);
+        onSuccess?.(outcome);
+        if (!(await completeSyncJob(syncEnv.DB, due, runId)))
+          throw new SyncLockLostError();
+        console.log(
+          JSON.stringify({
+            event: "sync_run_finished",
+            runId,
+            cron: controller.cron,
+            connectorId: outcome.connectorId,
+            scope: outcome.scope,
+            trigger: "scheduled",
+            status: "success",
+            records: outcome.records,
+            durationMs: Date.now() - startedAt,
+          }),
+        );
+        notification = {
           connectorId: outcome.connectorId,
-          scope: outcome.scope,
-          trigger: "scheduled",
           status: "success",
-          records: outcome.records,
-          durationMs: Date.now() - startedAt,
-        }),
-      );
-      notification = {
-        connectorId: outcome.connectorId,
-        status: "success",
-      };
-    } catch (error) {
-      const status: SyncStatus = isUserActionError(error)
-        ? "needs_user_action"
-        : "failed";
-      const message = safeErrorMessage(error);
-      await failSyncJob(env.DB, due, {
-        status,
-        errorMessage: message,
-      });
-      console.error(
-        JSON.stringify({
-          event: "sync_run_failed",
+        };
+      } catch (error) {
+        const status: SyncStatus = isUserActionError(error)
+          ? "needs_user_action"
+          : "failed";
+        const message = safeErrorMessage(error);
+        const recorded = await failSyncJob(
+          env.DB,
+          due,
+          {
+            status,
+            errorMessage: message,
+          },
           runId,
-          cron: controller.cron,
+        );
+        if (!recorded) return undefined;
+        console.error(
+          JSON.stringify({
+            event: "sync_run_failed",
+            runId,
+            cron: controller.cron,
+            connectorId: due.connector_id,
+            scope: due.scope,
+            trigger: "scheduled",
+            status,
+            message,
+            ...safeErrorLogDetails(error),
+            durationMs: Date.now() - startedAt,
+          }),
+        );
+        notification = {
           connectorId: due.connector_id,
-          scope: due.scope,
-          trigger: "scheduled",
           status,
-          message,
-          ...safeErrorLogDetails(error),
-          durationMs: Date.now() - startedAt,
-        }),
-      );
-      notification = {
-        connectorId: due.connector_id,
-        status,
-      };
-    }
+        };
+      }
 
-    if (beforeRelease) await beforeRelease(notification, runId);
+      if (beforeRelease) await beforeRelease(notification, runId, syncEnv.DB);
+      return notification;
+    });
+  } catch (error) {
+    const recorded = await failSyncJob(
+      env.DB,
+      due,
+      { status: "failed", errorMessage: safeErrorMessage(error) },
+      runId,
+    );
+    if (!recorded) return undefined;
+    const notification: SyncNotificationEvent = {
+      connectorId: due.connector_id,
+      status: "failed",
+    };
+    if (beforeRelease)
+      await beforeRelease(
+        notification,
+        runId,
+        guardSyncDatabase(
+          env.DB,
+          { lockRowId, runId },
+          new AbortController().signal,
+        ),
+      );
     return notification;
   } finally {
-    stopHeartbeat();
+    execution.stop();
     await releaseSyncJobLock(env.DB, lockRowId, runId);
   }
 }
