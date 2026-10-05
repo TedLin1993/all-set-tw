@@ -1,5 +1,9 @@
 import type { SyncResult } from "../types";
-import { BrowserRunCapacityError, launchBrowserWithRetry } from "../browser.js";
+import {
+  BrowserRunCapacityError,
+  launchBrowserWithRetry,
+  connectBrowserWithCancellation,
+} from "../browser.js";
 import puppeteer, {
   type Browser,
   type CDPSession,
@@ -2779,7 +2783,10 @@ async function acquireBrowser(
     }
     if (preferred) {
       try {
-        return await puppeteer.connect(browserFetcher, preferred.sessionId);
+        return await connectBrowserWithCancellation(
+          browserFetcher,
+          preferred.sessionId,
+        );
       } catch {
         throw new FirstbankBrowserCapacityError(
           "前一個第一銀行驗證工作階段尚未釋放，請稍候再試。",

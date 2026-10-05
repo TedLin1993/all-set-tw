@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { createTestD1 } from "../../helpers/d1";
 import {
   createOrGetActiveEinvoiceRun,
@@ -6,6 +14,10 @@ import {
   mergeEinvoiceRunItems,
   promoteEinvoiceRunRecords,
 } from "../../../src/sources/einvoice/run-repository";
+import { startEinvoiceSyncRun } from "../../../src/sources/einvoice/sync";
+import { syncRoutes } from "../../../src/features/sync/route";
+import { encryptJson } from "../../../src/platform/crypto";
+import type { Env } from "../../../src/platform/env";
 
 const version = "2026-09-01T00:00:00Z";
 const promotedAt = "2026-09-02T00:00:00Z";
@@ -22,20 +34,46 @@ describe("發票分段同步的正式資料（隔離 D1）", () => {
   });
   beforeEach(async () => {
     await db.batch([
+      db.prepare("DROP TRIGGER IF EXISTS fail_initial_cursor"),
       ...[
         "invoice_line_items",
         "invoices",
         "einvoice_sync_run_items",
         "einvoice_sync_runs",
         "connector_settings",
+        "sync_jobs",
       ].map((table) => db.prepare(`DELETE FROM ${table}`)),
       db
         .prepare(
           "INSERT INTO connector_settings (id, connector_id, encrypted_config, sync_cursor, created_at, updated_at) VALUES ('einvoice', 'einvoice', 'synthetic-encrypted', 'old', ?, ?)",
         )
         .bind(version, version),
+      db
+        .prepare(
+          `INSERT INTO sync_jobs (id, connector_id, scope, interval_minutes, next_run_at, created_at, updated_at)
+        VALUES ('einvoice:all', 'einvoice', 'all', 1440, ?, ?, ?)`,
+        )
+        .bind(version, version, version),
     ]);
   });
+  async function syncEnv() {
+    const key = "11".repeat(32);
+    const encrypted = await encryptJson(
+      { mobile: "0912345678", password: "synthetic" },
+      key,
+    );
+    await db
+      .prepare(
+        "UPDATE connector_settings SET encrypted_config = ? WHERE connector_id = 'einvoice'",
+      )
+      .bind(encrypted)
+      .run();
+    return {
+      DB: db,
+      CONFIG_ENCRYPTION_KEY: key,
+      SYNC_QUEUE: { send: vi.fn().mockResolvedValue(undefined) },
+    } as unknown as Env;
+  }
   async function prepareRun(done = true) {
     const { run } = await createOrGetActiveEinvoiceRun(db, {
       id: "run",
@@ -98,6 +136,60 @@ describe("發票分段同步的正式資料（隔離 D1）", () => {
       ),
     );
   }
+
+  it.each(["manual", "scheduled"] as const)(
+    "重試 %s active run 會補送同一個 continuation",
+    async (trigger) => {
+      const env = await syncEnv();
+      const { run } = await startEinvoiceSyncRun(env, { trigger });
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const response = await syncRoutes.request(
+          "/connectors/einvoice/sync",
+          { method: "POST" },
+          env,
+        );
+        expect(response.status).toBe(202);
+        expect(await response.json()).toMatchObject({ runId: run.id });
+      }
+      expect(env.SYNC_QUEUE.send).toHaveBeenCalledTimes(2);
+      expect(env.SYNC_QUEUE.send).toHaveBeenCalledWith({
+        type: "run-einvoice-chunk",
+        runId: run.id,
+      });
+      expect(await getEinvoiceRun(db, run.id)).toMatchObject({
+        trigger,
+        status: "queued",
+      });
+      expect(
+        await db
+          .prepare("SELECT COUNT(*) AS count FROM einvoice_sync_runs")
+          .first("count"),
+      ).toBe(1);
+    },
+  );
+
+  it("初始化 cursor 寫入失敗會結案並清鎖，修復後可以重新啟動", async () => {
+    const env = await syncEnv();
+    await db
+      .prepare(
+        `CREATE TRIGGER fail_initial_cursor BEFORE UPDATE OF sync_cursor ON connector_settings
+      BEGIN SELECT RAISE(ABORT, 'synthetic startup failure'); END`,
+      )
+      .run();
+    await expect(
+      startEinvoiceSyncRun(env, { trigger: "manual" }),
+    ).rejects.toThrow();
+    expect(
+      await db.prepare("SELECT status FROM einvoice_sync_runs").first("status"),
+    ).toBe("failed");
+    expect(
+      await db.prepare("SELECT locked_by, last_status FROM sync_jobs").first(),
+    ).toEqual({ locked_by: null, last_status: "failed" });
+    await db.prepare("DROP TRIGGER fail_initial_cursor").run();
+    expect(
+      (await startEinvoiceSyncRun(env, { trigger: "manual" })).created,
+    ).toBe(true);
+  });
 
   it("完整發票與品項一起寫入，重送不重複資料或推進 cursor", async () => {
     const run = await prepareRun();

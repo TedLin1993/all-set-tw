@@ -1,3 +1,4 @@
+import { createSyncExecution } from "../../features/sync/execution";
 import type { Env } from "../../platform/env";
 import { canonicalSyncLockRowId } from "../../features/sync/lock";
 import {
@@ -66,36 +67,44 @@ export async function prepareObankCaptchaSession(env: Env) {
   });
   if (!locked) throw new SyncAlreadyRunningError(connectorId);
 
+  const execution = createSyncExecution(
+    env,
+    { lockRowId, runId },
+    { deadline: Date.now() + 3 * 60 * 1000 },
+  );
   try {
-    const settings = await requireConnectorSettings(env.DB, connectorId);
-    const stored = await decryptJson<Record<string, unknown>>(
-      settings.encrypted_config,
-      configEncryptionKey(env),
-    );
-    const config = parseObankConfig({
-      ...stored,
-      ...parsePublicConnectorConfig(connectorId, settings.public_config),
-    });
-    const prepared = await prepareObankCaptcha(config);
-    await updateConnectorEncryptedConfig(
-      env.DB,
-      connectorId,
-      await encryptJson(
-        {
-          ...stored,
-          pendingSession: prepared.pendingSession,
-          pendingSessionExpiresAt: prepared.pendingSessionExpiresAt,
-        },
+    return await execution.run(async (env) => {
+      const settings = await requireConnectorSettings(env.DB, connectorId);
+      const stored = await decryptJson<Record<string, unknown>>(
+        settings.encrypted_config,
         configEncryptionKey(env),
-      ),
-    );
-    return {
-      captchaImage: prepared.captchaImage,
-      expiresAt: prepared.pendingSessionExpiresAt,
-      captchaLength: 4,
-      captchaKind: "alphanumeric" as const,
-    };
+      );
+      const config = parseObankConfig({
+        ...stored,
+        ...parsePublicConnectorConfig(connectorId, settings.public_config),
+      });
+      const prepared = await prepareObankCaptcha(config);
+      await updateConnectorEncryptedConfig(
+        env.DB,
+        connectorId,
+        await encryptJson(
+          {
+            ...stored,
+            pendingSession: prepared.pendingSession,
+            pendingSessionExpiresAt: prepared.pendingSessionExpiresAt,
+          },
+          configEncryptionKey(env),
+        ),
+      );
+      return {
+        captchaImage: prepared.captchaImage,
+        expiresAt: prepared.pendingSessionExpiresAt,
+        captchaLength: 4,
+        captchaKind: "alphanumeric" as const,
+      };
+    });
   } finally {
+    execution.stop();
     await releaseSyncJobLock(env.DB, lockRowId, runId);
   }
 }

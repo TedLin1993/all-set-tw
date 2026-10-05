@@ -8,10 +8,14 @@ const mocks = vi.hoisted(() => ({
   processEinvoiceSyncChunk: vi.fn(),
   processTdccSyncChunk: vi.fn(),
   runSchedulerTick: vi.fn(),
+  recoverStalledSyncRuns: vi.fn(),
 }));
 
 vi.mock("../../../src/features/sync/scheduling/scheduler", () => ({
   runSchedulerTick: mocks.runSchedulerTick,
+}));
+vi.mock("../../../src/features/sync/scheduling/recovery", () => ({
+  recoverStalledSyncRuns: mocks.recoverStalledSyncRuns,
 }));
 
 vi.mock("../../../src/sources/einvoice/sync", () => ({
@@ -60,6 +64,7 @@ function env(send = vi.fn().mockResolvedValue(undefined)) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.isEinvoiceUserActionError.mockReturnValue(false);
+  mocks.recoverStalledSyncRuns.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -67,6 +72,17 @@ afterEach(() => {
 });
 
 describe("scheduled sync queue", () => {
+  it("停滯恢復失敗仍會送出 scheduler kick", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    mocks.recoverStalledSyncRuns.mockRejectedValueOnce(
+      new Error("synthetic recovery failure"),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await enqueueScheduledSync(env(send));
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: "run-next-scheduled-sync",
+    });
+  });
   it("does not enqueue the scheduler kick in demo mode", async () => {
     const send = vi.fn().mockResolvedValue(undefined);
 

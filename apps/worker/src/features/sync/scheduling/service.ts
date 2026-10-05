@@ -1,6 +1,8 @@
 import type { ConnectorId } from "@taiwan-fin-hub/shared";
 import { nextSyncRunAt, type SyncScheduleMode } from "../../../db";
 import { getActiveEinvoiceRun } from "../../../sources/einvoice/run-repository";
+import { getActiveTdccRun } from "../../../sources/tdcc/run-repository";
+import { durableRunState } from "../run-state";
 import {
   findDefaultSyncSchedule,
   findSyncJob,
@@ -53,15 +55,39 @@ export async function setDefaultSyncSchedule(
 export async function getSyncJobs(db: D1Database) {
   const rows = await listSyncJobs(db);
   const now = new Date();
-  const activeEinvoiceRun = await getActiveEinvoiceRun(db);
-  return rows.map((row) => ({
-    ...row,
-    configured: Boolean(row.configured),
-    enabled: Boolean(row.enabled),
-    running:
-      (row.connectorId === "einvoice" && Boolean(activeEinvoiceRun)) ||
-      Boolean(row.lockedUntil && new Date(row.lockedUntil) > now),
-  }));
+  const [activeEinvoiceRun, activeTdccRun] = await Promise.all([
+    getActiveEinvoiceRun(db),
+    getActiveTdccRun(db),
+  ]);
+  return rows.map((row) => {
+    const run =
+      row.connectorId === "einvoice"
+        ? activeEinvoiceRun
+        : row.connectorId === "tdcc"
+          ? activeTdccRun
+          : null;
+    const locked = Boolean(row.lockedUntil && new Date(row.lockedUntil) > now);
+    const state = run ? durableRunState(run, now.getTime()) : null;
+    return {
+      ...row,
+      configured: Boolean(row.configured),
+      enabled: Boolean(row.enabled),
+      lockScope: run ? ("scope" in run ? run.scope : "all") : row.lockScope,
+      lockTrigger: run?.trigger ?? row.lockTrigger,
+      running: Boolean(run) || locked,
+      runId: state?.runId ?? (locked ? row.lockedBy : null),
+      phase: state?.phase ?? (locked ? "processing" : null),
+      lastProgressAt: state?.lastProgressAt ?? (locked ? row.updatedAt : null),
+      retryAfterSeconds:
+        state?.retryAfterSeconds ??
+        (locked
+          ? Math.max(
+              1,
+              Math.ceil((Date.parse(row.lockedUntil!) - now.getTime()) / 1000),
+            )
+          : 0),
+    };
+  });
 }
 
 export type UpdateSyncJobInput = {

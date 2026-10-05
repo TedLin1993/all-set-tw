@@ -1,10 +1,31 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { createTestD1 } from "../../helpers/d1";
 import {
   acquireSyncJobLock,
   renewSyncJobLock,
   releaseSyncJobLock,
+  completeSyncJob,
+  failSyncJob,
 } from "../../../src/db";
+import * as dbApi from "../../../src/db";
+import { findSyncJob } from "../../../src/features/sync/scheduling/repository";
+import { getSyncJobs } from "../../../src/features/sync/scheduling/service";
+import { recoverStalledSyncRuns } from "../../../src/features/sync/scheduling/recovery";
+import {
+  createSyncExecution,
+  guardSyncDatabase,
+  SyncLockLostError,
+  SyncTimeoutError,
+} from "../../../src/features/sync/execution";
+import type { Env } from "../../../src/platform/env";
 import {
   acquireEinvoiceRunChunkLease,
   renewEinvoiceRunChunkLease,
@@ -27,6 +48,7 @@ import {
   promoteStagedSyncWrite,
 } from "../../../src/features/sync/persistence";
 import { connectorCursorStatement } from "../../../src/features/sync/connector-repository";
+import { failTdccSyncRun } from "../../../src/sources/tdcc/sync";
 
 const now = "2026-09-13T00:00:00.000Z";
 
@@ -90,6 +112,339 @@ describe("同步鎖與原子寫入（隔離 D1）", () => {
         runId: owner,
       }),
     ).toBe(false);
+  });
+
+  it("鎖被接管後，舊同步不能寫入金融資料、cursor 或新工作的結果", async () => {
+    const db = harness.binding;
+    await db
+      .prepare(
+        `INSERT INTO sync_jobs (id, connector_id, scope, interval_minutes, next_run_at, created_at, updated_at) VALUES ('einvoice:all', 'einvoice', 'all', 1440, ?, ?, ?)`,
+      )
+      .bind(now, now, now)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO connector_settings (id, connector_id, encrypted_config, sync_cursor, created_at, updated_at) VALUES ('einvoice', 'einvoice', 'config', 'old-cursor', ?, ?)`,
+      )
+      .bind(now, now)
+      .run();
+    const input = {
+      lockRowId: "einvoice:all",
+      scope: "all",
+      trigger: "manual" as const,
+      leaseMs: 60_000,
+    };
+    await acquireSyncJobLock(db, { ...input, runId: "old" });
+    const guarded = guardSyncDatabase(
+      db,
+      { lockRowId: input.lockRowId, runId: "old" },
+      new AbortController().signal,
+    );
+    const record = {
+      entityType: "invoice" as const,
+      recordKey: "stale",
+      payload: {
+        id: "stale",
+        connector_id: "einvoice",
+        source_id: "stale",
+        invoice_date: "2026-10-05",
+        amount: 120,
+        created_at: now,
+        updated_at: now,
+      },
+    };
+    await stageSyncWriteRecords(guarded, "stale-write", [record]);
+    expect(
+      await promoteStagedSyncWrite(guarded, {
+        runId: "stale-write",
+        entityTypes: ["invoice"],
+        finalizeStatements: [
+          connectorCursorStatement(guarded, "einvoice", "current-cursor", now),
+        ],
+      }),
+    ).toEqual({ invoices: 1, bankTransactions: 0, investmentTransactions: 0 });
+    await stageSyncWriteRecords(guarded, "stale-write", [
+      { ...record, payload: { ...record.payload, amount: 999 } },
+    ]);
+    await db
+      .prepare("UPDATE sync_jobs SET locked_until = ? WHERE id = ?")
+      .bind(now, input.lockRowId)
+      .run();
+    expect(await renewSyncJobLock(db, { ...input, runId: "old" })).toBe(false);
+    expect(await acquireSyncJobLock(db, { ...input, runId: "new" })).toBe(true);
+    await expect(
+      promoteStagedSyncWrite(guarded, {
+        runId: "stale-write",
+        entityTypes: ["invoice"],
+        finalizeStatements: [
+          connectorCursorStatement(guarded, "einvoice", "stale-cursor", now),
+        ],
+      }),
+    ).rejects.toBeInstanceOf(SyncLockLostError);
+    const job = (await findSyncJob(db, "einvoice", "all"))!;
+    expect(await completeSyncJob(db, job, "old")).toBe(false);
+    expect(
+      await failSyncJob(
+        db,
+        job,
+        { status: "failed", errorMessage: "old error" },
+        "old",
+      ),
+    ).toBe(false);
+    expect(
+      await db.prepare("SELECT COUNT(*) AS count FROM invoices").first("count"),
+    ).toBe(1);
+    expect(
+      await db.prepare("SELECT amount FROM invoices").first("amount"),
+    ).toBe(120);
+    expect(
+      await db
+        .prepare("SELECT sync_cursor FROM connector_settings")
+        .first("sync_cursor"),
+    ).toBe("current-cursor");
+    expect(
+      await db.prepare("SELECT locked_by, last_status FROM sync_jobs").first(),
+    ).toEqual({ locked_by: "new", last_status: null });
+  });
+
+  it("失去續租或達到執行期限會停止等待，並拒絕遲到寫入", async () => {
+    const db = harness.binding;
+    const controller = new AbortController();
+    const guarded = guardSyncDatabase(
+      db,
+      { lockRowId: "einvoice:all", runId: "run" },
+      controller.signal,
+    );
+    controller.abort(new SyncTimeoutError());
+    await expect(
+      guarded.prepare("DELETE FROM connector_settings").run(),
+    ).rejects.toBeInstanceOf(SyncTimeoutError);
+    const env = { DB: db } as Env;
+    const expired = createSyncExecution(
+      env,
+      { lockRowId: "einvoice:all", runId: "run" },
+      { deadline: Date.now() - 1 },
+    );
+    const task = vi.fn();
+    try {
+      await expect(expired.run(task)).rejects.toBeInstanceOf(SyncTimeoutError);
+      expect(task).not.toHaveBeenCalled();
+    } finally {
+      expired.stop();
+    }
+    vi.useFakeTimers();
+    const renew = vi.spyOn(dbApi, "renewSyncJobLock").mockResolvedValue(false);
+    const execution = createSyncExecution(env, {
+      lockRowId: "einvoice:all",
+      runId: "run",
+    });
+    try {
+      const rejected = expect(
+        execution.run(() => new Promise<never>(() => {})),
+      ).rejects.toThrow("同步鎖已失效");
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await rejected;
+    } finally {
+      execution.stop();
+      renew.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["einvoice", "tdcc"] as const)(
+    "%s chunk 被另一個 invocation 接管後，舊 chunk 無法寫入",
+    async (connectorId) => {
+      const db = harness.binding;
+      const lockRowId = `${connectorId}:all`;
+      await db
+        .prepare(
+          `INSERT INTO sync_jobs (id, connector_id, scope, interval_minutes, next_run_at, created_at, updated_at)
+      VALUES (?, ?, 'all', 1440, ?, ?, ?)`,
+        )
+        .bind(lockRowId, connectorId, now, now, now)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO connector_settings (id, connector_id, encrypted_config, sync_cursor, created_at, updated_at)
+      VALUES (?, ?, 'config', 'old-cursor', ?, ?)`,
+        )
+        .bind(connectorId, connectorId, now, now)
+        .run();
+      const create =
+        connectorId === "einvoice"
+          ? createOrGetActiveEinvoiceRun
+          : createOrGetActiveTdccRun;
+      const acquire =
+        connectorId === "einvoice"
+          ? acquireEinvoiceRunChunkLease
+          : acquireTdccRunLease;
+      await create(db, { id: "run", trigger: "manual" });
+      await acquireSyncJobLock(db, {
+        lockRowId,
+        runId: "run",
+        scope: "all",
+        trigger: "manual",
+        leaseMs: 60_000,
+      });
+      await acquire(db, { runId: "run", owner: "old", leaseMs: 60_000 });
+      const guarded = guardSyncDatabase(
+        db,
+        { lockRowId, runId: "run" },
+        new AbortController().signal,
+        { connectorId, owner: "old" },
+      );
+      await db
+        .prepare(
+          `UPDATE ${connectorId}_sync_runs SET ${connectorId === "einvoice" ? "chunk_lease_expires_at" : "lease_expires_at"} = ?`,
+        )
+        .bind(now)
+        .run();
+      expect(
+        await acquire(db, { runId: "run", owner: "new", leaseMs: 60_000 }),
+      ).toBe(true);
+      await expect(
+        guarded.batch([
+          connectorCursorStatement(guarded, connectorId, "late-cursor", now),
+          guarded
+            .prepare(
+              "UPDATE sync_jobs SET last_status = 'success' WHERE id = ?",
+            )
+            .bind(lockRowId),
+        ]),
+      ).rejects.toBeInstanceOf(SyncLockLostError);
+      expect(
+        await db
+          .prepare("SELECT sync_cursor FROM connector_settings")
+          .first("sync_cursor"),
+      ).toBe("old-cursor");
+      expect(
+        await db
+          .prepare("SELECT locked_by, last_status FROM sync_jobs")
+          .first(),
+      ).toEqual({ locked_by: "run", last_status: null });
+    },
+  );
+
+  it("Cron 補送停滯 run、略過有效租約，逾時結案後可以建立新 run", async () => {
+    const db = harness.binding;
+    const current = Date.now();
+    const stale = new Date(current - 4 * 60_000).toISOString();
+    for (const connectorId of ["einvoice", "tdcc"] as const)
+      await db
+        .prepare(
+          `INSERT INTO sync_jobs (id, connector_id, scope, interval_minutes, next_run_at, created_at, updated_at) VALUES (?, ?, 'all', 1440, ?, ?, ?)`,
+        )
+        .bind(`${connectorId}:all`, connectorId, stale, stale, stale)
+        .run();
+    await createOrGetActiveEinvoiceRun(db, {
+      id: "invoice-run",
+      trigger: "manual",
+      now: stale,
+    });
+    await createOrGetActiveTdccRun(db, {
+      id: "tdcc-run",
+      trigger: "manual",
+      scope: "bank",
+      now: stale,
+    });
+    await acquireTdccRunLease(db, {
+      runId: "tdcc-run",
+      owner: "live",
+      leaseMs: 60_000,
+    });
+    const send = vi.fn().mockResolvedValue(undefined);
+    const env = { DB: db, SYNC_QUEUE: { send } } as unknown as Env;
+    let jobs = await getSyncJobs(db);
+    expect(jobs.find((job) => job.connectorId === "einvoice")).toMatchObject({
+      running: true,
+      runId: "invoice-run",
+      phase: "stalled",
+      retryAfterSeconds: 0,
+    });
+    expect(jobs.find((job) => job.connectorId === "tdcc")).toMatchObject({
+      running: true,
+      runId: "tdcc-run",
+      phase: "queued",
+      lockScope: "bank",
+      lockTrigger: "manual",
+    });
+    await recoverStalledSyncRuns(env);
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: "run-einvoice-chunk",
+      runId: "invoice-run",
+    });
+    await db
+      .prepare(
+        "UPDATE einvoice_sync_runs SET created_at = ?, updated_at = ? WHERE id = ?",
+      )
+      .bind(new Date(current - 11 * 60_000).toISOString(), stale, "invoice-run")
+      .run();
+    await recoverStalledSyncRuns(env);
+    jobs = await getSyncJobs(db);
+    expect(jobs.find((job) => job.connectorId === "einvoice")).toMatchObject({
+      running: false,
+      lastStatus: "failed",
+      lockedBy: null,
+    });
+    expect(
+      (
+        await createOrGetActiveEinvoiceRun(db, {
+          id: "retry",
+          trigger: "manual",
+        })
+      ).created,
+    ).toBe(true);
+  });
+
+  it("集保失敗結案、結果與 staging 清理一起提交，失敗時全部回滾", async () => {
+    const db = harness.binding;
+    await db
+      .prepare(
+        `INSERT INTO sync_jobs (id, connector_id, scope, interval_minutes, next_run_at, created_at, updated_at)
+      VALUES ('tdcc:all', 'tdcc', 'all', 1440, ?, ?, ?)`,
+      )
+      .bind(now, now, now)
+      .run();
+    await createOrGetActiveTdccRun(db, { id: "run", trigger: "manual" });
+    await stageSyncWriteRecords(db, "run", [
+      { entityType: "invoice", recordKey: "staged", payload: { id: "staged" } },
+    ]);
+    await db
+      .prepare(
+        `CREATE TRIGGER fail_run_update BEFORE UPDATE ON tdcc_sync_runs
+      BEGIN SELECT RAISE(ABORT, 'synthetic finalization failure'); END`,
+      )
+      .run();
+    const env = { DB: db } as Env;
+    await expect(
+      failTdccSyncRun(env, "run", new Error("failed"), true),
+    ).rejects.toThrow();
+    expect(
+      await db.prepare("SELECT status FROM tdcc_sync_runs").first("status"),
+    ).toBe("queued");
+    expect(
+      await db.prepare("SELECT locked_by, last_status FROM sync_jobs").first(),
+    ).toEqual({ locked_by: "run", last_status: null });
+    expect(
+      await db
+        .prepare("SELECT COUNT(*) AS count FROM sync_write_staging")
+        .first("count"),
+    ).toBe(1);
+    await db.prepare("DROP TRIGGER fail_run_update").run();
+    expect(await failTdccSyncRun(env, "run", new Error("failed"), true)).toBe(
+      true,
+    );
+    expect(
+      await db.prepare("SELECT status FROM tdcc_sync_runs").first("status"),
+    ).toBe("failed");
+    expect(
+      await db.prepare("SELECT locked_by, last_status FROM sync_jobs").first(),
+    ).toEqual({ locked_by: null, last_status: "failed" });
+    expect(
+      await db
+        .prepare("SELECT COUNT(*) AS count FROM sync_write_staging")
+        .first("count"),
+    ).toBe(0);
   });
 
   for (const run of [

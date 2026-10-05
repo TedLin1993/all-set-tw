@@ -4,7 +4,18 @@ import {
   einvoiceSyncRuns,
   einvoiceSyncRunItems,
 } from "../../db";
-import { and, asc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 
 // 讀取以明確 selection 維持 snake_case DTO；寫入的 claim、JSON merge、
 // 計數及 promotion 保留原生 statement composition 與原子邊界。
@@ -275,12 +286,13 @@ export async function renewEinvoiceRunChunkLease(
   const expiresAt = new Date(now.getTime() + input.leaseMs).toISOString();
   const result = await createDrizzle(db)
     .update(einvoiceSyncRuns)
-    .set({ chunkLeaseExpiresAt: expiresAt, updatedAt: nowIso })
+    .set({ chunkLeaseExpiresAt: expiresAt })
     .where(
       and(
         eq(einvoiceSyncRuns.id, input.runId),
         inArray(einvoiceSyncRuns.status, ACTIVE_RUN_STATUSES),
         eq(einvoiceSyncRuns.chunkLeaseOwner, input.owner),
+        gt(einvoiceSyncRuns.chunkLeaseExpiresAt, nowIso),
       ),
     )
     .run()

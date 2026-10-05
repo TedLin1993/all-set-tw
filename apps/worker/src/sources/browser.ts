@@ -1,5 +1,40 @@
 import puppeteer from "@cloudflare/puppeteer";
 
+type SyncBrowserBinding = Parameters<typeof puppeteer.launch>[0] & {
+  syncSignal?: AbortSignal;
+};
+
+function watchBrowserCancellation(
+  browser: Awaited<ReturnType<typeof puppeteer.launch>>,
+  binding: SyncBrowserBinding,
+) {
+  const signal = binding.syncSignal;
+  if (!signal) return browser;
+  const close = () => {
+    void browser.close().catch(() => undefined);
+  };
+  if (signal.aborted) {
+    close();
+    signal.throwIfAborted();
+  }
+  signal.addEventListener("abort", close, { once: true });
+  browser.once("disconnected", () =>
+    signal.removeEventListener("abort", close),
+  );
+  return browser;
+}
+
+export async function connectBrowserWithCancellation(
+  binding: SyncBrowserBinding,
+  sessionId: string,
+) {
+  binding.syncSignal?.throwIfAborted();
+  return watchBrowserCancellation(
+    await puppeteer.connect(binding, sessionId),
+    binding,
+  );
+}
+
 const RETRY_DELAYS_MS = [2_000, 5_000] as const;
 const DAY_MS = 86_400_000;
 
@@ -48,13 +83,15 @@ export function classifyBrowserRunCapacityError(
 
 /** Retry only rejected browser acquisition, before a session or login exists. */
 export async function launchBrowserWithRetry(
-  binding: Parameters<typeof puppeteer.launch>[0],
+  binding: SyncBrowserBinding,
   options?: Parameters<typeof puppeteer.launch>[1],
 ) {
   try {
-    return await puppeteer.launch(
+    binding.syncSignal?.throwIfAborted();
+    const browser = await puppeteer.launch(
       {
         async fetch(input, init) {
+          binding.syncSignal?.throwIfAborted();
           const url = new URL(
             input instanceof Request ? input.url : String(input),
           );
@@ -71,6 +108,7 @@ export async function launchBrowserWithRetry(
 
           const request = new Request(input, init);
           for (let attempt = 0; ; attempt++) {
+            binding.syncSignal?.throwIfAborted();
             const response = await binding.fetch(request.clone() as Request);
             if (response.status !== 503) return response;
 
@@ -92,6 +130,7 @@ export async function launchBrowserWithRetry(
       },
       options,
     );
+    return watchBrowserCancellation(browser, binding);
   } catch (error) {
     throw classifyBrowserRunCapacityError(error) ?? error;
   }

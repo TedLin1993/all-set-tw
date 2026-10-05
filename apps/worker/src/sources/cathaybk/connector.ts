@@ -1,5 +1,8 @@
 import type { SyncResult } from "../types";
-import { launchBrowserWithRetry } from "../browser.js";
+import {
+  launchBrowserWithRetry,
+  connectBrowserWithCancellation,
+} from "../browser.js";
 import puppeteer, {
   type Browser,
   type CookieParam,
@@ -346,7 +349,7 @@ async function connectCathayBrowser(
   );
   if (!session) throw new CathayOtpSessionExpiredError();
   try {
-    return await puppeteer.connect(browserBinding, sessionId);
+    return await connectBrowserWithCancellation(browserBinding, sessionId);
   } catch {
     throw new CathayOtpSessionExpiredError();
   }

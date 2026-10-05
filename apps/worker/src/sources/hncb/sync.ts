@@ -1,3 +1,4 @@
+import { createSyncExecution } from "../../features/sync/execution";
 import type { Env } from "../../platform/env";
 import { canonicalSyncLockRowId } from "../../features/sync/lock";
 import {
@@ -70,37 +71,45 @@ export async function prepareHncbCaptchaSession(env: Env) {
   });
   if (!locked) throw new SyncAlreadyRunningError(connectorId);
 
+  const execution = createSyncExecution(
+    env,
+    { lockRowId, runId },
+    { deadline: Date.now() + 3 * 60 * 1000 },
+  );
   try {
-    const settings = await requireConnectorSettings(env.DB, connectorId);
-    const stored = await decryptJson<Record<string, unknown>>(
-      settings.encrypted_config,
-      configEncryptionKey(env),
-    );
-    const publicStored = settings.public_config
-      ? JSON.parse(settings.public_config)
-      : {};
-    const config = parseHncbConfig({ ...stored, ...publicStored });
-    const prepared = await prepareHncbCaptcha(env.BROWSER, config);
-    await updateConnectorEncryptedConfig(
-      env.DB,
-      connectorId,
-      await encryptJson(
-        {
-          ...stored,
-          browserSessionId: prepared.browserSessionId,
-          browserSessionExpiresAt: prepared.browserSessionExpiresAt,
-          captchaDigitCount: prepared.captchaDigitCount,
-        },
+    return await execution.run(async (env) => {
+      const settings = await requireConnectorSettings(env.DB, connectorId);
+      const stored = await decryptJson<Record<string, unknown>>(
+        settings.encrypted_config,
         configEncryptionKey(env),
-      ),
-    );
-    return {
-      captchaImage: prepared.captchaImage,
-      expiresAt: prepared.browserSessionExpiresAt,
-      digitCount: prepared.captchaDigitCount,
-      captchaKind: "numeric" as const,
-    };
+      );
+      const publicStored = settings.public_config
+        ? JSON.parse(settings.public_config)
+        : {};
+      const config = parseHncbConfig({ ...stored, ...publicStored });
+      const prepared = await prepareHncbCaptcha(env.BROWSER, config);
+      await updateConnectorEncryptedConfig(
+        env.DB,
+        connectorId,
+        await encryptJson(
+          {
+            ...stored,
+            browserSessionId: prepared.browserSessionId,
+            browserSessionExpiresAt: prepared.browserSessionExpiresAt,
+            captchaDigitCount: prepared.captchaDigitCount,
+          },
+          configEncryptionKey(env),
+        ),
+      );
+      return {
+        captchaImage: prepared.captchaImage,
+        expiresAt: prepared.browserSessionExpiresAt,
+        digitCount: prepared.captchaDigitCount,
+        captchaKind: "numeric" as const,
+      };
+    });
   } finally {
+    execution.stop();
     await releaseSyncJobLock(env.DB, lockRowId, runId);
   }
 }

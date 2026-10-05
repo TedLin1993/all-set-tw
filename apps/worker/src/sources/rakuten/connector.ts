@@ -8,7 +8,11 @@ import type { SyncResult } from "../types";
  * - 不復用 session／cookie：每次同步都重新登入，結束一律 browser.close()；
  *   只有 prepare 階段 disconnect，保留瀏覽器給使用者輸入驗證碼。
  */
-import { BrowserRunCapacityError, launchBrowserWithRetry } from "../browser.js";
+import {
+  BrowserRunCapacityError,
+  launchBrowserWithRetry,
+  connectBrowserWithCancellation,
+} from "../browser.js";
 import puppeteer, {
   type Browser,
   type Dialog,
@@ -1690,7 +1694,7 @@ async function reconnectPreparedBrowser(
     );
   }
   try {
-    return await puppeteer.connect(browserFetcher, sessionId);
+    return await connectBrowserWithCancellation(browserFetcher, sessionId);
   } catch {
     throw new RakutenBrowserCapacityError(
       "前一個樂天驗證工作階段尚未釋放，請稍候再試。",
@@ -1716,7 +1720,10 @@ async function acquireBrowserForPrepare(
     }
     if (preferred) {
       try {
-        return await puppeteer.connect(browserFetcher, preferred.sessionId);
+        return await connectBrowserWithCancellation(
+          browserFetcher,
+          preferred.sessionId,
+        );
       } catch {
         throw new RakutenBrowserCapacityError(
           "前一個樂天驗證工作階段尚未釋放，請稍候再試。",
@@ -1740,7 +1747,10 @@ async function releasePreparedBrowser(
         const sessions = await puppeteer.sessions(browserFetcher);
         const session = sessions.find((item) => item.sessionId === sessionId);
         if (!session || session.connectionId) return;
-        const browser = await puppeteer.connect(browserFetcher, sessionId);
+        const browser = await connectBrowserWithCancellation(
+          browserFetcher,
+          sessionId,
+        );
         await closeRakutenBrowser(browser);
       })(),
       STALE_SESSION_RELEASE_TIMEOUT_MS,

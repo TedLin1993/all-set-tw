@@ -90,3 +90,8 @@ npm run verify:web
 明細展示新增活動、已入帳、補上發票及原幣金額，沿用全域隱藏金額設定。
 日期是活動發生日期，同步時間另列；已配對發票合併顯示，活動筆數不等同新增資料筆數。
 舊報告沒有明細時明確說明，不顯示成「沒有變動」。
+
+## 同步狀態與重試
+
+`ConnectorPanel` 依 `GET /api/sync-jobs` 的 `running` 與 `phase` 追蹤電子發票／集保 active run，不能只依 connector lock 到期判定完成。API 同時提供 run ID、最近狀態更新時間與最短重試等待秒數；一般同步的狀態時間可能包含 heartbeat，不能當成金融資料更新時間。
+`phase = stalled` 時保留 polling，顯示停滯提示與「重試同步」，補送既有 run 的 continuation；集保保留原 run 的 scope。有效 lease 下的工作仍禁止重複同步，重試排入 Queue 後須等待 lifecycle 完成才顯示成功。

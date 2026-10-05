@@ -1,3 +1,4 @@
+import { createSyncExecution } from "../../features/sync/execution";
 import type { Env } from "../../platform/env";
 import { canonicalSyncLockRowId } from "../../features/sync/lock";
 import {
@@ -69,44 +70,52 @@ export async function prepareMegabankCaptchaSession(env: Env) {
   });
   if (!locked) throw new SyncAlreadyRunningError(connectorId);
 
+  const execution = createSyncExecution(
+    env,
+    { lockRowId, runId },
+    { deadline: Date.now() + 3 * 60 * 1000 },
+  );
   try {
-    const settings = await requireConnectorSettings(env.DB, connectorId);
-    const stored = await decryptJson<Record<string, unknown>>(
-      settings.encrypted_config,
-      configEncryptionKey(env),
-    );
-    const config = parseMegabankConfig({
-      ...stored,
-      ...parsePublicConnectorConfig(connectorId, settings.public_config),
-    });
-    const prepared = await prepareMegabankCaptcha(config);
-    const saved = await updateConnectorEncryptedConfigIfCurrent(
-      env.DB,
-      connectorId,
-      settings.encrypted_config,
-      await encryptJson(
-        {
-          ...stored,
-          // 首次取得驗證碼時固定虛擬裝置，之後登入都沿用，簡訊驗證才可能只需一次。
-          ...prepared.device,
-          pendingSession: prepared.pendingSession,
-          pendingSessionExpiresAt: prepared.pendingSessionExpiresAt,
-        },
+    return await execution.run(async (env) => {
+      const settings = await requireConnectorSettings(env.DB, connectorId);
+      const stored = await decryptJson<Record<string, unknown>>(
+        settings.encrypted_config,
         configEncryptionKey(env),
-      ),
-    );
-    if (!saved) {
-      throw new NeedsUserActionError(
-        "兆豐銀行設定在驗證期間已變更，請重新取得驗證碼。",
       );
-    }
-    return {
-      captchaImage: prepared.captchaImage,
-      expiresAt: prepared.pendingSessionExpiresAt,
-      captchaLength: 5,
-      captchaKind: "numeric" as const,
-    };
+      const config = parseMegabankConfig({
+        ...stored,
+        ...parsePublicConnectorConfig(connectorId, settings.public_config),
+      });
+      const prepared = await prepareMegabankCaptcha(config);
+      const saved = await updateConnectorEncryptedConfigIfCurrent(
+        env.DB,
+        connectorId,
+        settings.encrypted_config,
+        await encryptJson(
+          {
+            ...stored,
+            // 首次取得驗證碼時固定虛擬裝置，之後登入都沿用，簡訊驗證才可能只需一次。
+            ...prepared.device,
+            pendingSession: prepared.pendingSession,
+            pendingSessionExpiresAt: prepared.pendingSessionExpiresAt,
+          },
+          configEncryptionKey(env),
+        ),
+      );
+      if (!saved) {
+        throw new NeedsUserActionError(
+          "兆豐銀行設定在驗證期間已變更，請重新取得驗證碼。",
+        );
+      }
+      return {
+        captchaImage: prepared.captchaImage,
+        expiresAt: prepared.pendingSessionExpiresAt,
+        captchaLength: 5,
+        captchaKind: "numeric" as const,
+      };
+    });
   } finally {
+    execution.stop();
     await releaseSyncJobLock(env.DB, lockRowId, runId);
   }
 }

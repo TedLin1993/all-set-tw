@@ -110,6 +110,14 @@
       (j) => j.connectorId === connectorId && j.scope === "all",
     ),
   );
+  const syncBusy = $derived(Boolean(job?.running && job.phase !== "stalled"));
+  $effect(() => {
+    if (!job?.running || destroyed) return;
+    if (connectorId === "einvoice" && einvoiceSyncPolling === null)
+      startEinvoiceSyncPolling();
+    if (connectorId === "tdcc" && tdccSyncPolling === null)
+      startTdccSyncPolling();
+  });
   const browserBank = $derived(
     connectorId === "sinopac" ||
       connectorId === "taishin" ||
@@ -1047,7 +1055,7 @@
           <p class="mt-1 text-sm">
             取得後會在下方顯示圖片與輸入欄，請勿重複點擊。
           </p>
-        {:else if $sync.isPending || $verifyBrowserBank.isPending || job?.running}
+        {:else if $sync.isPending || $verifyBrowserBank.isPending || syncBusy}
           <p role="status" class="font-semibold">正在登入並查詢帳戶…</p>
           <p class="mt-1 text-sm">尚未完成同步，請勿重複提交。</p>
         {:else if error}
@@ -1090,7 +1098,7 @@
               size="sm"
               disabled={demoMode ||
                 !$settings.data?.credentialsComplete ||
-                job?.running ||
+                syncBusy ||
                 $save.isPending ||
                 $sync.isPending ||
                 $prepareBrowserBank.isPending ||
@@ -1114,7 +1122,7 @@
               variant="outline"
               disabled={demoMode ||
                 !$settings.data?.credentialsComplete ||
-                job?.running ||
+                syncBusy ||
                 $save.isPending ||
                 $sync.isPending ||
                 $prepareBrowserBank.isPending ||
@@ -1193,7 +1201,7 @@
     />
   {/if}
   <div
-    class={`mt-3 rounded-xl border border-ink/10 bg-paper p-3 text-sm ${(connectorId === "tdcc" && !tdccConnectionReady) || (connectorId === "cathaybk" && !cathayConnectionReady && cathayVerificationStep !== "complete") ? "hidden" : ""}`}
+    class={`mt-3 rounded-xl border border-ink/10 bg-paper p-3 text-sm ${(connectorId === "tdcc" && !tdccConnectionReady && !job?.running) || (connectorId === "cathaybk" && !cathayConnectionReady && cathayVerificationStep !== "complete") ? "hidden" : ""}`}
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -1207,17 +1215,39 @@
                 : "下次同步會自動驗證"}</span
             >{/if}
           {#if job && connectorId !== "nextbank"}<span
-              >狀態：{job.running
-                ? "同步中"
-                : job.lastStatus === "success"
-                  ? "正常"
-                  : job.lastStatus === "failed"
-                    ? "失敗"
-                    : job.lastStatus === "needs_user_action"
-                      ? "需要處理"
-                      : "尚未同步"}</span
+              >狀態：{job.phase === "stalled"
+                ? "同步停滯，可重試"
+                : job.running
+                  ? job.phase === "queued"
+                    ? "等待同步"
+                    : job.phase === "initializing"
+                      ? "正在登入"
+                      : job.phase === "bank"
+                        ? "正在查詢銀行資料"
+                        : job.phase === "trades"
+                          ? "正在查詢投資交易"
+                          : job.phase === "promoting" || job.phase === "promote"
+                            ? "正在儲存結果"
+                            : "同步中"
+                  : job.lastStatus === "success"
+                    ? "正常"
+                    : job.lastStatus === "failed"
+                      ? "失敗"
+                      : job.lastStatus === "needs_user_action"
+                        ? "需要處理"
+                        : "尚未同步"}</span
             >{/if}
         </div>
+        {#if job?.running}
+          <div class="mt-1 text-sm text-muted-foreground" role="status">
+            {#if job.lastProgressAt}<p>
+                最近狀態更新：{formatDateTime(job.lastProgressAt)}
+              </p>{/if}
+            {#if job.phase === "stalled"}<p>
+                工作已停止更新，系統會自動恢復，也可按下方「重試同步」。
+              </p>{/if}
+          </div>
+        {/if}
         {#if job?.lastRunAt && connectorId !== "nextbank"}
           <p class="mt-1 text-sm text-muted-foreground">
             最近嘗試：{formatDateTime(job.lastRunAt)}
@@ -1232,6 +1262,22 @@
           >{job.enabled ? "關閉" : "開啟"}</Button
         >{/if}
     </div>
+    {#if job?.phase === "stalled" && (connectorId === "einvoice" || connectorId === "tdcc")}
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={demoMode || $sync.isPending}
+        onclick={() =>
+          $sync.mutate(
+            connectorId === "tdcc" &&
+              (job.lockScope === "bank" ||
+                job.lockScope === "investments" ||
+                job.lockScope === "trades")
+              ? job.lockScope
+              : "default",
+          )}>重試同步</Button
+      >
+    {/if}
 
     {#if connectorId === "nextbank"}
       <p class="mt-2 text-sm text-muted-foreground">

@@ -131,6 +131,7 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 - 一般同步使用 `runConnectorSync`，不要在 route 或 scheduler 新增 connector switch。電子發票與集保的手動／排程入口使用各自的 durable-run service 啟動 Queue 流程。
 - 所有 scope 必須先宣告在 `connectorCatalog`；排程工作目前固定使用 `all`。
 - 同一 connector 的所有 scope 共用 canonical lock。
+- 手動／排程必須把 `createSyncExecution` 的 scoped env 傳給來源同步，不得改用原始 DB 寫入金融資料、session、cursor 或結果。CAPTCHA preparation 同樣使用 scoped env，並維持 3 分鐘期限。Browser 透過共用 launch／connect helper 接收取消訊號；durable HTTP client 傳遞 `syncSignal`。
 - 需要 CAPTCHA／OTP 時，runtime registry 提供 `prepareChallenge`，route 只處理輸入驗證與 HTTP error mapping。
 - 排程不得主動寄送 OTP；需要互動時標記 `needs_user_action`。
 - 若外部服務支援接管其他登入中的裝置，必須明確定義手動與排程的 `force` policy，並在介面與使用文件提示可能中斷使用者目前的工作階段。
@@ -184,15 +185,17 @@ staging source。設定儲存、登入 session 與資料 promotion 仍遵守本�
 
 - 啟動手動或排程同步時只建立／取得 active run 並 enqueue `run-einvoice-chunk`；API
   可以回傳已排入同步，前端必須依 sync job lifecycle 顯示完成結果。
+- 既有 run 也必須補送 continuation；新 run 初始化或首次 enqueue 失敗要補償結案與清鎖。Cron 恢復無有效 chunk lease 的停滯 run，整體期限為建立後 10 分鐘（包含 Queue 等待）；逾時先結案，再允許重新建立。
 - 初始化只取得清單並 durable 地寫入 item；明細一律同步。每個 Queue invocation 最多
   claim 並擷取 35 張發票，完成狀態以 set-based D1 寫入；若尚有工作便 enqueue continuation，不能在同一 invocation
   繼續處理下一批。
-- item claim、run chunk 都必須使用 owner-scoped lease；明細處理期間每五張 rolling renew
+- item claim、run chunk 都必須使用 owner-scoped lease，chunk owner 使用每次 invocation 的新 UUID；3 分鐘 chunk lease 每分鐘及每五張明細 rolling renew
   run lease，item 完成／釋放則以 claim token CAS。Queue 重送時只可接管已過期的 run lease
   與 item，且不得解除其他 invocation 的 lease。
 - 所有 item `done` 前不得 promotion。完成後由 run items 以固定五個 set-based statements
   一次 promotion invoice 與 line item，並以設定版本 CAS 在同一 batch 更新 cursor；後續
   finalize path 更新 sync job 和排程批次結果。`promoted_at` 必須使重送可冪等。
+- 所有持久化寫入同時核對 connector 與 chunk owner；成功結案保護 owner，失敗結案另要求沒有有效 chunk lease。不得讓失鎖的舊 invocation 更新資料或清除新 owner 的鎖。
 - 暫時外部錯誤釋放 item claim 並使用 Queue retry；session 過期清除已保存 session 後回到
   初始化；憑證或互動式登入需求則標記 `needs_user_action`，retry 上限後標記 `failed`。
 
@@ -212,12 +215,14 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 
 - `tdcc_sync_runs` 保存 run lifecycle、scope、設定版本及加密認證／session；
   `tdcc_sync_run_items` 保存 `bank_page`、`trade_page` 工作與結果。
-- 手動啟動先初始化登入以處理 OTP；排程初始化不主動寄送 OTP。
+- 手動啟動先取得 run lease 並初始化登入以處理 OTP；排程初始化不主動寄送 OTP。
 - 同一 connector 的所有 scope 共用 active run 限制與 canonical lock；每個 chunk
   另取得 owner-scoped run lease，每次最多 claim 一個分頁 item，以 claim token
   更新或釋放該 item，尚有工作時 enqueue continuation。
+- run lease 為 3 分鐘、每分鐘續租，整體期限與停滯恢復沿用電子發票；手動重試同 scope 的既有排程 run 可補送 continuation，保留原批次。
 - 分頁結果完成後彙整，透過一般 staging 與 promotion 寫入金融資料，並檢查設定版本、
   更新 cursor；後續完成排程結果、手動完整同步的報告修復與 run 結案。
+- 金融資料與 cursor 使用同一 batch 的 connector／chunk owner guard；結果與結案寫入完成前保留 connector lock。失敗結案、結果、staging 清理與清鎖必須原子提交。
 - 暫時錯誤交給 Queue retry；需要互動或重試耗盡時終止。不得把每段 run lease 的
   釋放當成整個 connector 同步完成。
 

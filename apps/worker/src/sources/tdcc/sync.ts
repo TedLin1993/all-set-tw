@@ -48,6 +48,7 @@ import {
   markTdccRunItemSucceeded,
   releaseTdccRunItemForRetry,
   releaseTdccRunLease,
+  renewTdccRunLease,
   transitionTdccRun,
   updateTdccRunState,
   type TdccRunItemRow,
@@ -78,7 +79,17 @@ import {
   safeErrorMessage,
   SyncAlreadyRunningError,
 } from "../../features/sync/errors";
-import { SYNC_LOCK_LEASE_MS } from "../../features/sync/lock";
+import {
+  SYNC_LOCK_LEASE_MS,
+  SYNC_MAX_DURATION_MS,
+} from "../../features/sync/lock";
+import {
+  createSyncExecution,
+  type SyncEnv,
+  SyncTimeoutError,
+} from "../../features/sync/execution";
+import { syncLockGuardStatement } from "../../db/sync-jobs";
+import { durableRunState } from "../../features/sync/run-state";
 import {
   serializePublicConnectorConfig,
   splitConnectorCursorState,
@@ -149,7 +160,16 @@ export async function startTdccSyncRun(
   });
   const { run, created } = result;
   if (
-    run.trigger !== input.trigger ||
+    !created &&
+    durableRunState(run).expired &&
+    !durableRunState(run).leased
+  ) {
+    if (await failTdccSyncRun(env, run.id, new SyncTimeoutError(), true))
+      return startTdccSyncRun(env, input);
+    throw new SyncAlreadyRunningError("tdcc");
+  }
+  if (
+    (run.trigger !== input.trigger && input.trigger !== "manual") ||
     run.scope !== input.scope ||
     (input.scheduledBatchId &&
       run.scheduled_batch_id !== input.scheduledBatchId)
@@ -159,27 +179,60 @@ export async function startTdccSyncRun(
   if (!created) return result;
 
   if (!(await holdTdccRunLock(env.DB, run.id, input.trigger, input.scope))) {
-    await failTdccSyncRun(
-      env,
-      run.id,
-      new SyncAlreadyRunningError("tdcc"),
-      true,
-    );
+    await finalizeTdccRun(env.DB, {
+      runId: run.id,
+      status: "failed",
+      error: "同步鎖已由其他工作取得。",
+    });
     throw new SyncAlreadyRunningError("tdcc");
   }
 
+  const initialOwner = crypto.randomUUID();
+  const leased = await acquireTdccRunLease(env.DB, {
+    runId: run.id,
+    owner: initialOwner,
+    leaseMs: TDCC_RUN_LEASE_MS,
+  });
+  if (!leased) throw new SyncAlreadyRunningError("tdcc");
   try {
-    await beginActivityRun(
-      env.DB,
-      run.id,
-      run.scheduled_batch_id ??
-        (run.trigger === "manual" && run.scope === "all"
-          ? await findLatestRecoverableScheduledBatchId(env.DB, "tdcc")
-          : null),
-      "tdcc",
+    const execution = createSyncExecution(
+      env,
+      { lockRowId: TDCC_JOB_ID, runId: run.id },
+      {
+        deadline: Date.parse(run.created_at) + SYNC_MAX_DURATION_MS,
+        chunk: {
+          connectorId: "tdcc",
+          owner: initialOwner,
+          renew: () =>
+            renewTdccRunLease(env.DB, {
+              runId: run.id,
+              owner: initialOwner,
+              leaseMs: TDCC_RUN_LEASE_MS,
+            }),
+        },
+      },
     );
-    if (input.trigger === "manual") {
-      await initializeTdccRun(env, run, config, settings.sync_cursor);
+    try {
+      await execution.run(async (syncEnv) => {
+        await beginActivityRun(
+          syncEnv.DB,
+          run.id,
+          run.scheduled_batch_id ??
+            (run.trigger === "manual" && run.scope === "all"
+              ? await findLatestRecoverableScheduledBatchId(env.DB, "tdcc")
+              : null),
+          "tdcc",
+        );
+        if (input.trigger === "manual") {
+          await initializeTdccRun(syncEnv, run, config, settings.sync_cursor);
+        }
+      });
+    } finally {
+      execution.stop();
+      await releaseTdccRunLease(env.DB, {
+        runId: run.id,
+        owner: initialOwner,
+      }).catch(() => undefined);
     }
   } catch (error) {
     await failTdccSyncRun(env, run.id, error);
@@ -212,44 +265,70 @@ export async function processTdccSyncChunk(
     if (!(await holdTdccRunLock(env.DB, run.id, run.trigger, run.scope))) {
       throw new SyncAlreadyRunningError("tdcc");
     }
-    if (run.status === "queued" || run.phase === "initialize") {
-      const settings = await requireTdccSettings(env);
-      const config = await loadRunConfig(env, run);
-      await initializeTdccRun(env, run, config, settings.sync_cursor);
-      run = (await getTdccRun(env.DB, runId)) ?? run;
-    }
+    const execution = createSyncExecution(
+      env,
+      { lockRowId: TDCC_JOB_ID, runId },
+      {
+        deadline: Date.parse(run.created_at) + SYNC_MAX_DURATION_MS,
+        chunk: {
+          connectorId: "tdcc",
+          owner: chunkOwner,
+          renew: () =>
+            renewTdccRunLease(env.DB, {
+              runId,
+              owner: chunkOwner,
+              leaseMs: TDCC_RUN_LEASE_MS,
+            }),
+        },
+      },
+    );
+    const leasedRun = run;
+    try {
+      return await execution.run(async (syncEnv) => {
+        let run = leasedRun;
+        const leasedEnv = syncEnv;
+        if (run.status === "queued" || run.phase === "initialize") {
+          const settings = await requireTdccSettings(leasedEnv);
+          const config = await loadRunConfig(leasedEnv, run);
+          await initializeTdccRun(leasedEnv, run, config, settings.sync_cursor);
+          run = (await getTdccRun(leasedEnv.DB, runId)) ?? run;
+        }
 
-    const claimToken = crypto.randomUUID();
-    const claimed = await claimTdccRunItems(env.DB, {
-      runId,
-      claimToken,
-      limit: TDCC_MAX_QUEUE_ITEMS_PER_CHUNK,
-      leaseMs: TDCC_RUN_LEASE_MS,
-    });
-    if (claimed.length > 0) {
-      try {
-        await processTdccRunItem(env, run, claimed[0]!, claimToken);
-      } catch (error) {
-        await releaseTdccRunItemForRetry(env.DB, {
+        const claimToken = crypto.randomUUID();
+        const claimed = await claimTdccRunItems(leasedEnv.DB, {
           runId,
-          itemId: claimed[0]!.id,
           claimToken,
-          error: safeErrorMessage(error),
-        }).catch(() => undefined);
-        throw error;
-      }
-      run = (await getTdccRun(env.DB, runId)) ?? run;
-    }
+          limit: TDCC_MAX_QUEUE_ITEMS_PER_CHUNK,
+          leaseMs: TDCC_RUN_LEASE_MS,
+        });
+        if (claimed.length > 0) {
+          try {
+            await processTdccRunItem(leasedEnv, run, claimed[0]!, claimToken);
+          } catch (error) {
+            await releaseTdccRunItemForRetry(leasedEnv.DB, {
+              runId,
+              itemId: claimed[0]!.id,
+              claimToken,
+              error: safeErrorMessage(error),
+            }).catch(() => undefined);
+            throw error;
+          }
+          run = (await getTdccRun(leasedEnv.DB, runId)) ?? run;
+        }
 
-    if (run.pending_item_count > 0 || run.processing_item_count > 0) {
-      return { status: "continue" };
+        if (run.pending_item_count > 0 || run.processing_item_count > 0) {
+          return { status: "continue" };
+        }
+        if (run.status !== "promoting" && !run.promoted_at) {
+          await promoteTdccRun(leasedEnv, run);
+          run = (await getTdccRun(leasedEnv.DB, runId)) ?? run;
+        }
+        const finalized = await finalizeTdccRunOutcome(leasedEnv, run);
+        return finalized ? { status: "completed" } : { status: "terminal" };
+      });
+    } finally {
+      execution.stop();
     }
-    if (run.status !== "promoting" && !run.promoted_at) {
-      await promoteTdccRun(env, run);
-      run = (await getTdccRun(env.DB, runId)) ?? run;
-    }
-    const finalized = await finalizeTdccRunOutcome(env, run);
-    return finalized ? { status: "completed" } : { status: "terminal" };
   } finally {
     await releaseTdccRunLease(env.DB, {
       runId,
@@ -266,17 +345,18 @@ export async function failTdccSyncRun(
 ) {
   const run = await getTdccRun(env.DB, runId);
   if (!run || isTerminal(run)) return false;
+  if (
+    run.lease_owner &&
+    run.lease_expires_at &&
+    Date.parse(run.lease_expires_at) > Date.now()
+  )
+    return false;
+  if (!(await holdTdccRunLock(env.DB, run.id, run.trigger, run.scope)))
+    return false;
   const status: Exclude<SyncNotificationStatus, "success"> =
     !forceFailed && isUserActionError(error) ? "needs_user_action" : "failed";
   const errorMessage = safeErrorMessage(error);
-  await finalizeTdccRun(env.DB, {
-    runId,
-    status,
-    error: errorMessage,
-  });
-  await clearTdccStaging(env, runId);
-  await finishTdccJob(env, run, status, errorMessage, emptyNewRecords());
-  return true;
+  return finishTdccJob(env, run, status, errorMessage, emptyNewRecords());
 }
 
 export async function cancelQueuedTdccSyncRun(
@@ -295,7 +375,7 @@ export async function cancelQueuedTdccSyncRun(
 }
 
 async function initializeTdccRun(
-  env: Env,
+  env: SyncEnv,
   run: TdccRunRow,
   config: TdccConfig,
   persistedCursor: string | null,
@@ -315,6 +395,7 @@ async function initializeTdccRun(
   const initialized = await initializeTdccSnapshot(
     config,
     persistedCursor ?? undefined,
+    env.syncSignal,
   );
   const now = new Date().toISOString();
   const cursor = JSON.stringify({
@@ -338,7 +419,7 @@ async function initializeTdccRun(
 }
 
 async function processTdccRunItem(
-  env: Env,
+  env: SyncEnv,
   run: TdccRunRow,
   item: TdccRunItemRow,
   claimToken: string,
@@ -352,6 +433,7 @@ async function processTdccRunItem(
   const clientState = createTdccClient(
     { ...config, session: sessionState.session },
     cursor,
+    env.syncSignal,
   );
   await ensureTdccSession(clientState.client, {
     ...config,
@@ -592,8 +674,7 @@ async function promoteTdccRun(env: Env, run: TdccRunRow) {
         `UPDATE sync_jobs
            SET last_status = 'success', last_error = NULL,
                last_run_at = ?, last_success_at = ?, next_run_at = ?,
-               locked_by = NULL, locked_until = NULL,
-               lock_trigger = NULL, lock_scope = NULL, updated_at = ?
+               updated_at = ?
            WHERE id = ? AND locked_by = ?`,
       ).bind(now, now, nextRunAt, now, job.id, run.id),
     );
@@ -621,12 +702,18 @@ async function promoteTdccRun(env: Env, run: TdccRunRow) {
 }
 
 async function finalizeTdccRunOutcome(env: Env, run: TdccRunRow) {
-  return finalizeTdccRun(env.DB, {
-    runId: run.id,
-    status: "completed",
-    phase: "promote",
-    promotedAt: run.promoted_at ?? new Date().toISOString(),
-  });
+  const now = new Date().toISOString();
+  const result = await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE tdcc_sync_runs SET status = 'completed', phase = 'promote', promoted_at = COALESCE(promoted_at, ?), completed_at = ?, updated_at = ?, lease_owner = NULL, lease_expires_at = NULL
+      WHERE id = ? AND status = 'promoting'
+        AND NOT EXISTS (SELECT 1 FROM tdcc_sync_run_items WHERE run_id = ? AND status != 'done')`,
+    ).bind(now, now, now, run.id, run.id),
+    env.DB.prepare(
+      `UPDATE sync_jobs SET locked_by = NULL, locked_until = NULL, lock_trigger = NULL, lock_scope = NULL, updated_at = ? WHERE id = ? AND locked_by = ?`,
+    ).bind(now, TDCC_JOB_ID, run.id),
+  ]);
+  return result[0]!.meta.changes === 1;
 }
 
 async function finishTdccJobAfterPromotion(
@@ -690,52 +777,68 @@ async function finishTdccJob(
   newRecords: SyncNewRecordCounts,
 ) {
   const job = await findSyncJob(env.DB, "tdcc", "all");
-  if (job) {
-    const now = new Date().toISOString();
-    const nextRunAt =
-      status === "failed"
-        ? nextSyncRunAt(
-            job.interval_minutes,
-            job.preferred_time,
-            new Date(now),
-            job.next_run_at,
-            job.preferred_weekday,
-          )
-        : job.next_run_at;
-    await env.DB.prepare(
+  if (!job) return false;
+  const now = new Date().toISOString();
+  const nextRunAt =
+    status === "failed"
+      ? nextSyncRunAt(
+          job.interval_minutes,
+          job.preferred_time,
+          new Date(now),
+          job.next_run_at,
+          job.preferred_weekday,
+        )
+      : job.next_run_at;
+  const statements: D1PreparedStatement[] = [
+    syncLockGuardStatement(
+      env.DB,
+      { lockRowId: TDCC_JOB_ID, runId: run.id },
+      { connectorId: "tdcc", owner: null },
+    ),
+    env.DB.prepare(
       `UPDATE sync_jobs
          SET last_status = ?, last_error = ?, last_run_at = ?, next_run_at = ?,
              locked_by = NULL, locked_until = NULL,
              lock_trigger = NULL, lock_scope = NULL, updated_at = ?
          WHERE id = ? AND locked_by = ?`,
-    )
-      .bind(status, error, now, nextRunAt, now, job.id, run.id)
-      .run();
-    if (run.scheduled_batch_id) {
-      await env.DB.batch([
-        env.DB.prepare(
-          `UPDATE scheduled_sync_batch_results
+    ).bind(status, error, now, nextRunAt, now, job.id, run.id),
+  ];
+  if (run.scheduled_batch_id) {
+    statements.push(
+      env.DB.prepare(
+        `UPDATE scheduled_sync_batch_results
            SET connector_id = 'tdcc', status = ?, completed_at = ?,
                new_invoices = 0, new_bank_transactions = ?,
                new_investment_transactions = ?
            WHERE batch_id = ? AND job_id = ? AND completed_at IS NULL`,
-        ).bind(
-          status,
-          now,
-          newRecords.bankTransactions,
-          newRecords.investmentTransactions,
-          run.scheduled_batch_id,
-          job.id,
-        ),
-        publishActivityRunStatement(
-          env.DB,
-          run.id,
-          run.scheduled_batch_id,
-          "tdcc",
-        ),
-      ]);
-    }
+      ).bind(
+        status,
+        now,
+        newRecords.bankTransactions,
+        newRecords.investmentTransactions,
+        run.scheduled_batch_id,
+        job.id,
+      ),
+      publishActivityRunStatement(
+        env.DB,
+        run.id,
+        run.scheduled_batch_id,
+        "tdcc",
+      ),
+    );
   }
+  statements.push(
+    env.DB.prepare("DELETE FROM sync_write_staging WHERE run_id = ?").bind(
+      run.id,
+    ),
+    env.DB.prepare(
+      `UPDATE tdcc_sync_runs
+      SET status = ?, last_error = ?, lease_owner = NULL, lease_expires_at = NULL, completed_at = ?, updated_at = ?
+      WHERE id = ? AND status IN ('queued', 'initializing', 'processing', 'promoting')`,
+    ).bind(status, error, now, now, run.id),
+  );
+  const results = await env.DB.batch(statements);
+  if (results.at(-1)?.meta.changes !== 1) return false;
   if (run.scheduled_batch_id) {
     const summary = await claimCompletedDefaultScheduleBatch(
       env.DB,
@@ -745,6 +848,7 @@ async function finishTdccJob(
   } else if (run.trigger === "scheduled") {
     await safelySendSyncNotification(env, { connectorId: "tdcc", status });
   }
+  return true;
 }
 
 async function requireTdccSettings(env: Env) {
@@ -1017,13 +1121,6 @@ function parseJson<T>(value: string | null): T {
 
 function emptyNewRecords(): SyncNewRecordCounts {
   return { invoices: 0, bankTransactions: 0, investmentTransactions: 0 };
-}
-
-async function clearTdccStaging(env: Env, runId: string) {
-  await env.DB.prepare("DELETE FROM sync_write_staging WHERE run_id = ?")
-    .bind(runId)
-    .run()
-    .catch(() => undefined);
 }
 
 async function holdTdccRunLock(
