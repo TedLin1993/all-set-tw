@@ -68,7 +68,7 @@ export const demoReadOnlyMiddleware: MiddlewareHandler<AppBindings> = async (
 
 const paginationLimitSchema = z.coerce.number().int().min(1).max(100);
 
-export function parseKeysetPagination<T extends z.ZodTypeAny>(
+export function parseKeysetPagination<T extends z.ZodType>(
   query: Record<string, string | undefined>,
   cursorSchema: T,
   defaultLimit = 50,

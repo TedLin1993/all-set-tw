@@ -1,9 +1,13 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import { connectorRoutes } from "../../src/features/connectors/route";
 import type { AppBindings, Env } from "../../src/platform/env";
 import {
   apiErrorResponse,
   demoReadOnlyMiddleware,
+  encodePageCursor,
+  parseKeysetPagination,
 } from "../../src/platform/http";
 
 function testApp() {
@@ -36,6 +40,51 @@ describe("demo read-only middleware", () => {
 });
 
 describe("HTTP helpers", () => {
+  // 預期依據：後端架構的 API 錯誤契約要求固定 error code，且不得洩漏輸入。
+  it("Zod 分頁驗證失敗仍回傳固定 400，且不洩漏 cursor 內容", async () => {
+    const app = new Hono();
+    app.onError(apiErrorResponse);
+    app.get("/resource", (c) =>
+      c.json(
+        parseKeysetPagination(
+          c.req.query(),
+          z.object({ lastPostedDate: z.string(), lastId: z.string() }),
+        ),
+      ),
+    );
+    const cursor = encodePageCursor({ lastId: "synthetic-private-cursor" });
+    const response = await app.request(`/resource?cursor=${cursor}`);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Request data does not match the expected format.",
+      },
+    });
+  });
+
+  it("Hono 的 Zod 驗證失敗仍回傳固定錯誤，且不洩漏設定內容", async () => {
+    const response = await connectorRoutes.request(
+      "/connectors/sinopac/settings",
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: "synthetic-private-config" }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: {
+        code: "INVALID_REQUEST_BODY",
+        message: "Request body must include a config object.",
+      },
+    });
+  });
+
   it("maps unexpected errors to a generic 500 response", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const response = apiErrorResponse(new Error("secret database detail"));

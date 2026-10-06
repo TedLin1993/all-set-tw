@@ -32,7 +32,7 @@ export const connectorConfigSchemas = {
   rakuten: rakutenConfigSchema,
   kgibank: kgibankConfigSchema,
   megabank: megabankConfigSchema,
-} satisfies Record<ConnectorId, z.ZodTypeAny>;
+} satisfies Record<ConnectorId, z.ZodType>;
 
 export function parseConnectorConfig(
   connectorId: ConnectorId,

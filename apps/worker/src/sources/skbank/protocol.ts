@@ -11,7 +11,8 @@ export const skbankConfigSchema = z.object({
   nationalId: z.string().min(1).max(32).optional(),
   alias: z.string().min(1).max(128).optional(),
   password: z.string().min(1).max(128).optional(),
-  deviceId: z.string().uuid().optional(),
+  // 沿用 Zod 3 的 UUID-like 格式，保留既有裝置識別碼。
+  deviceId: z.guid().optional(),
 });
 
 export type SkbankConfig = z.infer<typeof skbankConfigSchema>;
