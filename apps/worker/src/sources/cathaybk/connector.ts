@@ -6,7 +6,9 @@ import {
 import puppeteer, {
   type Browser,
   type CookieParam,
+  type HTTPRequest,
   type Page,
+  TimeoutError,
 } from "@cloudflare/puppeteer";
 import type {
   BankAccount,
@@ -16,7 +18,13 @@ import type {
 } from "@taiwan-fin-hub/shared";
 import { BANK_SYNC_MONTHS } from "../sync-window";
 import { isNoCreditCardMessage } from "../credit-card-status";
-import { type CathaybkConfig } from "./protocol";
+import {
+  type CathaybkConfig,
+  type CathayDepositTransaction,
+  assertCathayDepositQuery,
+  parseCathayCardStatus,
+  parseCathayDepositTransactions,
+} from "./protocol";
 
 const LOGIN_URL = "https://www.cathaybk.com.tw/MyBank/";
 const DEPOSIT_OVERVIEW_URL =
@@ -27,6 +35,7 @@ const CREDIT_CARD_BILL_URL =
   "https://www.cathaybk.com.tw/OnlineBanking/CQuery/C0102_BillInq";
 
 const API_DEPOSIT_TX = "B_ACCT_Q_TransferDetail";
+const API_CARD_STATUS = "C_COM_Q_CardStatus";
 const OTP_SESSION_TTL_MS = 2 * 60 * 1000;
 const TRUSTED_DEVICE_NAME = "ALL SET 同步";
 const OTP_SUBMIT_LABEL_PATTERN = /驗證|確認|確定|送出|登入/;
@@ -153,6 +162,7 @@ async function scrapeWithBrowser(
   let page: Page | undefined;
   let preserveSession = false;
   let loggedOut = false;
+  let phase = "browser";
 
   try {
     console.log(
@@ -169,6 +179,7 @@ async function scrapeWithBrowser(
     page = pages[0] ?? (await b.newPage());
 
     await page.setViewport({ width: 1280, height: 800 });
+    phase = "login";
 
     if (config.browserSessionId) {
       if (!config.otpChannel) {
@@ -223,11 +234,14 @@ async function scrapeWithBrowser(
     }
 
     console.log("[cathaybk] collecting deposit accounts");
+    phase = "deposits";
     const deposits = await scrapeDeposits(page, syncWindowDays);
 
     console.log("[cathaybk] collecting credit cards");
+    phase = "credit_cards";
     const cards = await scrapeCreditCards(page);
 
+    phase = "logout";
     const trustedState = await captureCathayTrustedState(page);
     await logoutCathay(page);
     loggedOut = true;
@@ -251,6 +265,8 @@ async function scrapeWithBrowser(
       JSON.stringify({
         event: "cathaybk_scrape_failed",
         errorType: error instanceof Error ? error.name : "UNKNOWN_ERROR",
+        phase,
+        currentUrl: page ? safeCathayDiagnosticUrl(page.url()) : undefined,
       }),
     );
     throw error;
@@ -1118,31 +1134,6 @@ interface DomAccount {
   currency: string;
 }
 
-// Actual API response structure from B_ACCT_Q_TransferDetail
-interface TransferDetail {
-  txnDateTime?: string | null;
-  accountDate?: string | null;
-  description?: string | null;
-  expendAmt?: number | null;
-  incomeAmt?: number | null;
-  balance?: number | null;
-  specialMemo?: string | null;
-  memo?: string | null;
-  [key: string]: unknown;
-}
-
-interface TransferDetailResponse {
-  content?: {
-    datas?: Array<{
-      accountNumber?: string;
-      details?: TransferDetail[];
-      [key: string]: unknown;
-    }>;
-    [key: string]: unknown;
-  } | null;
-  [key: string]: unknown;
-}
-
 async function scrapeDomAccounts(page: Page): Promise<DomAccount[]> {
   return page.evaluate(() => {
     const results: Array<{
@@ -1193,52 +1184,186 @@ function periodLabel(days: number): string {
   return "近 1 年";
 }
 
-async function selectTransactionPeriod(
+type CathayCombobox = "account" | "period";
+
+async function chooseCathayComboboxOption(
   page: Page,
-  days: number,
-): Promise<void> {
-  const label = periodLabel(days);
-  if (label === "近 30 天") return; // default, no action needed
+  kind: CathayCombobox,
+  expected: string,
+) {
+  const marked = await page.evaluate((target: CathayCombobox) => {
+    for (const input of document.querySelectorAll<HTMLInputElement>(
+      "input[role='combobox']",
+    )) {
+      let control: HTMLElement | null = input.parentElement;
+      for (let depth = 0; depth < 5 && control; depth += 1) {
+        const label = control.innerText.replace(/\s+/g, "");
+        if (!label) {
+          control = control.parentElement;
+          continue;
+        }
+        if (
+          target === "period"
+            ? /^近\d+(天|個?月|年)$/.test(label)
+            : /\d{10,}/.test(label)
+        ) {
+          input.dataset.cathayCombobox = target;
+          control.dataset.cathayComboboxControl = target;
+          return true;
+        }
+        break;
+      }
+    }
+    return false;
+  }, kind);
+  if (!marked) {
+    throw new Error("國泰世華交易頁面找不到帳號或期間選單，未更新資料。");
+  }
 
-  // Open the period dropdown (find the one showing days/天)
-  const opened = await page.evaluate(() => {
-    const dropdowns = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        "[role='combobox'], button[aria-haspopup]",
-      ),
-    ).filter(
-      (el) =>
-        (el as HTMLElement).innerText?.includes("天") ||
-        (el as HTMLElement).innerText?.includes("月"),
-    );
-    if (!dropdowns[0]) return false;
-    dropdowns[0].click();
-    return true;
+  await page.focus(`[data-cathay-combobox="${kind}"]`);
+  await page.keyboard.press("ArrowDown");
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll("[role='option'], [id*='-option-']").length > 0,
+    { timeout: 5000 },
+  );
+  const selected = await page.evaluate(
+    (target: CathayCombobox, match: string) => {
+      const option = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          "[role='option'], [id*='-option-']",
+        ),
+      ).find((element) => {
+        const text = (element.textContent ?? "").replace(/\s+/g, "");
+        return target === "account"
+          ? text.match(/\d{10,}/)?.[0] === match
+          : text === match.replace(/\s+/g, "");
+      });
+      option?.click();
+      return Boolean(option);
+    },
+    kind,
+    expected,
+  );
+  if (!selected) {
+    throw new Error("國泰世華交易頁面找不到指定帳號或期間，未更新資料。");
+  }
+  await page.waitForFunction(
+    (target: CathayCombobox, match: string) => {
+      const text = document
+        .querySelector<HTMLElement>(
+          `[data-cathay-combobox-control="${target}"]`,
+        )
+        ?.innerText.replace(/\s+/g, "");
+      return target === "account"
+        ? text?.match(/\d{10,}/)?.[0] === match
+        : text === match.replace(/\s+/g, "");
+    },
+    { timeout: 5000 },
+    kind,
+    expected,
+  );
+}
+
+function assertCathayNotLoggedOut(page: Pick<Page, "url">) {
+  if (page.url().toLowerCase().includes("/logout/")) {
+    throw new Error("國泰世華資料查詢時被登出，未更新資料。");
+  }
+}
+
+async function settleCathayDepositSelectors(
+  page: Page,
+  action: () => Promise<void>,
+) {
+  const pending = new Set<HTTPRequest>();
+  let lastActivity = Date.now();
+  let failed = false;
+  const onRequest = (request: HTTPRequest) => {
+    if (request.method() !== "POST" || !request.url().includes(API_DEPOSIT_TX))
+      return;
+    pending.add(request);
+    lastActivity = Date.now();
+  };
+  const onFinished = (request: HTTPRequest) => {
+    if (pending.delete(request)) lastActivity = Date.now();
+  };
+  const onFailed = (request: HTTPRequest) => {
+    if (pending.has(request)) failed = true;
+    onFinished(request);
+  };
+  page.on("request", onRequest);
+  page.on("requestfinished", onFinished);
+  page.on("requestfailed", onFailed);
+  try {
+    await action();
+    const deadline = Date.now() + 10000;
+    while (pending.size > 0 || Date.now() - lastActivity < 500) {
+      if (Date.now() >= deadline) {
+        throw new Error("國泰世華存款選單查詢尚未完成，未更新資料。");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assertCathayNotLoggedOut(page);
+    if (failed) throw new Error("國泰世華存款選單查詢失敗，未更新資料。");
+  } finally {
+    page.off("request", onRequest);
+    page.off("requestfinished", onFinished);
+    page.off("requestfailed", onFailed);
+  }
+}
+
+async function readCathayQueryResponse(
+  page: Page,
+  api: string,
+  action: () => Promise<void>,
+  timeout = 30000,
+) {
+  let query: HTTPRequest | undefined;
+  const onRequest = (request: HTTPRequest) => {
+    if (!query && request.method() === "POST" && request.url().includes(api)) {
+      query = request;
+    }
+  };
+  const controller = new AbortController();
+  page.on("request", onRequest);
+  try {
+    // Register both listeners before the action. A response from an older
+    // request cannot satisfy this wait, even when its datas array is empty.
+    const [response] = await Promise.all([
+      page.waitForResponse((response) => response.request() === query, {
+        timeout,
+        signal: controller.signal,
+      }),
+      action(),
+    ]);
+    assertCathayNotLoggedOut(page);
+    return response;
+  } finally {
+    controller.abort();
+    page.off("request", onRequest);
+  }
+}
+
+async function readCathayDepositQuery(
+  page: Page,
+  accountNumber: string,
+  periodDays: number,
+  action: () => Promise<void>,
+) {
+  const response = await readCathayQueryResponse(page, API_DEPOSIT_TX, action);
+  let requestBody: unknown;
+  try {
+    requestBody = JSON.parse(response.request().postData() ?? "");
+  } catch {
+    throw new Error("國泰世華存款交易查詢不是有效 JSON，未更新資料。");
+  }
+  assertCathayDepositQuery(requestBody, accountNumber, periodDays);
+  if (response.status() !== 200) {
+    throw new Error("國泰世華存款交易查詢失敗，未更新資料。");
+  }
+  return await response.json().catch(() => {
+    throw new Error("國泰世華存款交易回應不是有效 JSON，未更新資料。");
   });
-
-  if (!opened) {
-    console.log("[cathaybk] could not open period dropdown, using default");
-    return;
-  }
-
-  await new Promise((r) => setTimeout(r, 500));
-
-  const clicked = await page.evaluate((targetLabel: string) => {
-    const opts = Array.from(
-      document.querySelectorAll<HTMLElement>("[role='option'], li"),
-    ).filter((el) => el.textContent?.trim() === targetLabel);
-    if (!opts[0]) return false;
-    opts[0].click();
-    return true;
-  }, label);
-
-  if (!clicked) {
-    console.log(`[cathaybk] period option "${label}" not found, using default`);
-    return;
-  }
-
-  await new Promise((r) => setTimeout(r, 300));
-  console.log(`[cathaybk] set period to "${label}"`);
 }
 
 async function scrapeDeposits(
@@ -1255,9 +1380,7 @@ async function scrapeDeposits(
     timeout: 60000,
   });
   console.log("[cathaybk] deposit page opened");
-  if (page.url().includes("/logout/")) {
-    throw new Error("Cathay Bank forced logout on deposit page.");
-  }
+  assertCathayNotLoggedOut(page);
 
   // Wait for account number buttons to render
   await page
@@ -1294,68 +1417,66 @@ async function scrapeDeposits(
       asOfAt,
       raw: acct,
     });
+  }
 
-    // Click account button → navigates to B0103 (transaction detail page)
-    const initialTxPromise = page
-      .waitForResponse(
-        (r) => r.url().includes(API_DEPOSIT_TX) && r.status() === 200,
-        { timeout: 30000 },
-      )
-      .catch(() => null);
-
-    const clicked = await page.evaluate((acctNo: string) => {
-      const btn = Array.from(
-        document.querySelectorAll<HTMLButtonElement>("button"),
-      ).find((b) => b.textContent?.trim() === acctNo);
-      if (btn) {
-        btn.click();
-        return true;
-      }
-      return false;
-    }, acct.acctNo);
-
-    if (!clicked) {
-      console.log(
-        `[cathaybk] no button found for account ${maskAccountNumber(acct.acctNo)}`,
+  for (const [index, acct] of accounts.entries()) {
+    const sourceId = `bank:cathaybk:${acct.acctNo}`;
+    if (index === 0) {
+      // Consume the page's initial 30-day query before changing selectors.
+      const initial = await readCathayDepositQuery(
+        page,
+        acct.acctNo,
+        30,
+        async () => {
+          const clicked = await page.evaluate((accountNumber: string) => {
+            const button = Array.from(document.querySelectorAll("button")).find(
+              (button) => button.textContent?.trim() === accountNumber,
+            );
+            button?.click();
+            return Boolean(button);
+          }, acct.acctNo);
+          if (!clicked) {
+            throw new Error("國泰世華存款帳戶無法開啟，未更新資料。");
+          }
+          await page.waitForSelector("input[role='combobox']", {
+            timeout: 15000,
+          });
+        },
       );
-      continue;
+      parseCathayDepositTransactions(initial, acct.acctNo);
     }
-
-    await page
-      .waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 })
-      .catch(() => null);
-
-    let txRsp = null;
-
-    if (lookbackDays > 30) {
-      // Initial page load triggered API with default 30-day period; re-query with desired period
-      const reTxPromise = page
-        .waitForResponse(
-          (r) => r.url().includes(API_DEPOSIT_TX) && r.status() === 200,
-          { timeout: 30000 },
-        )
-        .catch(() => null);
-
-      await selectTransactionPeriod(page, lookbackDays);
-
-      await page.evaluate(() => {
-        const btn = Array.from(
-          document.querySelectorAll<HTMLButtonElement>("button"),
-        ).find((b) => b.textContent?.trim() === "查詢");
-        btn?.click();
-      });
-
-      txRsp = await reTxPromise;
-    } else {
-      txRsp = await initialTxPromise;
-    }
-
-    const txData: TransferDetailResponse = txRsp
-      ? ((await txRsp.json().catch(() => ({}))) as TransferDetailResponse)
-      : {};
-
-    const datas = txData.content?.datas ?? [];
-    const details: TransferDetail[] = datas.flatMap((d) => d.details ?? []);
+    // Track only transfer queries: analytics may keep the page's network busy.
+    await settleCathayDepositSelectors(page, async () => {
+      assertCathayNotLoggedOut(page);
+      if (index > 0) {
+        // Stay on the detail page: reopening the overview can end the session.
+        await chooseCathayComboboxOption(page, "account", acct.acctNo);
+      }
+      await chooseCathayComboboxOption(
+        page,
+        "period",
+        periodLabel(lookbackDays),
+      );
+    });
+    assertCathayNotLoggedOut(page);
+    const txData = await readCathayDepositQuery(
+      page,
+      acct.acctNo,
+      lookbackDays,
+      async () => {
+        const clicked = await page.evaluate(() => {
+          const button = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "查詢",
+          );
+          button?.click();
+          return Boolean(button);
+        });
+        if (!clicked) {
+          throw new Error("國泰世華存款交易查詢按鈕不存在，未更新資料。");
+        }
+      },
+    );
+    const details = parseCathayDepositTransactions(txData, acct.acctNo);
     console.log(
       `[cathaybk] account ${maskAccountNumber(acct.acctNo)}: ${details.length} tx (period=${periodLabel(lookbackDays)})`,
     );
@@ -1366,21 +1487,6 @@ async function scrapeDeposits(
       sourceId,
       acct.currency,
     );
-
-    // Return to deposit overview for next account
-    await page.goto(DEPOSIT_OVERVIEW_URL, {
-      waitUntil: "networkidle2",
-      timeout: 60000,
-    });
-    await page
-      .waitForFunction(
-        () =>
-          Array.from(document.querySelectorAll("button")).some((b) =>
-            /^\d{10,}$/.test(b.textContent?.trim() ?? ""),
-          ),
-        { timeout: 10000 },
-      )
-      .catch(() => null);
   }
 
   return {
@@ -1393,7 +1499,7 @@ async function scrapeDeposits(
 
 export function appendCathayDepositTransactions(
   target: Scraped["bankTransactions"],
-  details: TransferDetail[],
+  details: CathayDepositTransaction[],
   accountId: string,
   currency: string,
 ) {
@@ -1495,12 +1601,47 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
   const asOfAt = new Date().toISOString();
 
   // ── C0101: card overview (DOM) ─────────────────────────────────────────
-  await page.goto(CREDIT_CARD_OVERVIEW_URL, {
-    waitUntil: "networkidle2",
-    timeout: 60000,
-  });
+  const statusResponse = await readCathayQueryResponse(
+    page,
+    API_CARD_STATUS,
+    async () => {
+      await page.goto(CREDIT_CARD_OVERVIEW_URL, {
+        waitUntil: "networkidle2",
+        timeout: 60000,
+      });
+    },
+    60000,
+  );
   console.log("[cathaybk] credit card overview opened");
-  await new Promise((r) => setTimeout(r, 2000));
+  if (statusResponse.status() !== 200) {
+    throw new Error("國泰世華信用卡狀態查詢失敗，未更新資料。");
+  }
+  const cardStatus = parseCathayCardStatus(
+    await statusResponse.json().catch(() => {
+      throw new Error("國泰世華信用卡狀態回應不是有效 JSON，未更新資料。");
+    }),
+  );
+  console.log(JSON.stringify({ event: "cathaybk_card_status", cardStatus }));
+  // The bank's C0101 frontend treats Invalid as no credit card.
+  if (cardStatus === "Invalid") {
+    return {
+      bankAccounts,
+      bankBalanceSnapshots,
+      bankTransactions,
+      creditCardBills,
+    };
+  }
+  let waitTimedOut = false;
+  await page
+    .waitForFunction(
+      () => /卡片末四碼[：:]\s*\d{4}/.test(document.body?.innerText ?? ""),
+      { timeout: 15000 },
+    )
+    .catch((error: unknown) => {
+      if (!(error instanceof TimeoutError)) throw error;
+      waitTimedOut = true;
+    });
+  assertCathayNotLoggedOut(page);
 
   const overviewText = await page.evaluate(() => document.body.innerText);
   const cardOverview = parseCathayCardOverview(overviewText);
@@ -1511,6 +1652,8 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
       cardDetected: cardOverview.cardDetected,
       paymentDueDateAvailable: Boolean(cardOverview.paymentDueDate),
       noPaymentNeeded: cardOverview.noPaymentNeeded,
+      waitTimedOut,
+      currentUrl: safeCathayDiagnosticUrl(page.url()),
     }),
   );
 
