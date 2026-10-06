@@ -111,18 +111,16 @@ export function parseCathayForeignDeposits(
   return { bankAccounts, bankBalanceSnapshots };
 }
 
-const depositTransactionSchema = z
-  .object({
-    txnDateTime: z.string().nullish(),
-    accountDate: z.string().nullish(),
-    description: z.string().nullish(),
-    expendAmt: z.number().nullish(),
-    incomeAmt: z.number().nullish(),
-    balance: z.number().nullish(),
-    specialMemo: z.string().nullish(),
-    memo: z.string().nullish(),
-  })
-  .passthrough();
+const depositTransactionSchema = z.looseObject({
+  txnDateTime: z.string().nullish(),
+  accountDate: z.string().nullish(),
+  description: z.string().nullish(),
+  expendAmt: z.number().nullish(),
+  incomeAmt: z.number().nullish(),
+  balance: z.number().nullish(),
+  specialMemo: z.string().nullish(),
+  memo: z.string().nullish(),
+});
 
 const depositResponseSchema = z.object({
   returnCode: z.literal("0000"),

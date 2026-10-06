@@ -388,7 +388,7 @@ Request
 
 ## Request 驗證
 
-外部輸入應優先使用 Zod 驗證：
+外部輸入應優先使用 Zod 4 驗證：
 
 ```ts
 api.post(

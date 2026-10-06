@@ -24,6 +24,26 @@ describe("連線設定的憑證安全（隔離 D1）", () => {
     await harness?.mf.dispose();
   });
 
+  // Zod 3 接受所有 8-4-4-4-12 十六進位裝置識別碼；升級不得拒絕既有設定。
+  it("更新新光設定時保留舊版可接受的裝置識別碼與加密憑證", async () => {
+    const env = { DB: harness.binding, CONFIG_ENCRYPTION_KEY: key } as Env;
+    const config = {
+      nationalId: credentials.userId,
+      alias: credentials.account,
+      password: credentials.password,
+      deviceId: "00000000-0000-0000-0000-000000000001",
+    };
+    await updateConnectorSettings(env, "skbank", config);
+    await updateConnectorSettings(env, "skbank", {});
+
+    const stored = await getConnectorSettings(env.DB, "skbank");
+    expect(await decryptJson(stored!.encrypted_config, key)).toEqual(config);
+    expect(stored?.encrypted_config).not.toContain(config.password);
+    expect(
+      JSON.stringify(await getConnectorSettingsView(env, "skbank")),
+    ).not.toContain(config.deviceId);
+  });
+
   it("加密儲存且公開 view 不洩漏秘密，變更帳密後移除舊 session 與 cursor", async () => {
     const env = { DB: harness.binding, CONFIG_ENCRYPTION_KEY: key } as Env;
     await updateConnectorSettings(env, "sinopac", credentials);

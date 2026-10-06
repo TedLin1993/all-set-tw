@@ -31,7 +31,7 @@ const syncScheduleUpdateSchema = z.object({
 const syncJobUpdateSchema = z
   .object({
     enabled: z.boolean().optional(),
-    nextRunAt: z.string().datetime().optional(),
+    nextRunAt: z.iso.datetime().optional(),
     intervalMinutes: syncIntervalSchema.optional(),
     preferredTime: preferredTimeSchema.optional(),
     preferredWeekday: preferredWeekdaySchema.optional(),

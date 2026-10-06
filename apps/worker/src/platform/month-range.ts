@@ -13,14 +13,14 @@ export const monthRangeQuerySchema = z
     const hasTo = value.to !== undefined;
     if (value.month !== undefined && (hasFrom || hasTo)) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["month"],
         message: "month cannot be combined with from/to.",
       });
     }
     if (hasFrom !== hasTo) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: [hasFrom ? "to" : "from"],
         message: "from and to must be provided together.",
       });
@@ -30,13 +30,13 @@ export const monthRangeQuerySchema = z
       const toIndex = monthIndex(value.to);
       if (toIndex < fromIndex) {
         context.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["to"],
           message: "to must not be earlier than from.",
         });
       } else if (toIndex - fromIndex > 11) {
         context.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["to"],
           message: "The requested range cannot exceed 12 months.",
         });
