@@ -389,6 +389,7 @@ export async function submitCathayOtp(
   page: Pick<
     Page,
     | "click"
+    | "cookies"
     | "evaluate"
     | "type"
     | "url"
@@ -490,7 +491,9 @@ export async function submitCathayOtp(
     page
       .waitForFunction(
         () =>
-          (window.location.href.includes("/OnlineBanking/") &&
+          ((window.location.href.includes("/OnlineBanking/") ||
+            window.location.pathname.replace(/\/+$/, "").toLowerCase() ===
+              "/mybank/quicklinks/home") &&
             document.querySelector('[data-cathay-otp-input="true"]') ===
               null) ||
           /登入安全再升級|立即啟用|信任裝置|設定裝置名稱|確定加入|啟用成功/.test(
@@ -505,8 +508,11 @@ export async function submitCathayOtp(
   await verificationResult;
   const verified = await page.evaluate(() => {
     const normalizedText = (document.body?.innerText ?? "").replace(/\s+/g, "");
+    // 國泰登入後可能停在 /MyBank/Quicklinks/Home（例如密碼逾半年未更新的提醒）。
     return (
-      (window.location.href.includes("/OnlineBanking/") &&
+      ((window.location.href.includes("/OnlineBanking/") ||
+        window.location.pathname.replace(/\/+$/, "").toLowerCase() ===
+          "/mybank/quicklinks/home") &&
         document.querySelector('[data-cathay-otp-input="true"]') === null) ||
       /登入安全再升級|立即啟用|信任裝置|設定裝置名稱|確定加入|啟用成功/.test(
         normalizedText,
@@ -524,9 +530,56 @@ export async function submitCathayOtp(
   }
 }
 
-export async function completeCathayTrustedDeviceSetup(
-  page: Pick<Page, "click" | "evaluate" | "type" | "waitForFunction">,
+/** 密碼逾半年未更新時，國泰會在 OTP 後先顯示提醒頁，擋住後續的信任裝置設定。 */
+export async function dismissCathayPasswordNoticeIfPresent(
+  page: Pick<Page, "click" | "evaluate" | "waitForFunction">,
 ) {
+  const found = await page.evaluate(() => {
+    const normalizedText = (document.body?.innerText ?? "").replace(/\s+/g, "");
+    if (!/密碼已超過.*未更新/.test(normalizedText)) return false;
+    const skip = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        'a, button, input[type="button"], [role="button"]',
+      ),
+    ).find((control) => {
+      const rect = control.getBoundingClientRect();
+      const text = `${control.textContent ?? ""} ${control.getAttribute("value") ?? ""}`;
+      return rect.width > 0 && rect.height > 0 && /暫不變更/.test(text);
+    });
+    if (skip) skip.dataset.cathayPasswordNoticeSkip = "true";
+    return Boolean(skip);
+  });
+  if (!found) return false;
+
+  console.log("[cathaybk] dismissing password change notice");
+  await page.click('[data-cathay-password-notice-skip="true"]');
+  await page
+    .waitForFunction(
+      () =>
+        !/密碼已超過.*未更新/.test(
+          (document.body?.innerText ?? "").replace(/\s+/g, ""),
+        ),
+      { timeout: 15_000 },
+    )
+    .catch(() => null);
+  return true;
+}
+
+/** CUB.eBank.DeviceId 可能是 HttpOnly，document.cookie 看不到，需以 CDP 讀取。 */
+async function hasCathayDeviceIdCookie(page: Pick<Page, "cookies">) {
+  const cookies = await page
+    .cookies(LOGIN_URL, DEPOSIT_OVERVIEW_URL, CREDIT_CARD_OVERVIEW_URL)
+    .catch(() => []);
+  return cookies.some(isCathayCookie);
+}
+
+export async function completeCathayTrustedDeviceSetup(
+  page: Pick<
+    Page,
+    "click" | "cookies" | "evaluate" | "type" | "waitForFunction"
+  >,
+) {
+  await dismissCathayPasswordNoticeIfPresent(page);
   await page
     .waitForFunction(
       () =>
@@ -648,7 +701,18 @@ export async function completeCathayTrustedDeviceSetup(
     step = await findStep();
   }
 
-  if (!step.hasNameInput && !step.hasConfirm) return step.success;
+  if (!step.hasNameInput && !step.hasConfirm) {
+    if (step.success || (await hasCathayDeviceIdCookie(page))) return true;
+    console.warn(
+      JSON.stringify({
+        event: "cathaybk_trusted_device_not_detected",
+        currentPath: await page
+          .evaluate(() => window.location.pathname)
+          .catch(() => "unknown"),
+      }),
+    );
+    return false;
+  }
   if (!step.hasNameInput || !step.hasConfirm) {
     console.warn(
       JSON.stringify({
@@ -676,13 +740,14 @@ export async function completeCathayTrustedDeviceSetup(
       { timeout: 15_000 },
     )
     .catch(() => null);
-  return page.evaluate(() => {
+  const confirmed = await page.evaluate(() => {
     const normalizedText = (document.body?.innerText ?? "").replace(/\s+/g, "");
     return (
       document.cookie.includes("CUB.eBank.DeviceId=") ||
       /啟用成功|已加入信任裝置/.test(normalizedText)
     );
   });
+  return confirmed || hasCathayDeviceIdCookie(page);
 }
 
 export type CathayLoginPage = Pick<
