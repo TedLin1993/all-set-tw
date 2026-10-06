@@ -132,7 +132,9 @@ describe("國泰存款同步核心保障", () => {
   // currencyCode 顯示原幣餘額，equalTwdBalance 僅顯示臺幣參考值；
   // isGetDemandAccountSuccess 為 false 時顯示錯誤，為 true 且清單空時才是無帳戶。
   // 以下回應皆為合成資料，尚未驗證有外幣帳戶的真實 API 回應。
-  it("同帳號的外幣餘額依幣別分開，保留小數且不使用臺幣參考值", () => {
+  // raw 的預期依據：docs/004-connector-development.md 禁止保存完整帳號與
+  // token／cookie，僅允許遮罩或白名單資料；額外敏感欄位亦為合成資料。
+  it("同帳號依幣別保留原幣小數餘額，raw 僅保存末四碼與白名單", () => {
     const result = parseCathayForeignDeposits({
       returnCode: "0000",
       content: {
@@ -141,8 +143,18 @@ describe("國泰存款同步核心保障", () => {
           {
             account: accountNumber,
             details: [
-              { currencyCode: "USD", balance: "12.34", equalTwdBalance: 400 },
-              { currencyCode: "EUR", balance: 56.78, equalTwdBalance: 2000 },
+              {
+                currencyCode: "USD",
+                balance: "12.34",
+                equalTwdBalance: 400,
+                token: "synthetic-token",
+              },
+              {
+                currencyCode: "EUR",
+                balance: 56.78,
+                equalTwdBalance: 2000,
+                cookie: "synthetic-cookie",
+              },
             ],
           },
         ],
@@ -156,6 +168,14 @@ describe("國泰存款同步核心保障", () => {
       { accountId: `${accountId}:USD`, balance: 12.34, currency: "USD" },
       { accountId: `${accountId}:EUR`, balance: 56.78, currency: "EUR" },
     ]);
+    const expectedRaw = [
+      { accountSuffix: "9012", currencyCode: "USD", balance: 12.34 },
+      { accountSuffix: "9012", currencyCode: "EUR", balance: 56.78 },
+    ];
+    expect(result.bankAccounts.map(({ raw }) => raw)).toEqual(expectedRaw);
+    expect(result.bankBalanceSnapshots.map(({ raw }) => raw)).toEqual(
+      expectedRaw,
+    );
   });
 
   it("外幣查詢成功且沒有帳戶時回傳空資料，不建立假的零餘額", () => {

@@ -44,19 +44,17 @@ const foreignDepositResponseSchema = z.object({
           account: z.string().regex(/^\d+$/),
           details: z
             .array(
-              z
-                .object({
-                  currencyCode: z.string().regex(/^[A-Z]{3}$/),
-                  balance: z.union([
-                    z.number().finite(),
-                    z
-                      .string()
-                      .regex(/^[+-]?\d+(?:\.\d+)?$/)
-                      .transform(Number)
-                      .pipe(z.number().finite()),
-                  ]),
-                })
-                .passthrough(),
+              z.object({
+                currencyCode: z.string().regex(/^[A-Z]{3}$/),
+                balance: z.union([
+                  z.number().finite(),
+                  z
+                    .string()
+                    .regex(/^[+-]?\d+(?:\.\d+)?$/)
+                    .transform(Number)
+                    .pipe(z.number().finite()),
+                ]),
+              }),
             )
             .nullish(),
         }),
@@ -87,7 +85,11 @@ export function parseCathayForeignDeposits(
       // R0101 displays balance in currencyCode; equalTwdBalance is only a
       // reference conversion. One account can have several currency rows.
       const sourceId = `bank:cathaybk:${account.account}:${detail.currencyCode}`;
-      const raw = { account: account.account, ...detail };
+      const raw = {
+        accountSuffix: account.account.slice(-4),
+        currencyCode: detail.currencyCode,
+        balance: detail.balance,
+      };
       bankAccounts.push({
         sourceId,
         institutionName: "國泰世華銀行",
