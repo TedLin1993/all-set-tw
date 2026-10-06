@@ -464,6 +464,7 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 - 存款清單取 `/fco/fco10001/home`；臺幣交易按帳戶查 `/fao/fao01001/query`，最多回溯三個月並處理 `tsqName` 分頁。外幣帳戶與餘額會同步，不查詢外幣交易。
 - 信用卡總覽與餘額取 `/fco/fco10007/home`，近三期帳單取 `/fao/fao01009/home`，消費取 `/fao/fao01010/home` 與 `query`。總覽 `creditCardBillInfoList` 為空時視為沒有信用卡，不查帳單與卡片清單、只同步存款；總覽有卡但帳單或卡片清單缺少預期欄位時仍整次失敗。
 - 總覽 `creditCardBillInfoList` 依 `ACCT_TYPE` 與 `CURR_CODE` 區分；`ACCT_MON=999912` 是未出帳，其餘僅取各組最新一期計算目前應繳，不累加歷史帳單。消費的 `acctMon=999912` 表示未入帳。
+- 存款交易 sourceId 為 `megabank:deposit:tx:<hash(帳戶|日期|金額|摘要)>:<occurrence>`，不含 `serialNo`／`seq`：這兩欄是當天的交易順序，同日稍後有新交易入帳就會變動，納入會讓同一筆被重複寫入。舊格式 sourceId 在寫入前由 `syncMegabank` 對帳（`sources/megabank/transaction-reconcile.ts`）：同帳戶、同日、同金額、同摘要的既有列（最舊 `created_at` 優先）沿用其舊 sourceId，使寫入路徑更新既有列而非新增，既有列的 id、使用者偏好與分類覆寫不受影響；不刪除、不改寫既有列，log 只記 `megabank_tx_source_reconciled` 的 `remapped` 筆數。
 - 帳戶與卡號只用於請求和雜湊識別；持久化的 `raw` 只保留末四碼。任何關鍵回應無法解析時整次同步失敗，避免部分更新。
 
 ## 將來銀行

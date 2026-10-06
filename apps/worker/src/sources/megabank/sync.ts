@@ -19,6 +19,7 @@ import {
 import { decryptJson, encryptJson } from "../../platform/crypto";
 import { configEncryptionKey } from "../../platform/config";
 import { parseMegabankConfig } from "./protocol";
+import { reconcileMegabankDeposits } from "./transaction-reconcile";
 import {
   parsePublicConnectorConfig,
   splitConnectorCursorState,
@@ -205,7 +206,11 @@ export async function syncMegabank(
 
   const bankAccounts = result.bankAccounts ?? [];
   const bankBalanceSnapshots = result.bankBalanceSnapshots ?? [];
-  const bankTransactions = result.bankTransactions ?? [];
+  // 舊 sourceId 含會隨當天交易變動的順序欄位；寫入前先對回既有列，避免重複寫入。
+  const bankTransactions = await reconcileMegabankDeposits(
+    env.DB,
+    result.bankTransactions ?? [],
+  );
   const creditCardBills = result.creditCardBills ?? [];
   const now = new Date().toISOString();
   const records: SyncWriteRecord[] = [

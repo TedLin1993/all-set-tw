@@ -131,14 +131,10 @@ export function parseMegabankData(
       }
       const amount = (direction === "D" ? -1 : 1) * Math.abs(amountValue);
       const description = stringAt(value, "paymentItem") || "兆豐存款交易";
-      const key = [
-        accountId,
-        date,
-        stringAt(value, "serialNo"),
-        stringAt(value, "seq"),
-        amount,
-        description,
-      ].join("|");
+      // 不可納入 serialNo／seq：實際上它們是當天的交易順序而非穩定編號，同一天稍後
+      // 又有新交易入帳時，先前交易的順序欄位會跟著變動，導致同一筆被當成新交易重複寫入。
+      // 同日同額同摘要的多筆交易以 occurrence 區分。
+      const key = [accountId, date, amount, description].join("|");
       const occurrence = depositOccurrences.get(key) ?? 0;
       depositOccurrences.set(key, occurrence + 1);
       bankTransactions.push({
