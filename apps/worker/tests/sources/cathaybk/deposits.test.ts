@@ -3,6 +3,7 @@ import { appendCathayDepositTransactions } from "../../../src/sources/cathaybk/c
 import {
   assertCathayDepositQuery,
   parseCathayDepositTransactions,
+  parseCathayForeignDeposits,
 } from "../../../src/sources/cathaybk/protocol";
 
 const accountNumber = "123456789012";
@@ -125,5 +126,53 @@ describe("國泰存款同步核心保障", () => {
         90,
       ),
     ).toThrow("帳號或期間不符");
+  });
+
+  // 獨立預期來源：官方 R0101_FDepInq 使用 details[].balance 與
+  // currencyCode 顯示原幣餘額，equalTwdBalance 僅顯示臺幣參考值；
+  // isGetDemandAccountSuccess 為 false 時顯示錯誤，為 true 且清單空時才是無帳戶。
+  // 以下回應皆為合成資料，尚未驗證有外幣帳戶的真實 API 回應。
+  it("同帳號的外幣餘額依幣別分開，保留小數且不使用臺幣參考值", () => {
+    const result = parseCathayForeignDeposits({
+      returnCode: "0000",
+      content: {
+        isGetDemandAccountSuccess: true,
+        demandAccounts: [
+          {
+            account: accountNumber,
+            details: [
+              { currencyCode: "USD", balance: "12.34", equalTwdBalance: 400 },
+              { currencyCode: "EUR", balance: 56.78, equalTwdBalance: 2000 },
+            ],
+          },
+        ],
+      },
+    });
+    expect(result.bankAccounts).toMatchObject([
+      { sourceId: `${accountId}:USD`, currency: "USD" },
+      { sourceId: `${accountId}:EUR`, currency: "EUR" },
+    ]);
+    expect(result.bankBalanceSnapshots).toMatchObject([
+      { accountId: `${accountId}:USD`, balance: 12.34, currency: "USD" },
+      { accountId: `${accountId}:EUR`, balance: 56.78, currency: "EUR" },
+    ]);
+  });
+
+  it("外幣查詢成功且沒有帳戶時回傳空資料，不建立假的零餘額", () => {
+    expect(
+      parseCathayForeignDeposits({
+        returnCode: "0000",
+        content: { isGetDemandAccountSuccess: true, demandAccounts: [] },
+      }),
+    ).toEqual({ bankAccounts: [], bankBalanceSnapshots: [] });
+  });
+
+  it("外幣查詢失敗不能當成沒有外幣帳戶", () => {
+    expect(() =>
+      parseCathayForeignDeposits({
+        returnCode: "0000",
+        content: { isGetDemandAccountSuccess: false, demandAccounts: [] },
+      }),
+    ).toThrow("國泰世華外幣活存查詢失敗，未更新資料。");
   });
 });

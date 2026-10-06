@@ -24,17 +24,21 @@ import {
   assertCathayDepositQuery,
   parseCathayCardStatus,
   parseCathayDepositTransactions,
+  parseCathayForeignDeposits,
 } from "./protocol";
 
 const LOGIN_URL = "https://www.cathaybk.com.tw/MyBank/";
 const DEPOSIT_OVERVIEW_URL =
   "https://www.cathaybk.com.tw/OnlineBanking/AcctInq/B0101_DepInq";
+const FOREIGN_DEPOSIT_OVERVIEW_URL =
+  "https://www.cathaybk.com.tw/OnlineBanking/FAcctInq/R0101_FDepInq";
 const CREDIT_CARD_OVERVIEW_URL =
   "https://www.cathaybk.com.tw/OnlineBanking/CQuery/C0101_BillOverview";
 const CREDIT_CARD_BILL_URL =
   "https://www.cathaybk.com.tw/OnlineBanking/CQuery/C0102_BillInq";
 
 const API_DEPOSIT_TX = "B_ACCT_Q_TransferDetail";
+const API_FOREIGN_DEPOSIT_OVERVIEW = "R_ACCT_Q_OverView";
 const API_CARD_STATUS = "C_COM_Q_CardStatus";
 const OTP_SESSION_TTL_MS = 2 * 60 * 1000;
 const TRUSTED_DEVICE_NAME = "ALL SET 同步";
@@ -237,6 +241,9 @@ async function scrapeWithBrowser(
     phase = "deposits";
     const deposits = await scrapeDeposits(page, syncWindowDays);
 
+    phase = "foreign_deposits";
+    const foreignDeposits = await scrapeForeignDeposits(page);
+
     console.log("[cathaybk] collecting credit cards");
     phase = "credit_cards";
     const cards = await scrapeCreditCards(page);
@@ -247,9 +254,14 @@ async function scrapeWithBrowser(
     loggedOut = true;
 
     return {
-      bankAccounts: [...deposits.bankAccounts, ...cards.bankAccounts],
+      bankAccounts: [
+        ...deposits.bankAccounts,
+        ...foreignDeposits.bankAccounts,
+        ...cards.bankAccounts,
+      ],
       bankBalanceSnapshots: [
         ...deposits.bankBalanceSnapshots,
+        ...foreignDeposits.bankBalanceSnapshots,
         ...cards.bankBalanceSnapshots,
       ],
       bankTransactions: [
@@ -1495,6 +1507,35 @@ async function scrapeDeposits(
     bankTransactions,
     creditCardBills: [],
   };
+}
+
+async function scrapeForeignDeposits(page: Page) {
+  const response = await readCathayQueryResponse(
+    page,
+    API_FOREIGN_DEPOSIT_OVERVIEW,
+    async () => {
+      await page.goto(FOREIGN_DEPOSIT_OVERVIEW_URL, {
+        waitUntil: "domcontentloaded",
+        timeout: 60000,
+      });
+    },
+    60000,
+  );
+  if (response.status() !== 200) {
+    throw new Error("國泰世華外幣活存查詢失敗，未更新資料。");
+  }
+  const result = parseCathayForeignDeposits(
+    await response.json().catch(() => {
+      throw new Error("國泰世華外幣活存回應不是有效 JSON，未更新資料。");
+    }),
+  );
+  console.log(
+    JSON.stringify({
+      event: "cathaybk_foreign_deposits",
+      accountCount: result.bankAccounts.length,
+    }),
+  );
+  return result;
 }
 
 export function appendCathayDepositTransactions(

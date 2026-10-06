@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { BankAccount, BankBalanceSnapshot } from "@taiwan-fin-hub/shared";
 
 export const cathaybkConfigSchema = z.object({
   userId: z.string().min(1).optional(),
@@ -31,6 +32,81 @@ export function parseCathayCardStatus(value: unknown) {
     throw new Error("國泰世華信用卡狀態回應無法辨識，未更新資料。");
   }
   return parsed.data.content.cardStatus;
+}
+
+const foreignDepositResponseSchema = z.object({
+  returnCode: z.literal("0000"),
+  content: z.object({
+    isGetDemandAccountSuccess: z.boolean(),
+    demandAccounts: z
+      .array(
+        z.object({
+          account: z.string().regex(/^\d+$/),
+          details: z
+            .array(
+              z
+                .object({
+                  currencyCode: z.string().regex(/^[A-Z]{3}$/),
+                  balance: z.union([
+                    z.number().finite(),
+                    z
+                      .string()
+                      .regex(/^[+-]?\d+(?:\.\d+)?$/)
+                      .transform(Number)
+                      .pipe(z.number().finite()),
+                  ]),
+                })
+                .passthrough(),
+            )
+            .nullish(),
+        }),
+      )
+      .nullish(),
+  }),
+});
+
+export function parseCathayForeignDeposits(
+  value: unknown,
+  asOfAt = new Date().toISOString(),
+) {
+  const parsed = foreignDepositResponseSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error("國泰世華外幣活存回應格式無法辨識，未更新資料。");
+  }
+  const { isGetDemandAccountSuccess, demandAccounts } = parsed.data.content;
+  if (!isGetDemandAccountSuccess) {
+    throw new Error("國泰世華外幣活存查詢失敗，未更新資料。");
+  }
+
+  const bankAccounts: Array<Omit<BankAccount, "id" | "connectorId">> = [];
+  const bankBalanceSnapshots: Array<
+    Omit<BankBalanceSnapshot, "id" | "connectorId">
+  > = [];
+  for (const account of demandAccounts ?? []) {
+    for (const detail of account.details ?? []) {
+      // R0101 displays balance in currencyCode; equalTwdBalance is only a
+      // reference conversion. One account can have several currency rows.
+      const sourceId = `bank:cathaybk:${account.account}:${detail.currencyCode}`;
+      const raw = { account: account.account, ...detail };
+      bankAccounts.push({
+        sourceId,
+        institutionName: "國泰世華銀行",
+        accountName: "國泰外幣活存",
+        accountType: "savings",
+        currency: detail.currencyCode,
+        raw,
+      });
+      bankBalanceSnapshots.push({
+        accountId: sourceId,
+        sourceId: `${sourceId}:${asOfAt}`,
+        balance: detail.balance,
+        currency: detail.currencyCode,
+        asOfAt,
+        raw,
+      });
+    }
+  }
+  return { bankAccounts, bankBalanceSnapshots };
 }
 
 const depositTransactionSchema = z
