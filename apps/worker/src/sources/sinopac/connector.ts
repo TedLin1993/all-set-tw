@@ -1503,8 +1503,9 @@ function sinoCardTransactionMatchKey(
   cardLast4?: string,
 ) {
   // 繳款是整份帳單的扣繳，永豐每次查詢可能把它掛在不同張卡下；不含卡號才不會同一筆重複寫入。
+  // 改以摘要雜湊區分，同日同額但摘要不同的繳款（例如自扣與臨櫃）才不會共用序號而互換識別碼。
   const card = isSinoCardPayment(amount, description)
-    ? "payment"
+    ? `payment-${hashString(description)}`
     : cardLast4 || "unknown";
   return [currency, transactionDate, amount, card].join(":");
 }

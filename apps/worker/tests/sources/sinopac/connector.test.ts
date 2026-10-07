@@ -330,13 +330,45 @@ describe("sinopac App JSON parser", () => {
         },
       }).bankTransactions.map((row) => [row.description, row.sourceId]);
 
-    expect(parse("1111")).toEqual([
-      ["測試自扣已入帳", "sinopac:card:tx:v2:TWD:2026-09-24:5000:payment:1"],
-      ["測試退款", "sinopac:card:tx:v2:TWD:2026-09-24:300:1111:1"],
+    const [payment, refund] = parse("1111");
+    expect(payment?.[1]).toMatch(
+      /^sinopac:card:tx:v2:TWD:2026-09-24:5000:payment-[0-9a-f]{8}:1$/,
+    );
+    expect(refund).toEqual([
+      "測試退款",
+      "sinopac:card:tx:v2:TWD:2026-09-24:300:1111:1",
     ]);
-    expect(parse("2222")[0]).toEqual(parse("1111")[0]);
+    expect(parse("2222")[0]).toEqual(payment);
     expect(parse("2222")[1]?.[1]).toBe(
       "sinopac:card:tx:v2:TWD:2026-09-24:300:2222:1",
     );
+  });
+
+  it("同日同額但摘要不同的繳款各自有固定識別碼，不受回傳順序影響", () => {
+    const detail = (card: string, memo: string) => ({
+      CurrencyCode: "000",
+      CardLast4: card,
+      TXDATE: "2026/09/24",
+      DEDATE: "2026/09/24",
+      TXCODE: "",
+      MEMO: memo,
+      AMT: "-5,000",
+    });
+    const parse = (rows: Array<ReturnType<typeof detail>>) =>
+      Object.fromEntries(
+        parseSinopacCardData({
+          summary: summaryPayload,
+          bills: billPayload,
+          latest: { Result: { Items: [] } },
+          outstanding: { Result: { Detail: rows } },
+        }).bankTransactions.map((row) => [row.description, row.sourceId]),
+      );
+    const autoDebit = detail("1111", "測試自扣已入帳");
+    const counter = detail("2222", "測試臨櫃繳款");
+
+    const forward = parse([autoDebit, counter]);
+    expect(forward["測試自扣已入帳"]).not.toBe(forward["測試臨櫃繳款"]);
+    expect(parse([counter, autoDebit])).toEqual(forward);
+    expect(parse([counter])["測試臨櫃繳款"]).toBe(forward["測試臨櫃繳款"]);
   });
 });

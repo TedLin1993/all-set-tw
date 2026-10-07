@@ -32,7 +32,7 @@ import {
 } from "../../features/sync/connector-repository";
 import {
   reconcileSinopacCardPaymentStatements,
-  reconcileSinopacCardSignStatements,
+  reconcileSinopacCardStaleStatements,
   reconcileSinopacLegacyTransactionStatements,
 } from "./repository";
 import {
@@ -261,14 +261,16 @@ export async function syncSinopac(
     records,
     afterPromoteStatements: [
       ...reconcileSinopacLegacyTransactionStatements(env.DB),
-      ...reconcileSinopacCardSignStatements(env.DB),
-      // 只有這次帶回繳款列時才需要把舊版（含卡號）的繳款列併進來。
+      ...(authorizationWrite?.afterPromoteStatements ?? []),
+      // 以下合併會刪除舊列，必須在授權寫入之後：授權寫入沿用同步前讀到的交易 ID，
+      // 合併再把這些配對改指向留下的列，否則會引用已刪除的列而讓整次同步回滾。
+      // 只有這次帶回繳款列時才需要把舊版的繳款列併進來。
       ...(bankTransactions.some((transaction) =>
-        transaction.sourceId.includes(":payment:"),
+        transaction.sourceId.includes(":payment-"),
       )
         ? reconcileSinopacCardPaymentStatements(env.DB)
         : []),
-      ...(authorizationWrite?.afterPromoteStatements ?? []),
+      ...reconcileSinopacCardStaleStatements(env.DB, now),
       ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB)]
         : []),

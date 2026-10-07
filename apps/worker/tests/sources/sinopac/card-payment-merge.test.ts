@@ -63,11 +63,11 @@ describe("永豐信用卡繳款舊列合併（隔離 D1）", () => {
     return rows.results.map((row) => row.id);
   }
 
-  it("同一筆繳款掛在不同卡下的多筆舊列，全部併入新版 payment 列並帶走使用者分類", async () => {
-    await transaction("legacy-a", "1111", "2026-09-25");
+  it("同一筆繳款掛在不同卡下的多筆舊列（含尚無摘要雜湊的 payment 列），全部併入新版列並帶走使用者分類", async () => {
+    await transaction("legacy-a", "payment", "2026-09-25");
     await transaction("legacy-b", "2222", "2026-10-01");
     await transaction("legacy-c", "3333", "2026-10-03");
-    await transaction("canonical", "payment", "2026-10-08");
+    await transaction("canonical", "payment-0a1b2c3d", "2026-10-08");
     await db
       .prepare(
         "INSERT INTO classification_overrides VALUES ('override:bank_transaction:legacy-b', 'bank_transaction', 'legacy-b', 'transfer', 't', 't')",
@@ -93,7 +93,7 @@ describe("永豐信用卡繳款舊列合併（隔離 D1）", () => {
       description: "測試退款",
     });
     await transaction("purchase", "3333", "2026-09-25", { amount: -5000 });
-    await transaction("canonical", "payment", "2026-10-08");
+    await transaction("canonical", "payment-0a1b2c3d", "2026-10-08");
 
     await db.batch(reconcileSinopacCardPaymentStatements(db));
 
