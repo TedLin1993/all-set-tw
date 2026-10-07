@@ -27,6 +27,7 @@ import {
 } from "./connector";
 import {
   updateConnectorEncryptedConfig,
+  updateConnectorEncryptedConfigIfCurrent,
   connectorStateStatement,
   linkCanonicalBankAccountsStatement,
 } from "../../features/sync/connector-repository";
@@ -48,10 +49,8 @@ import {
   bankTransactionRecord,
   creditCardBillRecord,
 } from "../../features/sync/record-mapper";
-import {
-  rebuildBankDepositHistory,
-  dateFromIso,
-} from "../../features/net-worth/service";
+import { rebuildBankDepositHistory } from "../../features/net-worth/service";
+import { prepareTaishinAuthorizationWrite } from "./authorizations";
 
 export type TaishinSyncOverrides = {
   captcha?: string;
@@ -170,9 +169,10 @@ export async function syncTaishin(
       delete cleaned.sessionCookies;
       delete cleaned.sessionCreatedAt;
     }
-    await updateConnectorEncryptedConfig(
+    await updateConnectorEncryptedConfigIfCurrent(
       env.DB,
       connectorId,
+      settings.encrypted_config,
       await encryptJson(cleaned, configEncryptionKey(env)),
     );
     if (error instanceof TaishinVerificationRequiredError) {
@@ -224,20 +224,36 @@ export async function syncTaishin(
         serializePublicConfig(connectorId, config),
         persistedCursor,
         now,
+        settings.encrypted_config,
       ),
     );
   }
 
-  const newRecords = await persistStagedSyncWrite(env.DB, {
+  const settingsGuard = {
+    connectorId: "taishin" as const,
+    encryptedConfig: settings.encrypted_config,
+  };
+  const authorizationWrite = await prepareTaishinAuthorizationWrite(
+    env.DB,
     records,
-    afterPromoteStatements:
-      bankAccounts.length > 0
-        ? [linkCanonicalBankAccountsStatement(env.DB)]
-        : [],
+    settings.encrypted_config,
+  );
+  const newRecords = await persistStagedSyncWrite(env.DB, {
+    records: authorizationWrite.records,
+    settingsGuard,
+    afterPromoteStatements: [
+      ...authorizationWrite.afterPromoteStatements,
+      ...(bankAccounts.length > 0
+        ? [linkCanonicalBankAccountsStatement(env.DB, settingsGuard)]
+        : []),
+    ],
     finalizeStatements,
   });
   if (bankBalanceSnapshots.length > 0) {
-    await rebuildBankDepositHistory(env.DB, [dateFromIso(now)]);
+    const depositDay = new Date(Date.parse(now) + 8 * 3600_000)
+      .toISOString()
+      .slice(0, 10);
+    await rebuildBankDepositHistory(env.DB, [depositDay]);
   }
   return {
     success: true,

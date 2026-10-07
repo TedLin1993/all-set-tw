@@ -10,6 +10,20 @@ const KGIBANK_BANK_CODE = "809";
 const RAKUTEN_BANK_CODE = "826";
 const FIRSTBANK_BANK_CODE = "007";
 const MEGABANK_BANK_CODE = "017";
+const TAISHIN_BANK_CODE = "812";
+const CONNECTOR_BANK_CODES: ReadonlyMap<string, string> = new Map([
+  ["esun", ESUN_BANK_CODE],
+  ["cathaybk", CATHAYBK_BANK_CODE],
+  ["taishin", TAISHIN_BANK_CODE],
+  ["ctbc", CTBC_BANK_CODE],
+  ["skbank", SKBANK_BANK_CODE],
+  ["obank", OBANK_BANK_CODE],
+  ["firstbank", FIRSTBANK_BANK_CODE],
+  ["hncb", HNCB_BANK_CODE],
+  ["kgibank", KGIBANK_BANK_CODE],
+  ["megabank", MEGABANK_BANK_CODE],
+  ["rakuten", RAKUTEN_BANK_CODE],
+]);
 const TAIWAN_BANK_NAMES: Record<string, string> = {
   "004": "台灣銀行",
   "005": "土地銀行",
@@ -73,6 +87,10 @@ export function deriveBankMatchKey(
     const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
     return { bankCode: "807", last4: last4 || null };
   }
+  if (connectorId === "taishin" && sourceId.startsWith("bank:taishin:")) {
+    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
+    return { bankCode: TAISHIN_BANK_CODE, last4: last4 || null };
+  }
   if (connectorId === "ctbc" && sourceId.startsWith("bank:ctbc:")) {
     const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
     return { bankCode: CTBC_BANK_CODE, last4: last4 || null };
@@ -130,27 +148,7 @@ function normalizeDepositDisplay<T extends BankDisplayRow>(row: T): T {
   const bankCode =
     row.bankCode ??
     settlement.bankCode ??
-    (row.connectorId === "esun"
-      ? ESUN_BANK_CODE
-      : row.connectorId === "cathaybk"
-        ? CATHAYBK_BANK_CODE
-        : row.connectorId === "ctbc"
-          ? CTBC_BANK_CODE
-          : row.connectorId === "skbank"
-            ? SKBANK_BANK_CODE
-            : row.connectorId === "obank"
-              ? OBANK_BANK_CODE
-              : row.connectorId === "firstbank"
-                ? FIRSTBANK_BANK_CODE
-                : row.connectorId === "hncb"
-                  ? HNCB_BANK_CODE
-                  : row.connectorId === "kgibank"
-                    ? KGIBANK_BANK_CODE
-                    : row.connectorId === "megabank"
-                      ? MEGABANK_BANK_CODE
-                      : row.connectorId === "rakuten"
-                        ? RAKUTEN_BANK_CODE
-                        : undefined);
+    CONNECTOR_BANK_CODES.get(row.connectorId ?? "");
   const accountSuffix = accountSuffixFromSourceId(sourceId);
   return {
     ...row,
@@ -177,6 +175,8 @@ function parseBankAccountSource(sourceId: string): {
   if (cathaybk) return { bankCode: CATHAYBK_BANK_CODE, account: cathaybk[1] };
   const sinopac = sourceId.match(/^bank:sinopac:([^:]+)/);
   if (sinopac) return { bankCode: "807", account: sinopac[1] };
+  const taishin = sourceId.match(/^bank:taishin:([^:]+)/);
+  if (taishin) return { bankCode: TAISHIN_BANK_CODE, account: taishin[1] };
   const ctbc = sourceId.match(/^bank:ctbc:([^:]+)/);
   if (ctbc) return { bankCode: CTBC_BANK_CODE, account: ctbc[1] };
   const skbank = sourceId.match(/^bank:skbank:([^:]+)/);

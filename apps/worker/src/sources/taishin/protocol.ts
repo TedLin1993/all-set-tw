@@ -34,6 +34,7 @@ export type TaishinCreditCardPayloads = {
   overview?: unknown;
   bills: unknown[];
   realtime?: unknown;
+  unbilled?: unknown;
 };
 
 export type TaishinCreditCardData = {
@@ -83,10 +84,12 @@ export function parseTaishinCreditCardData(
     );
   const currentBillEntry = billEntries[0];
   const currentBill = currentBillEntry?.value;
-  const postedCandidates = billValues.flatMap(postedTransactions);
-  const pendingCandidates = realtimeTransactions(
-    responseValue(payloads.realtime),
-  );
+  const unbilled = unbilledData(payloads.unbilled);
+  const postedCandidates = mergePostedFeeds([
+    ...billValues.map(postedTransactions),
+    unbilled.transactions,
+  ]);
+  const pendingCandidates = realtimeTransactions(payloads.realtime);
   const transactions = mergeTransactionLifecycle(
     postedCandidates,
     pendingCandidates,
@@ -116,6 +119,8 @@ export function parseTaishinCreditCardData(
     overviewMatchesCurrentBill && overview.statementAmount != null
       ? Math.max(overview.statementAmount - (paidAmount ?? 0), 0)
       : undefined;
+  const balance =
+    remainingDue == null ? undefined : -(remainingDue + unbilled.totalAmount);
   const asOfAt = now.toISOString();
 
   const bills = billEntries
@@ -144,12 +149,12 @@ export function parseTaishinCreditCardData(
       },
     ],
     bankBalanceSnapshots:
-      currentBill && remainingDue != null
+      currentBill && balance != null
         ? [
             {
               accountId: ACCOUNT_SOURCE_ID,
               sourceId: `${ACCOUNT_SOURCE_ID}:${asOfAt.slice(0, 10)}`,
-              balance: remainingDue > 0 ? -remainingDue : 0,
+              balance: balance === 0 ? 0 : balance,
               availableBalance: availableCredit,
               statementBalance: statementAmount,
               paymentDueDate,
@@ -159,6 +164,8 @@ export function parseTaishinCreditCardData(
               asOfAt,
               raw: {
                 statementAmount,
+                remainingDue,
+                unbilledAmount: unbilled.totalAmount,
                 availableCredit,
                 paymentDueDate,
                 statementClosingDate,
@@ -235,7 +242,7 @@ function postedTransactions(value: JsonRecord): TransactionCandidate[] {
       const rawAmount = optionalNumber(detail.showOutAmt);
       if (!transactionDate || rawAmount == null || rawAmount === 0) continue;
       const description =
-        stringValue(detail.showOutDesc).trim() || "台新信用卡交易";
+        taishinCardText(detail.showOutDesc) || "台新信用卡交易";
       const amount = signedAmount(rawAmount, description);
       const currency = normalizeCurrency(detail.showOutCurrency);
       const matchKey = transactionMatchKey(
@@ -262,7 +269,7 @@ function postedTransactions(value: JsonRecord): TransactionCandidate[] {
           description,
           amount,
           currency,
-          country: stringValue(detail.showOutCountry).trim() || undefined,
+          country: taishinCardText(detail.showOutCountry) || undefined,
         },
       });
     }
@@ -270,32 +277,67 @@ function postedTransactions(value: JsonRecord): TransactionCandidate[] {
   return candidates;
 }
 
-function realtimeTransactions(
-  value: JsonRecord | undefined,
-): TransactionCandidate[] {
-  if (!value || !Array.isArray(value.fmtRealTxListMap)) return [];
+const cardCellSchema = z.union([z.string(), z.number(), z.null()]);
+const cardGroupSchema = z.object({
+  cardname: z.string(),
+  txlist: z.array(z.array(cardCellSchema).min(7)),
+});
+
+export function isTaishinNoConsumption(value: unknown) {
+  return (
+    stringValue(isRecord(value) ? value.message : value).trim() ===
+    "(CRXTIKE004)無消費資料"
+  );
+}
+
+export function taishinCardText(value: unknown) {
+  return stringValue(value)
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .trim()
+    .replace(/[A-Z][12]\d{8}/gi, "[身分證已遮罩]")
+    .replace(
+      /\d(?:[ -]?\d){7,}/g,
+      (match) => `****${match.replace(/\D/g, "").slice(-4)}`,
+    );
+}
+
+function cardAmount(value: unknown) {
+  const text = stringValue(value)
+    .replace(/<[^>]*>/g, "")
+    .replaceAll(",", "")
+    .trim();
+  if (!/^(?:[+-]?\d+(?:\.\d+)?|\(\d+(?:\.\d+)?\))$/.test(text))
+    throw new Error("台新信用卡交易金額格式已改變。");
+  const number = optionalNumber(text);
+  if (number == null) throw new Error("台新信用卡交易金額無效。");
+  return number;
+}
+
+function realtimeTransactions(payload: unknown): TransactionCandidate[] {
+  if (isRecord(payload) && isTaishinNoConsumption(payload.error)) return [];
+  const parsed = z
+    .object({ fmtRealTxListMap: z.array(cardGroupSchema) })
+    .safeParse(responseValue(payload));
+  if (!parsed.success) throw new Error("台新即時消費回應缺少完整清單。");
   const candidates: TransactionCandidate[] = [];
-  for (const group of value.fmtRealTxListMap.filter(isRecord)) {
+  for (const group of parsed.data.fmtRealTxListMap) {
     const cardName = stringValue(group.cardname);
     const cardLast4 = last4(cardName) ?? "unknown";
-    const rows = Array.isArray(group.txlist) ? group.txlist : [];
-    for (const row of rows) {
-      if (!Array.isArray(row)) continue;
+    for (const row of group.txlist) {
+      // The official page sums only exact 成功; 未成功 must never count as spending.
+      const authorizationResult = stringValue(row[5]).trim();
+      if (authorizationResult !== "成功") continue;
       const transactionDate = normalizeDate(row[0]);
       const time = stringValue(row[1]).trim();
-      const description = stringValue(row[2]).trim() || "台新信用卡交易";
-      const rawAmount = optionalNumber(row[3]);
-      const country = stringValue(row[4]).trim();
-      const authorizationResult = stringValue(row[5]).trim();
-      if (
-        !transactionDate ||
-        rawAmount == null ||
-        rawAmount === 0 ||
-        !/成功|success|approved/i.test(authorizationResult)
-      ) {
-        continue;
-      }
-      const amount = signedAmount(rawAmount, description);
+      // RB0708 displays row[6]. Keep row[2] for the existing v2 identity.
+      const identityDescription = taishinCardText(row[2]) || "台新信用卡交易";
+      const description = taishinCardText(row[6]) || identityDescription;
+      const rawAmount = cardAmount(row[3]);
+      const country = taishinCardText(row[4]);
+      if (!transactionDate) throw new Error("台新即時消費日期無效。");
+      if (rawAmount === 0) continue;
+      const amount = signedAmount(rawAmount, identityDescription);
       const currency = "TWD";
       const authorizedAt = dateTimeWithTaipeiOffset(transactionDate, time);
       const matchKey = transactionMatchKey(
@@ -306,7 +348,7 @@ function realtimeTransactions(
       );
       candidates.push({
         matchKey,
-        identityKey: transactionIdentityKey(matchKey, description),
+        identityKey: transactionIdentityKey(matchKey, identityDescription),
         cardLast4,
         authorizedAt,
         amount,
@@ -322,6 +364,8 @@ function realtimeTransactions(
           currency,
           country: country || undefined,
           authorizationResult,
+          identityDescription,
+          amountBasis: "TWD authorization",
         },
       });
     }
@@ -329,50 +373,125 @@ function realtimeTransactions(
   return candidates;
 }
 
+function unbilledData(payload: unknown): {
+  transactions: TransactionCandidate[];
+  totalAmount: number;
+} {
+  if (isRecord(payload) && isTaishinNoConsumption(payload.error))
+    return { transactions: [], totalAmount: 0 };
+  const value = responseValue(payload);
+  if (
+    !isRecord(value?.unpostedTx) &&
+    !(Array.isArray(value?.unpostedTx) && value.unpostedTx.length === 0)
+  )
+    throw new Error("台新未出帳消費回應缺少完整清單。");
+  const candidates: TransactionCandidate[] = [];
+  let hasRows = false;
+  for (const [key, group] of Object.entries(value.unpostedTx)) {
+    if (!isRecord(group)) throw new Error("台新未出帳消費幣別清單格式已改變。");
+    if (group.ErrMsg) {
+      if (isTaishinNoConsumption(group.ErrMsg)) continue;
+      throw new Error("台新未出帳消費幣別查詢失敗。");
+    }
+    const currency = key.match(/^(?:\d{3})?([A-Z]{3})$/)?.[1];
+    const parsed = z
+      .array(
+        cardGroupSchema.extend({
+          txlist: z.array(z.array(cardCellSchema).min(8)),
+        }),
+      )
+      .safeParse(group.data);
+    if (!currency || !parsed.success)
+      throw new Error("台新未出帳消費格式已改變。");
+    for (const card of parsed.data) {
+      if (card.txlist.length > 0) hasRows = true;
+      const cardLast4 = last4(card.cardname) ?? "unknown";
+      for (const row of card.txlist) {
+        const transactionDate = normalizeDate(row[0]);
+        const postedDate = normalizeDate(row[1]);
+        if (!transactionDate || !postedDate)
+          throw new Error("台新未出帳消費日期無效。");
+        if (
+          stringValue(row[7]).trim() &&
+          (!/^(?:[A-Z]{3}|新臺幣|台幣|臺幣|美元|日圓|日幣|歐元)$/.test(
+            stringValue(row[7]).trim(),
+          ) ||
+            normalizeCurrency(row[7]) !== currency)
+        )
+          throw new Error("台新未出帳消費幣別與分組不符。");
+        const description = taishinCardText(row[2]) || "台新信用卡交易";
+        const amount = signedAmount(cardAmount(row[3]), description);
+        if (amount === 0) continue;
+        const matchKey = transactionMatchKey(
+          currency,
+          transactionDate,
+          amount,
+          cardLast4,
+        );
+        candidates.push({
+          matchKey,
+          identityKey: transactionIdentityKey(matchKey, description),
+          cardLast4,
+          authorizedAt: transactionDate,
+          postedDate,
+          amount,
+          currency,
+          description,
+          counterparty: description,
+          status: "posted",
+          raw: {
+            cardLast4: cardLast4 === "unknown" ? undefined : cardLast4,
+            transactionDate,
+            postedDate,
+            amount,
+            currency,
+            description,
+            country: taishinCardText(row[5]) || undefined,
+          },
+        });
+      }
+    }
+  }
+  if (value.showRB0712_SUBTOTAL == null && hasRows)
+    throw new Error("台新未出帳消費回應缺少新臺幣總額。");
+  // The bank's TWD subtotal includes refunds and excludes payments. Summing
+  // transaction rows would deduct payments twice and mix unconverted currencies.
+  return {
+    transactions: candidates,
+    totalAmount:
+      value.showRB0712_SUBTOTAL == null
+        ? 0
+        : cardAmount(value.showRB0712_SUBTOTAL),
+  };
+}
+
+function mergePostedFeeds(feeds: TransactionCandidate[][]) {
+  const merged = new Map<string, TransactionCandidate>();
+  for (const feed of feeds) {
+    const occurrences = new Map<string, number>();
+    for (const transaction of feed) {
+      const occurrence = (occurrences.get(transaction.identityKey) ?? 0) + 1;
+      occurrences.set(transaction.identityKey, occurrence);
+      const key = `${transaction.identityKey}:${occurrence}`;
+      if (!merged.has(key)) merged.set(key, transaction);
+    }
+  }
+  return [...merged.values()];
+}
+
 function mergeTransactionLifecycle(
   posted: TransactionCandidate[],
   pending: TransactionCandidate[],
 ) {
-  const pendingByMatchKey = groupByMatchKey(pending);
-  const postedByMatchKey = groupByMatchKey(posted);
   const postedIdentityKeys = new Map<
     TransactionCandidate,
     { identityKey: string; authorizedAt?: string }
   >();
   const consumedPending = new Set<TransactionCandidate>();
 
-  for (const [matchKey, postedGroup] of postedByMatchKey) {
-    const pendingGroup = pendingByMatchKey.get(matchKey) ?? [];
-
-    for (const postedTransaction of postedGroup) {
-      const matchingPending = pendingGroup.filter((pendingTransaction) =>
-        merchantNamesMatch(
-          postedTransaction.description,
-          pendingTransaction.description,
-        ),
-      );
-      if (matchingPending.length !== 1) continue;
-
-      const pendingTransaction = matchingPending[0]!;
-      const matchingPosted = postedGroup.filter((candidate) =>
-        merchantNamesMatch(
-          candidate.description,
-          pendingTransaction.description,
-        ),
-      );
-      if (matchingPosted.length !== 1) continue;
-
-      postedIdentityKeys.set(postedTransaction, {
-        identityKey: pendingTransaction.identityKey,
-        authorizedAt: preferredAuthorizedAt(
-          postedTransaction.authorizedAt,
-          pendingTransaction.authorizedAt,
-        ),
-      });
-      consumedPending.add(pendingTransaction);
-    }
-  }
-
+  // Only identical v2 identities collapse here. Different merchant names are
+  // linked against saved authorizations in D1, without changing the posted ID
+  // when the bank stops returning the authorization on a later sync.
   for (const postedTransaction of posted) {
     if (postedIdentityKeys.has(postedTransaction)) continue;
     const pendingTransaction = pending.find(
@@ -460,23 +579,19 @@ function taishinTransactionSourceId(identityKey: string, occurrence: number) {
   return `taishin:card:tx:v2:${identityKey}:${occurrence}`;
 }
 
-function groupByMatchKey<T extends TransactionCandidate>(candidates: T[]) {
-  const groups = new Map<string, T[]>();
-  for (const candidate of candidates) {
-    const group = groups.get(candidate.matchKey) ?? [];
-    group.push(candidate);
-    groups.set(candidate.matchKey, group);
-  }
-  return groups;
-}
-
-function merchantNamesMatch(
+export function taishinMerchantNamesMatch(
   left: string | undefined,
   right: string | undefined,
 ) {
   const normalizedLeft = normalizeMerchantName(left);
   const normalizedRight = normalizeMerchantName(right);
-  if (!normalizedLeft || !normalizedRight) return false;
+  if (
+    !normalizedLeft ||
+    !normalizedRight ||
+    normalizedLeft === "台新信用卡交易" ||
+    normalizedRight === "台新信用卡交易"
+  )
+    return false;
   if (normalizedLeft === normalizedRight) return true;
   return (
     Math.min(normalizedLeft.length, normalizedRight.length) >= 4 &&
@@ -485,7 +600,7 @@ function merchantNamesMatch(
   );
 }
 
-function normalizeMerchantName(value: string | undefined) {
+export function normalizeMerchantName(value: string | undefined) {
   return (value ?? "")
     .normalize("NFKC")
     .toLowerCase()
@@ -553,13 +668,25 @@ function normalizeDate(value: unknown) {
   if (!match) return undefined;
   const month = Number(match[2] ?? match[4]);
   const day = Number(match[3] ?? match[5]);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
-  return `${match[1]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const date = `${match[1]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  if (
+    !Number.isFinite(Date.parse(date)) ||
+    new Date(date).toISOString().slice(0, 10) !== date
+  )
+    return undefined;
+  return date;
 }
 
 function dateTimeWithTaipeiOffset(date: string, time: string) {
   const match = time.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
-  if (!match) return date;
+  if (!time) return date;
+  if (
+    !match ||
+    Number(match[1]) > 23 ||
+    Number(match[2]) > 59 ||
+    Number(match[3] ?? 0) > 59
+  )
+    throw new Error("台新即時消費時間無效。");
   return `${date}T${String(Number(match[1])).padStart(2, "0")}:${match[2]}:${match[3] ?? "00"}+08:00`;
 }
 

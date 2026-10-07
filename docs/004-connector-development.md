@@ -370,10 +370,43 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 
 ### 台新銀行
 
-- 信用卡端點的 `error` 字串或 `error.message` 明確回覆無卡時，停止信用卡查詢並以 `hasCreditCard: false` 回傳空結果；不建立預設信用卡帳戶。session 檢查不套用此規則，HTTP 失敗或未知必需查詢錯誤仍失敗。有卡但無帳單或消費則保留原流程。
+- 先在同一登入 session 取得存款，再查信用卡。信用卡端點的 `error` 字串或 `error.message` 明確回覆無卡時，以 `hasCreditCard: false` 略過信用卡，仍回傳存款；不建立預設信用卡帳戶。存款僅接受成功回應內的完整空產品清單，不將未知錯誤當成無存款。session 檢查不套用無卡規則。
 - 台新登入後若出現「訊息通知／每三個月變更一次密碼」彈窗，必須點「關閉」後再抓資料。不得點「前往修改」或「3個月後提醒」，也不得停在彈窗卻因為 session API 仍可用而回報同步成功。
+- session 確認成功後重新取得當前 frame，最多等待 15 秒讓登入後頁面掛載 `popupLoginChangePwd`。`PwdExpired` cookie 尚在時需等待通知顯示，直接觸發該通知內 `button[data-action="hide"]` 的官方 click handler；最多等 5 秒確認 `active` 已移除且銀行的關閉處理已清除 `PwdExpired`，才查詢資料。頁面未就緒、按鈕缺失或關閉失敗均中止同步，不吞掉錯誤。
+- 重用已確認有效的 session 時，經 session 檢查的 frame 不一定掛載登入後通知元件；該 frame 沒有通知與 `PwdExpired` 時可直接查詢，不等待一次並未發生的新登入。已有通知或提醒 cookie 時仍須完成上述關閉流程。
 - 自動登入分別限制最多辨識六張新驗證碼、最多向銀行送出三次登入請求。辨識結果若不符合頁面要求的數字位數，不送出登入，也不扣登入額度；重新載入頁面取得新驗證碼。只有明確的驗證碼錯誤可以重試，帳密遭拒或登入結果不明時立即停止。耗盡辨識或登入額度時改由使用者人工驗證，訊息分別說明辨識上限與實際送出次數。
 - 每輪自動登入記錄辨識次數、當輪及累計登入請求數、結果分類與耗時；日誌不得記錄驗證碼、圖片或帳密。
+
+#### 存款查詢
+
+協定欄位與請求依 2026-10-07 [官方網銀 RWD 前端](https://my.taishinbank.com.tw/TIBNetBank/svc/rwd/index.html) 的 RB0100/0101/0102、RB0800/0802 查證；fixtures 使用合成帳務。存款範圍以同一網銀 session 回傳的臺外幣活期性帳戶為準，不含定存、貸款或投資；Richart 是否出現在相同 session 的清單仍待驗收。
+
+以下均為 POST，相對於 `/TIBNetBank/svc`；物件 body 使用 JSON，無參數呼叫依官方 axios helper 使用空字串。
+
+| 端點                                                                             | 請求／解析                                                                                                                                                                          |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web1/rb0100/query`                                                              | `RESULT = NORMAL`，`OUTPUTDATA.SavingAccount` 提供 `accountNo`、`accountTypeName`；不使用定存總額。                                                                                 |
+| `web1/rb0101/query`                                                              | `{ account }`；`balance` 為帳戶餘額，`availbalance` 為可用餘額，`dtltamt` 不加進活存。                                                                                              |
+| `web1/rb0102/listaccount`、`web1/rb0102/query`                                   | 先以 `{}` 初始化並確認帳號，再以 `{ account, start, end }` 查近三個月，日期為 `YYYYMMDD`；解析 `userList`。                                                                         |
+| `web2/rb0800/getRB08000100Data`                                                  | `error = null`，`data.FCS_ACCOUNT[].FCS_ACCOUNT_DETAIL` 列出帳號與各幣別活存；不使用 `FTS_ACCOUNT` 或 `ALL_BALANCE`。                                                               |
+| `web2/rb0800/getRB08000100QueryRealtimeBalance`                                  | `{ requestAccount, requestAccountAlias, requestCcyCode }`；核對回應 `ACCT_NO`、`CURRENCY_CODE`，保存 `BALANCE`；官方未提供可用餘額，保持未知。                                      |
+| `web2/rb0812/getRB08120100Options`、`web2/rb0802/getRB08020100ForeignTranDetail` | 官方 RB0802 初始化使用 RB0812 options。按各幣別以 `requestAcctNo`、`requestCurrency`、`requestStartDate`、`requestEndDate`、`requestDateType = I` 查詢；解析 `data.TRANS_DETAILS`。 |
+
+臺幣 `txnamtOut` 非 `-` 是支出、`txnamtIn` 非 `-` 是存入；`sysdate` 為交易日／時刻，`dateNew` 為帳務日。`inNo + outNo` 必須與清單筆數一致，截斷時拆分不重疊期間重查；單日仍不完整即失敗。外幣 `DRWAMT` 是支出、`DEPAMT` 是存入，`ACCT_BAL` 是交易後餘額；交易日／時刻採官方顯示的 `TRANSACTION_DATE_TIME_DSC`，`TX_DATE` 為帳務日。前端表格在本機分頁，外幣查詢未見伺服器 continuation 或筆數欄位，要求完整 `TRANS_DETAILS`，不猜測分頁端點。
+
+每個帳號與幣別使用 `bank:taishin:{last4}:{sha256(accountIdentity)}:{currency}`，完整帳號只用於當次請求。交易 ID 依帳戶、消費日期、正負金額、交易後餘額及臺幣 `procSeq` 摘要，再按完整候選集合分配 occurrence；排序、備註或時間精度不影響 ID。快照按台灣日期每天更新，原幣小數與零餘額均保留。末四碼、銀行代碼 `812`、幣別沿用共用 canonical linking，集保同帳戶不重複計入資產。
+
+#### 完整即時消費與入帳配對
+
+- 「即時消費」指每次同步取得銀行當下提供的信用卡授權清單，更新頻率沿用既有同步排程。官方總覽的 `qryRealTime` 只供最近消費摘要；完整清單改用 `web4/rb0708rwd/queryRealTime`，在摘要／當期帳單初始化後查詢 `value.fmtRealTxListMap`。列 `[3]` 是「新臺幣消費金額」，`[5]` 須精確等於 `成功`；拒絕、取消或 `未成功` 不計入消費。店名顯示採 `[6]`，v2 identity 保留舊版的 `[2]`，補時間不換 ID。
+- 同步 `web4/rb0708rwd/qryUnposted` 的 `value.unpostedTx`，連結授權離開清單後至正式出帳之間的交易。幣別分組以 `001TWD` 或 `USD` 等 key 與列 `[7]` 核對；`[0]` 為消費日、`[1]` 為入帳起息日、`[2]` 為明細、`[3]` 為約定幣別金額。同份未出帳與帳單重疊時按 identity 的 occurrence 去重，同日同額多筆仍保留。
+- 完整空清單或明確 `(CRXTIKE004)無消費資料` 可成功。即時消費忙碌／暫時性網路錯誤重試最多三次，耗盡即失敗；缺少必要清單、未知格式、未出帳幣別錯誤不可由可選帳單降級吞掉。必要查詢途中 session 失效時，沿用一次重新登入政策，重抓整份存款及信用卡資料後才寫入。
+- `authorizations.ts` 讀取歷史未配對授權與本次正式交易，只在同信用卡末四碼、同消費日、同幣別同額同方向且可確認店名的雙向唯一對應下建立 `matched_transaction_id`；卡片不明、重複候選、跨日、跨幣別均不強配。來源消失本身不代表取消，不刪除歷史授權；已建立關係不重新分配。
+- 相同 ID 由共用 persistence 提升為 `posted` 並保留可靠時刻；不同 ID 保留原 pending 列，活動與統計沿用共用規則隱藏已配對授權。首次配對在同一 guarded promotion batch 補時刻並移轉個別分類、排除與發票關係，正式交易既有決定優先，發票衝突保留。舊版曾借用授權店名 ID 的已入帳紀錄，只在唯一對應時重用原 ID，不換使用者引用。
+- 存款、配對、canonical linking 與 cursor finalize 受相同憑證版本保護；查詢或 promotion 失敗不更新金融資料／cursor。
+- 信用卡負債合計當期帳單剩餘應繳與 `qryUnposted.value.showRB0712_SUBTOTAL` 的官方新臺幣未出帳總額，快照保存合計的相反號；帳單繳清及無需繳款仍依當期帳單判斷。未出帳總額保留退款的正負號，銀行合計已排除繳款／繳款更正，不加總明細列以免重扣繳款或混入未換算外幣，也不加入即時授權。非空明細缺少總額或總額格式無效時同步失敗；完整空清單或明確無消費可採 0。
+
+2026-10-07 已以真實帳戶通過本機自動登入、密碼通知關閉、完整手動同步、session 重用及重複同步不新增副本；帳單已繳清時的未出帳負債已與官方畫面、本機 D1、API 及資產頁核對一致。其他帳務逐項核對、Richart 可見範圍、人工驗證、排程與 Cloudflare 部署環境的實際操作仍待驗收。
 
 ### 中國信託銀行
 
