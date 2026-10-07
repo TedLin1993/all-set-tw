@@ -229,7 +229,7 @@ describe("sinopac App JSON parser", () => {
     ).toBe(0);
   });
 
-  it("卡名含「回饋」時消費仍為負數，只有摘要或交易代碼才判成貸方", () => {
+  it("卡名或摘要含「回饋」不影響方向：已入帳依銀行正負號，授權只看摘要與授權結果", () => {
     const result = parseSinopacCardData({
       summary: summaryPayload,
       bills: billPayload,
@@ -268,6 +268,16 @@ describe("sinopac App JSON parser", () => {
               DEDATE: "2026/09/24",
               TXCODE: "",
               MEMO: "現金回饋",
+              AMT: "-88",
+              CARDNAME: "測試現金回饋信用卡",
+            },
+            {
+              CurrencyCode: "000",
+              CardLast4: "5678",
+              TXDATE: "2026/09/21",
+              DEDATE: "2026/09/24",
+              TXCODE: "",
+              MEMO: "現金回饋金入帳戶",
               AMT: "88",
               CARDNAME: "測試現金回饋信用卡",
             },
@@ -281,10 +291,11 @@ describe("sinopac App JSON parser", () => {
       expect.arrayContaining([
         ["測試電費", -1500],
         ["現金回饋", 88],
+        ["現金回饋金入帳戶", -88],
         ["測試便利商店", -120],
       ]),
     );
-    expect(result.bankTransactions).toHaveLength(3);
+    expect(result.bankTransactions).toHaveLength(4);
   });
 
   it("繳款入帳被掛在不同張卡下時識別碼相同，退款仍依卡號區分", () => {

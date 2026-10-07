@@ -1383,12 +1383,9 @@ function parseSinoCardTransactions(
     }
     if (rawAmount === 0) return [];
     const description = stringValue(record.MEMO).trim() || "永豐信用卡消費";
-    // 同上：只看摘要與交易代碼，不把卡名併進去比對。
-    const amount = signedTransactionAmount(
-      rawAmount,
-      description,
-      stringValue(record.TXCODE),
-    );
+    // 已入帳明細的金額帶正負號（正數為消費、負數為退款／回饋／繳款），直接採用，
+    // 不以關鍵字推測：「回饋金入帳戶」是把回饋從卡片轉出，摘要含「回饋」但其實是扣款。
+    const amount = -rawAmount;
     const currency = normalizeCurrency(
       stringValue(record.CurrencyCode) || stringValue(record.TXCUR),
     );

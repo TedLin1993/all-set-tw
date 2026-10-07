@@ -55,3 +55,33 @@ export function reconcileSinopacCardPaymentStatements(db: D1Database) {
     mergeLegacyTransactionStatements(db, candidates),
   ).flat();
 }
+
+/**
+ * 舊版以關鍵字判斷方向而記錯正負號的已入帳列，併入依銀行正負號重寫的新列。
+ * 金額是識別碼的一部分，方向改正後會產生新列；兩列來自同一筆銀行明細（原始金額、摘要、
+ * 日期、帳戶都相同），只有記錄的正負號相反，留下與銀行原始正負號一致的那一列。
+ */
+export function reconcileSinopacCardSignStatements(db: D1Database) {
+  return mergeLegacyTransactionStatements(
+    db,
+    `
+    SELECT legacy.id AS old_id, canonical.id AS new_id
+    FROM bank_transactions legacy
+    JOIN bank_transactions canonical
+      ON canonical.connector_id = legacy.connector_id
+      AND canonical.account_id = legacy.account_id
+      AND canonical.currency = legacy.currency
+      AND canonical.amount = -legacy.amount
+      AND canonical.posted_date = legacy.posted_date
+      AND COALESCE(canonical.description, '') = COALESCE(legacy.description, '')
+      AND json_extract(canonical.raw_payload, '$.AMT')
+        = json_extract(legacy.raw_payload, '$.AMT')
+    WHERE legacy.connector_id = 'sinopac'
+      AND legacy.status = 'posted'
+      AND canonical.status = 'posted'
+      AND legacy.source_id LIKE 'sinopac:card:tx:v2:%'
+      AND canonical.source_id LIKE 'sinopac:card:tx:v2:%'
+      AND (json_extract(canonical.raw_payload, '$.AMT') LIKE '-%')
+        = (canonical.amount > 0)`,
+  );
+}

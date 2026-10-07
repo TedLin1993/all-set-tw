@@ -32,6 +32,7 @@ import {
 } from "../../features/sync/connector-repository";
 import {
   reconcileSinopacCardPaymentStatements,
+  reconcileSinopacCardSignStatements,
   reconcileSinopacLegacyTransactionStatements,
 } from "./repository";
 import {
@@ -260,6 +261,7 @@ export async function syncSinopac(
     records,
     afterPromoteStatements: [
       ...reconcileSinopacLegacyTransactionStatements(env.DB),
+      ...reconcileSinopacCardSignStatements(env.DB),
       // 只有這次帶回繳款列時才需要把舊版（含卡號）的繳款列併進來。
       ...(bankTransactions.some((transaction) =>
         transaction.sourceId.includes(":payment:"),
