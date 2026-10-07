@@ -100,8 +100,29 @@ Protocol／client 不得依賴 Hono、D1、Worker `Env`、adapter 或 `sync.ts`�
 
 手動同步與驗證碼 route 對共用錯誤回應 `429 BROWSER_BUSY`；同步紀錄維持
 `failed`，排程在下一輪照常重試。銀行專屬 capacity error 只處理驗證碼作業或
-session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session 重連、瀏覽器建立後
-的操作與銀行登入不在共用辨識及建立重試範圍內。
+session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session 重連與銀行回應不在
+上述 capacity 辨識及建立重試範圍內。
+
+玉山、國泰世華、永豐、台新、華南、第一銀行、凱基與樂天的自動瀏覽器登入，
+另使用 `prepareBrowserLoginWithRetry` 復原尚未送出登入的頁面停滯。準備 callback
+只做分頁設定、cookie 還原、登入表單與第一張驗證碼載入；OCR、送出登入與金融
+資料查詢都在 callback 外，第一輪 OCR 重用準備好的圖片，不再重新導覽。
+可復用的登入 cookie 只在首次嘗試還原；若首次準備失敗，後續新 session 直接載入
+登入頁，避免每次都耗時重走失效的 session。國泰的信任裝置 cookie 仍在每次新建時還原。
+
+- 最多三次嘗試（含首次）；每次頁面準備硬逾時 15 秒，共用流程使用固定的 45 秒
+  預算，取得瀏覽器與限流等待也算入預算。來源原有同步期限與取消 signal 繼續生效；
+  樂天另外預留 OCR／登入時間，重試不重設整次同步期限。
+- 只重試載入逾時、分頁失去回應及暫時性網路錯誤。帳密遭拒、已辨識的銀行維護、
+  登入結果不明與送出登入後的錯誤沿用來源原有政策。人工 CAPTCHA／OTP 重連保留
+  原 session，不套用自動重開。
+- 失敗取樣最多一秒，隨後清理最多四秒；先呼叫 `browser.close()`，並透過 binding
+  `DELETE /v1/devtools/browser/:sessionId` 確認遠端關閉。清理不能確認成功就停止，
+  不再開新 session。等待下一次 acquisition 額度只會發生在舊 session 已關閉後；
+  每日額度及瀏覽器建立錯誤不觸發登入頁重試。診斷與最後清理可在準備預算外收尾。
+- `browser_login_preparation_failed` 只記來源、次數、耗時、去除 query／fragment 的
+  host/path、HTTP 狀態、網路錯誤代碼、CDP 是否回應、維護判斷與關閉結果，最多八筆
+  失敗請求；不保存完整 HTML、頁面文字、截圖、帳密、cookie 或 token。
 
 ## 正規化資料契約
 
@@ -387,7 +408,7 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 ### 華南銀行
 
 - 信用卡未出帳回應只含明確無卡提示時，不再查歷史信用卡帳單，仍解析已取得的存款；其他查詢回應維持既有解析與錯誤處理。
-- 華南登入頁沿用一般導覽：先前 CDP 取樣曾在 1.5 秒內看到 `readyState` 為 `complete`，`USERIDTEXT` 與 `doSubmit` 皆就緒，但遠端 Browser Run 仍可能停在 `chromewebdata/` 錯誤頁。改動登入頁載入方式前必須先以 CDP 取樣確認實際停滯點，不得以推測為依據：`setRequestInterception` 會讓導覽停在 `about:blank`、`setJavaScriptEnabled(false)` 會讓 `waitForFunction`／`evaluate` 失效、`document.write` 移植會摧毀執行環境，三者都已實測不可行。Worker `fetch` 若用於輔助抓取必須設 `AbortSignal.timeout`，否則會在有 proxy 的環境無限等待。導覽的 Puppeteer timeout 外另設 6 秒硬逾時，避免 CDP 操作超時卻持續等待。登入表單或驗證碼沒出現時記導覽狀態及失敗請求的網路錯誤，並立即以連線失敗結束；只有明確的驗證碼錯誤才重試 OCR，不明登入結果不重送帳密。驗證碼準備工作限 35 秒、同步工作限 120 秒，逾時先清理 Browser session 再回報失敗（清理可能另需 15 秒）；Puppeteer 關閉失敗時以 Browser binding 關閉 session。新建的自動同步 session 使用 60 秒閒置期限，準備人工驗證碼則保留 150 秒。
+- 華南登入頁沿用一般導覽：先前 CDP 取樣曾在 1.5 秒內看到 `readyState` 為 `complete`，`USERIDTEXT` 與 `doSubmit` 皆就緒，但遠端 Browser Run 仍可能停在 `chromewebdata/` 錯誤頁。改動登入頁載入方式前必須先以 CDP 取樣確認實際停滯點，不得以推測為依據：`setRequestInterception` 會讓導覽停在 `about:blank`、`setJavaScriptEnabled(false)` 會讓 `waitForFunction`／`evaluate` 失效、`document.write` 移植會摧毀執行環境，三者都已實測不可行。Worker `fetch` 若用於輔助抓取必須設 `AbortSignal.timeout`，否則會在有 proxy 的環境無限等待。導覽的 Puppeteer timeout 外另設 6 秒硬逾時，避免 CDP 操作超時卻持續等待。登入表單或驗證碼沒出現時記導覽狀態及失敗請求的網路錯誤；自動同步在送出登入前依共用政策關閉舊 session 後重開，最多三次準備，耗盡才以連線失敗結束；只有明確的驗證碼錯誤才重試 OCR，不明登入結果不重送帳密。驗證碼準備工作限 35 秒、同步工作限 120 秒，逾時先清理 Browser session 再回報失敗（清理最多另需四秒）；透過 Browser binding 確認遠端 session 已關閉。新建的自動同步 session 使用 60 秒閒置期限，準備人工驗證碼則保留 150 秒。
 - 華南分頁必須常駐 dialog 自動關閉 handler。未預期的 `alert` 會凍結頁面 JavaScript 並使自動化停止回應；送出登入時另有 handler 記錄訊息做成敗分類，兩者並存。
 
 ### 第一銀行

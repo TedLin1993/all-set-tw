@@ -3,6 +3,8 @@ import {
   BrowserRunCapacityError,
   launchBrowserWithRetry,
   connectBrowserWithCancellation,
+  prepareBrowserLoginWithRetry,
+  closeBrowserSession,
 } from "../browser.js";
 import puppeteer, {
   type Browser,
@@ -445,27 +447,37 @@ export async function loginSinopacWithOcr(
   }
   if (!browser) throw new Error("永豐自動驗證需要 BROWSER binding。");
 
-  const browserInstance = await getCaptchaBrowser(
-    browser,
-    config.browserSessionId,
-  );
-  const pages = await browserInstance.pages();
-  const page =
-    pages.find((candidate) =>
-      candidate.url().includes("/m/member/login/m_login.aspx"),
-    ) ??
-    pages[0] ??
-    (await browserInstance.newPage());
+  const { browser: browserInstance, value: prepared } =
+    await prepareBrowserLoginWithRetry({
+      binding: browser,
+      connectorId: "sinopac",
+      isRetryable: (error) =>
+        error instanceof Error &&
+        /^永豐(?:行動網銀登入頁沒有取得圖形驗證碼|圖形驗證碼影像為空白)/.test(
+          error.message,
+        ),
+      prepare: async (browser, observePage) => {
+        const pages = await browser.pages();
+        const page = pages[0] ?? (await browser.newPage());
+        observePage(page);
+        await configurePage(page);
+        await openLoginAndFill(page, config);
+        return { page, imageBytes: await captureSinopacCaptcha(page) };
+      },
+    });
+  const { page } = prepared;
   try {
-    await configurePage(page);
     for (
       let attempt = 1;
       attempt <= SINOPAC_AUTO_LOGIN_ATTEMPTS;
       attempt += 1
     ) {
       try {
-        await openLoginAndFill(page, config);
-        const imageBytes = await captureSinopacCaptcha(page);
+        if (attempt > 1) await openLoginAndFill(page, config);
+        const imageBytes =
+          attempt === 1
+            ? prepared.imageBytes
+            : await captureSinopacCaptcha(page);
         const captcha = await recognizeCaptcha(toArrayBuffer(imageBytes));
         if (!/^\d{6}$/.test(captcha)) {
           throw new Error("Gemma 4 未回傳六位數字。");
@@ -483,7 +495,7 @@ export async function loginSinopacWithOcr(
       `永豐自動驗證連續失敗 ${SINOPAC_AUTO_LOGIN_ATTEMPTS} 次，請改用人工驗證。`,
     );
   } finally {
-    await browserInstance.close();
+    await closeBrowserSession(browser, browserInstance);
   }
 }
 
