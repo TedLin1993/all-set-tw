@@ -228,4 +228,147 @@ describe("sinopac App JSON parser", () => {
         ?.balance,
     ).toBe(0);
   });
+
+  it("卡名或摘要含「回饋」不影響方向：已入帳依銀行正負號，授權只看摘要與授權結果", () => {
+    const result = parseSinopacCardData({
+      summary: summaryPayload,
+      bills: billPayload,
+      latest: {
+        Result: {
+          Items: [
+            {
+              AuthDate: "2026/09/23",
+              AuthTime: "12:30:00",
+              CardNo: "************1234",
+              Memo: "測試便利商店",
+              AuthAmt: "120",
+              AuthResult: "Y",
+              CardName: "測試現金回饋信用卡",
+            },
+          ],
+        },
+      },
+      outstanding: {
+        Result: {
+          Detail: [
+            {
+              CurrencyCode: "000",
+              CardLast4: "5678",
+              TXDATE: "2026/09/22",
+              DEDATE: "2026/09/24",
+              TXCODE: "",
+              MEMO: "測試電費",
+              AMT: "1,500",
+              CARDNAME: "測試現金回饋信用卡",
+            },
+            {
+              CurrencyCode: "000",
+              CardLast4: "5678",
+              TXDATE: "2026/09/20",
+              DEDATE: "2026/09/24",
+              TXCODE: "",
+              MEMO: "現金回饋",
+              AMT: "-88",
+              CARDNAME: "測試現金回饋信用卡",
+            },
+            {
+              CurrencyCode: "000",
+              CardLast4: "5678",
+              TXDATE: "2026/09/21",
+              DEDATE: "2026/09/24",
+              TXCODE: "",
+              MEMO: "現金回饋金入帳戶",
+              AMT: "88",
+              CARDNAME: "測試現金回饋信用卡",
+            },
+          ],
+        },
+      },
+    });
+    expect(
+      result.bankTransactions.map((row) => [row.description, row.amount]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["測試電費", -1500],
+        ["現金回饋", 88],
+        ["現金回饋金入帳戶", -88],
+        ["測試便利商店", -120],
+      ]),
+    );
+    expect(result.bankTransactions).toHaveLength(4);
+  });
+
+  it("繳款入帳被掛在不同張卡下時識別碼相同，退款仍依卡號區分", () => {
+    const parse = (card: string) =>
+      parseSinopacCardData({
+        summary: summaryPayload,
+        bills: billPayload,
+        latest: { Result: { Items: [] } },
+        outstanding: {
+          Result: {
+            Detail: [
+              {
+                CurrencyCode: "000",
+                CardLast4: card,
+                TXDATE: "2026/09/24",
+                DEDATE: "2026/09/24",
+                TXCODE: "",
+                MEMO: "測試自扣已入帳",
+                AMT: "-5,000",
+              },
+              {
+                CurrencyCode: "000",
+                CardLast4: card,
+                TXDATE: "2026/09/24",
+                DEDATE: "2026/09/24",
+                TXCODE: "",
+                MEMO: "測試退款",
+                AMT: "-300",
+              },
+            ],
+          },
+        },
+      }).bankTransactions.map((row) => [row.description, row.sourceId]);
+
+    const [payment, refund] = parse("1111");
+    expect(payment?.[1]).toMatch(
+      /^sinopac:card:tx:v2:TWD:2026-09-24:5000:payment-[0-9a-f]{8}:1$/,
+    );
+    expect(refund).toEqual([
+      "測試退款",
+      "sinopac:card:tx:v2:TWD:2026-09-24:300:1111:1",
+    ]);
+    expect(parse("2222")[0]).toEqual(payment);
+    expect(parse("2222")[1]?.[1]).toBe(
+      "sinopac:card:tx:v2:TWD:2026-09-24:300:2222:1",
+    );
+  });
+
+  it("同日同額但摘要不同的繳款各自有固定識別碼，不受回傳順序影響", () => {
+    const detail = (card: string, memo: string) => ({
+      CurrencyCode: "000",
+      CardLast4: card,
+      TXDATE: "2026/09/24",
+      DEDATE: "2026/09/24",
+      TXCODE: "",
+      MEMO: memo,
+      AMT: "-5,000",
+    });
+    const parse = (rows: Array<ReturnType<typeof detail>>) =>
+      Object.fromEntries(
+        parseSinopacCardData({
+          summary: summaryPayload,
+          bills: billPayload,
+          latest: { Result: { Items: [] } },
+          outstanding: { Result: { Detail: rows } },
+        }).bankTransactions.map((row) => [row.description, row.sourceId]),
+      );
+    const autoDebit = detail("1111", "測試自扣已入帳");
+    const counter = detail("2222", "測試臨櫃繳款");
+
+    const forward = parse([autoDebit, counter]);
+    expect(forward["測試自扣已入帳"]).not.toBe(forward["測試臨櫃繳款"]);
+    expect(parse([counter, autoDebit])).toEqual(forward);
+    expect(parse([counter])["測試臨櫃繳款"]).toBe(forward["測試臨櫃繳款"]);
+  });
 });
