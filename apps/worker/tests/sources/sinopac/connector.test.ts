@@ -228,4 +228,104 @@ describe("sinopac App JSON parser", () => {
         ?.balance,
     ).toBe(0);
   });
+
+  it("卡名含「回饋」時消費仍為負數，只有摘要或交易代碼才判成貸方", () => {
+    const result = parseSinopacCardData({
+      summary: summaryPayload,
+      bills: billPayload,
+      latest: {
+        Result: {
+          Items: [
+            {
+              AuthDate: "2026/09/23",
+              AuthTime: "12:30:00",
+              CardNo: "************1234",
+              Memo: "測試便利商店",
+              AuthAmt: "120",
+              AuthResult: "Y",
+              CardName: "測試現金回饋信用卡",
+            },
+          ],
+        },
+      },
+      outstanding: {
+        Result: {
+          Detail: [
+            {
+              CurrencyCode: "000",
+              CardLast4: "5678",
+              TXDATE: "2026/09/22",
+              DEDATE: "2026/09/24",
+              TXCODE: "",
+              MEMO: "測試電費",
+              AMT: "1,500",
+              CARDNAME: "測試現金回饋信用卡",
+            },
+            {
+              CurrencyCode: "000",
+              CardLast4: "5678",
+              TXDATE: "2026/09/20",
+              DEDATE: "2026/09/24",
+              TXCODE: "",
+              MEMO: "現金回饋",
+              AMT: "88",
+              CARDNAME: "測試現金回饋信用卡",
+            },
+          ],
+        },
+      },
+    });
+    expect(
+      result.bankTransactions.map((row) => [row.description, row.amount]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["測試電費", -1500],
+        ["現金回饋", 88],
+        ["測試便利商店", -120],
+      ]),
+    );
+    expect(result.bankTransactions).toHaveLength(3);
+  });
+
+  it("繳款入帳被掛在不同張卡下時識別碼相同，退款仍依卡號區分", () => {
+    const parse = (card: string) =>
+      parseSinopacCardData({
+        summary: summaryPayload,
+        bills: billPayload,
+        latest: { Result: { Items: [] } },
+        outstanding: {
+          Result: {
+            Detail: [
+              {
+                CurrencyCode: "000",
+                CardLast4: card,
+                TXDATE: "2026/09/24",
+                DEDATE: "2026/09/24",
+                TXCODE: "",
+                MEMO: "測試自扣已入帳",
+                AMT: "-5,000",
+              },
+              {
+                CurrencyCode: "000",
+                CardLast4: card,
+                TXDATE: "2026/09/24",
+                DEDATE: "2026/09/24",
+                TXCODE: "",
+                MEMO: "測試退款",
+                AMT: "-300",
+              },
+            ],
+          },
+        },
+      }).bankTransactions.map((row) => [row.description, row.sourceId]);
+
+    expect(parse("1111")).toEqual([
+      ["測試自扣已入帳", "sinopac:card:tx:v2:TWD:2026-09-24:5000:payment:1"],
+      ["測試退款", "sinopac:card:tx:v2:TWD:2026-09-24:300:1111:1"],
+    ]);
+    expect(parse("2222")[0]).toEqual(parse("1111")[0]);
+    expect(parse("2222")[1]?.[1]).toBe(
+      "sinopac:card:tx:v2:TWD:2026-09-24:300:2222:1",
+    );
+  });
 });

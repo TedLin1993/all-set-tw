@@ -30,7 +30,10 @@ import {
   connectorStateStatement,
   linkCanonicalBankAccountsStatement,
 } from "../../features/sync/connector-repository";
-import { reconcileSinopacLegacyTransactionStatements } from "./repository";
+import {
+  reconcileSinopacCardPaymentStatements,
+  reconcileSinopacLegacyTransactionStatements,
+} from "./repository";
 import {
   parsePublicConnectorConfig,
   splitConnectorCursorState,
@@ -257,6 +260,12 @@ export async function syncSinopac(
     records,
     afterPromoteStatements: [
       ...reconcileSinopacLegacyTransactionStatements(env.DB),
+      // 只有這次帶回繳款列時才需要把舊版（含卡號）的繳款列併進來。
+      ...(bankTransactions.some((transaction) =>
+        transaction.sourceId.includes(":payment:"),
+      )
+        ? reconcileSinopacCardPaymentStatements(env.DB)
+        : []),
       ...(authorizationWrite?.afterPromoteStatements ?? []),
       ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB)]

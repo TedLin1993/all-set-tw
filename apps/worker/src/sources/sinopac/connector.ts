@@ -1339,10 +1339,11 @@ function parseSinoCardTransactions(
     }
     if (rawAmount === 0) return [];
     const description = stringValue(record.Memo).trim() || "永豐信用卡消費";
+    // 只看摘要與授權結果：整筆記錄含卡名（如「DAWHO現金回饋信用卡」），拿去比對會把消費誤判成貸方。
     const amount = signedTransactionAmount(
       rawAmount,
       description,
-      recordText(record),
+      stringValue(record.AuthResult),
     );
     const cardLast4 = last4FromValue(record.CardNo);
     const authorizedAt = dateTimeWithTaipeiOffset(
@@ -1355,6 +1356,7 @@ function parseSinoCardTransactions(
           "TWD",
           transactionDate,
           amount,
+          description,
           cardLast4,
         ),
         authorizedAt,
@@ -1381,10 +1383,11 @@ function parseSinoCardTransactions(
     }
     if (rawAmount === 0) return [];
     const description = stringValue(record.MEMO).trim() || "永豐信用卡消費";
+    // 同上：只看摘要與交易代碼，不把卡名併進去比對。
     const amount = signedTransactionAmount(
       rawAmount,
       description,
-      recordText(record),
+      stringValue(record.TXCODE),
     );
     const currency = normalizeCurrency(
       stringValue(record.CurrencyCode) || stringValue(record.TXCUR),
@@ -1397,6 +1400,7 @@ function parseSinoCardTransactions(
           currency,
           transactionDate,
           amount,
+          description,
           cardLast4,
         ),
         authorizedAt: transactionDate,
@@ -1498,9 +1502,18 @@ function sinoCardTransactionMatchKey(
   currency: string,
   transactionDate: string,
   amount: number,
+  description: string,
   cardLast4?: string,
 ) {
-  return [currency, transactionDate, amount, cardLast4 || "unknown"].join(":");
+  // 繳款是整份帳單的扣繳，永豐每次查詢可能把它掛在不同張卡下；不含卡號才不會同一筆重複寫入。
+  const card = isSinoCardPayment(amount, description)
+    ? "payment"
+    : cardLast4 || "unknown";
+  return [currency, transactionDate, amount, card].join(":");
+}
+
+function isSinoCardPayment(amount: number, description: string) {
+  return amount > 0 && /自扣|繳款/.test(description);
 }
 
 function signedTransactionAmount(
