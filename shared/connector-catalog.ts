@@ -172,7 +172,7 @@ export const connectorCatalog = {
   taishin: {
     id: "taishin",
     title: "台新銀行",
-    description: "信用卡額度、帳單與即時消費",
+    description: "臺外幣活存、交易、信用卡帳單與即時消費",
     connectionMode: "browser_captcha_session",
     scopes: ["all"],
     capabilities: [

@@ -541,6 +541,12 @@ sources/
 │   ├── authorizations.ts
 │   ├── matching.ts
 │   └── repository.ts
+├── taishin/
+│   ├── sync.ts
+│   ├── connector.ts
+│   ├── protocol.ts            # 信用卡與設定協定
+│   ├── deposit-protocol.ts    # 臺外幣活存查詢與正規化
+│   └── authorizations.ts      # 跨次授權配對與舊版已入帳 ID 相容
 ├── einvoice/
 │   ├── sync.ts                # 電子發票 Queue 分段同步
 │   ├── protocol.ts
@@ -575,6 +581,8 @@ sources/
 | `transaction-merge.ts`、`card-reconciliation.ts` | 共用舊交易合併與單卡摘要帳戶修復；保留使用者偏好、分類與發票關聯。                                                                         |
 
 Worker 的 `sources/<connectorId>/sync.ts` 負責設定解密、connector 呼叫與同步資料寫入；單次銀行流程也處理互動式 challenge，override 型別與來源 colocate。`ctbc/authorizations.ts` 管信用卡授權合併，`hncb/repository.ts` 管華南舊交易／帳戶修復，`nextbank/deposits.ts` 與 `obank/time-deposits.ts` 管存款生命週期。共用同步管理留在 `features/sync`，來源之間共用的外部取資料工具留在 `sources` 根目錄。
+
+台新由 `deposit-protocol.ts` 查詢臺外幣活存，與信用卡完整授權／未出帳／帳單合併後交給共用 mapper。`taishin/authorizations.ts` 只配對同卡、同消費日、同幣別同額及可確認店名的唯一授權與入帳關係；原 pending 列持續保存，以共用可見性規則排除重複計算。來源 `sync.ts` 將配對、偏好與發票移轉、canonical 帳戶關聯、金融資料 promotion 及 cursor 放在同一 D1 batch，並以既有同步鎖及原憑證版本保護。銀行協定與真實帳戶驗收限制見連接器文件。
 
 各來源直接引用同一來源目錄的 protocol／adapter，以及 `features/sync` 的共用 record mapper、persistence，不經由 `manual-sync.ts` 匯出，也不互相依賴其他來源。電子發票與集保的 `sync.ts`／`run-repository.ts` 管理 durable Queue 流程，集保不再保留另一套單次同步實作。目錄調整不改變驗證、session、cursor 與 D1 promotion／finalize 的原子邊界。
 

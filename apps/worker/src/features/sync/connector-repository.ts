@@ -143,6 +143,7 @@ const DIRECT_DEPOSIT_CONNECTOR_IDS = [
   "esun",
   "cathaybk",
   "sinopac",
+  "taishin",
   "ctbc",
   "skbank",
   "obank",
