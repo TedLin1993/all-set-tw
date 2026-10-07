@@ -1,5 +1,5 @@
 import type { SyncWriteRecord } from "../../features/sync/persistence";
-import { taishinMerchantNamesMatch, normalizeMerchantName } from "./protocol";
+import { normalizeMerchantName } from "./protocol";
 
 type CardRow = {
   id: string;
@@ -14,43 +14,30 @@ type CardRow = {
   matched_transaction_id: string | null;
 };
 
-function cardDetails(row: CardRow) {
+function cardLast4(row: CardRow) {
   try {
     const raw = JSON.parse(row.raw_payload || "{}") as Record<string, unknown>;
-    const last4 =
-      typeof raw.cardLast4 === "string" && /^\d{4}$/.test(raw.cardLast4)
-        ? raw.cardLast4
-        : undefined;
-    return {
-      last4,
-      identityDescription:
-        typeof raw.identityDescription === "string"
-          ? raw.identityDescription
-          : undefined,
-    };
+    return typeof raw.cardLast4 === "string" && /^\d{4}$/.test(raw.cardLast4)
+      ? raw.cardLast4
+      : undefined;
   } catch {
-    return { last4: undefined, identityDescription: undefined };
+    return undefined;
   }
 }
 
 function samePurchase(left: CardRow, right: CardRow) {
-  const a = cardDetails(left);
-  const b = cardDetails(right);
-  if (
-    !a.last4 ||
-    a.last4 !== b.last4 ||
-    !left.authorized_at ||
-    !right.authorized_at ||
-    left.account_id !== right.account_id ||
-    left.authorized_at.slice(0, 10) !== right.authorized_at.slice(0, 10) ||
-    left.currency !== right.currency ||
-    left.amount !== right.amount
-  )
-    return false;
-  return [left.description, a.identityDescription].some((name) =>
-    [right.description, b.identityDescription].some((other) =>
-      taishinMerchantNamesMatch(name ?? undefined, other ?? undefined),
-    ),
+  const last4 = cardLast4(left);
+  // Authorization names may be a category or company rather than the posted
+  // merchant. Callers require a unique match in both directions.
+  return Boolean(
+    last4 &&
+    last4 === cardLast4(right) &&
+    left.authorized_at &&
+    right.authorized_at &&
+    left.account_id === right.account_id &&
+    left.authorized_at.slice(0, 10) === right.authorized_at.slice(0, 10) &&
+    left.currency === right.currency &&
+    left.amount === right.amount,
   );
 }
 

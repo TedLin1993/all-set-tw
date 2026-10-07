@@ -153,135 +153,174 @@ describe("同步資料完整性（隔離 D1）", () => {
     });
   }
 
-  it("台新授權消失、店名變化及出帳後只計一次，保留時間、分類、排除及發票關係", async () => {
-    await taishinSettings();
-    const pending = parseTaishinCreditCardData(
-      { ...taishinBase, realtime },
-      bankNow,
-    );
-    await writeTaishin(pending);
-    const pendingId = taishinRecords(pending).find(
-      (row) => row.entityType === "bank_transaction",
-    )!.recordKey;
-    await db.batch([
-      db
-        .prepare(
-          "INSERT INTO bank_transaction_preferences VALUES (?, 1, 'created', 'updated')",
-        )
-        .bind(pendingId),
-      db
-        .prepare(
-          "INSERT INTO classification_overrides VALUES ('taishin-category', 'bank_transaction', ?, 'shopping', 'created', 'updated')",
-        )
-        .bind(pendingId),
-      db.prepare(
-        "INSERT INTO invoices (id, connector_id, source_id, invoice_date, amount, created_at, updated_at) VALUES ('invoice', 'einvoice', 'invoice', '2026-10-05', 252, 't', 't')",
-      ),
-      db
-        .prepare(
-          "INSERT INTO invoice_transaction_preferences VALUES ('invoice', ?, 'linked', 'created', 'updated')",
-        )
-        .bind(pendingId),
-    ]);
-    const posted = parseTaishinCreditCardData(
-      { ...taishinBase, unbilled },
-      bankNow,
-    );
-    expect((await writeTaishin(posted)).bankTransactions).toBe(1);
-    const postedId = taishinRecords(posted).find(
-      (row) => row.entityType === "bank_transaction",
-    )!.recordKey;
-    for (const data of [
-      posted,
-      parseTaishinCreditCardData(
-        { ...taishinBase, bills: [taishinBill] },
+  it.each([
+    ["店名縮寫", "DEMO SHOP", "DEMO SHOP TAIPEI", "DEMO SHOP TAIPEI"],
+    [
+      "公司名與分店名",
+      "商業服務",
+      "測試便利商店股份有限公司",
+      "測試便利商店－示範分店A0000 TAIPEI",
+    ],
+    ["店名不明", "", "", "DEMO SHOP TAIPEI"],
+  ])(
+    "台新%s修復已保存的重複，授權消失及出帳後仍保留時間、分類、排除及發票關係",
+    async (
+      _scenario,
+      identityDescription,
+      pendingDescription,
+      postedDescription,
+    ) => {
+      await taishinSettings();
+      const authorization = structuredClone(realtime);
+      authorization.value.fmtRealTxListMap[0].txlist[0][2] =
+        identityDescription;
+      authorization.value.fmtRealTxListMap[0].txlist[0][6] = pendingDescription;
+      const unposted = structuredClone(unbilled);
+      unposted.value.unpostedTx["001TWD"].data[0].txlist[0][2] =
+        postedDescription;
+      const statement = structuredClone(taishinBill);
+      statement.value.newAcctDetailList[0].detail[0].showOutDesc =
+        postedDescription;
+      const pending = parseTaishinCreditCardData(
+        { ...taishinBase, realtime: authorization },
         bankNow,
-      ),
-      pending,
-    ])
-      expect((await writeTaishin(data)).bankTransactions).toBe(0);
-    const visible = await listBankTransactions(db, 20);
-    expect(visible).toHaveLength(1);
-    expect(visible[0]).toMatchObject({
-      id: postedId,
-      amount: -252,
-      currency: "TWD",
-      status: "posted",
-      authorizedAt: "2026-10-05T09:15:30+08:00",
-      postedDate: "2026-10-06",
-      calculationPreference: 1,
-    });
-    expect(
-      await db
-        .prepare(
-          "SELECT matched_transaction_id FROM bank_transactions WHERE id = ?",
-        )
-        .bind(pendingId)
-        .first("matched_transaction_id"),
-    ).toBe(postedId);
-    expect(
-      await db
-        .prepare(
-          "SELECT category_id FROM classification_overrides WHERE target_id = ?",
-        )
-        .bind(postedId)
-        .first("category_id"),
-    ).toBe("shopping");
-    expect(
-      await db
-        .prepare(
-          "SELECT transaction_id FROM invoice_transaction_preferences WHERE invoice_id = 'invoice'",
-        )
-        .first("transaction_id"),
-    ).toBe(postedId);
-    expect(
-      await db
-        .prepare("SELECT COUNT(*) AS n FROM bank_transactions")
-        .first("n"),
-    ).toBe(2);
-    expect(
-      (await db.prepare("PRAGMA foreign_key_check").all()).results,
-    ).toEqual([]);
-  });
+      );
+      await writeTaishin(pending);
+      const pendingId = taishinRecords(pending).find(
+        (row) => row.entityType === "bank_transaction",
+      )!.recordKey;
+      await db.batch([
+        db
+          .prepare(
+            "INSERT INTO bank_transaction_preferences VALUES (?, 1, 'created', 'updated')",
+          )
+          .bind(pendingId),
+        db
+          .prepare(
+            "INSERT INTO classification_overrides VALUES ('taishin-category', 'bank_transaction', ?, 'shopping', 'created', 'updated')",
+          )
+          .bind(pendingId),
+        db.prepare(
+          "INSERT INTO invoices (id, connector_id, source_id, invoice_date, amount, created_at, updated_at) VALUES ('invoice', 'einvoice', 'invoice', '2026-10-05', 252, 't', 't')",
+        ),
+        db
+          .prepare(
+            "INSERT INTO invoice_transaction_preferences VALUES ('invoice', ?, 'linked', 'created', 'updated')",
+          )
+          .bind(pendingId),
+      ]);
+      const posted = parseTaishinCreditCardData(
+        { ...taishinBase, unbilled: unposted },
+        bankNow,
+      );
+      await persistStagedSyncWrite(db, { records: taishinRecords(posted) });
+      expect(await listBankTransactions(db, 20)).toHaveLength(2);
+      expect((await writeTaishin(posted)).bankTransactions).toBe(0);
+      const postedId = taishinRecords(posted).find(
+        (row) => row.entityType === "bank_transaction",
+      )!.recordKey;
+      for (const data of [
+        posted,
+        parseTaishinCreditCardData(
+          { ...taishinBase, bills: [statement] },
+          bankNow,
+        ),
+        pending,
+      ])
+        expect((await writeTaishin(data)).bankTransactions).toBe(0);
+      const visible = await listBankTransactions(db, 20);
+      expect(visible).toHaveLength(1);
+      expect(visible[0]).toMatchObject({
+        id: postedId,
+        amount: -252,
+        description: postedDescription,
+        currency: "TWD",
+        status: "posted",
+        authorizedAt: "2026-10-05T09:15:30+08:00",
+        postedDate: "2026-10-06",
+        calculationPreference: 1,
+      });
+      expect(
+        await db
+          .prepare(
+            "SELECT matched_transaction_id FROM bank_transactions WHERE id = ?",
+          )
+          .bind(pendingId)
+          .first("matched_transaction_id"),
+      ).toBe(postedId);
+      expect(
+        await db
+          .prepare(
+            "SELECT category_id FROM classification_overrides WHERE target_id = ?",
+          )
+          .bind(postedId)
+          .first("category_id"),
+      ).toBe("shopping");
+      expect(
+        await db
+          .prepare(
+            "SELECT transaction_id FROM invoice_transaction_preferences WHERE invoice_id = 'invoice'",
+          )
+          .first("transaction_id"),
+      ).toBe(postedId);
+      expect(
+        await db
+          .prepare("SELECT COUNT(*) AS n FROM bank_transactions")
+          .first("n"),
+      ).toBe(2);
+      expect(
+        (await db.prepare("PRAGMA foreign_key_check").all()).results,
+      ).toEqual([]);
+    },
+  );
 
   it.each([
     "重複授權",
+    "重複入帳",
     "卡片不明",
-    "店名不明",
     "不同卡",
+    "消費日不明",
     "不同消費日",
+    "不同金額",
     "不同幣別",
     "不同方向",
   ])("台新不強配%s", async (scenario) => {
     await taishinSettings();
     const authorization = structuredClone(realtime);
-    if (scenario === "重複授權")
-      authorization.value.fmtRealTxListMap[0].txlist.push([
-        ...authorization.value.fmtRealTxListMap[0].txlist[0],
-      ]);
+    if (scenario === "重複授權") {
+      const duplicate = [...authorization.value.fmtRealTxListMap[0].txlist[0]];
+      duplicate[2] = "OTHER SHOP";
+      duplicate[6] = "OTHER SHOP";
+      authorization.value.fmtRealTxListMap[0].txlist.push(duplicate);
+    }
     if (scenario === "卡片不明")
       authorization.value.fmtRealTxListMap[0].cardname = "無卡號";
-    if (scenario === "店名不明") {
-      authorization.value.fmtRealTxListMap[0].txlist[0][2] = "";
-      authorization.value.fmtRealTxListMap[0].txlist[0][6] = "";
-    }
     await writeTaishin(
       parseTaishinCreditCardData(
         { ...taishinBase, realtime: authorization },
         bankNow,
       ),
     );
+    const unposted = structuredClone(unbilled);
+    if (scenario === "重複入帳") {
+      const duplicate = [
+        ...unposted.value.unpostedTx["001TWD"].data[0].txlist[0],
+      ];
+      duplicate[2] = "OTHER SHOP";
+      unposted.value.unpostedTx["001TWD"].data[0].txlist.push(duplicate);
+    }
     const incoming = parseTaishinCreditCardData(
-      { ...taishinBase, unbilled },
+      { ...taishinBase, unbilled: unposted },
       bankNow,
     );
     if (scenario === "不同卡")
       incoming.bankTransactions[0].raw = { cardLast4: "5678" };
-    if (scenario === "店名不明")
-      incoming.bankTransactions[0].description = "台新信用卡交易";
+    if (scenario === "消費日不明")
+      incoming.bankTransactions[0].authorizedAt = undefined;
     if (scenario === "不同消費日")
       incoming.bankTransactions[0].authorizedAt = "2026-10-04";
     if (scenario === "不同幣別") incoming.bankTransactions[0].currency = "USD";
+    if (scenario === "不同金額") incoming.bankTransactions[0].amount = -253;
     if (scenario === "不同方向") incoming.bankTransactions[0].amount = 252;
     await writeTaishin(incoming);
     expect(
@@ -291,6 +330,9 @@ describe("同步資料完整性（隔離 D1）", () => {
         )
         .first("n"),
     ).toBe(0);
+    expect(await listBankTransactions(db, 20)).toHaveLength(
+      scenario.startsWith("重複") ? 3 : 2,
+    );
   });
 
   it("台新正式交易已有決定時保留分類、排除與發票衝突，不覆寫或重新分配關係", async () => {
