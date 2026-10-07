@@ -3,6 +3,8 @@ import {
   BrowserRunCapacityError,
   launchBrowserWithRetry,
   connectBrowserWithCancellation,
+  prepareBrowserLoginWithRetry,
+  closeBrowserSession,
 } from "../browser.js";
 import puppeteer, {
   type Browser,
@@ -187,23 +189,19 @@ export function createTaishinConnector(
       let page: Page | undefined;
       let authenticated = false;
       try {
-        browserInstance = await acquireBrowser(
-          browser,
-          config.browserSessionId,
-        );
-        stage = "initialize_browser_page";
-        const pages = await browserInstance.pages();
-        page = pages[0] ?? (await browserInstance.newPage());
-        stage = "configure_browser_page";
-        // Reconnecting creates a new Puppeteer emulation manager. Setting
-        // isMobile again reloads the preserved page and loses the CAPTCHA form.
-        if (!(config.browserSessionId && config.captcha)) {
-          await configurePage(page);
-        }
         let loggedIn = false;
-
-        let pageContext: BrowserPage = page;
+        let initialCapture:
+          Awaited<ReturnType<typeof openLoginAndCaptureCaptcha>> | undefined;
+        let pageContext: BrowserPage;
         if (config.browserSessionId && config.captcha) {
+          browserInstance = await acquireBrowser(
+            browser,
+            config.browserSessionId,
+          );
+          stage = "initialize_browser_page";
+          const pages = await browserInstance.pages();
+          page = pages[0] ?? (await browserInstance.newPage());
+          // Reapplying mobile emulation reloads the preserved CAPTCHA form.
           stage = "login";
           if (
             !config.browserSessionExpiresAt ||
@@ -217,15 +215,54 @@ export function createTaishinConnector(
           pageContext = await findLoginFrame(page);
           await submitLogin(pageContext, config.captcha, "manual", page);
           loggedIn = true;
-        } else if (config.sessionCookies) {
-          stage = "restore_session";
-          await importCookies(page, config.sessionCookies);
-          await page.goto(RWD_URL, {
-            waitUntil: "domcontentloaded",
-            timeout: 30_000,
+        } else {
+          const prepared = await prepareBrowserLoginWithRetry({
+            binding: browser,
+            connectorId: "taishin",
+            isRetryable: (error) =>
+              error instanceof TaishinCaptchaUnavailableError,
+            prepare: async (browser, observePage, signal, attempt) => {
+              stage = "initialize_browser_page";
+              const pages = await browser.pages();
+              const page = pages[0] ?? (await browser.newPage());
+              observePage(page);
+              stage = "configure_browser_page";
+              await configurePage(page);
+              let frame: BrowserPage = page;
+              if (attempt === 1 && config.sessionCookies) {
+                stage = "restore_session";
+                await importCookies(page, config.sessionCookies);
+                await page.goto(RWD_URL, {
+                  waitUntil: "domcontentloaded",
+                  timeout: 15_000,
+                });
+                frame = await findLoginFrame(page);
+                if (await hasValidSession(frame))
+                  return { page, frame, loggedIn: true, capture: undefined };
+              }
+              signal.throwIfAborted();
+              stage = "login";
+              if (!recognizeCaptcha)
+                throw new TaishinVerificationRequiredError(
+                  "台新銀行 session 已失效，需要重新登入。",
+                );
+              frame = await openLoginAndFill(page, config);
+              if (await isLoggedIn(frame))
+                return { page, frame, loggedIn: true, capture: undefined };
+              const captcha = await captureCaptcha(frame);
+              return {
+                page,
+                frame,
+                loggedIn: false,
+                capture: { frame, captcha },
+              };
+            },
           });
-          pageContext = await findLoginFrame(page);
-          loggedIn = await hasValidSession(pageContext);
+          browserInstance = prepared.browser;
+          page = prepared.value.page;
+          pageContext = prepared.value.frame;
+          loggedIn = prepared.value.loggedIn;
+          initialCapture = prepared.value.capture;
         }
 
         if (!loggedIn) {
@@ -235,7 +272,12 @@ export function createTaishinConnector(
               "台新銀行 session 已失效，需要重新登入。",
             );
           }
-          pageContext = await loginWithOcr(page, config, recognizeCaptcha);
+          pageContext = await loginWithOcr(
+            page,
+            config,
+            recognizeCaptcha,
+            initialCapture,
+          );
         }
         authenticated = true;
         await dismissPasswordReminder(pageContext);
@@ -316,7 +358,8 @@ export function createTaishinConnector(
         }
         throw normalized;
       } finally {
-        if (browserInstance) await closeTaishinBrowser(browserInstance);
+        if (browserInstance)
+          await closeTaishinBrowser(browserInstance, browser);
       }
     },
   };
@@ -351,7 +394,7 @@ export async function prepareTaishinCaptcha(
       captchaImage: `data:image/jpeg;base64,${bytesToBase64(captcha.bytes)}`,
     };
   } finally {
-    if (!preserved) await closeTaishinBrowser(browserInstance);
+    if (!preserved) await closeTaishinBrowser(browserInstance, browser);
   }
 }
 
@@ -362,6 +405,7 @@ async function loginWithOcr(
     imageBytes: ArrayBuffer,
     digitCount: number,
   ) => Promise<string | null>,
+  initialCapture?: Awaited<ReturnType<typeof openLoginAndCaptureCaptcha>>,
 ) {
   let ocrAttempts = 0;
   let loginRequests = 0;
@@ -374,7 +418,10 @@ async function loginWithOcr(
     let captchaValid = false;
     let outcome = "failed";
     try {
-      const { frame, captcha } = await openLoginAndCaptureCaptcha(page, config);
+      const capture = initialCapture;
+      initialCapture = undefined;
+      const { frame, captcha } =
+        capture ?? (await openLoginAndCaptureCaptcha(page, config));
       ocrAttempts += 1;
       const answer = await recognizeCaptcha(
         toArrayBuffer(captcha.bytes),
@@ -1421,18 +1468,13 @@ function normalizeTaishinSyncError(error: unknown, stage: TaishinSyncStage) {
   return new TaishinSyncStageError(stage, error);
 }
 
-async function closeTaishinBrowser(browser: Browser) {
-  try {
-    await browser.close();
-  } catch (error) {
-    const message = safeTaishinRuntimeMessage(error);
+async function closeTaishinBrowser(browser: Browser, binding: Fetcher) {
+  if (!(await closeBrowserSession(binding, browser))) {
     console.warn(
       JSON.stringify({
         event: "taishin_browser_cleanup_failed",
         connectorId: "taishin",
         stage: "close_browser",
-        errorName: error instanceof Error ? error.name : typeof error,
-        message: message || "瀏覽器關閉失敗，但未取得錯誤原因。",
       }),
     );
   }

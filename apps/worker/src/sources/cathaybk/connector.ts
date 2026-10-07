@@ -1,7 +1,8 @@
 import type { SyncResult } from "../types";
 import {
-  launchBrowserWithRetry,
   connectBrowserWithCancellation,
+  prepareBrowserLoginWithRetry,
+  closeBrowserSession,
 } from "../browser.js";
 import puppeteer, {
   type Browser,
@@ -174,15 +175,29 @@ async function scrapeWithBrowser(
         ? "[cathaybk] reconnecting to verification session"
         : "[cathaybk] launching browser",
     );
-    b = reconnecting
-      ? await connectCathayBrowser(browserBinding, config.browserSessionId!)
-      : await launchBrowserWithRetry(browserBinding, {
-          keep_alive: OTP_SESSION_TTL_MS,
-        });
-    const pages = await b.pages();
-    page = pages[0] ?? (await b.newPage());
-
-    await page.setViewport({ width: 1280, height: 800 });
+    if (reconnecting) {
+      b = await connectCathayBrowser(browserBinding, config.browserSessionId!);
+      const pages = await b.pages();
+      page = pages[0] ?? (await b.newPage());
+      await page.setViewport({ width: 1280, height: 800 });
+    } else {
+      const prepared = await prepareBrowserLoginWithRetry({
+        binding: browserBinding,
+        connectorId: "cathaybk",
+        launchOptions: { keep_alive: OTP_SESSION_TTL_MS },
+        prepare: async (browser, observePage) => {
+          const pages = await browser.pages();
+          const page = pages[0] ?? (await browser.newPage());
+          observePage(page);
+          await page.setViewport({ width: 1280, height: 800 });
+          await restoreCathayTrustedState(page, config);
+          await prepareCathayLoginPage(page);
+          return page;
+        },
+      });
+      b = prepared.browser;
+      page = prepared.value;
+    }
     phase = "login";
 
     if (config.browserSessionId) {
@@ -215,12 +230,8 @@ async function scrapeWithBrowser(
         throw error;
       }
     } else {
-      const restoredState = await restoreCathayTrustedState(page, config);
-      if (restoredState) {
-        console.log("[cathaybk] restored trusted browser state");
-      }
       try {
-        await loginCathay(page, config);
+        await loginCathay(page, config, true);
       } catch (error) {
         if (!(error instanceof CathayVerificationRequiredError)) throw error;
         const sessionId = b.sessionId();
@@ -290,7 +301,7 @@ async function scrapeWithBrowser(
           await logoutCathay(page);
         }
       } finally {
-        await b.close();
+        await closeBrowserSession(browserBinding, b);
       }
     }
   }
@@ -1008,13 +1019,25 @@ export function isCathayAuthenticatedUrl(value: string) {
   }
 }
 
+async function prepareCathayLoginPage(page: CathayLoginPage) {
+  await page.goto(LOGIN_URL, {
+    waitUntil: "domcontentloaded",
+    timeout: 15_000,
+  });
+  await dismissInterstitialIfPresent(page);
+  await dismissCathaySystemMessageIfPresent(page);
+  for (const selector of ["#CustID", "#UserIdKeyin", "#PasswordKeyin"]) {
+    await page.waitForSelector(selector, { timeout: 15_000 });
+  }
+}
+
 export async function loginCathay(
   page: CathayLoginPage,
   config: CathaybkConfig,
+  prepared = false,
 ) {
   attachCathaySafeDiagnostics(page, config);
-  console.log("[cathaybk] navigating to login page");
-  await page.goto(LOGIN_URL, { waitUntil: "networkidle2", timeout: 60000 });
+  if (!prepared) await prepareCathayLoginPage(page);
 
   // ponytail: bank shows "未完成正常的登出程序" both on page load AND after clicking login
   // if a prior session didn't log out — retry up to 3 times

@@ -1,5 +1,8 @@
 import type { SyncResult } from "../types";
-import { launchBrowserWithRetry } from "../browser.js";
+import {
+  prepareBrowserLoginWithRetry,
+  closeBrowserSession,
+} from "../browser.js";
 import {
   buildEsunCreditTimelinePages,
   collectEsunBrowserSnapshot,
@@ -113,29 +116,43 @@ async function loginWithBrowser(
   config: EsunConfig,
 ) {
   console.log("[esun debug] launching browser");
-  const browser = await launchBrowserWithRetry(browserBinding);
-  const page = await browser.newPage();
-  let txnDupToken: string | undefined;
+  const { browser, value: prepared } = await prepareBrowserLoginWithRetry({
+    binding: browserBinding,
+    connectorId: "esun",
+    prepare: async (browser, observePage) => {
+      const page = await browser.newPage();
+      observePage(page);
+      const state: { txnDupToken?: string } = {};
+      page.on("response", (response) => {
+        const token = response.headers().txnduptoken;
+        if (token) state.txnDupToken = token;
+      });
+      await page.setViewport({ width: 390, height: 844, isMobile: true });
+      await page.setUserAgent(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/147.0.0.0 Mobile/15E148 Safari/604.1",
+      );
+      await page.goto(PORTAL_URL, {
+        waitUntil: "domcontentloaded",
+        timeout: 15_000,
+      });
+      await page.waitForSelector('input[name="id"]', { timeout: 15_000 });
+      await page.waitForSelector('input[name="userName"]', { timeout: 15_000 });
+      await page.waitForSelector('input[name="pxssword"]', { timeout: 15_000 });
+      await page.waitForSelector("button.btn-main-fill", { timeout: 15_000 });
+      return { page, state };
+    },
+  });
+  const { page, state } = prepared;
 
   try {
-    page.on("response", (response) => {
-      const token = response.headers().txnduptoken;
-      if (token) txnDupToken = token;
-    });
-    await page.setViewport({ width: 390, height: 844, isMobile: true });
-    await page.setUserAgent(
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/147.0.0.0 Mobile/15E148 Safari/604.1",
-    );
-    console.log(`[esun debug] navigating to ${PORTAL_URL}`);
-    await page.goto(PORTAL_URL, { waitUntil: "networkidle0", timeout: 30000 });
     console.log("[esun debug] login page opened");
     await loginMobilePage(page, config);
     console.log("[esun debug] login succeeded, collecting account data");
     const collected = await collectEsunBrowserSnapshot(browser, page);
     client.snapshot = collected.snapshot;
     client.rememberBrowserSession(collected.session);
-    if (txnDupToken) {
-      client.setTxnDupToken(txnDupToken);
+    if (state.txnDupToken) {
+      client.setTxnDupToken(state.txnDupToken);
     }
     console.log("[esun debug] browser login complete");
   } catch (error) {
@@ -147,7 +164,7 @@ async function loginWithBrowser(
     );
     throw error;
   } finally {
-    await browser.close();
+    await closeBrowserSession(browserBinding, browser);
   }
 }
 
