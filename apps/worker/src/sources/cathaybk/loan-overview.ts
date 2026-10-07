@@ -1,6 +1,7 @@
 // Pure DOM extraction and validation for Cathay's loan overview page.
 // Diagnostics intentionally contain counts/statuses only, never loan values.
-const CATHAY_LOAN_STAGE_LOGGING_ENABLED = true;
+// Enable temporarily when debugging Cathay loan page changes.
+const CATHAY_LOAN_DIAGNOSTICS_ENABLED = false;
 
 export type CathayLoanRecord = {
   accountNumber: string;
@@ -156,7 +157,7 @@ export function logCathayLoanStage<T extends CathayLoanDiagnosticStage>(
   outcome: CathayLoanDiagnosticOutcome,
   fields: CathayLoanDiagnosticFields[T],
 ) {
-  if (!CATHAY_LOAN_STAGE_LOGGING_ENABLED) return;
+  if (!CATHAY_LOAN_DIAGNOSTICS_ENABLED) return;
 
   const allowedKeys = CATHAY_LOAN_DIAGNOSTIC_FIELD_KEYS[stage];
   const safeFields = Object.fromEntries(
@@ -674,6 +675,7 @@ export function parseCathayLoanOverview(
     checks?: Record<string, boolean>,
     loanFieldStatuses?: LoanFieldSummary[],
   ) => {
+    if (!CATHAY_LOAN_DIAGNOSTICS_ENABLED) return;
     console.log(
       JSON.stringify({
         event: "cathaybk_loan_parse_failure",
@@ -931,7 +933,7 @@ export function parseCathayLoanOverview(
       firstFailure.checks,
       loggedLoanFieldStatuses,
     );
-    if (omittedLoanStatusCount > 0) {
+    if (CATHAY_LOAN_DIAGNOSTICS_ENABLED && omittedLoanStatusCount > 0) {
       console.log(
         JSON.stringify({
           event: "cathaybk_loan_parse_failure_omitted",
@@ -954,17 +956,19 @@ export function parseCathayLoanOverview(
     },
   );
 
-  console.log(
-    JSON.stringify({
-      event: "cathaybk_loan_parse_success",
-      detectedCardCount: extraction.loanAccounts.length,
-      parsedCardCount: parsedLoanRecords.length,
-      cardFieldStatuses: loggedLoanFieldStatuses,
-      ...(omittedLoanStatusCount > 0
-        ? { omittedCardStatusCount: omittedLoanStatusCount }
-        : {}),
-    }),
-  );
+  if (CATHAY_LOAN_DIAGNOSTICS_ENABLED) {
+    console.log(
+      JSON.stringify({
+        event: "cathaybk_loan_parse_success",
+        detectedCardCount: extraction.loanAccounts.length,
+        parsedCardCount: parsedLoanRecords.length,
+        cardFieldStatuses: loggedLoanFieldStatuses,
+        ...(omittedLoanStatusCount > 0
+          ? { omittedCardStatusCount: omittedLoanStatusCount }
+          : {}),
+      }),
+    );
+  }
 
   return parsedLoanRecords.map(({ loanRecord }) => loanRecord);
 }

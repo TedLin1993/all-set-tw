@@ -252,59 +252,36 @@ describe("Cathay loan overview DOM extraction", () => {
     },
   );
 
+  it("does not emit loan diagnostics by default", () => {
+    const extraction = extractHtml(fullLayoutHtml);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      expect(parseCathayLoanOverview(extraction)).toHaveLength(5);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("reports missing optional fields safely while retaining the core loan records", () => {
     const extraction = extractHtml(optionalMissingLayoutHtml);
-    const sensitiveValues = sensitiveLoanValues(extraction);
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
     try {
       const loans = parseCathayLoanOverview(extraction);
-      const events = log.mock.calls.map(
-        ([value]) => JSON.parse(String(value)) as Record<string, unknown>,
-      );
-      const parseSuccess = events.find(
-        (event) => event.event === "cathaybk_loan_parse_success",
-      );
-      const fieldValidation = events.find(
-        (event) =>
-          event.event === "cathaybk_loan_stage" &&
-          event.stage === "field_validation",
-      );
 
       expect(loans).toHaveLength(5);
-      expect(fieldValidation).toMatchObject({
-        outcome: "success",
-        extractedCardCount: 5,
-        validatedCardCount: 5,
-        fieldFailureCount: 0,
-        optionalFieldMissingCount: 15,
-        optionalFieldInvalidCount: 0,
-      });
-      expect(parseSuccess?.cardFieldStatuses).toEqual(
-        Array.from({ length: 5 }, (_, index) => ({
-          cardIndex: index + 1,
-          accountLast3Status: "available",
-          paymentAmountDigitCount: 5,
-          paymentAmountSuffixStatus: "available",
-          balanceDigitCount: 6,
-          balanceSuffixStatus: "available",
-          fields: {
-            category: "missing",
-            accountNumber: "valid",
-            interestRate: "missing",
-            paymentAmount: "valid",
-            dueDateOrStatus: "valid",
-            balance: "valid",
-            installments: "missing",
-          },
-        })),
-      );
-
-      const serialized = JSON.stringify(events);
-      for (const value of sensitiveValues) {
-        expect(serialized).not.toContain(value);
-      }
-      expect(serialized).not.toContain("L0101_LoanInqDetail");
+      expect(
+        loans.every(
+          (loan) =>
+            !Object.hasOwn(loan, "loanCategory") &&
+            !Object.hasOwn(loan, "interestRate") &&
+            !Object.hasOwn(loan, "installmentsPaid") &&
+            !Object.hasOwn(loan, "installmentsTotal"),
+        ),
+      ).toBe(true);
+      expect(log).not.toHaveBeenCalled();
     } finally {
       log.mockRestore();
     }
@@ -319,54 +296,25 @@ describe("Cathay loan overview DOM extraction", () => {
 
     try {
       const loans = parseCathayLoanOverview(extraction);
-      const events = log.mock.calls.map(
-        ([value]) => JSON.parse(String(value)) as Record<string, unknown>,
-      );
-      const fieldValidation = events.find(
-        (event) =>
-          event.event === "cathaybk_loan_stage" &&
-          event.stage === "field_validation",
-      );
-      const firstParseFieldStatus = (
-        events.find((event) => event.event === "cathaybk_loan_parse_success")
-          ?.cardFieldStatuses as Array<{ fields: Record<string, string> }>
-      )[0];
 
       expect(loans).toHaveLength(5);
       expect(loans[0]).not.toHaveProperty("loanCategory");
       expect(loans[0]).not.toHaveProperty("interestRate");
       expect(loans[0]).not.toHaveProperty("installmentsPaid");
-      expect(fieldValidation).toMatchObject({
-        outcome: "success",
-        fieldFailureCount: 0,
-        optionalFieldMissingCount: 0,
-        optionalFieldInvalidCount: 3,
-      });
-      expect(firstParseFieldStatus.fields).toMatchObject({
-        category: "invalid",
-        interestRate: "invalid",
-        installments: "invalid",
-      });
+      expect(log).not.toHaveBeenCalled();
     } finally {
       log.mockRestore();
     }
   });
 
   it.each([
-    {
-      field: "paymentAmount" as const,
-      reason: "paymentAmountParse",
-    },
-    {
-      field: "paymentDueOrStatus" as const,
-      reason: "paymentDueOrStatusParse",
-    },
-    { field: "balance" as const, reason: "balanceAmountParse" },
+    { field: "paymentAmount" as const },
+    { field: "paymentDueOrStatus" as const },
+    { field: "balance" as const },
   ])(
-    "rejects a missing core $field without logging loan values",
-    ({ field, reason }) => {
+    "rejects a missing core $field without emitting diagnostics",
+    ({ field }) => {
       const extraction = extractHtml(fullLayoutHtml);
-      const sensitiveValues = sensitiveLoanValues(extraction);
       extraction.loanAccounts[0]![field] = null;
       const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -374,17 +322,7 @@ describe("Cathay loan overview DOM extraction", () => {
         expect(() => parseCathayLoanOverview(extraction)).toThrow(
           "Cathay loan overview card could not be parsed.",
         );
-        const events = log.mock.calls.map(
-          ([value]) => JSON.parse(String(value)) as Record<string, unknown>,
-        );
-        const failure = events.find(
-          (event) => event.event === "cathaybk_loan_parse_failure",
-        );
-        expect(failure?.reasonCodes).toContain(reason);
-        const serialized = JSON.stringify(events);
-        for (const value of sensitiveValues) {
-          expect(serialized).not.toContain(value);
-        }
+        expect(log).not.toHaveBeenCalled();
       } finally {
         log.mockRestore();
       }
