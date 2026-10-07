@@ -11,14 +11,14 @@
 - Tables：31
 - Explicit indexes：44
 - Other objects：0
-- Migrations：49
+- Migrations：51
 
 ## Tables
 
 | Table | 用途 | Columns | Foreign keys | Indexes |
 | --- | --- | ---: | ---: | ---: |
-| [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 17 | 1 | 1 |
-| [`bank_balance_snapshots`](#bank_balance_snapshots) | 帳戶在特定時間點的餘額快照，供資產總值與歷史圖表計算。 | 15 | 1 | 2 |
+| [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 19 | 1 | 1 |
+| [`bank_balance_snapshots`](#bank_balance_snapshots) | 帳戶在特定時間點的餘額快照，供資產總值與歷史圖表計算。 | 19 | 1 | 2 |
 | [`bank_transaction_preferences`](#bank_transaction_preferences) | 使用者對銀行交易計算方式的個別偏好。 | 4 | 1 | 1 |
 | [`bank_transactions`](#bank_transactions) | 銀行帳戶、信用卡與其他存款型連接器同步回來的交易明細。 | 17 | 3 | 7 |
 | [`classification_categories`](#classification_categories) | 交易與發票使用的分類字典，包含系統預設分類與使用者分類。 | 6 | 0 | 1 |
@@ -39,7 +39,7 @@
 | [`notification_preferences`](#notification_preferences) | 此單一部署的同步推播偏好設定。 | 5 | 0 | 0 |
 | [`push_subscriptions`](#push_subscriptions) | 瀏覽器 Web Push 裝置訂閱資料。 | 6 | 0 | 0 |
 | [`scheduled_sync_batch_results`](#scheduled_sync_batch_results) | 預設排程同步批次中各工作的完成結果。 | 9 | 1 | 0 |
-| [`scheduled_sync_batches`](#scheduled_sync_batches) | 追蹤預設排程中需彙總推播的一輪同步工作。 | 12 | 0 | 2 |
+| [`scheduled_sync_batches`](#scheduled_sync_batches) | 各排程同步批次的狀態與同步前後資產、信用卡及貸款負債快照。 | 14 | 0 | 2 |
 | [`sync_activity_changes`](#sync_activity_changes) | 與金融資料 promotion 同一 transaction 保存的新增紀錄與入帳事件。 | 5 | 1 | 0 |
 | [`sync_activity_details`](#sync_activity_details) | 報告完成時沿用活動配對規則產生的活動展示快照。 | 3 | 1 | 0 |
 | [`sync_activity_runs`](#sync_activity_runs) | 同步執行與排程報告的明確關聯，涵蓋原始同步及成功的手動補救。 | 7 | 1 | 1 |
@@ -75,6 +75,8 @@
 | 15 | `opened_date` | 銀行提供的定存起息日；來源未提供時為 NULL。 | TEXT | YES | — | — | — |
 | 16 | `maturity_date` | 銀行提供的定存到期日；不作為自動結清的判定條件。 | TEXT | YES | — | — | — |
 | 17 | `inactive_at` | 同步確認來源不再列出定存的觀測時間，不是銀行實際結清日；有效帳戶為 NULL。 | TEXT | YES | — | — | — |
+| 18 | `loan_category` | 貸款類別，例如 housing（房屋貸款）或 other（其他貸款）。 | TEXT | YES | — | — | — |
+| 19 | `loan_interest_rate` | 貸款年利率百分比；銀行未提供或無法解析時為 NULL。 | REAL | YES | — | — | — |
 
 #### Foreign keys
 
@@ -108,7 +110,7 @@ CREATE TABLE "bank_accounts" (
   bank_code TEXT,
   account_last4 TEXT,
   canonical_account_id TEXT REFERENCES "bank_accounts" (id),
-  credit_limit INTEGER, opened_date TEXT, maturity_date TEXT, inactive_at TEXT,
+  credit_limit INTEGER, opened_date TEXT, maturity_date TEXT, inactive_at TEXT, loan_category TEXT CHECK (loan_category IS NULL OR loan_category IN ('housing', 'other')), loan_interest_rate REAL,
   UNIQUE (connector_id, source_id)
 )
 ```
@@ -137,6 +139,10 @@ CREATE TABLE "bank_accounts" (
 | 13 | `payment_due_date` | 信用卡帳單繳款期限。 | TEXT | YES | — | — | — |
 | 14 | `no_payment_needed` | 是否標示為本期不需要繳款的旗標。 | INTEGER | YES | — | — | — |
 | 15 | `statement_closing_date` | 信用卡帳單結帳日。 | TEXT | YES | — | — | — |
+| 16 | `loan_payment_amount` | 貸款本期應繳金額；來源未提供時為 NULL。 | INTEGER | YES | — | — | — |
+| 17 | `loan_payment_status` | 貸款扣款狀態，例如 scheduled 或 collection_incomplete。 | TEXT | YES | — | — | — |
+| 18 | `loan_installments_paid` | 貸款已繳期數；來源未提供時為 NULL。 | INTEGER | YES | — | — | — |
+| 19 | `loan_installments_total` | 貸款總期數；來源未提供時為 NULL。 | INTEGER | YES | — | — | — |
 
 #### Foreign keys
 
@@ -169,7 +175,7 @@ CREATE TABLE "bank_balance_snapshots" (
   statement_balance INTEGER,
   payment_due_date TEXT,
   no_payment_needed INTEGER,
-  statement_closing_date TEXT,
+  statement_closing_date TEXT, loan_payment_amount INTEGER, loan_payment_status TEXT CHECK (loan_payment_status IS NULL OR loan_payment_status IN ('scheduled', 'collection_incomplete')), loan_installments_paid INTEGER, loan_installments_total INTEGER,
   UNIQUE (connector_id, account_id, source_id)
 )
 ```
@@ -1169,7 +1175,7 @@ CREATE TABLE scheduled_sync_batch_results (
 
 ### `scheduled_sync_batches`
 
-> 用途：追蹤預設排程中需彙總推播的一輪同步工作。
+> 用途：各排程同步批次的狀態與同步前後資產、信用卡及貸款負債快照。
 > 注意：同一 schedule_key 同時只保留一個未 claim 批次；建立時固定整輪成員，所有成員完成或略過後只允許一個 scheduler claim 推播。建立新輪次時會清理超過 30 天的已結案批次。
 
 #### Columns
@@ -1188,6 +1194,8 @@ CREATE TABLE scheduled_sync_batch_results (
 | 10 | `assets_after_twd` | 批次完成後以新臺幣換算的資產總額。 | INTEGER | YES | — | — | — |
 | 11 | `credit_card_debt_after_twd` | 批次完成後以新臺幣換算的信用卡負債總額。 | INTEGER | YES | — | — | — |
 | 12 | `missing_currencies_after` | 批次完成後缺少匯率、以新台幣 0 元計值的幣別 JSON 陣列。 | TEXT | NO | '[]' | — | — |
+| 13 | `loan_debt_before_twd` | 批次開始前以新臺幣換算的貸款負債總額；遷移前建立的報告為 NULL。 | INTEGER | YES | — | — | — |
+| 14 | `loan_debt_after_twd` | 批次完成後以新臺幣換算的貸款負債總額；遷移前建立的報告為 NULL。 | INTEGER | YES | — | — | — |
 
 #### Foreign keys
 
@@ -1208,7 +1216,7 @@ CREATE TABLE "scheduled_sync_batches" (
   schedule_key TEXT NOT NULL DEFAULT 'default' CHECK (schedule_key = 'default'),
   notification_claimed_at TEXT,
   created_at TEXT NOT NULL
-, completed_at TEXT, is_baseline INTEGER NOT NULL DEFAULT 0, assets_before_twd INTEGER, credit_card_debt_before_twd INTEGER, missing_currencies_before TEXT NOT NULL DEFAULT '[]', assets_after_twd INTEGER, credit_card_debt_after_twd INTEGER, missing_currencies_after TEXT NOT NULL DEFAULT '[]')
+, completed_at TEXT, is_baseline INTEGER NOT NULL DEFAULT 0, assets_before_twd INTEGER, credit_card_debt_before_twd INTEGER, missing_currencies_before TEXT NOT NULL DEFAULT '[]', assets_after_twd INTEGER, credit_card_debt_after_twd INTEGER, missing_currencies_after TEXT NOT NULL DEFAULT '[]', loan_debt_before_twd INTEGER, loan_debt_after_twd INTEGER)
 ```
 
 ### `sync_activity_changes`
@@ -1683,6 +1691,8 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0049_megabank_sync_job.sql`](../apps/worker/migrations/0049_megabank_sync_job.sql)
 - [`0050_nextbank_sync_job.sql`](../apps/worker/migrations/0050_nextbank_sync_job.sql)
 - [`0051_rakuten_sync_job.sql`](../apps/worker/migrations/0051_rakuten_sync_job.sql)
+- [`0052_bank_loan_overview.sql`](../apps/worker/migrations/0052_bank_loan_overview.sql)
+- [`0053_scheduled_sync_loan_debt.sql`](../apps/worker/migrations/0053_scheduled_sync_loan_debt.sql)
 
 ## 程式碼導覽
 

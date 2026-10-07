@@ -86,6 +86,8 @@ export function bankAccountRecord(
       institution_name: account.institutionName ?? null,
       account_name: account.accountName ?? null,
       account_type: account.accountType ?? null,
+      loan_category: account.loanCategory ?? null,
+      loan_interest_rate: account.loanInterestRate ?? null,
       currency: account.currency || "TWD",
       credit_limit: account.creditLimit ?? null,
       opened_date: account.openedDate ?? null,
@@ -120,6 +122,10 @@ export function bankBalanceSnapshotRecord(
       statement_balance: snapshot.statementBalance ?? null,
       payment_due_date: snapshot.paymentDueDate ?? null,
       statement_closing_date: snapshot.statementClosingDate ?? null,
+      loan_payment_amount: snapshot.loanPaymentAmount ?? null,
+      loan_payment_status: snapshot.loanPaymentStatus ?? null,
+      loan_installments_paid: snapshot.loanInstallmentsPaid ?? null,
+      loan_installments_total: snapshot.loanInstallmentsTotal ?? null,
       no_payment_needed:
         snapshot.noPaymentNeeded == null
           ? null

@@ -102,6 +102,52 @@ describe("calculateAssetSummary", () => {
     expect(summary.missingCurrencies).toEqual([]);
   });
 
+  it("separates loan debt from deposits and subtracts it from net worth", () => {
+    const summary = calculateAssetSummary({
+      bank: {
+        accounts: [
+          {
+            id: "cash",
+            connectorId: "cathaybk",
+            sourceId: "cash",
+            institutionName: "國泰世華銀行",
+            accountType: "savings",
+            balance: 80_000,
+            currency: "TWD",
+          },
+          {
+            id: "loan",
+            connectorId: "cathaybk",
+            sourceId: "loan",
+            institutionName: "國泰世華銀行",
+            accountType: "loan",
+            loanCategory: "housing",
+            loanInterestRate: 1.8,
+            balance: -50_000,
+            currency: "TWD",
+            loanPaymentAmount: 12_000,
+            loanInstallmentsPaid: 10,
+            loanInstallmentsTotal: 240,
+          },
+        ],
+        transactions: [],
+      },
+      investments: [],
+      manualAssets: [],
+      rates: [],
+    });
+
+    expect(summary.bankTotal).toBe(80_000);
+    expect(summary.loanDebt).toBe(50_000);
+    expect(summary.netWorth).toBe(30_000);
+    expect(summary.institutionGroups[0]).toMatchObject({
+      accounts: [{ id: "cash" }],
+      loans: [{ id: "loan" }],
+      loanDebtTotalTwd: 50_000,
+      loanCategoryTotals: { housing: 50_000, other: 0 },
+    });
+  });
+
   it("reports currencies omitted from TWD totals when exchange rates are missing", () => {
     const summary = calculateAssetSummary({
       bank: {

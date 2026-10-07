@@ -27,6 +27,12 @@ import {
   parseCathayDepositTransactions,
   parseCathayForeignDeposits,
 } from "./protocol";
+import {
+  extractCathayLoanOverviewDom,
+  logCathayLoanDomDiagnostics,
+  logCathayLoanStage,
+  parseCathayLoanOverview,
+} from "./loan-overview";
 
 const LOGIN_URL = "https://www.cathaybk.com.tw/MyBank/";
 const DEPOSIT_OVERVIEW_URL =
@@ -37,6 +43,8 @@ const CREDIT_CARD_OVERVIEW_URL =
   "https://www.cathaybk.com.tw/OnlineBanking/CQuery/C0101_BillOverview";
 const CREDIT_CARD_BILL_URL =
   "https://www.cathaybk.com.tw/OnlineBanking/CQuery/C0102_BillInq";
+const LOAN_OVERVIEW_URL =
+  "https://www.cathaybk.com.tw/OnlineBanking/LoanInq/L0101_LoanInq";
 
 const API_DEPOSIT_TX = "B_ACCT_Q_TransferDetail";
 const API_FOREIGN_DEPOSIT_OVERVIEW = "R_ACCT_Q_OverView";
@@ -259,6 +267,10 @@ async function scrapeWithBrowser(
     phase = "credit_cards";
     const cards = await scrapeCreditCards(page);
 
+    console.log("[cathaybk] collecting loan accounts");
+    phase = "loans";
+    const loans = await scrapeLoans(page);
+
     phase = "logout";
     const trustedState = await captureCathayTrustedState(page);
     await logoutCathay(page);
@@ -269,11 +281,13 @@ async function scrapeWithBrowser(
         ...deposits.bankAccounts,
         ...foreignDeposits.bankAccounts,
         ...cards.bankAccounts,
+        ...loans.bankAccounts,
       ],
       bankBalanceSnapshots: [
         ...deposits.bankBalanceSnapshots,
         ...foreignDeposits.bankBalanceSnapshots,
         ...cards.bankBalanceSnapshots,
+        ...loans.bankBalanceSnapshots,
       ],
       bankTransactions: [
         ...deposits.bankTransactions,
@@ -1947,6 +1961,124 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
     bankBalanceSnapshots,
     bankTransactions,
     creditCardBills,
+  };
+}
+
+export async function scrapeLoans(page: Page): Promise<Scraped> {
+  try {
+    await page.goto(LOAN_OVERVIEW_URL, {
+      waitUntil: "networkidle2",
+      timeout: 60_000,
+    });
+  } catch (error) {
+    logCathayLoanStage("navigation", "failed", {
+      navigationCompleted: false,
+      logoutDetected: false,
+    });
+    throw error;
+  }
+
+  const logoutDetected = page.url().includes("/logout/");
+  logCathayLoanStage("navigation", logoutDetected ? "failed" : "complete", {
+    navigationCompleted: true,
+    logoutDetected,
+  });
+  if (logoutDetected) {
+    throw new Error("Cathay Bank forced logout on loan overview page.");
+  }
+
+  let headingWaitSatisfied = false;
+  try {
+    await page.waitForFunction(
+      () =>
+        Array.from(
+          document.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading']"),
+        ).some((heading) =>
+          heading.textContent?.replace(/\s+/g, " ").includes("貸款帳戶總覽"),
+        ),
+      { timeout: 15_000 },
+    );
+    headingWaitSatisfied = true;
+  } catch (error) {
+    if (!(error instanceof TimeoutError)) throw error;
+  }
+
+  const extraction = await page.evaluate(extractCathayLoanOverviewDom);
+  logCathayLoanDomDiagnostics(extraction, headingWaitSatisfied);
+  const loanRecords = parseCathayLoanOverview(extraction);
+  const asOfAt = new Date().toISOString();
+  const bankAccounts: Scraped["bankAccounts"] = [];
+  const bankBalanceSnapshots: Scraped["bankBalanceSnapshots"] = [];
+
+  for (const loan of loanRecords) {
+    const sourceId = `loan:cathaybk:${loan.accountNumber}`;
+    const sanitized = {
+      ...(loan.loanCategory ? { category: loan.loanCategory } : {}),
+      accountLast4: loan.accountNumber.slice(-4),
+      ...(loan.interestRate !== undefined
+        ? { interestRate: loan.interestRate }
+        : {}),
+      currentPaymentAmount: loan.currentPaymentAmount,
+      paymentDueDate: loan.paymentDueDate,
+      paymentStatus: loan.paymentStatus,
+      balance: loan.balance,
+      ...(loan.installmentsPaid !== undefined &&
+      loan.installmentsTotal !== undefined
+        ? {
+            installmentsPaid: loan.installmentsPaid,
+            installmentsTotal: loan.installmentsTotal,
+          }
+        : {}),
+      currency: loan.currency,
+    };
+
+    bankAccounts.push({
+      sourceId,
+      institutionName: "國泰世華銀行",
+      accountName:
+        loan.loanCategory === "housing"
+          ? "房屋貸款"
+          : loan.loanCategory === "other"
+            ? "其他貸款"
+            : "國泰世華貸款",
+      accountType: "loan",
+      ...(loan.loanCategory ? { loanCategory: loan.loanCategory } : {}),
+      ...(loan.interestRate !== undefined
+        ? { loanInterestRate: loan.interestRate }
+        : {}),
+      currency: loan.currency,
+      raw: sanitized,
+    });
+    bankBalanceSnapshots.push({
+      accountId: sourceId,
+      sourceId: `${sourceId}:${asOfAt}`,
+      balance: -loan.balance,
+      currency: loan.currency,
+      ...(loan.paymentDueDate ? { paymentDueDate: loan.paymentDueDate } : {}),
+      loanPaymentAmount: loan.currentPaymentAmount,
+      ...(loan.paymentStatus ? { loanPaymentStatus: loan.paymentStatus } : {}),
+      ...(loan.installmentsPaid !== undefined &&
+      loan.installmentsTotal !== undefined
+        ? {
+            loanInstallmentsPaid: loan.installmentsPaid,
+            loanInstallmentsTotal: loan.installmentsTotal,
+          }
+        : {}),
+      asOfAt,
+      raw: sanitized,
+    });
+  }
+
+  logCathayLoanStage("persistence", "success", {
+    returnedLoanAccountCount: loanRecords.length,
+    submittedLoanAccountCount: bankAccounts.length,
+    submittedLoanSnapshotCount: bankBalanceSnapshots.length,
+  });
+  return {
+    bankAccounts,
+    bankBalanceSnapshots,
+    bankTransactions: [],
+    creditCardBills: [],
   };
 }
 

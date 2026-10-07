@@ -85,8 +85,8 @@ export async function ensureDefaultScheduleBatch(db: D1Database) {
           `INSERT INTO scheduled_sync_batches (
              id, schedule_key, notification_claimed_at, created_at,
              is_baseline, assets_before_twd, credit_card_debt_before_twd,
-             missing_currencies_before
-           ) VALUES (?, 'default', NULL, ?, ?, ?, ?, ?)`,
+             loan_debt_before_twd, missing_currencies_before
+           ) VALUES (?, 'default', NULL, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           batchId,
@@ -94,6 +94,7 @@ export async function ensureDefaultScheduleBatch(db: D1Database) {
           isBaseline ? 1 : 0,
           snapshot.assetsTwd,
           snapshot.creditCardDebtTwd,
+          snapshot.loanDebtTwd,
           JSON.stringify(snapshot.missingCurrencies),
         ),
       ...jobs.map((job) =>
@@ -236,6 +237,7 @@ export async function claimCompletedDefaultScheduleBatch(
            completed_at = ?,
            assets_after_twd = ?,
            credit_card_debt_after_twd = ?,
+           loan_debt_after_twd = ?,
            missing_currencies_after = ?
        WHERE id = ?
          AND notification_claimed_at IS NULL
@@ -256,6 +258,7 @@ export async function claimCompletedDefaultScheduleBatch(
       now,
       snapshot.assetsTwd,
       snapshot.creditCardDebtTwd,
+      snapshot.loanDebtTwd,
       JSON.stringify(snapshot.missingCurrencies),
       batchId,
       batchId,

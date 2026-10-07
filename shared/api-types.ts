@@ -69,6 +69,7 @@ export interface ScheduledSyncReport {
   financialChange: {
     assets: number;
     creditCardDebt: number;
+    loanDebt: number;
     netWorth: number;
   } | null;
   financialChangeUnavailableReason: SyncFinancialChangeUnavailableReason | null;

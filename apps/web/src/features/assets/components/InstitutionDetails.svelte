@@ -61,6 +61,26 @@
     if (bill.isPaid === 0) return "待繳";
     return "狀態未提供";
   }
+
+  function loanPaymentLabel(loan: BankAccountRow) {
+    const details = [
+      loan.loanInterestRate != null ? `利率 ${loan.loanInterestRate}%` : null,
+      loan.loanPaymentAmount != null
+        ? `本期應繳 ${formatCurrency(loan.loanPaymentAmount, loan.currency)}`
+        : null,
+      loan.loanPaymentStatus === "collection_incomplete"
+        ? loan.paymentDueDate
+          ? `扣款未完成 · 期限 ${formatDate(loan.paymentDueDate)}`
+          : "扣款未完成"
+        : loan.paymentDueDate
+          ? `扣款日 ${formatDate(loan.paymentDueDate)}`
+          : null,
+      loan.loanInstallmentsPaid != null && loan.loanInstallmentsTotal != null
+        ? `已繳 ${loan.loanInstallmentsPaid} / 共 ${loan.loanInstallmentsTotal} 期`
+        : null,
+    ].filter((value): value is string => value !== null);
+    return details.join(" · ") || "貸款明細尚未提供";
+  }
 </script>
 
 <div class={compact ? "grid gap-3" : "flex min-h-full flex-col"}>
@@ -74,11 +94,21 @@
         帳戶與信用卡依各自資料來源顯示
       </p>
     </header>
-    <div class="grid grid-cols-2 gap-6 border-b border-ink/10 px-5 py-4">
+    <div class="grid grid-cols-3 gap-4 border-b border-ink/10 px-5 py-4">
       <div>
         <p class="text-caption text-subtle">銀行資產</p>
         <p class="mt-2 text-lg font-medium tabular-nums text-steel">
           {group.accounts.length ? formatCurrency(group.assetTotalTwd) : "—"}
+        </p>
+      </div>
+      <div>
+        <p class="text-caption text-subtle">貸款負債</p>
+        <p class="mt-2 text-lg font-medium tabular-nums text-coral">
+          {group.hasUnknownLoanBalance
+            ? "資料不完整"
+            : group.loans.length
+              ? formatCurrency(group.loanDebtTotalTwd)
+              : "—"}
         </p>
       </div>
       <div>
@@ -139,6 +169,49 @@
             </div>
             <p class="text-right text-sm font-medium tabular-nums text-steel">
               {formatCurrency(account.balance ?? 0, account.currency)}
+            </p>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </section>
+
+  <section class={compact ? "" : "border-b border-ink/10 px-5 py-4"}>
+    <div class="flex items-center justify-between gap-3">
+      <h3
+        class={compact
+          ? "text-caption font-medium text-subtle"
+          : "text-sm font-semibold"}
+      >
+        貸款帳戶
+      </h3>
+      <span class="text-caption text-subtle">{group.loans.length} 筆貸款</span>
+    </div>
+    {#if group.loans.length === 0}
+      <p class="py-3 text-sm text-subtle">此機構沒有貸款。</p>
+    {:else}
+      <div class="mt-2 divide-y divide-border">
+        {#each group.loans as loan (loan.id)}
+          <div
+            class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3"
+          >
+            <div class="min-w-0">
+              <p class="break-words text-sm font-semibold">
+                {loan.accountName ?? "貸款帳戶"}
+              </p>
+              <p class="mt-1 text-caption text-subtle">
+                {loanPaymentLabel(loan)}
+              </p>
+              <p class="mt-1 text-caption text-subtle">
+                {loan.currency}{loan.asOfAt
+                  ? ` · 更新 ${formatDate(loan.asOfAt)}`
+                  : " · 尚未取得更新時間"}
+              </p>
+            </div>
+            <p class="text-right text-sm font-medium tabular-nums text-coral">
+              {loan.balance == null
+                ? "剩餘貸款餘額未取得"
+                : formatCurrency(Math.abs(loan.balance), loan.currency)}
             </p>
           </div>
         {/each}
