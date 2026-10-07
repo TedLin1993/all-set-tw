@@ -17,6 +17,7 @@ import {
   bankTransactionRecord,
 } from "../../../src/features/sync/record-mapper";
 import { prepareTaishinAuthorizationWrite } from "../../../src/sources/taishin/authorizations";
+import { prepareEsunAuthorizationWrite } from "../../../src/sources/esun/authorizations";
 import {
   parseTaishinCreditCardData,
   type TaishinCreditCardData,
@@ -275,8 +276,174 @@ describe("同步資料完整性（隔離 D1）", () => {
   );
 
   it.each([
-    "重複授權",
-    "重複入帳",
+    ["taishin", 3, 2],
+    ["taishin", 2, 3],
+    ["esun", 3, 2],
+    ["esun", 2, 3],
+  ] as const)(
+    "%s 同日同額 %i 筆授權／%i 筆明細逐一配對，補齊及重送不改既有關係",
+    async (connectorId, authorizationCount, detailCount) => {
+      await db
+        .prepare(
+          "INSERT INTO connector_settings (id, connector_id, encrypted_config, created_at, updated_at) VALUES (?, ?, 'config', 't', 't')",
+        )
+        .bind(connectorId, connectorId)
+        .run();
+      const accountSourceId =
+        connectorId === "taishin" ? "credit:taishin:main" : "credit:esun:1234";
+      const cardAccount = bankAccountRecord(
+        connectorId,
+        {
+          sourceId: accountSourceId,
+          accountType: "credit",
+          currency: "TWD",
+        },
+        now,
+      );
+      const records = (feed: "realtime" | "history") =>
+        [1, 2, 3].map((index) =>
+          bankTransactionRecord(
+            connectorId,
+            {
+              accountId: accountSourceId,
+              sourceId:
+                connectorId === "taishin"
+                  ? `taishin:card:tx:v2:TWD:2026-10-05:-252:1234:${feed}${index}:1`
+                  : `2026-10-05T00:00:00.000Z:credit:esun:1234:${feed}${index}:252:TWD:1`,
+              authorizedAt:
+                feed === "realtime"
+                  ? `2026-10-05T09:15:0${index}+08:00`
+                  : "2026-10-05",
+              postedDate:
+                feed === "history" && connectorId === "taishin"
+                  ? "2026-10-06"
+                  : undefined,
+              amount: -252,
+              currency: "TWD",
+              description: `${feed}${index}`,
+              status:
+                feed === "realtime" || connectorId === "esun"
+                  ? "pending"
+                  : "posted",
+              raw:
+                connectorId === "taishin"
+                  ? { cardLast4: "1234" }
+                  : { esunFeed: feed },
+            },
+            now,
+          ),
+        );
+      const authorizations = records("realtime");
+      const details = records("history");
+      const write = async (records: SyncWriteRecord[]) => {
+        const prepared =
+          connectorId === "taishin"
+            ? await prepareTaishinAuthorizationWrite(db, records, "config")
+            : {
+                records,
+                afterPromoteStatements: await prepareEsunAuthorizationWrite(
+                  db,
+                  records,
+                ),
+              };
+        return persistStagedSyncWrite(db, {
+          ...prepared,
+          settingsGuard: { connectorId, encryptedConfig: "config" },
+        });
+      };
+      const links = async () =>
+        (
+          await db
+            .prepare(
+              "SELECT id, matched_transaction_id FROM bank_transactions WHERE connector_id = ? AND matched_transaction_id IS NOT NULL ORDER BY source_id",
+            )
+            .bind(connectorId)
+            .all<{ id: string; matched_transaction_id: string }>()
+        ).results;
+      await write([
+        cardAccount,
+        ...authorizations.slice(0, authorizationCount).reverse(),
+      ]);
+      await db.batch([
+        db
+          .prepare(
+            "INSERT INTO bank_transaction_preferences VALUES (?, 1, 't', 't')",
+          )
+          .bind(authorizations[0].recordKey),
+        db
+          .prepare(
+            "INSERT INTO classification_overrides VALUES ('group-category', 'bank_transaction', ?, 'food', 't', 't')",
+          )
+          .bind(authorizations[0].recordKey),
+        db.prepare(
+          "INSERT INTO invoices (id, connector_id, source_id, invoice_date, amount, created_at, updated_at) VALUES ('group-invoice', 'einvoice', 'group-invoice', '2026-10-05', 252, 't', 't')",
+        ),
+        db
+          .prepare(
+            "INSERT INTO invoice_transaction_preferences VALUES ('group-invoice', ?, 'linked', 't', 't')",
+          )
+          .bind(authorizations[0].recordKey),
+      ]);
+      await write(details.slice(0, detailCount).reverse());
+      const initialLinks = await links();
+      expect(initialLinks).toEqual(
+        authorizations
+          .slice(0, Math.min(authorizationCount, detailCount))
+          .map((record, index) => ({
+            id: record.recordKey,
+            matched_transaction_id: details[index].recordKey,
+          })),
+      );
+      expect(await listBankTransactions(db, 20)).toHaveLength(3);
+      expect(
+        (await write(details.slice(0, detailCount))).bankTransactions,
+      ).toBe(0);
+      expect(await links()).toEqual(initialLinks);
+      const remaining =
+        authorizationCount > detailCount
+          ? details.slice(detailCount)
+          : authorizations.slice(authorizationCount);
+      expect((await write(remaining)).bankTransactions).toBe(1);
+      for (const records of [details, [...authorizations].reverse()]) {
+        expect((await write(records)).bankTransactions).toBe(0);
+      }
+      expect(await links()).toEqual(
+        authorizations.map((record, index) => ({
+          id: record.recordKey,
+          matched_transaction_id: details[index].recordKey,
+        })),
+      );
+      const visible = await listBankTransactions(db, 20);
+      expect(visible).toHaveLength(3);
+      expect(visible.reduce((total, row) => total + row.amount, 0)).toBe(-756);
+      expect(
+        visible.find((row) => row.id === details[0].recordKey),
+      ).toMatchObject({
+        authorizedAt: "2026-10-05T09:15:01+08:00",
+        calculationPreference: 1,
+      });
+      expect(
+        await db
+          .prepare(
+            "SELECT category_id FROM classification_overrides WHERE target_id = ?",
+          )
+          .bind(details[0].recordKey)
+          .first("category_id"),
+      ).toBe("food");
+      expect(
+        await db
+          .prepare(
+            "SELECT transaction_id FROM invoice_transaction_preferences WHERE invoice_id = 'group-invoice'",
+          )
+          .first("transaction_id"),
+      ).toBe(details[0].recordKey);
+      expect(
+        (await db.prepare("PRAGMA foreign_key_check").all()).results,
+      ).toEqual([]);
+    },
+  );
+
+  it.each([
     "卡片不明",
     "不同卡",
     "消費日不明",
@@ -287,12 +454,6 @@ describe("同步資料完整性（隔離 D1）", () => {
   ])("台新不強配%s", async (scenario) => {
     await taishinSettings();
     const authorization = structuredClone(realtime);
-    if (scenario === "重複授權") {
-      const duplicate = [...authorization.value.fmtRealTxListMap[0].txlist[0]];
-      duplicate[2] = "OTHER SHOP";
-      duplicate[6] = "OTHER SHOP";
-      authorization.value.fmtRealTxListMap[0].txlist.push(duplicate);
-    }
     if (scenario === "卡片不明")
       authorization.value.fmtRealTxListMap[0].cardname = "無卡號";
     await writeTaishin(
@@ -302,13 +463,6 @@ describe("同步資料完整性（隔離 D1）", () => {
       ),
     );
     const unposted = structuredClone(unbilled);
-    if (scenario === "重複入帳") {
-      const duplicate = [
-        ...unposted.value.unpostedTx["001TWD"].data[0].txlist[0],
-      ];
-      duplicate[2] = "OTHER SHOP";
-      unposted.value.unpostedTx["001TWD"].data[0].txlist.push(duplicate);
-    }
     const incoming = parseTaishinCreditCardData(
       { ...taishinBase, unbilled: unposted },
       bankNow,
@@ -330,9 +484,7 @@ describe("同步資料完整性（隔離 D1）", () => {
         )
         .first("n"),
     ).toBe(0);
-    expect(await listBankTransactions(db, 20)).toHaveLength(
-      scenario.startsWith("重複") ? 3 : 2,
-    );
+    expect(await listBankTransactions(db, 20)).toHaveLength(2);
   });
 
   it("台新正式交易已有決定時保留分類、排除與發票衝突，不覆寫或重新分配關係", async () => {

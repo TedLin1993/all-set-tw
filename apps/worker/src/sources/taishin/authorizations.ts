@@ -1,4 +1,8 @@
 import type { SyncWriteRecord } from "../../features/sync/persistence";
+import {
+  cardAuthorizationMatchKey,
+  matchCardAuthorizations,
+} from "../../features/sync/card-authorization-matching";
 import { normalizeMerchantName } from "./protocol";
 
 type CardRow = {
@@ -25,19 +29,22 @@ function cardLast4(row: CardRow) {
   }
 }
 
+function candidate(row: CardRow) {
+  return {
+    id: row.id,
+    sourceId: row.source_id,
+    accountId: row.account_id,
+    cardId: cardLast4(row),
+    authorizedAt: row.authorized_at,
+    amount: row.amount,
+    currency: row.currency,
+  };
+}
+
 function samePurchase(left: CardRow, right: CardRow) {
-  const last4 = cardLast4(left);
-  // Authorization names may be a category or company rather than the posted
-  // merchant. Callers require a unique match in both directions.
-  return Boolean(
-    last4 &&
-    last4 === cardLast4(right) &&
-    left.authorized_at &&
-    right.authorized_at &&
-    left.account_id === right.account_id &&
-    left.authorized_at.slice(0, 10) === right.authorized_at.slice(0, 10) &&
-    left.currency === right.currency &&
-    left.amount === right.amount,
+  const key = cardAuthorizationMatchKey(candidate(left));
+  return (
+    key !== undefined && key === cardAuthorizationMatchKey(candidate(right))
   );
 }
 
@@ -148,23 +155,10 @@ export async function prepareTaishinAuthorizationWrite(
   const posted = [...rows.values()].filter(
     (row) => row.status === "posted" && !targeted.has(row.id),
   );
-  const links: Array<{
-    id: string;
-    posted: string;
-    authorizedAt: string | null;
-  }> = [];
-  for (const authorization of pending) {
-    const candidates = posted.filter((row) => samePurchase(authorization, row));
-    if (candidates.length !== 1) continue;
-    const target = candidates[0]!;
-    if (pending.filter((row) => samePurchase(row, target)).length !== 1)
-      continue;
-    links.push({
-      id: authorization.id,
-      posted: target.id,
-      authorizedAt: authorization.authorized_at,
-    });
-  }
+  const links = matchCardAuthorizations(
+    pending.map(candidate),
+    posted.map(candidate),
+  );
   const json = JSON.stringify(links);
   const guard =
     encryptedConfig == null

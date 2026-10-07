@@ -1,4 +1,8 @@
 import type { SyncWriteRecord } from "../../features/sync/persistence";
+import {
+  matchCardAuthorizations,
+  type CardAuthorizationLink,
+} from "../../features/sync/card-authorization-matching";
 
 export type EsunCardRow = {
   id: string;
@@ -12,11 +16,7 @@ export type EsunCardRow = {
   matched_transaction_id?: string | null;
 };
 
-export type EsunAuthorizationLink = {
-  id: string;
-  posted: string;
-  authorizedAt: string | null;
-};
+export type EsunAuthorizationLink = CardAuthorizationLink;
 
 const CARD_SOURCE_PATTERN = "%:credit:esun:%";
 
@@ -45,52 +45,30 @@ export function matchEsunAuthorizations(
   const targeted = new Set(
     rows.map((row) => row.matched_transaction_id).filter(Boolean),
   );
-  const key = (row: EsunCardRow) =>
-    [
-      row.account_id,
-      row.authorized_at?.slice(0, 10),
-      row.currency,
-      row.amount,
-    ].join("|");
-  const available = new Map<string, EsunCardRow[]>();
-  for (const row of [...rows].sort((left, right) =>
-    left.source_id.localeCompare(right.source_id),
-  )) {
-    if (
-      !row.authorized_at ||
-      row.matched_transaction_id ||
-      targeted.has(row.id) ||
-      isRealtimeAuthorization(row)
-    )
-      continue;
-    const group = available.get(key(row)) ?? [];
-    group.push(row);
-    available.set(key(row), group);
-  }
-  return rows
-    .filter(
-      (row) =>
-        row.authorized_at &&
-        !row.matched_transaction_id &&
-        isRealtimeAuthorization(row),
-    )
-    .sort(
-      (left, right) =>
-        (left.authorized_at ?? "").localeCompare(right.authorized_at ?? "") ||
-        left.source_id.localeCompare(right.source_id),
-    )
-    .flatMap((authorization) => {
-      const target = available.get(key(authorization))?.shift();
-      return target
-        ? [
-            {
-              id: authorization.id,
-              posted: target.id,
-              authorizedAt: authorization.authorized_at,
-            },
-          ]
-        : [];
-    });
+  const candidate = (row: EsunCardRow) => ({
+    id: row.id,
+    sourceId: row.source_id,
+    accountId: row.account_id,
+    cardId: row.account_id,
+    authorizedAt: row.authorized_at,
+    amount: row.amount,
+    currency: row.currency,
+  });
+  return matchCardAuthorizations(
+    rows
+      .filter(
+        (row) => !row.matched_transaction_id && isRealtimeAuthorization(row),
+      )
+      .map(candidate),
+    rows
+      .filter(
+        (row) =>
+          !row.matched_transaction_id &&
+          !targeted.has(row.id) &&
+          !isRealtimeAuthorization(row),
+      )
+      .map(candidate),
+  );
 }
 
 export async function prepareEsunAuthorizationWrite(
