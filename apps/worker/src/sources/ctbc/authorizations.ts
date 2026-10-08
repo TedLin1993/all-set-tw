@@ -1,4 +1,6 @@
 import { ctbcTransactionsMatch } from "./protocol";
+import { matchCardAuthorizations } from "../../features/sync/card-authorization-matching";
+import { cardTransactionPreferenceStatements } from "../../features/sync/card-authorization-write";
 import type { SyncWriteRecord } from "../../features/sync/persistence";
 
 type Row = Record<string, unknown> & {
@@ -125,7 +127,17 @@ export async function prepareCtbcAuthorizationWrite(
       authorized_at: existing?.authorized_at?.includes("T")
         ? existing.authorized_at
         : row.authorized_at,
-      raw_payload: JSON.stringify({ ...metadata, syncSourceId: row.source_id }),
+      raw_payload: JSON.stringify({
+        ...metadata,
+        syncSourceId: row.source_id,
+        ...(existing &&
+        (raw(existing).authorizationMatched ||
+          (existing.status === "pending" &&
+            row.status === "posted" &&
+            existing.source_id === row.source_id))
+          ? { authorizationMatched: true }
+          : {}),
+      }),
     };
     rewritten.set(record.recordKey, {
       ...record,
@@ -153,10 +165,12 @@ export async function prepareCtbcAuthorizationWrite(
       .filter(
         (s) =>
           s.status === "pending" ||
-          /T\d{2}:\d{2}/.test(s.authorized_at ?? "") ||
-          stored.some(
-            (previous) => previous.id === s.id && previous.status === "pending",
-          ),
+          (!raw(s).authorizationMatched &&
+            (/T\d{2}:\d{2}/.test(s.authorized_at ?? "") ||
+              stored.some(
+                (previous) =>
+                  previous.id === s.id && previous.status === "pending",
+              ))),
       )
       .map((s) => s.id),
   );
@@ -172,38 +186,70 @@ export async function prepareCtbcAuthorizationWrite(
       !usedPosted.has(s.id) &&
       !authorizationIds.has(s.id),
   );
-  const candidates = pending.map((p) =>
-    posted.filter(
-      (t) =>
-        p.account_id === t.account_id &&
-        ctbcTransactionsMatch(candidate(p), candidate(t)),
-    ),
+  const matchCandidate = (row: Row) => {
+    const metadata = raw(row);
+    return {
+      id: row.id,
+      sourceId: row.source_id,
+      accountId: row.account_id,
+      cardId:
+        typeof metadata.cardLast4 === "string" &&
+        /^\d{4}$/.test(metadata.cardLast4)
+          ? metadata.cardLast4
+          : undefined,
+      authorizedAt: row.authorized_at,
+      amount: row.amount,
+      currency: row.currency,
+      authorizationId:
+        typeof metadata.authorizationHash === "string"
+          ? metadata.authorizationHash
+          : undefined,
+      row,
+    };
+  };
+  const newLinks = matchCardAuthorizations(
+    pending.map(matchCandidate),
+    posted.map(matchCandidate),
+    {
+      matchesReference: (left, right) =>
+        left.accountId === right.accountId &&
+        (!left.cardId || !right.cardId || left.cardId === right.cardId) &&
+        ctbcTransactionsMatch(candidate(left.row), candidate(right.row)),
+    },
+  ).map((link) => ({
+    ...all.get(link.id)!,
+    matched_transaction_id: link.posted,
+  }));
+  // CTBC retains the authorization ID and removes the formal duplicate. Two
+  // existing linked invoices cannot be merged without discarding a decision.
+  const invoices = new Set(
+    (
+      await db
+        .prepare(
+          `SELECT transaction_id FROM invoice_transaction_preferences
+    WHERE decision = 'linked' AND transaction_id IN (SELECT id FROM bank_transactions WHERE connector_id = 'ctbc')`,
+        )
+        .all<{ transaction_id: string }>()
+    ).results.map((row) => row.transaction_id),
   );
-  const newLinks = pending.flatMap((p, i) => {
-    const matches = candidates[i]!;
-    if (
-      matches.length !== 1 ||
-      candidates.filter((xs) => xs.includes(matches[0]!)).length !== 1
-    )
-      return [];
-    return [{ ...p, matched_transaction_id: matches[0]!.id }];
+  const links = [...savedLinks, ...newLinks].flatMap((pendingRow) => {
+    const posted = all.get(pendingRow.matched_transaction_id ?? "");
+    return posted &&
+      posted.id !== pendingRow.id &&
+      !(invoices.has(posted.id) && invoices.has(pendingRow.id))
+      ? [
+          {
+            id: pendingRow.id,
+            posted: posted.id,
+            postedName: posted.description,
+            postedDate: posted.posted_date,
+            postedAmount: posted.amount,
+            postedSourceId: posted.source_id,
+          },
+        ]
+      : [];
   });
-  const linksJson = JSON.stringify(
-    [...savedLinks, ...newLinks].flatMap((pendingRow) => {
-      const posted = all.get(pendingRow.matched_transaction_id ?? "");
-      return posted && posted.id !== pendingRow.id
-        ? [
-            {
-              id: pendingRow.id,
-              posted: posted.id,
-              postedName: posted.description,
-              postedDate: posted.posted_date,
-              postedAmount: posted.amount,
-            },
-          ]
-        : [];
-    }),
-  );
+  const linksJson = JSON.stringify(links);
   return {
     records: records.flatMap((r) =>
       current.includes(r)
@@ -221,38 +267,20 @@ export async function prepareCtbcAuthorizationWrite(
           counterparty = COALESCE(NULLIF(trim(json_extract(link.value, '$.postedName')), ''), counterparty),
           posted_date = COALESCE(json_extract(link.value, '$.postedDate'), posted_date),
           amount = COALESCE(json_extract(link.value, '$.postedAmount'), amount),
+          raw_payload = json_set(raw_payload, '$.authorizationMatched', json('true'), '$.syncSourceId', json_extract(link.value, '$.postedSourceId')),
           matched_transaction_id = NULL
         FROM json_each(?) link
         WHERE connector_id = 'ctbc' AND bank_transactions.id = json_extract(link.value, '$.id')`,
         )
         .bind(linksJson),
-      db
-        .prepare(
-          `INSERT INTO classification_overrides (id, target_type, target_id, category_id, created_at, updated_at)
-        SELECT 'override:bank_transaction:' || json_extract(link.value, '$.id'), 'bank_transaction', json_extract(link.value, '$.id'), posted.category_id, posted.created_at, posted.updated_at
-        FROM json_each(?) link JOIN classification_overrides posted ON posted.target_type = 'bank_transaction' AND posted.target_id = json_extract(link.value, '$.posted')
-        WHERE posted.category_id <> 'other'
-        ON CONFLICT(target_type, target_id) DO UPDATE SET
-          category_id = excluded.category_id,
-          updated_at = excluded.updated_at
-        WHERE classification_overrides.category_id = 'other'`,
-        )
-        .bind(linksJson),
-      db
-        .prepare(
-          `INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at)
-        SELECT json_extract(link.value, '$.id'), posted.excluded_from_calculation, posted.created_at, posted.updated_at
-        FROM json_each(?) link JOIN bank_transaction_preferences posted ON posted.transaction_id = json_extract(link.value, '$.posted')
-        WHERE true ON CONFLICT(transaction_id) DO NOTHING`,
-        )
-        .bind(linksJson),
-      db
-        .prepare(
-          `UPDATE invoice_transaction_preferences SET transaction_id = json_extract(link.value, '$.id')
-        FROM json_each(?) link WHERE invoice_transaction_preferences.transaction_id = json_extract(link.value, '$.posted')
-        AND NOT EXISTS (SELECT 1 FROM invoice_transaction_preferences existing WHERE existing.transaction_id = json_extract(link.value, '$.id') AND existing.decision = 'linked')`,
-        )
-        .bind(linksJson),
+      ...cardTransactionPreferenceStatements(
+        db,
+        links.map((link) => ({ id: link.posted, posted: link.id })),
+        {
+          connectorId: "ctbc",
+          fillUncategorized: true,
+        },
+      ),
       db
         .prepare(
           `UPDATE bank_transactions SET matched_transaction_id = NULL
@@ -262,7 +290,8 @@ export async function prepareCtbcAuthorizationWrite(
       db
         .prepare(
           `DELETE FROM invoice_transaction_preferences
-        WHERE transaction_id IN (SELECT json_extract(value, '$.posted') FROM json_each(?))`,
+        WHERE transaction_id IN (SELECT json_extract(value, '$.posted') FROM json_each(?))
+          AND decision <> 'linked'`,
         )
         .bind(linksJson),
       db

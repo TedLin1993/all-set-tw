@@ -239,6 +239,100 @@ afterEach(async () => {
 }, 30_000);
 
 describe("永豐信用卡升級：舊版錯號與重複列（隔離 D1，經 syncSinopac）", () => {
+  it("同 ID 入帳保留授權時間、名稱與設定，也不再用該明細隱藏第二筆同額授權", async () => {
+    const first = item({
+      AuthDate: "2026/09/23",
+      Memo: "合成授權店名",
+      AuthAmt: "100",
+    });
+    const pending = parsed([], [first]);
+    await runSync(pending);
+    const id = txId(TWD, pending.cardAuthorizations![0]!.sourceId);
+    await seedUserData(id, "same-id");
+    const postedDetail = detail({
+      TXDATE: "2026/09/23",
+      AMT: "100",
+      MEMO: "合成正式分店",
+    });
+    await runSync(parsed([postedDetail]));
+    await runSync(
+      parsed(
+        [postedDetail],
+        [first, { ...first, AuthTime: "13:00:00", Memo: "第二筆合成商店" }],
+      ),
+    );
+    await runSync(parsed([], []));
+    await runSync(parsed([postedDetail]));
+    const visible = await rows(
+      "status = 'posted' OR matched_transaction_id IS NULL",
+    );
+    expect(visible).toHaveLength(2);
+    expect(visible.find((row) => row.id === id)).toMatchObject({
+      status: "posted",
+      amount: -100,
+      description: "合成授權店名",
+    });
+    expect(visible.filter((row) => row.status === "pending")).toHaveLength(1);
+    expect(await userData(id)).toEqual({
+      category: "food",
+      excluded: 1,
+      invoice: "invoice-same-id",
+    });
+    expect(
+      await env.DB.prepare(
+        "SELECT authorized_at FROM bank_transactions WHERE id = ?",
+      )
+        .bind(id)
+        .first("authorized_at"),
+    ).toBe("2026-09-23T12:00:00+08:00");
+    expect(
+      (await env.DB.prepare("PRAGMA foreign_key_check").all()).results,
+    ).toEqual([]);
+  });
+
+  it("共用精確配對之後仍能銜接臺幣授權與外幣入帳，保留正式金額及使用者設定", async () => {
+    const authorization = item({
+      AuthDate: "2026/09/23",
+      Memo: "TEST OVERSEAS SHOP",
+      AuthAmt: "1,000",
+    });
+    const pending = parsed([], [authorization]);
+    await runSync(pending);
+    const pendingId = txId(TWD, pending.cardAuthorizations![0]!.sourceId);
+    await seedUserData(pendingId, "fx");
+    const posted = parsed([
+      detail({
+        TXDATE: "2026/09/23",
+        DEDATE: "2026/09/25",
+        CurrencyCode: "840",
+        MEMO: "TEST OVERSEAS SHOP",
+        AMT: "31.00",
+      }),
+    ]);
+    const postedId = txId(USD, posted.bankTransactions[0]!.sourceId);
+    for (const result of [posted, pending, posted]) await runSync(result);
+    expect(
+      await rows("status = 'posted' OR matched_transaction_id IS NULL"),
+    ).toEqual([
+      expect.objectContaining({ id: postedId, amount: -31, status: "posted" }),
+    ]);
+    expect(await userData(postedId)).toEqual({
+      category: "food",
+      excluded: 1,
+      invoice: "invoice-fx",
+    });
+    expect(
+      await env.DB.prepare(
+        "SELECT currency, authorized_at FROM bank_transactions WHERE id = ?",
+      )
+        .bind(postedId)
+        .first(),
+    ).toEqual({ currency: "USD", authorized_at: "2026-09-23T12:00:00+08:00" });
+    expect(
+      (await env.DB.prepare("PRAGMA foreign_key_check").all()).results,
+    ).toEqual([]);
+  });
+
   it("授權已配對錯號的外幣入帳：同步不回滾，配對與使用者資料改指向新列", async () => {
     const result = parsed([
       detail({ CurrencyCode: "840", MEMO: "TEST OVERSEAS SHOP", AMT: "31.00" }),

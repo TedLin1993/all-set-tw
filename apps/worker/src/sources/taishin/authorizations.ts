@@ -1,4 +1,5 @@
 import type { SyncWriteRecord } from "../../features/sync/persistence";
+import { cardAuthorizationLinkStatements } from "../../features/sync/card-authorization-write";
 import {
   cardAuthorizationMatchKey,
   matchCardAuthorizations,
@@ -159,67 +160,13 @@ export async function prepareTaishinAuthorizationWrite(
     pending.map(candidate),
     posted.map(candidate),
   );
-  const json = JSON.stringify(links);
-  const guard =
-    encryptedConfig == null
-      ? ""
-      : " AND EXISTS (SELECT 1 FROM connector_settings WHERE connector_id = 'taishin' AND encrypted_config = ?)";
-  const statement = (sql: string, ...bindings: string[]) =>
-    db
-      .prepare(sql.replace("/* settings guard */", guard))
-      .bind(...bindings, ...(encryptedConfig == null ? [] : [encryptedConfig]));
   return {
     records: [...updated.values()],
-    afterPromoteStatements:
-      links.length === 0
-        ? []
-        : [
-            statement(
-              `UPDATE bank_transactions SET matched_transaction_id = json_extract(link.value, '$.posted')
-        FROM json_each(?) link WHERE bank_transactions.connector_id = 'taishin'
-          AND bank_transactions.id = json_extract(link.value, '$.id')
-          AND bank_transactions.status = 'pending' AND bank_transactions.matched_transaction_id IS NULL /* settings guard */`,
-              json,
-            ),
-            statement(
-              `UPDATE bank_transactions SET authorized_at = json_extract(link.value, '$.authorizedAt')
-        FROM json_each(?) link WHERE bank_transactions.connector_id = 'taishin'
-          AND bank_transactions.id = json_extract(link.value, '$.posted')
-          AND bank_transactions.status = 'posted' AND length(COALESCE(bank_transactions.authorized_at, '')) <= 10
-          AND length(COALESCE(json_extract(link.value, '$.authorizedAt'), '')) > 10 /* settings guard */`,
-              json,
-            ),
-            statement(
-              `INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at)
-        SELECT json_extract(link.value, '$.posted'), preference.excluded_from_calculation, preference.created_at, preference.updated_at
-        FROM json_each(?) link JOIN bank_transaction_preferences preference
-          ON preference.transaction_id = json_extract(link.value, '$.id')
-        WHERE true /* settings guard */ ON CONFLICT(transaction_id) DO NOTHING`,
-              json,
-            ),
-            statement(
-              `INSERT INTO classification_overrides (id, target_type, target_id, category_id, created_at, updated_at)
-        SELECT 'override:bank_transaction:' || json_extract(link.value, '$.posted'), 'bank_transaction',
-          json_extract(link.value, '$.posted'), preference.category_id, preference.created_at, preference.updated_at
-        FROM json_each(?) link JOIN classification_overrides preference
-          ON preference.target_type = 'bank_transaction' AND preference.target_id = json_extract(link.value, '$.id')
-        WHERE true /* settings guard */ ON CONFLICT(target_type, target_id) DO NOTHING`,
-              json,
-            ),
-            statement(
-              `UPDATE invoice_transaction_preferences SET transaction_id = (
-          SELECT json_extract(link.value, '$.posted') FROM json_each(?) link
-          WHERE json_extract(link.value, '$.id') = invoice_transaction_preferences.transaction_id
-        ) WHERE transaction_id IN (SELECT json_extract(value, '$.id') FROM json_each(?))
-        AND NOT EXISTS (
-          SELECT 1 FROM invoice_transaction_preferences existing JOIN json_each(?) link
-            ON existing.transaction_id = json_extract(link.value, '$.posted')
-          WHERE existing.decision = 'linked' AND json_extract(link.value, '$.id') = invoice_transaction_preferences.transaction_id
-        ) /* settings guard */`,
-              json,
-              json,
-              json,
-            ),
-          ],
+    afterPromoteStatements: cardAuthorizationLinkStatements(
+      db,
+      "taishin",
+      links,
+      encryptedConfig,
+    ),
   };
 }
