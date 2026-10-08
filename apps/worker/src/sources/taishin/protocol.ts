@@ -579,27 +579,6 @@ function taishinTransactionSourceId(identityKey: string, occurrence: number) {
   return `taishin:card:tx:v2:${identityKey}:${occurrence}`;
 }
 
-export function taishinMerchantNamesMatch(
-  left: string | undefined,
-  right: string | undefined,
-) {
-  const normalizedLeft = normalizeMerchantName(left);
-  const normalizedRight = normalizeMerchantName(right);
-  if (
-    !normalizedLeft ||
-    !normalizedRight ||
-    normalizedLeft === "台新信用卡交易" ||
-    normalizedRight === "台新信用卡交易"
-  )
-    return false;
-  if (normalizedLeft === normalizedRight) return true;
-  return (
-    Math.min(normalizedLeft.length, normalizedRight.length) >= 4 &&
-    (normalizedLeft.includes(normalizedRight) ||
-      normalizedRight.includes(normalizedLeft))
-  );
-}
-
 export function normalizeMerchantName(value: string | undefined) {
   return (value ?? "")
     .normalize("NFKC")

@@ -106,19 +106,16 @@ export async function syncEsun(
     );
   }
 
-  const authorizationStatements = await prepareEsunAuthorizationWrite(
-    env.DB,
-    records,
-  );
+  const prepared = await prepareEsunAuthorizationWrite(env.DB, records);
   const newRecords = await persistStagedSyncWrite(env.DB, {
-    records,
+    records: prepared.records,
     afterPromoteStatements: [
       ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB)]
         : []),
       ...reconcileEsunLifecycleShadowStatements(env.DB),
       ...reconcileEsunSingleCardSummaryAccountStatements(env.DB),
-      ...authorizationStatements,
+      ...prepared.afterPromoteStatements,
     ],
     finalizeStatements,
   });

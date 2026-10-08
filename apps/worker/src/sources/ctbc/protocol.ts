@@ -552,6 +552,10 @@ function reconcileCreditCardLifecycle(
     return {
       ...transaction,
       identityKey: candidate.identityKey,
+      raw: {
+        ...(isRecord(transaction.raw) ? transaction.raw : {}),
+        authorizationMatched: true,
+      },
       authorizedAt: preferredAuthorizedAt(
         transaction.authorizedAt,
         candidate.authorizedAt,
@@ -624,6 +628,7 @@ export function ctbcTransactionsMatch(
   if (
     !l.authorizationHash ||
     l.authorizationHash !== r.authorizationHash ||
+    (l.cardLast4 && r.cardLast4 && l.cardLast4 !== r.cardLast4) ||
     left.currency !== right.currency ||
     left.amount !== right.amount
   )

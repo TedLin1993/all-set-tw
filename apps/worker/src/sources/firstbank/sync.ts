@@ -1,4 +1,5 @@
 import { createSyncExecution } from "../../features/sync/execution";
+import { prepareCardAuthorizationWrite } from "../../features/sync/card-authorization-write";
 import type { Env } from "../../platform/env";
 import { canonicalSyncLockRowId } from "../../features/sync/lock";
 import {
@@ -219,12 +220,26 @@ export async function syncFirstbank(
       ),
     );
   }
-  const newRecords = await persistStagedSyncWrite(env.DB, {
+  const prepared = await prepareCardAuthorizationWrite(
+    env.DB,
+    connectorId,
     records,
-    afterPromoteStatements:
-      bankAccounts.length > 0
+    {
+      sourcePattern: "firstbank:card:tx:%",
+      cardId: (row) =>
+        row.source_id.startsWith("firstbank:card:tx:")
+          ? row.account_id.match(/:credit:firstbank:(\d{4})$/)?.[1]
+          : undefined,
+    },
+  );
+  const newRecords = await persistStagedSyncWrite(env.DB, {
+    records: prepared.records,
+    afterPromoteStatements: [
+      ...prepared.afterPromoteStatements,
+      ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB)]
-        : [],
+        : []),
+    ],
     finalizeStatements,
   });
   if (bankBalanceSnapshots.length > 0) {

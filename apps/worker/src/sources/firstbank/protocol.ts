@@ -784,15 +784,9 @@ function parseCreditCards(
 
   const transactions: CardParseResult["transactions"] = [];
   for (const bill of bills) {
-    transactions.push(
-      ...bill.transactions.map((transaction) =>
-        cardTransactionRecord(transaction),
-      ),
-    );
+    transactions.push(...cardTransactionRecords(bill.transactions));
   }
-  transactions.push(
-    ...pending.map((transaction) => cardTransactionRecord(transaction)),
-  );
+  transactions.push(...cardTransactionRecords(pending));
   transactions.push(
     ...payments.map((payment) => ({
       accountId: cardAccountId(payment.cardKey),
@@ -881,6 +875,19 @@ function parseCreditCards(
     transactions: dedupeBySourceId(transactions),
     bills: dedupeBySourceId(creditCardBills),
   };
+}
+
+function cardTransactionRecords(transactions: CardTransaction[]) {
+  const occurrences = new Map<string, number>();
+  return transactions.map((transaction) => {
+    const record = cardTransactionRecord(transaction);
+    const occurrence = (occurrences.get(record.sourceId) ?? 0) + 1;
+    occurrences.set(record.sourceId, occurrence);
+    // Keep the saved ID of the first occurrence; distinguish real duplicates.
+    return occurrence === 1
+      ? record
+      : { ...record, sourceId: `${record.sourceId}:${occurrence}` };
+  });
 }
 
 function cardTransactionRecord(
