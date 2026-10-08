@@ -3,6 +3,7 @@ import { JSDOM } from "jsdom";
 import { describe, expect, it, vi } from "vitest";
 import {
   extractCathayLoanOverviewDom,
+  isCathayLoanOverviewQuerySettled,
   parseCathayLoanOverview,
 } from "../../../src/sources/cathaybk/loan-overview";
 
@@ -152,6 +153,58 @@ describe("Cathay loan overview table layout", () => {
 
 const syntheticAccount = (index: number) =>
   `000000000000${String(index).padStart(4, "0")}`;
+
+describe("Cathay loan overview query completion", () => {
+  it("does not treat a heading-only page or a visible loader as completed", () => {
+    const headingOnly = extractHtml(
+      "<h1>貸款帳戶總覽</h1><h2>貸款總餘額：$0</h2>",
+    );
+    expect(headingOnly.pageState).toBe("incomplete");
+    expect(
+      isCathayLoanOverviewQuerySettled(
+        new JSDOM("<h1>貸款帳戶總覽</h1><h2>貸款總餘額：$0</h2>").window
+          .document,
+      ),
+    ).toBe(false);
+    expect(() => parseCathayLoanOverview(headingOnly)).toThrow(
+      "Cathay loan overview query did not complete.",
+    );
+
+    const loadingDocument = new JSDOM(
+      '<h1>貸款帳戶總覽</h1><div aria-busy="true">載入中</div>',
+    ).window.document;
+    const loading = extractCathayLoanOverviewDom(loadingDocument);
+    expect(loading.pageState).toBe("loading");
+    expect(isCathayLoanOverviewQuerySettled(loadingDocument)).toBe(false);
+    expect(() => parseCathayLoanOverview(loading)).toThrow(
+      "Cathay loan overview query is still loading.",
+    );
+  });
+
+  it("distinguishes maintenance and only accepts an explicitly confirmed empty overview", () => {
+    const maintenanceDocument = new JSDOM("<p>系統維護中，暫停服務</p>").window
+      .document;
+    const maintenance = extractCathayLoanOverviewDom(maintenanceDocument);
+    expect(maintenance.pageState).toBe("maintenance");
+    expect(isCathayLoanOverviewQuerySettled(maintenanceDocument)).toBe(true);
+    expect(() => parseCathayLoanOverview(maintenance)).toThrow(
+      "Cathay loan overview is under maintenance.",
+    );
+
+    const emptyDocument = new JSDOM(
+      "<h1>貸款帳戶總覽</h1><h2>貸款總餘額：$0</h2><p>目前無貸款資料</p>",
+    ).window.document;
+    const empty = extractCathayLoanOverviewDom(emptyDocument);
+    expect(empty.pageState).toBe("empty");
+    expect(isCathayLoanOverviewQuerySettled(emptyDocument)).toBe(true);
+    expect(parseCathayLoanOverview(empty)).toEqual([]);
+
+    const unconfirmedEmpty = extractHtml(
+      "<h1>貸款帳戶總覽</h1><h2>貸款總餘額：$0</h2>",
+    );
+    expect(unconfirmedEmpty.pageState).toBe("incomplete");
+  });
+});
 
 describe("Cathay loan overview DOM extraction", () => {
   it.each([

@@ -263,6 +263,7 @@ export async function calculateCurrentFinancialSnapshot(
              LIMIT 1
            )
          WHERE account.canonical_account_id IS NULL
+           AND account.inactive_at IS NULL
        ), latest_investments AS (
          SELECT
            COALESCE(position.market_value, 0) + COALESCE(position.cash_balance, 0) AS amount,

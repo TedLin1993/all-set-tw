@@ -62,6 +62,17 @@ describe("scheduled financial snapshot loan debt", () => {
       loanDebtTwd: 40_000,
       missingCurrencies: [],
     });
+
+    await db
+      .prepare("UPDATE bank_accounts SET inactive_at = ? WHERE id = 'loan'")
+      .bind("2026-10-08T00:00:00.000Z")
+      .run();
+    await expect(calculateCurrentFinancialSnapshot(db)).resolves.toEqual({
+      assetsTwd: 100_000,
+      creditCardDebtTwd: 10_000,
+      loanDebtTwd: 0,
+      missingCurrencies: [],
+    });
   });
 
   it("treats legacy batches with NULL loan snapshots as a completed baseline", async () => {

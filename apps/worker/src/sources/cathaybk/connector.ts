@@ -29,6 +29,7 @@ import {
 } from "./protocol";
 import {
   extractCathayLoanOverviewDom,
+  isCathayLoanOverviewQuerySettled,
   logCathayLoanDomDiagnostics,
   logCathayLoanStage,
   parseCathayLoanOverview,
@@ -1987,24 +1988,18 @@ export async function scrapeLoans(page: Page): Promise<Scraped> {
     throw new Error("Cathay Bank forced logout on loan overview page.");
   }
 
-  let headingWaitSatisfied = false;
+  let overviewQueryWaitSatisfied = false;
   try {
-    await page.waitForFunction(
-      () =>
-        Array.from(
-          document.querySelectorAll("h1, h2, h3, h4, h5, h6, [role='heading']"),
-        ).some((heading) =>
-          heading.textContent?.replace(/\s+/g, " ").includes("貸款帳戶總覽"),
-        ),
-      { timeout: 15_000 },
-    );
-    headingWaitSatisfied = true;
+    await page.waitForFunction(isCathayLoanOverviewQuerySettled, {
+      timeout: 15_000,
+    });
+    overviewQueryWaitSatisfied = true;
   } catch (error) {
     if (!(error instanceof TimeoutError)) throw error;
   }
 
   const extraction = await page.evaluate(extractCathayLoanOverviewDom);
-  logCathayLoanDomDiagnostics(extraction, headingWaitSatisfied);
+  logCathayLoanDomDiagnostics(extraction, overviewQueryWaitSatisfied);
   const loanRecords = parseCathayLoanOverview(extraction);
   const asOfAt = new Date().toISOString();
   const bankAccounts: Scraped["bankAccounts"] = [];

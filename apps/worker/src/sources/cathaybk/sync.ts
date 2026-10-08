@@ -26,6 +26,7 @@ import {
   updateConnectorEncryptedConfig,
   connectorStateStatement,
   linkCanonicalBankAccountsStatement,
+  deactivateMissingCathayLoanAccountsStatement,
 } from "../../features/sync/connector-repository";
 import {
   type SyncWriteRecord,
@@ -199,10 +200,22 @@ export async function syncCathaybk(
 
   const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
-    afterPromoteStatements:
-      bankAccounts.length > 0
+    afterPromoteStatements: [
+      ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB)]
-        : [],
+        : []),
+      deactivateMissingCathayLoanAccountsStatement(
+        env.DB,
+        bankAccounts
+          .filter(
+            (account) =>
+              account.accountType === "loan" &&
+              account.sourceId.startsWith("loan:cathaybk:"),
+          )
+          .map((account) => account.sourceId),
+        now,
+      ),
+    ],
     finalizeStatements,
   });
 
