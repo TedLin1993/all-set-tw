@@ -62,10 +62,15 @@ export class BrowserRunCapacityError extends Error {
   }
 }
 
+// A launch can also fail during CDP setup, after a session was acquired.
+// Only a confirmed rejection of POST /v1/devtools/browser is safe to retry.
+const rejectedBrowserAcquisitions = new WeakSet<BrowserRunCapacityError>();
+
 /** Classify errors from Browser Run acquisition, never bank API responses. */
 export function classifyBrowserRunCapacityError(
   error: unknown,
 ): BrowserRunCapacityError | undefined {
+  if (error instanceof BrowserRunCapacityError) return error;
   const message = error instanceof Error ? error.message : String(error);
   if (/Browser time limit exceeded for today/i.test(message)) {
     const now = Date.now();
@@ -114,7 +119,38 @@ export async function launchBrowserWithRetry(
           const request = new Request(input, init);
           for (let attempt = 0; ; attempt++) {
             binding.syncSignal?.throwIfAborted();
-            const response = await binding.fetch(request.clone() as Request);
+            const response = await binding.fetch(
+              new Request(request.clone() as Request, {
+                signal: binding.syncSignal
+                  ? AbortSignal.any([request.signal, binding.syncSignal])
+                  : request.signal,
+              }),
+            );
+            if (response.status === 429) {
+              // The SDK drops response headers when constructing its error.
+              // Classify here, without logging the response body.
+              const capacity = classifyBrowserRunCapacityError(
+                await response.text(),
+              );
+              const error =
+                capacity?.kind === "daily_quota"
+                  ? capacity
+                  : new BrowserRunCapacityError(
+                      "rate_limit",
+                      browserRetryAfterSeconds(response.headers),
+                    );
+              rejectedBrowserAcquisitions.add(error);
+              console.warn(
+                JSON.stringify({
+                  event: "browser_acquisition_failed",
+                  status: 429,
+                  attempt: attempt + 1,
+                  capacityKind: error.kind,
+                  retryAfterSeconds: error.retryAfterSeconds,
+                }),
+              );
+              throw error;
+            }
             if (response.status !== 503) return response;
 
             const delayMs = RETRY_DELAYS_MS[attempt];
@@ -129,7 +165,7 @@ export async function launchBrowserWithRetry(
             // Leave the final response intact for Puppeteer's error handling.
             if (delayMs === undefined) return response;
             await response.body?.cancel();
-            await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+            await waitForBrowserRetry(delayMs, binding.syncSignal);
           }
         },
       },
@@ -141,12 +177,66 @@ export async function launchBrowserWithRetry(
   }
 }
 
+function browserRetryAfterSeconds(headers: Headers): number {
+  const value = headers.get("Retry-After");
+  if (!value?.trim()) return 20;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds))
+    return seconds >= 0 ? Math.max(1, Math.ceil(seconds)) : 20;
+  const date = Date.parse(value);
+  return Number.isFinite(date)
+    ? Math.max(1, Math.ceil((date - Date.now()) / 1_000))
+    : 20;
+}
+
+async function waitForBrowserRetry(delayMs: number, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 const LOGIN_PREPARATION_ATTEMPTS = 3;
-const LOGIN_PREPARATION_TIMEOUT_MS = 15_000;
-const LOGIN_PREPARATION_BUDGET_MS = 45_000;
+const LOGIN_PREPARATION_TIMEOUT_MS = 60_000;
+const LOGIN_PREPARATION_BUDGET_MS = 180_000;
+const BROWSER_LIMITS_TIMEOUT_MS = 15_000;
+const BROWSER_ACQUISITION_TIMEOUT_MS = 15_000;
+const BROWSER_ACQUISITION_ATTEMPTS = 3;
+
+export type BrowserLoginPreparationStage =
+  | "initialize_page"
+  | "configure_page"
+  | "restore_session"
+  | "navigate"
+  | "form"
+  | "captcha";
+
+export type ReportBrowserLoginStage = (
+  stage: BrowserLoginPreparationStage,
+) => void;
+
+type BrowserTimeoutSource =
+  | "page_preparation"
+  | "limits_lookup"
+  | "browser_acquisition"
+  | "shared_budget"
+  | "connector_deadline"
+  | "connector_operation";
 
 class BrowserLoginPreparationTimeoutError extends Error {
-  constructor() {
+  constructor(readonly source: BrowserTimeoutSource = "page_preparation") {
     super("登入頁沒有在期限內載入完整表單，請稍後再試。");
     this.name = "BrowserLoginPreparationTimeoutError";
   }
@@ -212,6 +302,7 @@ type LoginPreparationOptions<T> = {
     observePage: (page: Page) => void,
     signal: AbortSignal,
     attempt: number,
+    reportStage: ReportBrowserLoginStage,
   ) => Promise<T>;
 };
 
@@ -228,83 +319,216 @@ export async function prepareBrowserLoginWithRetry<T>(
     fetch: binding.fetch.bind(binding),
     syncSignal: signal,
   };
-  const deadline = Date.now() + LOGIN_PREPARATION_BUDGET_MS;
+  const startedAt = Date.now();
+  const deadline = startedAt + LOGIN_PREPARATION_BUDGET_MS;
   const remaining = () =>
     Math.min(deadline - Date.now(), options.remainingMs?.() ?? Infinity);
+  const operationBudget = (maximumMs: number, source: BrowserTimeoutSource) => {
+    const sharedMs = deadline - Date.now();
+    const connectorMs = options.remainingMs?.() ?? Infinity;
+    return {
+      timeoutMs: Math.min(maximumMs, sharedMs, connectorMs),
+      timeoutSource:
+        connectorMs <= Math.min(maximumMs, sharedMs)
+          ? ("connector_deadline" as const)
+          : sharedMs <= maximumMs
+            ? ("shared_budget" as const)
+            : source,
+    };
+  };
+  const checkRemaining = () => {
+    signal.throwIfAborted();
+    const { timeoutMs, timeoutSource } = operationBudget(
+      Infinity,
+      "shared_budget",
+    );
+    if (timeoutMs <= 0)
+      throw new BrowserLoginPreparationTimeoutError(timeoutSource);
+  };
 
   for (let attempt = 1; attempt <= LOGIN_PREPARATION_ATTEMPTS; attempt++) {
-    signal.throwIfAborted();
-    if (remaining() <= 0) throw new BrowserLoginPreparationTimeoutError();
-    const limits = await boundedBrowserOperation(
-      puppeteer.limits(scopedBinding),
-      Math.min(LOGIN_PREPARATION_TIMEOUT_MS, remaining()),
-      signal,
-    ).catch((error: unknown) => {
-      signal.throwIfAborted();
-      if (error instanceof BrowserLoginPreparationTimeoutError) throw error;
-      return undefined;
-    });
-    if (limits && limits.allowedBrowserAcquisitions < 1) {
-      const waitMs = Math.max(1, limits.timeUntilNextAllowedBrowserAcquisition);
-      // A retry may wait only after the previous session has been closed.
-      // Initial capacity failures retain the existing caller's quota policy.
-      if (attempt === 1 || waitMs >= remaining()) {
-        throw new BrowserRunCapacityError(
-          "acquisition_rate_limit",
-          Math.max(1, Math.ceil(waitMs / 1_000)),
-        );
-      }
-      await boundedBrowserOperation(
-        new Promise<void>((resolve) => setTimeout(resolve, waitMs)),
-        remaining(),
-        signal,
+    const attemptStartedAt = Date.now();
+    let acquisitionAttempt = 0;
+    let waitedMs = 0;
+    let acquisitionStage = "limits_lookup";
+    let limitsStatus: "allowed" | "rate_limited" | "unavailable" =
+      "unavailable";
+    let allowedBrowserAcquisitions: number | undefined;
+    let timeUntilNextAllowedBrowserAcquisition: number | undefined;
+    const waitForCapacity = async (error: BrowserRunCapacityError) => {
+      checkRemaining();
+      const waitMs = error.retryAfterSeconds * 1_000;
+      if (waitMs >= remaining()) throw error;
+      acquisitionStage = "rate_limit_wait";
+      console.warn(
+        JSON.stringify({
+          event: "browser_login_acquisition_wait",
+          connectorId,
+          attempt,
+          acquisitionAttempt,
+          capacityKind: error.kind,
+          waitMs,
+          limitsStatus,
+          allowedBrowserAcquisitions,
+          timeUntilNextAllowedBrowserAcquisition,
+          totalElapsedMs: Date.now() - startedAt,
+        }),
       );
-    }
+      await waitForBrowserRetry(waitMs, signal);
+      waitedMs += waitMs;
+    };
+    const acquire = async (): Promise<Browser> => {
+      for (;;) {
+        checkRemaining();
+        acquisitionStage = "limits_lookup";
+        const limitsBudget = operationBudget(
+          BROWSER_LIMITS_TIMEOUT_MS,
+          "limits_lookup",
+        );
+        const limits = await boundedBrowserOperation(
+          puppeteer.limits(scopedBinding),
+          limitsBudget.timeoutMs,
+          signal,
+          limitsBudget.timeoutSource,
+        ).catch((error: unknown) => {
+          signal.throwIfAborted();
+          if (error instanceof BrowserLoginPreparationTimeoutError) throw error;
+          return undefined;
+        });
+        allowedBrowserAcquisitions = limits?.allowedBrowserAcquisitions;
+        timeUntilNextAllowedBrowserAcquisition =
+          limits?.timeUntilNextAllowedBrowserAcquisition;
+        limitsStatus = !limits
+          ? "unavailable"
+          : limits.allowedBrowserAcquisitions < 1
+            ? "rate_limited"
+            : "allowed";
+        if (limits && limits.allowedBrowserAcquisitions < 1) {
+          const error = new BrowserRunCapacityError(
+            "acquisition_rate_limit",
+            Math.max(
+              1,
+              Math.ceil(limits.timeUntilNextAllowedBrowserAcquisition / 1_000),
+            ),
+          );
+          // Initial failures retain the caller's existing capacity policy.
+          // Replacement sessions wait only after confirmed remote closure.
+          if (attempt === 1) throw error;
+          await waitForCapacity(error);
+          continue; // Recheck limits after every wait, before acquisition.
+        }
 
-    // Acquisition errors are not bank page failures. In particular, never
-    // spend more sessions on a daily quota/capacity error or an unknown launch.
-    let acquisitionStopped = false;
-    const acquisition = launchBrowserWithRetry(
-      scopedBinding,
-      options.launchOptions ?? { keep_alive: 60_000 },
-    ).then(async (browser) => {
-      if (acquisitionStopped) {
-        await closeBrowserSession(binding, browser);
-        throw new BrowserLoginPreparationTimeoutError();
+        checkRemaining();
+        acquisitionStage = "browser_acquisition";
+        acquisitionAttempt++;
+        const acquisitionBudget = operationBudget(
+          BROWSER_ACQUISITION_TIMEOUT_MS,
+          "browser_acquisition",
+        );
+        const controller = new AbortController();
+        const acquisitionBinding: SyncBrowserBinding = {
+          ...scopedBinding,
+          syncSignal: AbortSignal.any([signal, controller.signal]),
+        };
+        // Unknown/timed-out acquisitions never trigger another launch. Stop
+        // pending HTTP retries, and close any session that arrives late.
+        let acquisitionStopped = false;
+        const acquisition = launchBrowserWithRetry(
+          acquisitionBinding,
+          options.launchOptions ?? { keep_alive: 60_000 },
+        ).then(async (browser) => {
+          if (acquisitionStopped) {
+            await closeBrowserSession(binding, browser);
+            throw new BrowserLoginPreparationTimeoutError(
+              acquisitionBudget.timeoutSource,
+            );
+          }
+          return browser;
+        });
+        try {
+          return await boundedBrowserOperation(
+            acquisition,
+            acquisitionBudget.timeoutMs,
+            signal,
+            acquisitionBudget.timeoutSource,
+          );
+        } catch (error) {
+          acquisitionStopped = true;
+          controller.abort(error);
+          signal.throwIfAborted();
+          if (
+            attempt === 1 ||
+            acquisitionAttempt >= BROWSER_ACQUISITION_ATTEMPTS ||
+            !(error instanceof BrowserRunCapacityError) ||
+            !rejectedBrowserAcquisitions.has(error) ||
+            error.kind === "daily_quota"
+          ) {
+            throw error;
+          }
+          await waitForCapacity(error);
+        }
       }
-      return browser;
-    });
+    };
     let browser: Browser;
     try {
-      browser = await boundedBrowserOperation(
-        acquisition,
-        Math.min(LOGIN_PREPARATION_TIMEOUT_MS, remaining()),
-        signal,
-      );
+      browser = await acquire();
     } catch (error) {
-      acquisitionStopped = true;
+      console.warn(
+        JSON.stringify({
+          event: "browser_login_acquisition_failed",
+          connectorId,
+          attempt,
+          acquisitionAttempt,
+          stage: acquisitionStage,
+          timeoutSource: browserTimeoutSource(error),
+          elapsedMs: Date.now() - attemptStartedAt,
+          totalElapsedMs: Date.now() - startedAt,
+          waitedMs,
+          limitsStatus,
+          allowedBrowserAcquisitions,
+          timeUntilNextAllowedBrowserAcquisition,
+          capacityKind:
+            error instanceof BrowserRunCapacityError ? error.kind : undefined,
+          retryAfterSeconds:
+            error instanceof BrowserRunCapacityError
+              ? error.retryAfterSeconds
+              : undefined,
+        }),
+      );
       throw error;
     }
 
-    const startedAt = Date.now();
+    const preparationStartedAt = Date.now();
+    let stage: BrowserLoginPreparationStage = "initialize_page";
     const controller = new AbortController();
     const attemptSignal = AbortSignal.any([signal, controller.signal]);
     const diagnostics = observeLoginPreparation();
     try {
       options.onBrowser?.(browser);
+      const preparationBudget = operationBudget(
+        LOGIN_PREPARATION_TIMEOUT_MS,
+        "page_preparation",
+      );
+      checkRemaining();
       const value = await boundedBrowserOperation(
         options.prepare(
           browser,
           diagnostics.observePage,
           attemptSignal,
           attempt,
+          (value) => {
+            attemptSignal.throwIfAborted();
+            stage = value;
+          },
         ),
-        Math.min(LOGIN_PREPARATION_TIMEOUT_MS, remaining()),
+        preparationBudget.timeoutMs,
         attemptSignal,
+        preparationBudget.timeoutSource,
       );
       attemptSignal.throwIfAborted();
       return { browser, value };
     } catch (error) {
+      const preparationElapsedMs = Date.now() - preparationStartedAt;
       controller.abort(error);
       const snapshot = signal.aborted
         ? { cdpResponsive: false }
@@ -321,7 +545,13 @@ export async function prepareBrowserLoginWithRetry<T>(
           event: "browser_login_preparation_failed",
           connectorId,
           attempt,
-          elapsedMs: Date.now() - startedAt,
+          stage,
+          timeoutSource: browserTimeoutSource(error),
+          preparationElapsedMs,
+          elapsedMs: Date.now() - attemptStartedAt,
+          totalElapsedMs: Date.now() - startedAt,
+          waitedMs,
+          limitsStatus,
           retryable,
           sessionClosed: closed,
           ...snapshot,
@@ -334,7 +564,16 @@ export async function prepareBrowserLoginWithRetry<T>(
       diagnostics.dispose();
     }
   }
-  throw new BrowserLoginPreparationTimeoutError();
+  throw new BrowserLoginPreparationTimeoutError("shared_budget");
+}
+
+function browserTimeoutSource(error: unknown): BrowserTimeoutSource | null {
+  if (!(error instanceof Error)) return null;
+  if (error instanceof BrowserLoginPreparationTimeoutError) return error.source;
+  if (/Timeout|Deadline/.test(error.name)) return "connector_operation";
+  return error.cause !== undefined && error.cause !== error
+    ? browserTimeoutSource(error.cause)
+    : null;
 }
 
 function isRetryableLoginPreparationError(error: unknown): boolean {
@@ -360,6 +599,7 @@ async function boundedBrowserOperation<T>(
   operation: Promise<T>,
   timeoutMs: number,
   signal?: AbortSignal,
+  timeoutSource: BrowserTimeoutSource = "page_preparation",
 ): Promise<T> {
   // Callers may have already started the operation before cancellation raced
   // with this function; still consume its eventual rejection.
@@ -374,7 +614,7 @@ async function boundedBrowserOperation<T>(
         onAbort = () => reject(signal?.reason);
         signal?.addEventListener("abort", onAbort, { once: true });
         timer = setTimeout(
-          () => reject(new BrowserLoginPreparationTimeoutError()),
+          () => reject(new BrowserLoginPreparationTimeoutError(timeoutSource)),
           Math.max(0, timeoutMs),
         );
       }),

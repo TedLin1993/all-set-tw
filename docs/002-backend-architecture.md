@@ -646,6 +646,11 @@ invocation 因此不必等待下一個 10 分鐘 Cron，且擁有獨立的 Worke
 逐一執行。是否到期仍由 D1 sync job 狀態判斷；沒有可執行工作時 consumer 不再送出訊息，
 結束本次串接。
 
+這段 20 秒延遲只作用於不同 Queue 工作之間。同一個 connector invocation 的登入頁
+復原可能重新取得 Browser session，由共用 browser adapter 在確認舊 session 關閉後
+處理 acquisition 限流等待與額度重查。登入準備每輪最多 60 秒、共用總預算 180 秒；
+額度查詢、取得瀏覽器與限流等待都算入總預算，來源原有較短期限與取消 signal 仍優先適用。
+
 Demo 模式（`DEMO_MODE`）不執行背景同步：Cron 不送出 scheduler 啟動訊息，Queue consumer
 不處理任何訊息，避免啟用 Demo 前殘留的訊息繼續以已儲存的憑證登入外部服務。scheduler 啟動訊息
 直接 ack；電子發票與集保分段訊息則以 1 小時延遲重新送出以保留 continuation，關閉 Demo 後會

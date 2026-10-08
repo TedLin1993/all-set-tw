@@ -5,6 +5,7 @@ import {
   connectBrowserWithCancellation,
   prepareBrowserLoginWithRetry,
   closeBrowserSession,
+  type ReportBrowserLoginStage,
 } from "../browser.js";
 import puppeteer, {
   type Browser,
@@ -336,12 +337,20 @@ export function createFirstbankConnector(
             isRetryable: (error) =>
               error instanceof FirstbankCaptchaUnavailableError ||
               error instanceof FirstbankActionTimeoutError,
-            prepare: async (browser, observePage, signal, attempt) => {
+            prepare: async (
+              browser,
+              observePage,
+              signal,
+              attempt,
+              reportStage,
+            ) => {
               const pages = await browser.pages();
               const page = pages[0] ?? (await browser.newPage());
               observePage(page);
+              reportStage("configure_page");
               await configurePage(page);
               if (attempt === 1 && config.sessionCookies) {
+                reportStage("restore_session");
                 await importCookies(page, config.sessionCookies);
                 await gotoAllowingTimeout(page, LOGIN_URL);
                 if (await resumeAuthenticatedSession(page))
@@ -353,7 +362,11 @@ export function createFirstbankConnector(
                   "第一銀行 session 已失效，需要重新登入。",
                 );
               try {
-                const captcha = await openLoginAndCaptureCaptcha(page, config);
+                const captcha = await openLoginAndCaptureCaptcha(
+                  page,
+                  config,
+                  reportStage,
+                );
                 return { page, loggedIn: false, captcha };
               } catch (error) {
                 if (error instanceof FirstbankAlreadyAuthenticatedError)
@@ -538,14 +551,18 @@ async function loginWithOcr(
 async function openLoginAndCaptureCaptcha(
   page: Page,
   config: FirstbankBrowserConfig,
+  reportStage?: ReportBrowserLoginStage,
 ): Promise<CaptchaImage> {
+  reportStage?.("navigate");
   await gotoAllowingTimeout(page, LOGIN_URL);
   await switchLoginPageToTraditionalChinese(page);
   if (await resumeAuthenticatedSession(page)) {
     throw new FirstbankAlreadyAuthenticatedError();
   }
+  reportStage?.("form");
   await openLoginAndFill(page, config);
 
+  reportStage?.("captcha");
   try {
     await page.waitForFunction(
       () => {

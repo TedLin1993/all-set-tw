@@ -91,7 +91,9 @@ Protocol／client 不得依賴 Hono、D1、Worker `Env`、adapter 或 `sync.ts`�
 `puppeteer.launch`。共用 adapter 在 binding `fetch` 層僅針對建立瀏覽器的
 `POST /v1/devtools/browser` 請求依 HTTP status `503` 判斷重試，不比對錯誤文案。
 預設等待 2 秒、5 秒後重試，最多嘗試 3 次；`503` 耗盡後保留原始錯誤。
-結構化 log 只記錄狀態碼、嘗試次數與重試延遲。建立瀏覽器時遇到 Browser Run
+結構化 log 只記錄狀態碼、嘗試次數與重試延遲。建立請求回應 `429` 時，在 binding
+層辨識每日額度，並保留 `Retry-After` 的秒數或 HTTP 日期；暫時限流缺少有效 header
+時預設 20 秒，避免 Puppeteer SDK 丟失 header。回應本文不寫入 log。建立瀏覽器時遇到 Browser Run
 每日額度或限流，`classifyBrowserRunCapacityError` 會轉成共用的
 `BrowserRunCapacityError`；不相關錯誤原樣傳遞。每日額度依 Cloudflare 的 UTC
 隔日重置，使用者訊息說明「每日台灣時間早上 8 點重置」，`Retry-After` 為距離
@@ -110,17 +112,29 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 可復用的登入 cookie 只在首次嘗試還原；若首次準備失敗，後續新 session 直接載入
 登入頁，避免每次都耗時重走失效的 session。國泰的信任裝置 cookie 仍在每次新建時還原。
 
-- 最多三次嘗試（含首次）；每次頁面準備硬逾時 15 秒，共用流程使用固定的 45 秒
+- 最多三次頁面嘗試（含首次）；每次頁面準備硬逾時 60 秒，共用流程使用固定的 180 秒
   預算，取得瀏覽器與限流等待也算入預算。來源原有同步期限與取消 signal 繼續生效；
   樂天另外預留 OCR／登入時間，重試不重設整次同步期限。
+- 查詢 `puppeteer.limits` 與每次取得瀏覽器各自最多 15 秒，受整體剩餘期限限制。
+  限流等待在取得操作之外計時，因此 20 秒等待不會被 15 秒取得逾時截斷。
+  首次額度不足或取得回應 `429` 保留原有忙碌政策；只有已確認關閉舊 session 的
+  重開流程會等待。每次等待後重新查詢額度，尚無額度就繼續等待至剩餘預算不足。
+  重開取得的暫時性 `429` 依 `Retry-After` 等待後重試，最多三次取得嘗試；每日額度
+  立即停止。只有建立請求明確回應 `429` 才能重試；CDP 連線失敗即使含有 `429`
+  也停止重開，避免重複建立狀態不明的 session。其他取得錯誤與取得逾時不觸發新一輪登入頁重試，未知取得
+  逾時也會停止尚未發出的 HTTP 重試；遲到的 session 仍須關閉。
 - 只重試載入逾時、分頁失去回應及暫時性網路錯誤。帳密遭拒、已辨識的銀行維護、
   登入結果不明與送出登入後的錯誤沿用來源原有政策。人工 CAPTCHA／OTP 重連保留
   原 session，不套用自動重開。
 - 失敗取樣最多一秒，隨後清理最多四秒；先呼叫 `browser.close()`，並透過 binding
   `DELETE /v1/devtools/browser/:sessionId` 確認遠端關閉。清理不能確認成功就停止，
   不再開新 session。等待下一次 acquisition 額度只會發生在舊 session 已關閉後；
-  每日額度及瀏覽器建立錯誤不觸發登入頁重試。診斷與最後清理可在準備預算外收尾。
-- `browser_login_preparation_failed` 只記來源、次數、耗時、去除 query／fragment 的
+  診斷與最後清理可在準備預算外收尾。
+- `browser_login_preparation_failed` 記錄固定的準備階段（分頁初始化／設定、session
+  還原、導覽、表單、驗證碼）、逾時來源（共用操作、整體預算、來源期限或來源內部操作）、
+  頁面準備耗時、每輪與累計耗時。`browser_login_acquisition_wait` 與
+  `browser_login_acquisition_failed` 記錄取得階段、額度查詢結果、等待時間、取得次數
+  與 capacity 類型，供區分限流與頁面載入問題。其他診斷只記去除 query／fragment 的
   host/path、HTTP 狀態、網路錯誤代碼、CDP 是否回應、維護判斷與關閉結果，最多八筆
   失敗請求；不保存完整 HTML、頁面文字、截圖、帳密、cookie 或 token。
 
