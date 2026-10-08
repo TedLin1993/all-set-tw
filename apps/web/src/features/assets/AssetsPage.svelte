@@ -252,7 +252,8 @@
                       {#if group.cards.length && group.loans.length}
                         {group.hasUnknownCardBalance
                           ? "信用卡資料不完整"
-                          : `卡債 ${formatCurrency(-group.debtTotalTwd)}`} · {group.hasUnknownLoanBalance
+                          : `${group.debtTotalTwd < 0 ? "溢繳" : "卡債"} ${formatCurrency(-group.debtTotalTwd)}`}
+                        · {group.hasUnknownLoanBalance
                           ? "貸款資料不完整"
                           : `貸款 ${formatCurrency(group.loanDebtTotalTwd)}`}
                       {:else if group.loans.length}
@@ -387,7 +388,8 @@
                     {#if group.cards.length && group.loans.length}
                       {group.hasUnknownCardBalance
                         ? "信用卡資料不完整"
-                        : `卡債 ${formatCurrency(-group.debtTotalTwd)}`} · {group.hasUnknownLoanBalance
+                        : `${group.debtTotalTwd < 0 ? "溢繳" : "卡債"} ${formatCurrency(-group.debtTotalTwd)}`}
+                      · {group.hasUnknownLoanBalance
                         ? "貸款資料不完整"
                         : `貸款 ${formatCurrency(group.loanDebtTotalTwd)}`}
                     {:else if group.loans.length}

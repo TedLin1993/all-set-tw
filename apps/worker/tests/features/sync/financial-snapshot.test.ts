@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTestD1 } from "../../helpers/d1";
-import { calculateCurrentFinancialSnapshot } from "../../../src/features/sync/reports/repository";
+import {
+  calculateCurrentFinancialSnapshot,
+  getLatestScheduledSyncReport,
+  hasCompletedFinancialBaseline,
+} from "../../../src/features/sync/reports/repository";
 
 describe("scheduled financial snapshot loan debt", () => {
   let harness: Awaited<ReturnType<typeof createTestD1>>;
@@ -17,6 +21,8 @@ describe("scheduled financial snapshot loan debt", () => {
 
   beforeEach(async () => {
     await db.batch([
+      db.prepare("DELETE FROM scheduled_sync_batch_results"),
+      db.prepare("DELETE FROM scheduled_sync_batches"),
       db.prepare("DELETE FROM bank_balance_snapshots"),
       db.prepare("DELETE FROM bank_accounts"),
     ]);
@@ -55,6 +61,52 @@ describe("scheduled financial snapshot loan debt", () => {
       creditCardDebtTwd: 10_000,
       loanDebtTwd: 40_000,
       missingCurrencies: [],
+    });
+  });
+
+  it("treats legacy batches with NULL loan snapshots as a completed baseline", async () => {
+    const completedAt = "2026-10-07T00:00:00.000Z";
+    await db
+      .prepare(
+        `INSERT INTO scheduled_sync_batches (
+           id, schedule_key, notification_claimed_at, created_at, completed_at,
+           is_baseline, assets_before_twd, credit_card_debt_before_twd,
+           loan_debt_before_twd, assets_after_twd, credit_card_debt_after_twd,
+           loan_debt_after_twd
+         ) VALUES (?, 'default', ?, ?, ?, 0, 100, 10, NULL, 120, 15, NULL)`,
+      )
+      .bind("legacy", completedAt, completedAt, completedAt)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO scheduled_sync_batch_results (
+           batch_id, job_id, connector_id, status, completed_at
+         ) VALUES (?, ?, ?, 'success', ?)`,
+      )
+      .bind("legacy", "job:legacy", "cathaybk", completedAt)
+      .run();
+
+    await expect(hasCompletedFinancialBaseline(db)).resolves.toBe(true);
+    await expect(getLatestScheduledSyncReport(db)).resolves.toMatchObject({
+      id: "legacy",
+      financialChange: {
+        assets: 20,
+        creditCardDebt: 5,
+        loanDebt: 0,
+        netWorth: 15,
+      },
+      financialChangeUnavailableReason: null,
+    });
+
+    await db
+      .prepare(
+        "UPDATE scheduled_sync_batches SET loan_debt_after_twd = 1 WHERE id = ?",
+      )
+      .bind("legacy")
+      .run();
+    await expect(getLatestScheduledSyncReport(db)).resolves.toMatchObject({
+      financialChange: null,
+      financialChangeUnavailableReason: "snapshot_unavailable",
     });
   });
 });

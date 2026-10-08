@@ -358,7 +358,6 @@ export async function hasCompletedFinancialBaseline(db: D1Database) {
         isNotNull(scheduledSyncBatches.completedAt),
         isNotNull(scheduledSyncBatches.assetsAfterTwd),
         isNotNull(scheduledSyncBatches.creditCardDebtAfterTwd),
-        isNotNull(scheduledSyncBatches.loanDebtAfterTwd),
         sql`EXISTS (SELECT 1 FROM ${scheduledSyncBatchResults} WHERE ${scheduledSyncBatchResults.batchId} = ${scheduledSyncBatches.id} AND ${scheduledSyncBatchResults.status} = 'success')`,
         sql`NOT EXISTS (SELECT 1 FROM ${scheduledSyncBatchResults} WHERE ${scheduledSyncBatchResults.batchId} = ${scheduledSyncBatches.id} AND ${scheduledSyncBatchResults.status} IN ('failed', 'needs_user_action'))`,
       ),
@@ -442,6 +441,9 @@ export async function getLatestScheduledSyncReport(
     ]),
   ].sort();
   const financialChangeUnavailableReason = unavailableReason(batch);
+  // Batches created before loan snapshots existed have NULL in both new fields.
+  const loanDebtBeforeTwd = batch.loanDebtBeforeTwd ?? 0;
+  const loanDebtAfterTwd = batch.loanDebtAfterTwd ?? 0;
 
   return {
     id: batch.id,
@@ -464,14 +466,14 @@ export async function getLatestScheduledSyncReport(
             assets: batch.assetsAfterTwd! - batch.assetsBeforeTwd!,
             creditCardDebt:
               batch.creditCardDebtAfterTwd! - batch.creditCardDebtBeforeTwd!,
-            loanDebt: batch.loanDebtAfterTwd! - batch.loanDebtBeforeTwd!,
+            loanDebt: loanDebtAfterTwd - loanDebtBeforeTwd,
             netWorth:
               batch.assetsAfterTwd! -
               batch.creditCardDebtAfterTwd! -
-              batch.loanDebtAfterTwd! -
+              loanDebtAfterTwd -
               (batch.assetsBeforeTwd! -
                 batch.creditCardDebtBeforeTwd! -
-                batch.loanDebtBeforeTwd!),
+                loanDebtBeforeTwd),
           }
         : null,
     financialChangeUnavailableReason,
@@ -533,13 +535,15 @@ function unavailableReason(
   batch: CompletedBatchRow,
 ): SyncFinancialChangeUnavailableReason | null {
   if (batch.isBaseline) return "baseline";
+  const hasLegacyLoanSnapshot =
+    batch.loanDebtBeforeTwd === null && batch.loanDebtAfterTwd === null;
   if (
     batch.assetsBeforeTwd === null ||
     batch.creditCardDebtBeforeTwd === null ||
-    batch.loanDebtBeforeTwd === null ||
     batch.assetsAfterTwd === null ||
     batch.creditCardDebtAfterTwd === null ||
-    batch.loanDebtAfterTwd === null
+    (!hasLegacyLoanSnapshot &&
+      (batch.loanDebtBeforeTwd === null || batch.loanDebtAfterTwd === null))
   ) {
     return "snapshot_unavailable";
   }

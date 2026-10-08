@@ -283,6 +283,10 @@
               currency: account.currency,
               amount: Math.abs(account.balance ?? 0),
             })),
+            ...loans.map((account) => ({
+              currency: account.currency,
+              amount: Math.abs(account.balance ?? 0),
+            })),
             ...($investments.data ?? []).map((item) => ({
               currency: item.currency,
               amount: (item.marketValue ?? 0) + (item.cashBalance ?? 0),
