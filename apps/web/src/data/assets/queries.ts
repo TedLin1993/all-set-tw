@@ -35,6 +35,13 @@ export const exchangeRatesQuery = (getApi: ApiProvider) =>
     queryFn: () => getApi().get<ExchangeRateRow[]>("/api/exchange-rates"),
   });
 
+export const exchangeRateCurrenciesQuery = (getApi: ApiProvider) =>
+  queryOptions({
+    queryKey: queryKeys.exchangeRateCurrencies,
+    queryFn: () => getApi().get<string[]>("/api/exchange-rates/currencies"),
+    staleTime: 0,
+  });
+
 export const netWorthHistoryQuery = (getApi: ApiProvider) =>
   queryOptions({
     queryKey: queryKeys.netWorthHistory,

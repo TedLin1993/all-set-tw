@@ -1,4 +1,5 @@
 export * from "./financial-types";
+export * from "./exchange-rates";
 export * from "./api-types";
 export * from "./bank-api";
 export * from "./connector-catalog";

@@ -1,8 +1,12 @@
 import { z } from "zod";
 import {
+  assetExchangeRateCurrencies,
+  DEFAULT_EXCHANGE_CURRENCIES,
+} from "@taiwan-fin-hub/shared";
+import {
+  listAssetCurrencyAmounts,
   listExchangeRates,
-  replaceExchangeRates,
-  SUPPORTED_EXCHANGE_CURRENCIES,
+  upsertExchangeRates,
 } from "./repository";
 
 export const EXCHANGE_RATE_API_URL = "https://open.er-api.com/v6/latest/TWD";
@@ -27,13 +31,24 @@ export function getExchangeRates(db: D1Database) {
   return listExchangeRates(db);
 }
 
+export async function getExchangeRateCurrencies(db: D1Database) {
+  return assetExchangeRateCurrencies(await listAssetCurrencyAmounts(db));
+}
+
 export async function refreshExchangeRates(
   db: D1Database,
   fetcher: typeof fetch = fetch,
 ) {
   const provider = await fetchProviderRates(fetcher);
-  const rates = SUPPORTED_EXCHANGE_CURRENCIES.map((currency) => {
+  const currencies = await getExchangeRateCurrencies(db);
+  const rates = currencies.flatMap((currency) => {
     const providerRate = provider.rates[currency];
+    if (
+      providerRate == null &&
+      !DEFAULT_EXCHANGE_CURRENCIES.includes(currency)
+    ) {
+      return [];
+    }
     if (typeof providerRate !== "number" || !Number.isFinite(providerRate)) {
       throw new ExchangeRateProviderError(
         `Exchange rate provider did not return ${currency}.`,
@@ -44,10 +59,10 @@ export async function refreshExchangeRates(
         `Exchange rate provider returned an invalid ${currency} rate.`,
       );
     }
-    return { currency, rate: 1 / providerRate };
+    return [{ currency, rate: 1 / providerRate }];
   });
 
-  await replaceExchangeRates(
+  await upsertExchangeRates(
     db,
     rates,
     new Date(provider.timeLastUpdateUnix * 1000).toISOString(),
