@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { calculateAssetSummary } from "./summary";
+import { formatCurrency } from "@/shared/format/financial";
 
 describe("calculateAssetSummary", () => {
   it("counts credit-card overpayments toward net worth instead of debt", () => {
@@ -135,4 +136,64 @@ describe("calculateAssetSummary", () => {
     expect(summary.grossAssets).toBe(0);
     expect(summary.missingCurrencies).toEqual(["JPY", "USD"]);
   });
+
+  it.each([
+    { amount: 0, missingCurrencies: [] },
+    { amount: 0.03, missingCurrencies: ["AUD", "CHF", "GBP", "HKD"] },
+    { amount: 1, missingCurrencies: ["AUD", "CHF", "GBP", "HKD"] },
+  ])(
+    "reports missing rates for actual nonzero foreign amounts ($amount)",
+    ({ amount, missingCurrencies }) => {
+      const summary = calculateAssetSummary({
+        bank: {
+          accounts: [
+            {
+              id: "foreign",
+              connectorId: "obank",
+              sourceId: "foreign",
+              accountType: "savings",
+              balance: amount,
+              currency: "HKD",
+            },
+            {
+              id: "card",
+              connectorId: "esun",
+              sourceId: "card",
+              accountType: "credit",
+              balance: -amount,
+              currency: "CHF",
+            },
+          ],
+          transactions: [],
+        },
+        investments: [
+          {
+            id: "investment",
+            assetType: "stock",
+            name: "外幣持倉",
+            marketValue: 0,
+            cashBalance: amount,
+            currency: "GBP",
+            asOfDate: "2026-10-08",
+          },
+        ],
+        manualAssets: [
+          {
+            id: "manual",
+            name: "外幣資產",
+            category: "other",
+            note: null,
+            currency: "AUD",
+            createdAt: "2026-10-08",
+            value: amount,
+          },
+        ],
+        rates: [],
+      });
+
+      expect(summary.netWorth).toBe(0);
+      expect(summary.missingCurrencies).toEqual(missingCurrencies);
+      expect(formatCurrency(amount, "HKD")).toBe(`HKD ${amount}`);
+    },
+  );
 });

@@ -401,7 +401,10 @@
         <div class="rounded-xl bg-muted p-4">
           <p class="text-sm font-semibold text-muted-foreground">支援幣別</p>
           <p class="mt-2 text-lg font-bold">{$rates.data?.length ?? 0} 筆</p>
-          <p class="mt-1 text-sm font-semibold text-steel">USD · JPY · EUR</p>
+          <p class="mt-1 text-sm font-semibold text-steel">
+            {($rates.data ?? []).map((rate) => rate.currency).join(" · ") ||
+              "尚未取得"}
+          </p>
         </div>
       </section>
 

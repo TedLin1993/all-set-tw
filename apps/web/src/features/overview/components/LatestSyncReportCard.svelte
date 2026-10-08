@@ -16,7 +16,6 @@
     signedFinancialChange,
     syncReportStatusPresentation,
     syncReportRecoveryMessage,
-    zeroRateCurrenciesMessage,
   } from "../model/sync-report";
 
   let {
@@ -44,9 +43,6 @@
   );
   const recoveryMessage = $derived(
     report ? syncReportRecoveryMessage(report) : null,
-  );
-  const zeroRateMessage = $derived(
-    report ? zeroRateCurrenciesMessage(report.missingCurrencies) : null,
   );
   const newRecordItems = $derived(
     report
@@ -232,17 +228,6 @@
           </div>
         {/if}
       </div>
-
-      {#if zeroRateMessage}
-        <div
-          class="flex items-start gap-2 rounded-lg bg-amber-50/70 px-3 py-2.5 text-amber-900"
-        >
-          <TriangleAlert class="mt-0.5 size-4 shrink-0" />
-          <p class="text-caption font-medium leading-relaxed">
-            {zeroRateMessage}
-          </p>
-        </div>
-      {/if}
 
       {#if report.sources.length > 0}
         <details
