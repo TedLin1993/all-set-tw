@@ -59,22 +59,207 @@ export type TaishinDepositData = {
   bankBalanceSnapshots: Array<Omit<BankBalanceSnapshot, "id" | "connectorId">>;
   bankTransactions: Array<Omit<BankTransaction, "id" | "connectorId">>;
 };
+type DiagnosticValueType =
+  | "missing"
+  | "null"
+  | "string"
+  | "number"
+  | "boolean"
+  | "array"
+  | "object"
+  | "unknown";
+type FxAccountDiagnosticIssue = {
+  path: string;
+  code:
+    | "invalid_type"
+    | "invalid_format"
+    | "too_small"
+    | "invalid_union"
+    | "unknown";
+  expected:
+    | "string"
+    | "number"
+    | "array"
+    | "object"
+    | "string|number"
+    | "array|object"
+    | "unknown";
+  received: DiagnosticValueType;
+};
+type FxAccountDiagnostics = {
+  issues: FxAccountDiagnosticIssue[];
+  truncated: boolean;
+};
 
 export class TaishinDepositProtocolError extends Error {
   constructor(
     message: string,
     readonly incomplete = false,
+    readonly diagnostics?: FxAccountDiagnostics,
   ) {
     super(message);
     this.name = "TaishinDepositProtocolError";
   }
 }
 
-function checked<T>(schema: z.ZodType<T>, value: unknown, label: string): T {
+function checked<T>(
+  schema: z.ZodType<T>,
+  value: unknown,
+  label: string,
+  diagnose?: (
+    issues: readonly z.core.$ZodIssue[],
+    value: unknown,
+  ) => FxAccountDiagnostics,
+): T {
   const parsed = schema.safeParse(value);
-  if (!parsed.success)
-    throw new TaishinDepositProtocolError(`台新存款${label}格式已改變。`);
+  if (!parsed.success) {
+    const diagnostics = diagnose?.(parsed.error.issues, value);
+    const first = diagnostics?.issues[0];
+    const message = diagnostics
+      ? `台新存款${label}格式驗證失敗。`
+      : `台新存款${label}格式已改變。`;
+    const detail = first
+      ? `（${first.path}：${first.code}，預期 ${first.expected}，收到 ${first.received}。）`
+      : "";
+    throw new TaishinDepositProtocolError(message + detail, false, diagnostics);
+  }
   return parsed.data;
+}
+
+function fxDiagnosticPath(path: readonly PropertyKey[]) {
+  if (path[0] !== "FCS_ACCOUNT") return "unknown";
+  let result = "FCS_ACCOUNT";
+  if (path.length === 1) return result;
+  // This position is always a dynamic account key or index, even if its text
+  // happens to match one of the schema's field names.
+  result += "[*]";
+  if (path.length === 2) return result;
+  const field = path[2];
+  if (
+    typeof field !== "string" ||
+    !["ACCOUNT_NO", "ACCOUNT_NAME", "FCS_ACCOUNT_DETAIL"].includes(field)
+  )
+    return `${result}.unknown`;
+  result += `.${field}`;
+  if (path.length === 3) return result;
+  if (field !== "FCS_ACCOUNT_DETAIL") return `${result}.unknown`;
+  result += "[*]";
+  if (path.length === 4) return result;
+  const detailField = path[4];
+  if (
+    typeof detailField !== "string" ||
+    !["ACCOUNT_NO", "ACCOUNT_ALIAS", "CURRENCY_CODE", "BALANCE"].includes(
+      detailField,
+    )
+  )
+    return `${result}.unknown`;
+  result += `.${detailField}`;
+  return path.length === 5 ? result : `${result}.unknown`;
+}
+
+function diagnosticValueType(value: unknown): DiagnosticValueType {
+  if (value === undefined) return "missing";
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  const type = typeof value;
+  switch (type) {
+    case "string":
+    case "number":
+    case "boolean":
+    case "object":
+      return type;
+    default:
+      return "unknown";
+  }
+}
+
+function fxAccountDiagnostics(
+  issues: readonly z.core.$ZodIssue[],
+  value: unknown,
+): FxAccountDiagnostics {
+  const result: FxAccountDiagnostics = { issues: [], truncated: false };
+  const seen = new Set<string>();
+  const visit = (
+    issues: readonly z.core.$ZodIssue[],
+    prefix: readonly PropertyKey[] = [],
+  ) => {
+    for (const issue of issues) {
+      const path = [...prefix, ...issue.path];
+      if (issue.code === "invalid_union") {
+        // Zod union child paths are relative. A branch with field errors
+        // matched the container; omit the other branch's root type error.
+        const branches = issue.errors.filter((branch) =>
+          branch.some((child) => child.path.length > 0),
+        );
+        if (branches.length > 0) {
+          for (const branch of branches) {
+            visit(branch, path);
+            if (result.truncated) return;
+          }
+          continue;
+        }
+      }
+      let receivedValue = value;
+      for (const key of path) {
+        receivedValue =
+          receivedValue !== null &&
+          typeof receivedValue === "object" &&
+          Object.hasOwn(receivedValue, key)
+            ? (receivedValue as Record<PropertyKey, unknown>)[key]
+            : undefined;
+      }
+      const diagnostic: FxAccountDiagnosticIssue = {
+        path: fxDiagnosticPath(path),
+        code: "unknown",
+        expected: "unknown",
+        received: diagnosticValueType(receivedValue),
+      };
+      switch (issue.code) {
+        case "invalid_type":
+          diagnostic.code = issue.code;
+          switch (issue.expected) {
+            case "string":
+              diagnostic.expected = "string";
+              break;
+            case "number":
+              diagnostic.expected = "number";
+              break;
+            case "array":
+              diagnostic.expected = "array";
+              break;
+            case "object":
+            case "record":
+              diagnostic.expected = "object";
+              break;
+          }
+          break;
+        case "invalid_format":
+        case "too_small":
+          diagnostic.code = issue.code;
+          diagnostic.expected = "string";
+          break;
+        case "invalid_union":
+          diagnostic.code = issue.code;
+          diagnostic.expected =
+            diagnostic.path === "FCS_ACCOUNT"
+              ? "array|object"
+              : diagnostic.path.endsWith(".BALANCE")
+                ? "string|number"
+                : "unknown";
+          break;
+      }
+      const identity = JSON.stringify(diagnostic);
+      if (seen.has(identity)) continue;
+      if (result.issues.length === 5) {
+        result.truncated = true;
+        return;
+      }
+      seen.add(identity);
+      result.issues.push(diagnostic);
+    }
+  };
+  visit(issues);
+  return result;
 }
 
 function twdData(payload: unknown) {
@@ -287,6 +472,7 @@ export async function fetchTaishinDeposits(
     }),
     fxData(await request(`${root}/web2/rb0800/getRB08000100Data`, "")),
     "外幣帳戶清單",
+    fxAccountDiagnostics,
   ).FCS_ACCOUNT;
   const result: TaishinDepositData = {
     bankAccounts: [],
