@@ -14,6 +14,7 @@ import {
   connectBrowserWithCancellation,
   prepareBrowserLoginWithRetry,
   closeBrowserSession,
+  type ReportBrowserLoginStage,
 } from "../browser.js";
 import puppeteer, {
   type Browser,
@@ -314,12 +315,14 @@ export function createRakutenConnector(
       const initializePage = async (
         browser: Browser,
         observePage?: (page: Page) => void,
+        reportStage?: ReportBrowserLoginStage,
       ) => {
         stage = "initialize_browser_page";
         const pages = await browser.pages();
         const page = pages[0] ?? (await browser.newPage());
         observePage?.(page);
         stage = "configure_browser_page";
+        reportStage?.("configure_page");
         await configurePage(page);
         // Response bodies remain encrypted here; financial data comes from
         // the response tap installed by configurePage before navigation.
@@ -354,12 +357,25 @@ export function createRakutenConnector(
               error instanceof RakutenActionTimeoutError ||
               (error instanceof RakutenConnectionError &&
                 /^樂天登入頁沒有/.test(error.message)),
-            prepare: async (browser, observePage) => {
-              const page = await initializePage(browser, observePage);
+            prepare: async (
+              browser,
+              observePage,
+              _signal,
+              _attempt,
+              reportStage,
+            ) => {
+              const page = await initializePage(
+                browser,
+                observePage,
+                reportStage,
+              );
               stage = "login";
               switchTimedStage("loginMs");
-              const capture = await prepareLoginAndCapture(page, config, (ms) =>
-                Math.min(ms, remainingMs(syncStartedAt, "login")),
+              const capture = await prepareLoginAndCapture(
+                page,
+                config,
+                (ms) => Math.min(ms, remainingMs(syncStartedAt, "login")),
+                reportStage,
               );
               return { page, capture };
             },
@@ -1149,11 +1165,14 @@ async function prepareLoginAndCapture(
   page: Page,
   config: RakutenConfig,
   budget: TimeBudget = noBudget,
+  reportStage?: ReportBrowserLoginStage,
 ): Promise<{
   captchaDataUri: string;
   fillCredentials: () => Promise<void>;
 }> {
+  reportStage?.("navigate");
   await gotoAllowingTimeout(page, LOGIN_URL, budget(GOTO_ALLOW_TIMEOUT_MS));
+  reportStage?.("form");
   try {
     await page.waitForFunction(
       () =>
@@ -1178,6 +1197,7 @@ async function prepareLoginAndCapture(
     );
   }
 
+  reportStage?.("captcha");
   const captchaDataUri = await captureCaptchaImage(
     page,
     budget(CAPTCHA_IMAGE_TIMEOUT_MS),

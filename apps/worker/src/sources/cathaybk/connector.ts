@@ -3,6 +3,7 @@ import {
   connectBrowserWithCancellation,
   prepareBrowserLoginWithRetry,
   closeBrowserSession,
+  type ReportBrowserLoginStage,
 } from "../browser.js";
 import puppeteer, {
   type Browser,
@@ -185,13 +186,21 @@ async function scrapeWithBrowser(
         binding: browserBinding,
         connectorId: "cathaybk",
         launchOptions: { keep_alive: OTP_SESSION_TTL_MS },
-        prepare: async (browser, observePage) => {
+        prepare: async (
+          browser,
+          observePage,
+          _signal,
+          _attempt,
+          reportStage,
+        ) => {
           const pages = await browser.pages();
           const page = pages[0] ?? (await browser.newPage());
           observePage(page);
+          reportStage("configure_page");
           await page.setViewport({ width: 1280, height: 800 });
+          reportStage("restore_session");
           await restoreCathayTrustedState(page, config);
-          await prepareCathayLoginPage(page);
+          await prepareCathayLoginPage(page, reportStage);
           return page;
         },
       });
@@ -1019,11 +1028,16 @@ export function isCathayAuthenticatedUrl(value: string) {
   }
 }
 
-async function prepareCathayLoginPage(page: CathayLoginPage) {
+async function prepareCathayLoginPage(
+  page: CathayLoginPage,
+  reportStage?: ReportBrowserLoginStage,
+) {
+  reportStage?.("navigate");
   await page.goto(LOGIN_URL, {
     waitUntil: "domcontentloaded",
     timeout: 15_000,
   });
+  reportStage?.("form");
   await dismissInterstitialIfPresent(page);
   await dismissCathaySystemMessageIfPresent(page);
   for (const selector of ["#CustID", "#UserIdKeyin", "#PasswordKeyin"]) {

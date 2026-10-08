@@ -5,6 +5,7 @@ import {
   connectBrowserWithCancellation,
   prepareBrowserLoginWithRetry,
   closeBrowserSession,
+  type ReportBrowserLoginStage,
 } from "../browser.js";
 import puppeteer, {
   type Browser,
@@ -198,13 +199,16 @@ export function createHncbConnector(
                   observePage,
                   preparationSignal,
                   attempt,
+                  reportStage,
                 ) => {
                   const pages = await browser.pages();
                   const page = pages[0] ?? (await browser.newPage());
                   observePage(page);
+                  reportStage("configure_page");
                   await configurePage(page);
                   let loggedIn = false;
                   if (attempt === 1 && config.sessionCookies) {
+                    reportStage("restore_session");
                     await importCookies(page, config.sessionCookies);
                     await gotoAllowingTimeout(page, PERSONAL_JSP);
                     loggedIn = await hasMainFrame(
@@ -219,7 +223,8 @@ export function createHncbConnector(
                       "華南銀行 session 已失效，需要重新登入。",
                     );
                   }
-                  await openLoginAndFill(page, config);
+                  await openLoginAndFill(page, config, reportStage);
+                  reportStage("captcha");
                   const captcha = await captureCaptcha(page);
                   return { page, loggedIn, captcha };
                 },
@@ -489,7 +494,11 @@ async function openLoginAndCaptureCaptcha(page: Page, config: HncbConfig) {
   );
 }
 
-async function openLoginAndFill(page: Page, config: HncbConfig) {
+async function openLoginAndFill(
+  page: Page,
+  config: HncbConfig,
+  reportStage?: ReportBrowserLoginStage,
+) {
   const failedRequests: { path: string; errorText: string }[] = [];
   const onRequestFailed = (request: {
     url: () => string;
@@ -505,7 +514,9 @@ async function openLoginAndFill(page: Page, config: HncbConfig) {
   };
   page.on("requestfailed", onRequestFailed);
   try {
+    reportStage?.("navigate");
     await gotoAllowingTimeout(page, LOGIN_URL);
+    reportStage?.("form");
     await waitForHncbLoginReady(page, HNCB_LOGIN_READY_TIMEOUT_MS);
   } catch (error) {
     const snapshot = await readHncbLoginSnapshot(page);
