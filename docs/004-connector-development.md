@@ -418,6 +418,19 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 | `web2/rb0800/getRB08000100QueryRealtimeBalance`                                  | `{ requestAccount, requestAccountAlias, requestCcyCode }`；核對回應 `ACCT_NO`、`CURRENCY_CODE`，保存 `BALANCE`；官方未提供可用餘額，保持未知。                                      |
 | `web2/rb0812/getRB08120100Options`、`web2/rb0802/getRB08020100ForeignTranDetail` | 官方 RB0802 初始化使用 RB0812 options。按各幣別以 `requestAcctNo`、`requestCurrency`、`requestStartDate`、`requestEndDate`、`requestDateType = I` 查詢；解析 `data.TRANS_DETAILS`。 |
 
+外幣總覽的 `FCS_ACCOUNT` 接受陣列或物件映射，包含空 `[]`／`{}`。清單 schema 驗證失敗時仍中止同步，訊息使用「格式驗證失敗」並附第一筆去識別診斷，不將錯誤推定為銀行改版或空產品。Worker 日誌以 `event = taishin_deposit_schema_validation_failed`、`endpoint = getRB08000100Data` 提供最多五筆去重後的診斷；超過時標記 `truncated: true`。
+
+每筆診斷僅含白名單欄位路徑、錯誤碼、預期型別與收到的型別。帳戶動態鍵與陣列索引按位置替換為 `[*]`，即使鍵名等於白名單欄位也不能保留；未知欄位／型別以 `unknown` 表示，缺省型別以 `missing` 表示。群組欄位僅允許 `ACCOUNT_NO`、`ACCOUNT_NAME`、`FCS_ACCOUNT_DETAIL`，明細欄位僅允許 `ACCOUNT_NO`、`ACCOUNT_ALIAS`、`CURRENCY_CODE`、`BALANCE`。Zod union 子錯誤接上外層路徑，優先呈現符合容器形狀的分支；金額型別合併為 `string|number`。錯誤與日誌不保存 Zod 原始 message/input、動態鍵、欄位值或原始回應。回報者可提供下列形式的診斷定位欄位，不需提供帳務資料：
+
+```json
+{
+  "path": "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL[*].CURRENCY_CODE",
+  "code": "invalid_type",
+  "expected": "string",
+  "received": "null"
+}
+```
+
 臺幣 `txnamtOut` 非 `-` 是支出、`txnamtIn` 非 `-` 是存入；`sysdate` 為交易日／時刻，`dateNew` 為帳務日。`inNo + outNo` 必須與清單筆數一致，截斷時拆分不重疊期間重查；單日仍不完整即失敗。外幣 `DRWAMT` 是支出、`DEPAMT` 是存入，`ACCT_BAL` 是交易後餘額；交易日／時刻採官方顯示的 `TRANSACTION_DATE_TIME_DSC`，`TX_DATE` 為帳務日。前端表格在本機分頁，外幣查詢未見伺服器 continuation 或筆數欄位，要求完整 `TRANS_DETAILS`，不猜測分頁端點。
 
 每個帳號與幣別使用 `bank:taishin:{last4}:{sha256(accountIdentity)}:{currency}`，完整帳號只用於當次請求。交易 ID 依帳戶、消費日期、正負金額、交易後餘額及臺幣 `procSeq` 摘要，再按完整候選集合分配 occurrence；排序、備註或時間精度不影響 ID。快照按台灣日期每天更新，原幣小數與零餘額均保留。末四碼、銀行代碼 `812`、幣別沿用共用 canonical linking，集保同帳戶不重複計入資產。

@@ -3,12 +3,17 @@ import type { Page } from "@cloudflare/puppeteer";
 import {
   fetchTaishinBankData,
   TaishinVerificationRequiredError,
+  TaishinSyncStageError,
 } from "../../../src/sources/taishin/connector";
+import { TaishinDepositProtocolError } from "../../../src/sources/taishin/deposit-protocol";
+import { safeErrorMessage } from "../../../src/features/sync/errors";
 import {
   bankNow,
   depositRequest,
   emptyUnbilled,
   realtime,
+  FX_ACCOUNT,
+  fxOverview,
 } from "./fixtures/bank-data";
 
 type Request = { path: string; body: Record<string, unknown> | string };
@@ -34,6 +39,82 @@ function responsePage(override: (request: Request) => unknown) {
 }
 
 describe("台新必要金融查詢", () => {
+  it("外幣格式錯誤提供安全日誌與畫面摘要，並在取得信用卡前中止同步", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const group = fxOverview.data.FCS_ACCOUNT[0]!;
+      const malformed = responsePage((input) =>
+        input.path.endsWith("/getRB08000100Data")
+          ? {
+              error: null,
+              data: {
+                FCS_ACCOUNT: {
+                  [FX_ACCOUNT]: {
+                    ...group,
+                    ACCOUNT_NAME: "synthetic-sensitive-name",
+                    FCS_ACCOUNT_DETAIL: [
+                      {
+                        ...group.FCS_ACCOUNT_DETAIL[0],
+                        CURRENCY_CODE: null,
+                        BALANCE: "87654.32",
+                        cookie: "synthetic-sensitive-cookie",
+                      },
+                    ],
+                  },
+                },
+              },
+            }
+          : undefined,
+      );
+      const stages: string[] = [];
+      const error = await fetchTaishinBankData(
+        malformed.page,
+        (stage) => stages.push(stage),
+        bankNow,
+      ).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(TaishinDepositProtocolError);
+      expect(stages.at(-1)).toBe("fetch_deposit_accounts");
+      expect(
+        malformed.evaluate.mock.calls.some(([, input]) =>
+          input.path.includes("/web4/"),
+        ),
+      ).toBe(false);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const log = String(warn.mock.calls[0]![0]);
+      expect(JSON.parse(log)).toEqual({
+        event: "taishin_deposit_schema_validation_failed",
+        connectorId: "taishin",
+        endpoint: "getRB08000100Data",
+        issues: [
+          {
+            path: "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL[*].CURRENCY_CODE",
+            code: "invalid_type",
+            expected: "string",
+            received: "null",
+          },
+        ],
+        truncated: false,
+      });
+      const message = safeErrorMessage(
+        new TaishinSyncStageError("fetch_deposit_accounts", error),
+      );
+      expect(message).toContain("取得存款帳戶");
+      expect(message).toContain(
+        "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL[*].CURRENCY_CODE",
+      );
+      expect(message).toContain("預期 string，收到 null");
+      for (const secret of [
+        FX_ACCOUNT,
+        "synthetic-sensitive-name",
+        "87654.32",
+        "synthetic-sensitive-cookie",
+      ])
+        expect(log + message).not.toContain(secret);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("使用完整即時消費端點，無卡回應只略過信用卡並保留存款", async () => {
     const successful = responsePage(() => undefined);
     const data = await fetchTaishinBankData(successful.page, () => {}, bankNow);

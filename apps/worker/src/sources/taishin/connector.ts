@@ -22,7 +22,10 @@ import {
   type TaishinConfig,
   type TaishinCreditCardPayloads,
 } from "./protocol";
-import { fetchTaishinDeposits } from "./deposit-protocol";
+import {
+  fetchTaishinDeposits,
+  TaishinDepositProtocolError,
+} from "./deposit-protocol";
 
 const RWD_URL = "https://my.taishinbank.com.tw/TIBNetBank/svc/rwd/index.html";
 const API_ROOT = "/TIBNetBank/svc";
@@ -494,7 +497,20 @@ export async function fetchTaishinBankData(
           : "fetch_deposit_transactions",
     );
     return postJson(page, path, body);
-  }, now);
+  }, now).catch((error: unknown) => {
+    if (error instanceof TaishinDepositProtocolError && error.diagnostics) {
+      console.warn(
+        JSON.stringify({
+          event: "taishin_deposit_schema_validation_failed",
+          connectorId: "taishin",
+          endpoint: "getRB08000100Data",
+          issues: error.diagnostics.issues,
+          truncated: error.diagnostics.truncated,
+        }),
+      );
+    }
+    throw error;
+  });
   const payloads = await fetchCreditCardPayloads(page, setStage);
   setStage("parse_payload");
   const credit = parseTaishinCreditCardData(payloads, now);
