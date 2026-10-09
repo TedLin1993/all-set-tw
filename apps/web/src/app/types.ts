@@ -6,7 +6,8 @@ export type MobileSettingsView =
   | "data-sources"
   | "sync-notifications"
   | "exchange-rates"
-  | "classification-rules";
+  | "classification-rules"
+  | "about";
 
 export type View = PrimaryView | DetailView | MobileSettingsView | "more";
 

@@ -255,21 +255,23 @@
                   currentView.description}
               </p>
             </div>
-            <div class="flex shrink-0 items-center gap-2">
-              <Button
-                class={mobileSetting
-                  ? "hidden rounded-full md:inline-flex"
-                  : "rounded-full"}
-                aria-label={moneyState.hidden ? "顯示金額" : "隱藏金額"}
-                onclick={toggleMoneyVisibility}
-                size="icon"
-                variant="secondary"
-                ><Icon
-                  icon={moneyState.hidden ? Eye : EyeOff}
-                  size="lg"
-                /></Button
-              >
-            </div>
+            {#if view !== "about"}
+              <div class="flex shrink-0 items-center gap-2">
+                <Button
+                  class={mobileSetting
+                    ? "hidden rounded-full md:inline-flex"
+                    : "rounded-full"}
+                  aria-label={moneyState.hidden ? "顯示金額" : "隱藏金額"}
+                  onclick={toggleMoneyVisibility}
+                  size="icon"
+                  variant="secondary"
+                  ><Icon
+                    icon={moneyState.hidden ? Eye : EyeOff}
+                    size="lg"
+                  /></Button
+                >
+              </div>
+            {/if}
           </div>
         </div>
       </header>
