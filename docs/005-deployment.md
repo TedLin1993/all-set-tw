@@ -4,7 +4,7 @@
 
 ## 部署前準備
 
-- [Cloudflare 帳號](https://dash.cloudflare.com/signup)
+- [Cloudflare 帳號](https://dash.cloudflare.com/sign-up)
 - [GitHub 帳號](https://github.com/signup)
 - 部署時填入的一組 `CONFIG_ENCRYPTION_KEY`
 
@@ -22,15 +22,19 @@ openssl rand -hex 32
 
 ### 2. 執行 Deploy to Cloudflare
 
-點擊 **Deploy to Cloudflare**，授權 Cloudflare 存取 GitHub，填入 `CONFIG_ENCRYPTION_KEY`，將 **Build command** 設為 `npm run build`、**Deploy command** 設為 `npm run deploy`。在同一頁開啟 **Protect with Cloudflare Access**，選擇 **All traffic** 與 **Cloudflare account**，確認後點擊 **Deploy**。
+點擊 **Deploy to Cloudflare**，授權 Cloudflare 存取 GitHub，填入 `CONFIG_ENCRYPTION_KEY`，將 **Build command** 設為 `npm run build`、**Deploy command** 設為 `npm run deploy`。在同一頁關閉 **Enable Preview builds**，再開啟 **Protect with Cloudflare Access**，選擇 **All traffic** 與 **Cloudflare account**，確認後點擊 **Deploy**。
 
 <img src="../images/deploy-setup.png" alt="Cloudflare 部署頁的 CONFIG_ENCRYPTION_KEY 欄位" width="700">
 
-Cloudflare 會先建立 Worker，再於背景執行 build。GUI 會建立登入保護；部署 script 自動取得 Team domain 與 AUD，再部署包含 `TEAM_DOMAIN`、`POLICY_AUD` 的版本。在這兩個值完成前，API 的登入驗證不會成功。請以 **Worker → Settings → Builds** 的該次 build 成功為準，完成後重新整理 Worker 頁面，再確認 Domains 狀態並開啟網站。
+Cloudflare 會先建立 Worker，再於背景執行 build；頁面會自動跳轉至 **Builds**。GUI 會建立登入保護；部署 script 自動取得 Team domain 與 AUD，再部署包含 `TEAM_DOMAIN`、`POLICY_AUD` 的版本。在這兩個值完成前，API 的登入驗證不會成功。請等待該次 build 顯示成功，再點擊右上角的 **Visit** 開啟網站；若未出現 **Visit** 按鈕，請先重新整理 Worker 頁面。
+
+<a href="../images/deploy-success.png"><img src="../images/deploy-success.png" alt="Cloudflare build 成功畫面與右上角的 Visit 按鈕" width="700"></a>
 
 [Deploy to Cloudflare](https://developers.cloudflare.com/workers/platform/deploy-buttons/) 會從 repository 根目錄的 `.dev.vars.example` 讀取部署時需要填寫的 Secret，並從 `package.json` 取得欄位說明。本專案將正式部署範例與 `apps/worker/.dev.vars.example` 的本機開發設定分開，初始表單只保留加密金鑰；多 Application、Demo、本機開發與 VAPID 參數不需在首次部署填寫。
 
 `.dev.vars.example` 定義 Worker Secret 欄位；Access 的開關、Scope、登入政策及期限需在 Cloudflare GUI 選擇。部署頁的登入期限最多可選 **7 days**，後續可在 Zero Trust [延長登入期限](#延長登入期限)。**Project name** 預設為 `all-set-tw`，由 `wrangler.toml` 的 `name` 定義；D1／Queue 的預填名稱也定義於同一檔案。請確認 **Deploy command** 為 `npm run deploy`；若 GUI 預填 `npx wrangler deploy`，需改為本專案的指令，才能執行完整設定。
+
+**Enable Preview builds** 是 [Workers Builds 的分支建置設定](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/)，目前沒有官方支援的 Wrangler 設定或一鍵部署參數可指定其預設值，請在部署頁手動關閉。若已部署，可在 **Worker → Settings → Builds → Branch control** 關閉。`wrangler.toml` 的 `preview_urls = false` 只關閉 Version URLs，不會停止非正式分支的自動建置。
 
 既有 Workers Builds 與部署 script 的 Secret 查詢會沿用已連接的 Worker 名稱，因此更新會保留原本的 Worker、Access 驗證值與 VAPID 金鑰。本機更新舊 Worker 時，請在私人 Wrangler 設定保留原本的 `name`，或於部署時指定 `--name`。
 
@@ -117,7 +121,7 @@ AUD 的官方取得方式請參考 [Get your AUD tag](https://developers.cloudfl
 
 依序檢查：
 
-1. Worker Access 的 Scope 是否為 **All traffic**，且正式網址會先要求 Access 登入。
+1. Worker Access 是否已啟用，且 Scope 為 **All traffic**。
 2. `POLICY_AUD` 是否為實際保護目前網址的 Application AUD。若同時有 hostname、Worker 與帳戶層級的 Access 規則，hostname 規則優先，其次是 Worker，再來才是帳戶規則。
 3. `TEAM_DOMAIN` 是否屬於相同的 Zero Trust organization。`https://yourteam.cloudflareaccess.com` 是正確格式；簽章公鑰網址為其後加上 `/cdn-cgi/access/certs`。
 4. 兩個值是否已存入 **Runtime variables and secrets** 並部署生效；Build variables 不會提供給 API runtime。
