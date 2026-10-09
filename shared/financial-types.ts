@@ -102,6 +102,8 @@ export interface BankAccount {
   institutionName?: string;
   accountName?: string;
   accountType?: BankAccountType;
+  loanCategory?: "housing" | "other";
+  loanInterestRate?: number;
   currency: string;
   openedDate?: string;
   maturityDate?: string;
@@ -121,6 +123,10 @@ export interface BankBalanceSnapshot {
   paymentDueDate?: string;
   statementClosingDate?: string;
   noPaymentNeeded?: boolean;
+  loanPaymentAmount?: number;
+  loanPaymentStatus?: "scheduled" | "collection_incomplete";
+  loanInstallmentsPaid?: number;
+  loanInstallmentsTotal?: number;
   currency: string;
   asOfAt: string;
   raw?: unknown;

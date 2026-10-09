@@ -29,12 +29,14 @@ import type {
 export type FinancialSnapshot = {
   assetsTwd: number;
   creditCardDebtTwd: number;
+  loanDebtTwd: number;
   missingCurrencies: string[];
 };
 
 type FinancialSnapshotRow = {
   assetsTwd: number;
   creditCardDebtTwd: number;
+  loanDebtTwd: number;
   missingCurrencies: string | null;
 };
 
@@ -45,9 +47,11 @@ type CompletedBatchRow = {
   isBaseline: number;
   assetsBeforeTwd: number | null;
   creditCardDebtBeforeTwd: number | null;
+  loanDebtBeforeTwd: number | null;
   missingCurrenciesBefore: string;
   assetsAfterTwd: number | null;
   creditCardDebtAfterTwd: number | null;
+  loanDebtAfterTwd: number | null;
   missingCurrenciesAfter: string;
 };
 
@@ -168,6 +172,7 @@ export async function recoverLatestScheduledSyncSource(
         `UPDATE scheduled_sync_batches
          SET assets_after_twd = ?,
              credit_card_debt_after_twd = ?,
+             loan_debt_after_twd = ?,
              missing_currencies_after = ?
          WHERE id = ?
            AND completed_at IS NOT NULL
@@ -180,6 +185,7 @@ export async function recoverLatestScheduledSyncSource(
       .bind(
         snapshot.assetsTwd,
         snapshot.creditCardDebtTwd,
+        snapshot.loanDebtTwd,
         JSON.stringify(snapshot.missingCurrencies),
         latest.batchId,
         latest.batchId,
@@ -257,6 +263,7 @@ export async function calculateCurrentFinancialSnapshot(
              LIMIT 1
            )
          WHERE account.canonical_account_id IS NULL
+           AND account.inactive_at IS NULL
        ), latest_investments AS (
          SELECT
            COALESCE(position.market_value, 0) + COALESCE(position.cash_balance, 0) AS amount,
@@ -284,7 +291,11 @@ export async function calculateCurrentFinancialSnapshot(
            )
        ), financial_items AS (
          SELECT
-           CASE WHEN account_type = 'credit' THEN 'debt' ELSE 'asset' END AS kind,
+           CASE
+             WHEN account_type = 'credit' THEN 'credit_debt'
+             WHEN account_type = 'loan' THEN 'loan_debt'
+             ELSE 'asset'
+           END AS kind,
            amount,
            currency
          FROM latest_bank_balances
@@ -316,11 +327,12 @@ export async function calculateCurrentFinancialSnapshot(
        )
        SELECT
          COALESCE(ROUND(SUM(CASE WHEN kind = 'asset' THEN amount_twd ELSE 0 END)), 0) AS assetsTwd,
-         COALESCE(ROUND(SUM(CASE WHEN kind = 'debt' THEN -amount_twd ELSE 0 END)), 0) AS creditCardDebtTwd,
+         COALESCE(ROUND(SUM(CASE WHEN kind = 'credit_debt' THEN -amount_twd ELSE 0 END)), 0) AS creditCardDebtTwd,
+         COALESCE(ROUND(SUM(CASE WHEN kind = 'loan_debt' THEN -amount_twd ELSE 0 END)), 0) AS loanDebtTwd,
          COALESCE(
            json_group_array(DISTINCT currency) FILTER (
              WHERE (
-               (kind = 'debt' AND ABS(amount) > 0)
+               (kind IN ('credit_debt', 'loan_debt') AND ABS(amount) > 0)
                OR (kind = 'asset' AND amount > 0)
              )
                AND is_missing_rate = 1
@@ -333,6 +345,7 @@ export async function calculateCurrentFinancialSnapshot(
   return {
     assetsTwd: row?.assetsTwd ?? 0,
     creditCardDebtTwd: row?.creditCardDebtTwd ?? 0,
+    loanDebtTwd: row?.loanDebtTwd ?? 0,
     missingCurrencies: parseStringArray(row?.missingCurrencies).sort(),
   };
 }
@@ -369,9 +382,11 @@ export async function getLatestScheduledSyncReport(
       isBaseline: scheduledSyncBatches.isBaseline,
       assetsBeforeTwd: scheduledSyncBatches.assetsBeforeTwd,
       creditCardDebtBeforeTwd: scheduledSyncBatches.creditCardDebtBeforeTwd,
+      loanDebtBeforeTwd: scheduledSyncBatches.loanDebtBeforeTwd,
       missingCurrenciesBefore: scheduledSyncBatches.missingCurrenciesBefore,
       assetsAfterTwd: scheduledSyncBatches.assetsAfterTwd,
       creditCardDebtAfterTwd: scheduledSyncBatches.creditCardDebtAfterTwd,
+      loanDebtAfterTwd: scheduledSyncBatches.loanDebtAfterTwd,
       missingCurrenciesAfter: scheduledSyncBatches.missingCurrenciesAfter,
     })
     .from(scheduledSyncBatches)
@@ -427,6 +442,9 @@ export async function getLatestScheduledSyncReport(
     ]),
   ].sort();
   const financialChangeUnavailableReason = unavailableReason(batch);
+  // Batches created before loan snapshots existed have NULL in both new fields.
+  const loanDebtBeforeTwd = batch.loanDebtBeforeTwd ?? 0;
+  const loanDebtAfterTwd = batch.loanDebtAfterTwd ?? 0;
 
   return {
     id: batch.id,
@@ -449,10 +467,14 @@ export async function getLatestScheduledSyncReport(
             assets: batch.assetsAfterTwd! - batch.assetsBeforeTwd!,
             creditCardDebt:
               batch.creditCardDebtAfterTwd! - batch.creditCardDebtBeforeTwd!,
+            loanDebt: loanDebtAfterTwd - loanDebtBeforeTwd,
             netWorth:
               batch.assetsAfterTwd! -
               batch.creditCardDebtAfterTwd! -
-              (batch.assetsBeforeTwd! - batch.creditCardDebtBeforeTwd!),
+              loanDebtAfterTwd -
+              (batch.assetsBeforeTwd! -
+                batch.creditCardDebtBeforeTwd! -
+                loanDebtBeforeTwd),
           }
         : null,
     financialChangeUnavailableReason,
@@ -514,11 +536,15 @@ function unavailableReason(
   batch: CompletedBatchRow,
 ): SyncFinancialChangeUnavailableReason | null {
   if (batch.isBaseline) return "baseline";
+  const hasLegacyLoanSnapshot =
+    batch.loanDebtBeforeTwd === null && batch.loanDebtAfterTwd === null;
   if (
     batch.assetsBeforeTwd === null ||
     batch.creditCardDebtBeforeTwd === null ||
     batch.assetsAfterTwd === null ||
-    batch.creditCardDebtAfterTwd === null
+    batch.creditCardDebtAfterTwd === null ||
+    (!hasLegacyLoanSnapshot &&
+      (batch.loanDebtBeforeTwd === null || batch.loanDebtAfterTwd === null))
   ) {
     return "snapshot_unavailable";
   }

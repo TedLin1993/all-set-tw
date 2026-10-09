@@ -9,6 +9,7 @@ import {
 import { decryptJson, encryptJson } from "../../platform/crypto";
 import { configEncryptionKey } from "../../platform/config";
 import { parseCathaybkConfig } from "./protocol";
+import { logCathayLoanStage } from "./loan-overview";
 import {
   parsePublicConnectorConfig,
   splitConnectorCursorState,
@@ -26,6 +27,7 @@ import {
   updateConnectorEncryptedConfig,
   connectorStateStatement,
   linkCanonicalBankAccountsStatement,
+  deactivateMissingCathayLoanAccountsStatement,
 } from "../../features/sync/connector-repository";
 import {
   type SyncWriteRecord,
@@ -150,8 +152,16 @@ export async function syncCathaybk(
   const bankBalanceSnapshots = result.bankBalanceSnapshots ?? [];
   const bankTransactions = result.bankTransactions ?? [];
   const creditCardBills = result.creditCardBills ?? [];
-  console.log(
-    `[sync] ${connectorId}/${scope}: accounts=${bankAccounts.length} snapshots=${bankBalanceSnapshots.length} transactions=${bankTransactions.length} bills=${creditCardBills.length}`,
+  const loanAccounts = bankAccounts.filter(
+    (account) =>
+      account.accountType === "loan" &&
+      account.sourceId.startsWith("loan:cathaybk:"),
+  );
+  const loanSourceIds = new Set(
+    loanAccounts.map((account) => account.sourceId),
+  );
+  const loanSnapshots = bankBalanceSnapshots.filter((snapshot) =>
+    loanSourceIds.has(snapshot.accountId),
   );
 
   const now = new Date().toISOString();
@@ -197,18 +207,65 @@ export async function syncCathaybk(
     );
   }
 
-  const newRecords = await persistStagedSyncWrite(env.DB, {
-    records,
-    afterPromoteStatements:
-      bankAccounts.length > 0
-        ? [linkCanonicalBankAccountsStatement(env.DB)]
-        : [],
-    finalizeStatements,
-  });
+  const loanPersistenceCounts = {
+    returnedLoanAccountCount: loanAccounts.length,
+    submittedLoanAccountCount: loanAccounts.length,
+    submittedLoanSnapshotCount: loanSnapshots.length,
+  };
+  logCathayLoanStage("persistence", "started", loanPersistenceCounts);
+  let newRecords: SyncOutcome["newRecords"];
+  try {
+    newRecords = await persistStagedSyncWrite(env.DB, {
+      records,
+      afterPromoteStatements: [
+        ...(bankAccounts.length > 0
+          ? [linkCanonicalBankAccountsStatement(env.DB)]
+          : []),
+        ...(result.loanOverviewComplete
+          ? [
+              deactivateMissingCathayLoanAccountsStatement(
+                env.DB,
+                bankAccounts
+                  .filter(
+                    (account) =>
+                      account.accountType === "loan" &&
+                      account.sourceId.startsWith("loan:cathaybk:"),
+                  )
+                  .map((account) => account.sourceId),
+                now,
+              ),
+            ]
+          : []),
+      ],
+      finalizeStatements,
+    });
+  } catch (error) {
+    logCathayLoanStage("persistence", "failed", loanPersistenceCounts);
+    throw error;
+  }
+
+  logCathayLoanStage("persistence", "success", loanPersistenceCounts);
 
   if (bankBalanceSnapshots.length > 0) {
-    await rebuildBankDepositHistory(env.DB, [dateFromIso(now)]);
+    logCathayLoanStage("history_rebuild", "started", {
+      snapshotCount: bankBalanceSnapshots.length,
+    });
+    try {
+      await rebuildBankDepositHistory(env.DB, [dateFromIso(now)]);
+    } catch (error) {
+      logCathayLoanStage("history_rebuild", "failed", {
+        snapshotCount: bankBalanceSnapshots.length,
+      });
+      throw error;
+    }
+    logCathayLoanStage("history_rebuild", "complete", {
+      snapshotCount: bankBalanceSnapshots.length,
+    });
   }
+
+  console.log(
+    `[sync] ${connectorId}/${scope}: accounts=${bankAccounts.length} loans=${loanAccounts.length} snapshots=${bankBalanceSnapshots.length} loan_snapshots=${loanSnapshots.length} transactions=${bankTransactions.length} bills=${creditCardBills.length} loan_overview=${result.loanOverviewComplete ? "complete" : "incomplete"}`,
+  );
 
   return {
     success: true,

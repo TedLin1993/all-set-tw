@@ -133,7 +133,7 @@ export async function calculateBankDepositValue(db: D1Database, date: string) {
     .where(
       and(
         isNull(account.canonicalAccountId),
-        sql`COALESCE(${account.accountType}, 'unknown') != 'credit'`,
+        sql`COALESCE(${account.accountType}, 'unknown') NOT IN ('credit', 'loan')`,
       ),
     )
     .all();

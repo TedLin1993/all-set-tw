@@ -146,6 +146,10 @@ export async function listBankAccounts(db: D1Database) {
       institutionName: account.institutionName,
       accountName: account.accountName,
       accountType: account.accountType,
+      loanCategory: sql<"housing" | "other" | null>`${account.loanCategory}`.as(
+        "loanCategory",
+      ),
+      loanInterestRate: account.loanInterestRate,
       currency: account.currency,
       openedDate: account.openedDate,
       maturityDate: account.maturityDate,
@@ -155,6 +159,12 @@ export async function listBankAccounts(db: D1Database) {
       availableBalance: balance.availableBalance,
       paymentDueDate: balance.paymentDueDate,
       statementClosingDate: balance.statementClosingDate,
+      loanPaymentAmount: balance.loanPaymentAmount,
+      loanPaymentStatus: sql<
+        "scheduled" | "collection_incomplete" | null
+      >`${balance.loanPaymentStatus}`.as("loanPaymentStatus"),
+      loanInstallmentsPaid: balance.loanInstallmentsPaid,
+      loanInstallmentsTotal: balance.loanInstallmentsTotal,
       asOfAt: balance.asOfAt,
     })
     .from(account)

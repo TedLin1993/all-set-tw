@@ -8,6 +8,8 @@ export interface BankAccountResponse {
   institutionName?: string | null;
   accountName?: string | null;
   accountType?: string | null;
+  loanCategory?: "housing" | "other" | null;
+  loanInterestRate?: number | null;
   currency: string;
   bankCode?: string | null;
   accountLast4?: string | null;
@@ -18,6 +20,10 @@ export interface BankAccountResponse {
   asOfAt?: string | null;
   openedDate?: string | null;
   maturityDate?: string | null;
+  loanPaymentAmount?: number | null;
+  loanPaymentStatus?: "scheduled" | "collection_incomplete" | null;
+  loanInstallmentsPaid?: number | null;
+  loanInstallmentsTotal?: number | null;
 }
 
 export interface BankTransactionResponse {

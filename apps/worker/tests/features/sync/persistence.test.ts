@@ -10,6 +10,7 @@ import {
   connectorStateStatement,
   updateConnectorEncryptedConfigIfCurrent,
   linkCanonicalBankAccountsStatement,
+  deactivateMissingCathayLoanAccountsStatement,
 } from "../../../src/features/sync/connector-repository";
 import {
   bankAccountRecord,
@@ -37,6 +38,7 @@ import {
   listBankAccounts,
   listBankTransactions,
 } from "../../../src/features/bank/repository";
+import { getBankPage } from "../../../src/features/bank/service";
 import { rebuildBankDepositHistory } from "../../../src/features/net-worth/service";
 import {
   bankNow,
@@ -159,6 +161,184 @@ describe("同步資料完整性（隔離 D1）", () => {
       ],
     });
   }
+
+  it("貸款六個 mapper 欄位經 insert/update 後可由 bank API 查詢", async () => {
+    const sourceId = "loan:cathaybk:0000000000000001";
+    const accountRecord = (loanCategory: "housing" | "other", rate: number) =>
+      bankAccountRecord(
+        "cathaybk",
+        {
+          sourceId,
+          institutionName: "國泰世華銀行",
+          accountName: "房屋貸款",
+          accountType: "loan",
+          loanCategory,
+          loanInterestRate: rate,
+          currency: "TWD",
+        },
+        now,
+      );
+    const snapshotRecord = (
+      paymentAmount: number,
+      paymentStatus: "scheduled" | "collection_incomplete",
+      installmentsPaid: number,
+      installmentsTotal: number,
+    ) =>
+      bankBalanceSnapshotRecord(
+        "cathaybk",
+        {
+          accountId: sourceId,
+          sourceId: "overview:current",
+          balance: -7_654_321,
+          currency: "TWD",
+          loanPaymentAmount: paymentAmount,
+          loanPaymentStatus: paymentStatus,
+          loanInstallmentsPaid: installmentsPaid,
+          loanInstallmentsTotal: installmentsTotal,
+          asOfAt: now,
+        },
+        now,
+      );
+
+    await persistStagedSyncWrite(db, {
+      records: [
+        accountRecord("housing", 1.75),
+        snapshotRecord(123_456, "scheduled", 17, 180),
+      ],
+    });
+    await persistStagedSyncWrite(db, {
+      records: [
+        accountRecord("other", 2.25),
+        snapshotRecord(234_567, "collection_incomplete", 18, 180),
+      ],
+    });
+
+    const page = await getBankPage(db, 20);
+    expect(page.accounts).toEqual([
+      expect.objectContaining({
+        accountType: "loan",
+        loanCategory: "other",
+        loanInterestRate: 2.25,
+        balance: -7_654_321,
+        loanPaymentAmount: 234_567,
+        loanPaymentStatus: "collection_incomplete",
+        loanInstallmentsPaid: 18,
+        loanInstallmentsTotal: 180,
+      }),
+    ]);
+  });
+
+  it("完整貸款總覽停用已消失帳戶但保留快照，空結果可停用全部且再出現時復活", async () => {
+    const sourceA = "loan:cathaybk:0000000000000001";
+    const sourceB = "loan:cathaybk:0000000000000002";
+    const loanAccount = (sourceId: string) =>
+      bankAccountRecord(
+        "cathaybk",
+        {
+          sourceId,
+          institutionName: "國泰世華銀行",
+          accountName: "房屋貸款",
+          accountType: "loan",
+          loanCategory: "housing",
+          loanInterestRate: 2.1,
+          currency: "TWD",
+        },
+        now,
+      );
+    const snapshot = (
+      sourceId: string,
+      sourceKey: string,
+      balance: number,
+      at: string,
+    ) =>
+      bankBalanceSnapshotRecord(
+        "cathaybk",
+        {
+          accountId: sourceId,
+          sourceId: sourceKey,
+          balance,
+          currency: "TWD",
+          asOfAt: at,
+        },
+        now,
+      );
+    await persistStagedSyncWrite(db, {
+      records: [
+        loanAccount(sourceA),
+        snapshot(sourceA, "first-overview", -100_000, now),
+        loanAccount(sourceB),
+        snapshot(sourceB, "first-overview", -200_000, now),
+      ],
+    });
+
+    await persistStagedSyncWrite(db, {
+      records: [
+        loanAccount(sourceB),
+        snapshot(
+          sourceB,
+          "second-overview",
+          -180_000,
+          "2026-09-02T10:30:00+08:00",
+        ),
+      ],
+      afterPromoteStatements: [
+        deactivateMissingCathayLoanAccountsStatement(db, [sourceB], now),
+      ],
+    });
+    expect((await getBankPage(db, 20)).accounts).toEqual([
+      expect.objectContaining({ sourceId: sourceB, accountType: "loan" }),
+    ]);
+    expect(
+      await db
+        .prepare("SELECT inactive_at FROM bank_accounts WHERE source_id = ?")
+        .bind(sourceA)
+        .first("inactive_at"),
+    ).toBe(now);
+    expect(
+      await db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM bank_balance_snapshots WHERE account_id = ?",
+        )
+        .bind(loanAccount(sourceA).recordKey)
+        .first("n"),
+    ).toBe(1);
+
+    const emptyAt = "2026-09-03T10:30:00+08:00";
+    await persistStagedSyncWrite(db, {
+      records: [],
+      afterPromoteStatements: [
+        deactivateMissingCathayLoanAccountsStatement(db, [], emptyAt),
+      ],
+    });
+    expect((await getBankPage(db, 20)).accounts).toEqual([]);
+    expect(
+      await db
+        .prepare("SELECT COUNT(*) AS n FROM bank_balance_snapshots")
+        .first("n"),
+    ).toBe(3);
+
+    await persistStagedSyncWrite(db, {
+      records: [
+        loanAccount(sourceB),
+        snapshot(
+          sourceB,
+          "recovered-overview",
+          -170_000,
+          "2026-09-04T10:30:00+08:00",
+        ),
+      ],
+      afterPromoteStatements: [
+        deactivateMissingCathayLoanAccountsStatement(
+          db,
+          [sourceB],
+          "2026-09-04T10:30:00+08:00",
+        ),
+      ],
+    });
+    expect((await getBankPage(db, 20)).accounts).toEqual([
+      expect.objectContaining({ sourceId: sourceB, accountType: "loan" }),
+    ]);
+  });
 
   it.each([
     ["店名縮寫", "DEMO SHOP", "DEMO SHOP TAIPEI", "DEMO SHOP TAIPEI"],
@@ -1184,6 +1364,31 @@ describe("同步資料完整性（隔離 D1）", () => {
       accountLast4: "1234",
       accountName: "末四碼 1234",
       balance: 2000,
+    });
+    const cathayLoanSourceId = "loan:cathaybk:0000000000000001";
+    await persistStagedSyncWrite(db, {
+      records: [
+        bankAccountRecord(
+          "cathaybk",
+          {
+            sourceId: cathayLoanSourceId,
+            accountType: "loan",
+            currency: "TWD",
+          },
+          now,
+        ),
+        bankBalanceSnapshotRecord(
+          "cathaybk",
+          {
+            accountId: cathayLoanSourceId,
+            sourceId: "loan-overview",
+            balance: -5_000_000,
+            currency: "TWD",
+            asOfAt: bankNow.toISOString(),
+          },
+          now,
+        ),
+      ],
     });
     await rebuildBankDepositHistory(db, ["2026-10-07"]);
     expect(

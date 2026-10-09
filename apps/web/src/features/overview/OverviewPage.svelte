@@ -85,10 +85,16 @@
   const toTwd = (value: number, currency: string) =>
     currency === "TWD" ? value : value * (rateValues[currency] ?? 0);
   const deposits = $derived(
-    bankData.accounts.filter((account) => account.accountType !== "credit"),
+    bankData.accounts.filter(
+      (account) =>
+        account.accountType !== "credit" && account.accountType !== "loan",
+    ),
   );
   const cards = $derived(
     bankData.accounts.filter((account) => account.accountType === "credit"),
+  );
+  const loans = $derived(
+    bankData.accounts.filter((account) => account.accountType === "loan"),
   );
   const depositTotal = $derived(
     deposits.reduce(
@@ -98,6 +104,12 @@
   );
   const cardDebt = $derived(
     cards.reduce(
+      (sum, account) => sum - toTwd(account.balance ?? 0, account.currency),
+      0,
+    ),
+  );
+  const loanDebt = $derived(
+    loans.reduce(
       (sum, account) => sum - toTwd(account.balance ?? 0, account.currency),
       0,
     ),
@@ -117,7 +129,7 @@
     ),
   );
   const gross = $derived(depositTotal + investmentTotal + manualTotal);
-  const netWorth = $derived(gross - cardDebt);
+  const netWorth = $derived(gross - cardDebt - loanDebt);
   const allocation = $derived([
     {
       label: "銀行與現金",
@@ -271,6 +283,10 @@
               currency: account.currency,
               amount: Math.abs(account.balance ?? 0),
             })),
+            ...loans.map((account) => ({
+              currency: account.currency,
+              amount: Math.abs(account.balance ?? 0),
+            })),
             ...($investments.data ?? []).map((item) => ({
               currency: item.currency,
               amount: (item.marketValue ?? 0) + (item.cashBalance ?? 0),
@@ -341,13 +357,16 @@
       >
         {formatCurrency(netWorth)}
       </p>
-      <p class="mt-3 text-caption text-subtle">
-        {#if cardDebt < 0}
-          已計入 {formatCurrency(-cardDebt)} 信用卡溢繳餘額
-        {:else}
-          已扣除 {formatCurrency(cardDebt)} 信用卡負債
-        {/if}
-      </p>
+      <div class="mt-3 grid gap-1 text-caption text-subtle">
+        <p>
+          {#if cardDebt < 0}
+            已計入 {formatCurrency(-cardDebt)} 信用卡溢繳餘額
+          {:else}
+            已扣除 {formatCurrency(cardDebt)} 信用卡負債
+          {/if}
+        </p>
+        <p>已扣除 {formatCurrency(loanDebt)} 貸款負債</p>
+      </div>
       <div class="mt-6 grid grid-cols-3 gap-3 md:gap-6">
         {#each allocation as item (item.label)}
           <div class="min-w-0">

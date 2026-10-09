@@ -124,13 +124,20 @@
         >
           {formatCurrency(summary.netWorth)}
         </p>
-        <p class="mt-3 text-caption text-subtle">
-          {summary.hasUnknownCardBalance
-            ? "信用卡負債資料不完整"
-            : summary.cardDebt < 0
-              ? `已計入 ${formatCurrency(-summary.cardDebt)} 信用卡溢繳餘額`
-              : `已扣除 ${formatCurrency(summary.cardDebt)} 信用卡負債`}
-        </p>
+        <div class="mt-3 grid gap-1 text-caption text-subtle">
+          <p>
+            {summary.hasUnknownCardBalance
+              ? "信用卡負債資料不完整"
+              : summary.cardDebt < 0
+                ? `已計入 ${formatCurrency(-summary.cardDebt)} 信用卡溢繳餘額`
+                : `已扣除 ${formatCurrency(summary.cardDebt)} 信用卡負債`}
+          </p>
+          <p>
+            {summary.hasUnknownLoanBalance
+              ? "貸款負債資料不完整"
+              : `已扣除 ${formatCurrency(summary.loanDebt)} 貸款負債`}
+          </p>
+        </div>
       </div>
       <div class="mt-6 grid grid-cols-3 gap-3 md:gap-6">
         <div class="min-w-0">
@@ -227,8 +234,8 @@
                       {group.institution}
                     </strong>
                     <small class="mt-1 block truncate text-caption text-subtle">
-                      {group.accounts.length} 帳戶 · {group.cards.length} 卡片{group
-                        .foreignCurrencies.length
+                      {group.accounts.length} 帳戶 · {group.loans.length} 貸款 · {group
+                        .cards.length} 卡片{group.foreignCurrencies.length
                         ? ` · 含 ${group.foreignCurrencies.join("、")}`
                         : ""}
                     </small>
@@ -240,13 +247,26 @@
                         : "—"}
                     </strong>
                     <small
-                      class={`mt-1 block text-caption tabular-nums ${group.cards.length ? "text-coral" : "text-subtle"}`}
+                      class={`mt-1 block text-caption tabular-nums ${group.cards.length || group.loans.length ? "text-coral" : "text-subtle"}`}
                     >
-                      {group.cards.length
-                        ? group.hasUnknownCardBalance
-                          ? "負債資料不完整"
-                          : `${group.debtTotalTwd < 0 ? "溢繳" : "負債"} ${formatCurrency(-group.debtTotalTwd)}`
-                        : "無信用卡"}
+                      {#if group.cards.length && group.loans.length}
+                        {group.hasUnknownCardBalance
+                          ? "信用卡資料不完整"
+                          : `${group.debtTotalTwd < 0 ? "溢繳" : "卡債"} ${formatCurrency(-group.debtTotalTwd)}`}
+                        · {group.hasUnknownLoanBalance
+                          ? "貸款資料不完整"
+                          : `貸款 ${formatCurrency(group.loanDebtTotalTwd)}`}
+                      {:else if group.loans.length}
+                        {group.hasUnknownLoanBalance
+                          ? "貸款資料不完整"
+                          : `貸款 ${formatCurrency(group.loanDebtTotalTwd)}`}
+                      {:else if group.cards.length}
+                        {group.hasUnknownCardBalance
+                          ? "信用卡資料不完整"
+                          : `${group.debtTotalTwd < 0 ? "溢繳" : "卡債"} ${formatCurrency(-group.debtTotalTwd)}`}
+                      {:else}
+                        無負債帳戶
+                      {/if}
                     </small>
                   </span>
                 </button>
@@ -350,8 +370,8 @@
                     {group.institution}
                   </strong>
                   <small class="mt-1 block truncate text-caption text-subtle">
-                    {group.accounts.length} 帳戶 · {group.cards.length} 卡片{group
-                      .foreignCurrencies.length
+                    {group.accounts.length} 帳戶 · {group.loans.length} 貸款 · {group
+                      .cards.length} 卡片{group.foreignCurrencies.length
                       ? ` · 含 ${group.foreignCurrencies.join("、")}`
                       : ""}
                   </small>
@@ -363,13 +383,26 @@
                       : "—"}
                   </strong>
                   <small
-                    class={`mt-1 block text-caption tabular-nums ${group.cards.length ? "text-coral" : "text-subtle"}`}
+                    class={`mt-1 block text-caption tabular-nums ${group.cards.length || group.loans.length ? "text-coral" : "text-subtle"}`}
                   >
-                    {group.cards.length
-                      ? group.hasUnknownCardBalance
-                        ? "負債資料不完整"
-                        : `${group.debtTotalTwd < 0 ? "溢繳" : "負債"} ${formatCurrency(-group.debtTotalTwd)}`
-                      : "無信用卡"}
+                    {#if group.cards.length && group.loans.length}
+                      {group.hasUnknownCardBalance
+                        ? "信用卡資料不完整"
+                        : `${group.debtTotalTwd < 0 ? "溢繳" : "卡債"} ${formatCurrency(-group.debtTotalTwd)}`}
+                      · {group.hasUnknownLoanBalance
+                        ? "貸款資料不完整"
+                        : `貸款 ${formatCurrency(group.loanDebtTotalTwd)}`}
+                    {:else if group.loans.length}
+                      {group.hasUnknownLoanBalance
+                        ? "貸款資料不完整"
+                        : `貸款 ${formatCurrency(group.loanDebtTotalTwd)}`}
+                    {:else if group.cards.length}
+                      {group.hasUnknownCardBalance
+                        ? "信用卡資料不完整"
+                        : `${group.debtTotalTwd < 0 ? "溢繳" : "卡債"} ${formatCurrency(-group.debtTotalTwd)}`}
+                    {:else}
+                      無負債帳戶
+                    {/if}
                   </small>
                 </span>
                 <ChevronRight

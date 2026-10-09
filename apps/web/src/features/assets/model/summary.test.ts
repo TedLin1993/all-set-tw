@@ -103,6 +103,113 @@ describe("calculateAssetSummary", () => {
     expect(summary.missingCurrencies).toEqual([]);
   });
 
+  it("separates loan debt from deposits and subtracts it from net worth", () => {
+    const summary = calculateAssetSummary({
+      bank: {
+        accounts: [
+          {
+            id: "cash",
+            connectorId: "cathaybk",
+            sourceId: "cash",
+            institutionName: "國泰世華銀行",
+            accountType: "savings",
+            balance: 80_000,
+            currency: "TWD",
+          },
+          {
+            id: "loan",
+            connectorId: "cathaybk",
+            sourceId: "loan",
+            institutionName: "國泰世華銀行",
+            accountType: "loan",
+            loanCategory: "housing",
+            loanInterestRate: 1.8,
+            balance: -50_000,
+            currency: "TWD",
+            loanPaymentAmount: 12_000,
+            loanInstallmentsPaid: 10,
+            loanInstallmentsTotal: 240,
+          },
+        ],
+        transactions: [],
+      },
+      investments: [],
+      manualAssets: [],
+      rates: [],
+    });
+
+    expect(summary.bankTotal).toBe(80_000);
+    expect(summary.loanDebt).toBe(50_000);
+    expect(summary.netWorth).toBe(30_000);
+    expect(summary.institutionGroups[0]).toMatchObject({
+      accounts: [{ id: "cash" }],
+      loans: [{ id: "loan" }],
+      loanDebtTotalTwd: 50_000,
+      loanCategoryTotals: { housing: 50_000, other: 0 },
+    });
+  });
+
+  it("includes loan currencies in missing exchange-rate warnings", () => {
+    const summary = calculateAssetSummary({
+      bank: {
+        accounts: [
+          {
+            id: "foreign-loan",
+            connectorId: "cathaybk",
+            sourceId: "foreign-loan",
+            accountType: "loan",
+            balance: -100_000,
+            currency: "EUR",
+          },
+        ],
+        transactions: [],
+      },
+      investments: [],
+      manualAssets: [],
+      rates: [],
+    });
+
+    expect(summary.missingCurrencies).toEqual(["EUR"]);
+  });
+
+  it("keeps a card overpayment separate from loan debt for a shared institution", () => {
+    const summary = calculateAssetSummary({
+      bank: {
+        accounts: [
+          {
+            id: "overpaid-card",
+            connectorId: "cathaybk",
+            sourceId: "overpaid-card",
+            institutionName: "國泰世華銀行",
+            accountType: "credit",
+            balance: 137,
+            currency: "TWD",
+          },
+          {
+            id: "loan",
+            connectorId: "cathaybk",
+            sourceId: "loan",
+            institutionName: "國泰世華銀行",
+            accountType: "loan",
+            balance: -50_000,
+            currency: "TWD",
+          },
+        ],
+        transactions: [],
+      },
+      investments: [],
+      manualAssets: [],
+      rates: [],
+    });
+
+    expect(summary.institutionGroups[0]).toMatchObject({
+      cards: [{ id: "overpaid-card" }],
+      debtTotalTwd: -137,
+      loans: [{ id: "loan" }],
+      loanDebtTotalTwd: 50_000,
+    });
+  });
+
   it("reports currencies omitted from TWD totals when exchange rates are missing", () => {
     const summary = calculateAssetSummary({
       bank: {

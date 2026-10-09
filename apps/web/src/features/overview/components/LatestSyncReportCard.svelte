@@ -70,6 +70,11 @@
             positiveChangeIsFavorable: false,
           },
           {
+            label: "貸款負債",
+            value: report.financialChange.loanDebt,
+            positiveChangeIsFavorable: false,
+          },
+          {
             label: "淨資產",
             value: report.financialChange.netWorth,
             positiveChangeIsFavorable: true,

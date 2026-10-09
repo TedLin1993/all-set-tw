@@ -23,20 +23,27 @@ export interface InstitutionAssetGroup {
   institution: string;
   accounts: BankAccountRow[];
   cards: BankAccountRow[];
+  loans: BankAccountRow[];
   assetTotalTwd: number;
   debtTotalTwd: number;
+  loanDebtTotalTwd: number;
+  loanCategoryTotals: { housing: number; other: number };
   hasUnknownCardBalance: boolean;
+  hasUnknownLoanBalance: boolean;
   foreignCurrencies: string[];
 }
 
 export interface AssetSummary {
   deposits: BankAccountRow[];
   cards: BankAccountRow[];
+  loans: BankAccountRow[];
   bankTotal: number;
   investmentTotal: number;
   manualTotal: number;
   cardDebt: number;
+  loanDebt: number;
   hasUnknownCardBalance: boolean;
+  hasUnknownLoanBalance: boolean;
   grossAssets: number;
   netWorth: number;
   institutionGroups: InstitutionAssetGroup[];
@@ -66,10 +73,14 @@ export function calculateAssetSummary({
   const toTwd = (value: number, currency: string) =>
     currency === "TWD" ? value : value * (rateValues[currency] ?? 0);
   const deposits = bank.accounts.filter(
-    (account) => account.accountType !== "credit",
+    (account) =>
+      account.accountType !== "credit" && account.accountType !== "loan",
   );
   const cards = bank.accounts.filter(
     (account) => account.accountType === "credit",
+  );
+  const loans = bank.accounts.filter(
+    (account) => account.accountType === "loan",
   );
   const missingCurrencies = missingExchangeRateCurrencies(
     [
@@ -78,6 +89,10 @@ export function calculateAssetSummary({
         amount: account.balance ?? 0,
       })),
       ...cards.map((account) => ({
+        currency: account.currency,
+        amount: Math.abs(account.balance ?? 0),
+      })),
+      ...loans.map((account) => ({
         currency: account.currency,
         amount: Math.abs(account.balance ?? 0),
       })),
@@ -110,6 +125,10 @@ export function calculateAssetSummary({
     (sum, account) => sum - toTwd(account.balance ?? 0, account.currency),
     0,
   );
+  const loanDebt = loans.reduce(
+    (sum, account) => sum - toTwd(account.balance ?? 0, account.currency),
+    0,
+  );
   const grossAssets = bankTotal + investmentTotal + manualTotal;
 
   const groups = bank.accounts.reduce<Record<string, BankAccountRow[]>>(
@@ -122,10 +141,14 @@ export function calculateAssetSummary({
   const institutionGroups = Object.entries(groups)
     .map(([key, groupedAccounts]) => {
       const accounts = groupedAccounts.filter(
-        (account) => account.accountType !== "credit",
+        (account) =>
+          account.accountType !== "credit" && account.accountType !== "loan",
       );
       const cards = groupedAccounts.filter(
         (account) => account.accountType === "credit",
+      );
+      const loans = groupedAccounts.filter(
+        (account) => account.accountType === "loan",
       );
       return {
         key,
@@ -153,6 +176,30 @@ export function calculateAssetSummary({
           (sum, account) => sum - toTwd(account.balance ?? 0, account.currency),
           0,
         ),
+        loans: [...loans].sort(
+          (a, b) =>
+            Math.abs(toTwd(b.balance ?? 0, b.currency)) -
+            Math.abs(toTwd(a.balance ?? 0, a.currency)),
+        ),
+        loanDebtTotalTwd: loans.reduce(
+          (sum, account) => sum - toTwd(account.balance ?? 0, account.currency),
+          0,
+        ),
+        loanCategoryTotals: {
+          housing: loans
+            .filter((loan) => loan.loanCategory === "housing")
+            .reduce(
+              (sum, loan) => sum - toTwd(loan.balance ?? 0, loan.currency),
+              0,
+            ),
+          other: loans
+            .filter((loan) => loan.loanCategory === "other")
+            .reduce(
+              (sum, loan) => sum - toTwd(loan.balance ?? 0, loan.currency),
+              0,
+            ),
+        },
+        hasUnknownLoanBalance: loans.some((loan) => loan.balance == null),
         foreignCurrencies: [
           ...new Set(
             groupedAccounts
@@ -165,6 +212,7 @@ export function calculateAssetSummary({
     .sort(
       (a, b) =>
         b.assetTotalTwd - a.assetTotalTwd ||
+        b.loanDebtTotalTwd - a.loanDebtTotalTwd ||
         b.debtTotalTwd - a.debtTotalTwd ||
         a.institution.localeCompare(b.institution, "zh-TW"),
     );
@@ -172,13 +220,16 @@ export function calculateAssetSummary({
   return {
     deposits,
     cards,
+    loans,
     bankTotal,
     investmentTotal,
     manualTotal,
     cardDebt,
+    loanDebt,
     hasUnknownCardBalance: cards.some((card) => card.balance == null),
+    hasUnknownLoanBalance: loans.some((loan) => loan.balance == null),
     grossAssets,
-    netWorth: grossAssets - cardDebt,
+    netWorth: grossAssets - cardDebt - loanDebt,
     institutionGroups,
     missingCurrencies,
   };
