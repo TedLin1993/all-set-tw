@@ -16,6 +16,11 @@ export type CathayLoanRecord = {
   currency: string;
 };
 
+export type CathayLoanOverviewParseResult = {
+  loanRecords: CathayLoanRecord[];
+  complete: boolean;
+};
+
 export type CathayLoanOverviewExtraction = {
   overviewRecognized: boolean;
   pageState:
@@ -26,6 +31,7 @@ export type CathayLoanOverviewExtraction = {
     | "incomplete"
     | "unrecognized";
   currency: string | null;
+  loanTotalBalanceMatches: boolean | null;
   diagnostics: CathayLoanDomDiagnostics;
   loanAccounts: Array<{
     category: string | null;
@@ -60,6 +66,11 @@ type CathayLoanDomDiagnostics = {
 
 type CathayLoanDiagnosticStage =
   | "navigation"
+  | "query_wait"
+  | "dom_extraction"
+  | "parse"
+  | "record_mapping"
+  | "history_rebuild"
   | "page_content"
   | "total_section"
   | "account_links"
@@ -68,12 +79,42 @@ type CathayLoanDiagnosticStage =
   | "persistence";
 
 type CathayLoanDiagnosticOutcome =
-  "started" | "complete" | "failed" | "found" | "missing" | "empty" | "success";
+  | "started"
+  | "complete"
+  | "failed"
+  | "timeout"
+  | "incomplete"
+  | "found"
+  | "missing"
+  | "empty"
+  | "success";
 
 type CathayLoanDiagnosticFields = {
   navigation: {
     navigationCompleted: boolean;
     logoutDetected: boolean;
+  };
+  query_wait: {
+    waitResolved?: boolean;
+    timeoutReached?: boolean;
+  };
+  dom_extraction: {
+    extractionReturned?: boolean;
+    overviewRecognized?: boolean;
+    extractedCardCount?: number;
+  };
+  parse: {
+    detectedCardCount: number;
+    parsedCardCount?: number;
+    overviewComplete?: boolean;
+  };
+  record_mapping: {
+    parsedAccountCount: number;
+    mappedAccountCount?: number;
+    mappedSnapshotCount?: number;
+  };
+  history_rebuild: {
+    snapshotCount: number;
   };
   page_content: {
     headingWaitSatisfied: boolean;
@@ -121,6 +162,19 @@ const CATHAY_LOAN_DIAGNOSTIC_FIELD_KEYS: Record<
   readonly string[]
 > = {
   navigation: ["navigationCompleted", "logoutDetected"],
+  query_wait: ["waitResolved", "timeoutReached"],
+  dom_extraction: [
+    "extractionReturned",
+    "overviewRecognized",
+    "extractedCardCount",
+  ],
+  parse: ["detectedCardCount", "parsedCardCount", "overviewComplete"],
+  record_mapping: [
+    "parsedAccountCount",
+    "mappedAccountCount",
+    "mappedSnapshotCount",
+  ],
+  history_rebuild: ["snapshotCount"],
   page_content: [
     "headingWaitSatisfied",
     "overviewHeadingFound",
@@ -286,15 +340,20 @@ export function isCathayLoanOverviewQuerySettled(
   );
   if (hasLoanDetailLink || hasLabeledLoanList || hasLoanTableRow) return true;
 
-  const explicitEmptyMessage =
-    /(?:目前|目前尚)?\s*(?:無|沒有|查無|尚無|未有)\s*(?:任何)?\s*貸款(?:帳戶|資料|紀錄)?/.test(
-      bodyText,
+  const emptyMessagePattern = /目前無貸款資料/;
+  return Array.from(root.querySelectorAll("*")).some((element) => {
+    const text = normalizeText(element.textContent);
+    if (
+      !emptyMessagePattern.test(text) ||
+      !isVisible(element) ||
+      element.closest("footer, [role='contentinfo'], nav")
+    ) {
+      return false;
+    }
+    return !Array.from(element.children).some((child) =>
+      emptyMessagePattern.test(normalizeText(child.textContent)),
     );
-  const zeroTotal =
-    /貸款總餘額\s*[：:]?\s*(?:(?:TWD|NT)\s*)?\$?\s*0+(?:\.0+)?(?![\d,])/i.test(
-      bodyText,
-    );
-  return explicitEmptyMessage && zeroTotal;
+  });
 }
 
 export function extractCathayLoanOverviewDom(
@@ -678,6 +737,43 @@ export function extractCathayLoanOverviewDom(
           };
         });
 
+  type ExactAmount = { wholeDigits: string; fractionDigits: string };
+  const parseExactAmount = (value: string | null): ExactAmount | null => {
+    const match = value
+      ?.replace(/[+-]/g, "")
+      .match(/(?:TWD\s*|NT\s*)?\$?\s*([\d,]+)(?:\.(\d+))?/i);
+    const wholeDigits = match?.[1]?.replace(/,/g, "") ?? "";
+    const fractionDigits = match?.[2] ?? "";
+    return /^\d+$/.test(wholeDigits) && fractionDigits.length <= 6
+      ? { wholeDigits, fractionDigits }
+      : null;
+  };
+  const loanTotalAmount = parseExactAmount(totalAmountText);
+  const loanBalanceAmounts = loanAccounts.map((loan) =>
+    parseExactAmount(loan.balance),
+  );
+  let loanTotalBalanceMatches: boolean | null = null;
+  if (loanAccounts.length > 0) {
+    const exactAmounts = [loanTotalAmount, ...loanBalanceAmounts];
+    if (exactAmounts.every((amount) => amount !== null)) {
+      const amounts = exactAmounts as ExactAmount[];
+      const precision = Math.max(
+        ...amounts.map((amount) => amount.fractionDigits.length),
+      );
+      const scale = 10n ** BigInt(precision);
+      const toMinorUnits = (amount: ExactAmount) =>
+        BigInt(amount.wholeDigits) * scale +
+        BigInt(amount.fractionDigits.padEnd(precision, "0") || "0");
+      loanTotalBalanceMatches =
+        amounts
+          .slice(1)
+          .reduce((sum, amount) => sum + toMinorUnits(amount), 0n) ===
+        toMinorUnits(amounts[0]!);
+    } else {
+      loanTotalBalanceMatches = false;
+    }
+  }
+
   const normalizedBodyText = visibleBodyText.replace(/\s+/g, " ").trim();
   const maintenanceMessageFound =
     /系統維護中|維護作業|暫停服務|服務暫停|目前無法提供服務|系統忙碌/.test(
@@ -715,12 +811,22 @@ export function extractCathayLoanOverviewDom(
   const loadingTextFound = /載入中|讀取中|查詢中|資料處理中|請稍候/.test(
     normalizedBodyText,
   );
-  const explicitEmptyMessage =
-    /(?:目前|目前尚)?\s*(?:無|沒有|查無|尚無|未有)\s*(?:任何)?\s*貸款(?:帳戶|資料|紀錄)?/.test(
-      normalizedBodyText,
-    );
-  const zeroLoanTotal =
-    totalAmountDigits.length > 0 && /^0+$/.test(totalAmountDigits);
+  const emptyMessagePattern = /目前無貸款資料/;
+  const explicitEmptyMessage = Array.from(root.querySelectorAll("*")).some(
+    (element) => {
+      const text = normalizeText(element);
+      if (
+        !emptyMessagePattern.test(text) ||
+        !isVisible(element) ||
+        element.closest("footer, [role='contentinfo'], nav")
+      ) {
+        return false;
+      }
+      return !Array.from(element.children).some((child) =>
+        emptyMessagePattern.test(normalizeText(child)),
+      );
+    },
+  );
   const pageState = maintenanceMessageFound
     ? "maintenance"
     : loadingIndicatorFound || loadingTextFound
@@ -728,8 +834,10 @@ export function extractCathayLoanOverviewDom(
       : !overviewRecognized
         ? "unrecognized"
         : loanAccounts.length > 0
-          ? "ready"
-          : explicitEmptyMessage && zeroLoanTotal
+          ? loanTotalBalanceMatches === true
+            ? "ready"
+            : "incomplete"
+          : explicitEmptyMessage
             ? "empty"
             : "incomplete";
 
@@ -737,6 +845,7 @@ export function extractCathayLoanOverviewDom(
     overviewRecognized,
     pageState,
     currency,
+    loanTotalBalanceMatches,
     diagnostics: {
       headingCount: headings.length,
       visibleOverviewHeadingFound: visibleBodyText.includes("貸款帳戶總覽"),
@@ -816,6 +925,24 @@ export function logCathayLoanDomDiagnostics(
 export function parseCathayLoanOverview(
   extraction: CathayLoanOverviewExtraction,
 ): CathayLoanRecord[] {
+  const result = parseCathayLoanOverviewInternal(extraction, false);
+  if (!result.complete) {
+    throw new Error("Cathay loan overview query did not complete.");
+  }
+  return result.loanRecords;
+}
+
+/** Returns parseable visible loans while preserving whether the overview is complete. */
+export function parseCathayLoanOverviewForSync(
+  extraction: CathayLoanOverviewExtraction,
+): CathayLoanOverviewParseResult {
+  return parseCathayLoanOverviewInternal(extraction, true);
+}
+
+function parseCathayLoanOverviewInternal(
+  extraction: CathayLoanOverviewExtraction,
+  allowPartial: boolean,
+): CathayLoanOverviewParseResult {
   type FieldStatus = "missing" | "invalid" | "valid";
   type LoanFieldSummary = {
     cardIndex: number;
@@ -859,13 +986,13 @@ export function parseCathayLoanOverview(
     );
   };
 
-  if (extraction.pageState === "maintenance") {
+  if (extraction.pageState === "maintenance" && !allowPartial) {
     throw new Error("Cathay loan overview is under maintenance.");
   }
-  if (extraction.pageState === "loading") {
+  if (extraction.pageState === "loading" && !allowPartial) {
     throw new Error("Cathay loan overview query is still loading.");
   }
-  if (extraction.pageState === "incomplete") {
+  if (extraction.pageState === "incomplete" && !allowPartial) {
     throw new Error("Cathay loan overview query did not complete.");
   }
   if (extraction.pageState === "empty") {
@@ -876,9 +1003,12 @@ export function parseCathayLoanOverview(
       optionalFieldMissingCount: 0,
       optionalFieldInvalidCount: 0,
     });
-    return [];
+    return { loanRecords: [], complete: true };
   }
   if (!extraction.overviewRecognized) {
+    if (allowPartial) {
+      return { loanRecords: [], complete: false };
+    }
     logCathayLoanStage("field_validation", "failed", {
       extractedCardCount: extraction.loanAccounts.length,
       validatedCardCount: 0,
@@ -890,6 +1020,12 @@ export function parseCathayLoanOverview(
       "overview_not_recognized",
     ]);
     throw new Error("Cathay loan overview page was not recognized.");
+  }
+  if (extraction.loanAccounts.length === 0) {
+    if (allowPartial) {
+      return { loanRecords: [], complete: false };
+    }
+    throw new Error("Cathay loan overview query did not complete.");
   }
 
   const parseAmount = (value: string | null) => {
@@ -1131,34 +1267,46 @@ export function parseCathayLoanOverview(
         }),
       );
     }
-    throw new Error("Cathay loan overview card could not be parsed.");
+    if (!allowPartial) {
+      throw new Error("Cathay loan overview card could not be parsed.");
+    }
   }
 
-  logCathayLoanStage(
-    "field_validation",
-    parsedLoanRecords.length > 0 ? "success" : "empty",
-    {
-      extractedCardCount: extraction.loanAccounts.length,
-      validatedCardCount: validatedLoanRecordCount,
-      fieldFailureCount,
-      optionalFieldMissingCount,
-      optionalFieldInvalidCount,
-    },
-  );
-
-  if (CATHAY_LOAN_DIAGNOSTICS_ENABLED) {
-    console.log(
-      JSON.stringify({
-        event: "cathaybk_loan_parse_success",
-        detectedCardCount: extraction.loanAccounts.length,
-        parsedCardCount: parsedLoanRecords.length,
-        cardFieldStatuses: loggedLoanFieldStatuses,
-        ...(omittedLoanStatusCount > 0
-          ? { omittedCardStatusCount: omittedLoanStatusCount }
-          : {}),
-      }),
+  if (!firstFailure) {
+    logCathayLoanStage(
+      "field_validation",
+      parsedLoanRecords.length > 0 ? "success" : "empty",
+      {
+        extractedCardCount: extraction.loanAccounts.length,
+        validatedCardCount: validatedLoanRecordCount,
+        fieldFailureCount,
+        optionalFieldMissingCount,
+        optionalFieldInvalidCount,
+      },
     );
+
+    if (CATHAY_LOAN_DIAGNOSTICS_ENABLED) {
+      console.log(
+        JSON.stringify({
+          event: "cathaybk_loan_parse_success",
+          detectedCardCount: extraction.loanAccounts.length,
+          parsedCardCount: parsedLoanRecords.length,
+          cardFieldStatuses: loggedLoanFieldStatuses,
+          ...(omittedLoanStatusCount > 0
+            ? { omittedCardStatusCount: omittedLoanStatusCount }
+            : {}),
+        }),
+      );
+    }
   }
 
-  return parsedLoanRecords.map(({ loanRecord }) => loanRecord);
+  return {
+    loanRecords: parsedLoanRecords
+      .filter(({ reasonCodes }) => reasonCodes.length === 0)
+      .map(({ loanRecord }) => loanRecord),
+    complete:
+      extraction.pageState === "ready" &&
+      extraction.loanTotalBalanceMatches === true &&
+      firstFailure === undefined,
+  };
 }

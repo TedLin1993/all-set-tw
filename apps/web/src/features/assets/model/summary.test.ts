@@ -148,6 +148,67 @@ describe("calculateAssetSummary", () => {
     });
   });
 
+  it("includes loan currencies in missing exchange-rate warnings", () => {
+    const summary = calculateAssetSummary({
+      bank: {
+        accounts: [
+          {
+            id: "foreign-loan",
+            connectorId: "cathaybk",
+            sourceId: "foreign-loan",
+            accountType: "loan",
+            balance: -100_000,
+            currency: "EUR",
+          },
+        ],
+        transactions: [],
+      },
+      investments: [],
+      manualAssets: [],
+      rates: [],
+    });
+
+    expect(summary.missingCurrencies).toEqual(["EUR"]);
+  });
+
+  it("keeps a card overpayment separate from loan debt for a shared institution", () => {
+    const summary = calculateAssetSummary({
+      bank: {
+        accounts: [
+          {
+            id: "overpaid-card",
+            connectorId: "cathaybk",
+            sourceId: "overpaid-card",
+            institutionName: "國泰世華銀行",
+            accountType: "credit",
+            balance: 137,
+            currency: "TWD",
+          },
+          {
+            id: "loan",
+            connectorId: "cathaybk",
+            sourceId: "loan",
+            institutionName: "國泰世華銀行",
+            accountType: "loan",
+            balance: -50_000,
+            currency: "TWD",
+          },
+        ],
+        transactions: [],
+      },
+      investments: [],
+      manualAssets: [],
+      rates: [],
+    });
+
+    expect(summary.institutionGroups[0]).toMatchObject({
+      cards: [{ id: "overpaid-card" }],
+      debtTotalTwd: -137,
+      loans: [{ id: "loan" }],
+      loanDebtTotalTwd: 50_000,
+    });
+  });
+
   it("reports currencies omitted from TWD totals when exchange rates are missing", () => {
     const summary = calculateAssetSummary({
       bank: {

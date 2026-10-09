@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   extractCathayLoanOverviewDom,
   isCathayLoanOverviewQuerySettled,
+  logCathayLoanDomDiagnostics,
   parseCathayLoanOverview,
+  parseCathayLoanOverviewForSync,
 } from "../../../src/sources/cathaybk/loan-overview";
 
 function readFixture(name: string) {
@@ -20,6 +22,7 @@ const optionalMissingLayoutHtml = readFixture(
 );
 const compactFixtureHtml = readFixture("cathay-loan-overview.html");
 const tableLayoutHtml = readFixture("cathay-loan-overview-table.html");
+const emptyOverviewHtml = readFixture("cathay-loan-overview-empty.html");
 
 function extractHtml(html: string) {
   const dom = new JSDOM(html, {
@@ -54,8 +57,12 @@ describe("Cathay loan overview table layout", () => {
     const extraction = extractCathayLoanOverviewDom(dom.window.document);
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
+      logCathayLoanDomDiagnostics(extraction, true);
       const loans = parseCathayLoanOverview(extraction);
       expect(extraction.overviewRecognized).toBe(true);
+      expect(extraction.pageState).toBe("ready");
+      expect(extraction.loanTotalBalanceMatches).toBe(true);
+      expect(parseCathayLoanOverviewForSync(extraction).complete).toBe(true);
       expect(extraction.diagnostics.recognizedLoanCardCount).toBe(5);
       expect(extraction.loanAccounts).toHaveLength(5);
       expect(loans).toEqual([
@@ -117,10 +124,14 @@ describe("Cathay loan overview table layout", () => {
       ]);
       expect(clickedLinks).toBe(0);
 
-      const serializedLogs = JSON.stringify(log.mock.calls);
+      const serializedLogs = log.mock.calls
+        .map((call) => String(call[0]))
+        .join("\n");
+      expect(serializedLogs).toBe("");
       for (const privateFixtureValue of sensitiveLoanValues(extraction)) {
         expect(serializedLogs).not.toContain(privateFixtureValue);
       }
+      expect(serializedLogs).not.toContain("38,271,615");
       expect(serializedLogs).not.toContain("L0101_LoanInqDetail");
     } finally {
       log.mockRestore();
@@ -148,6 +159,42 @@ describe("Cathay loan overview table layout", () => {
     } finally {
       log.mockRestore();
     }
+  });
+
+  it("rejects a non-empty overview when an omitted row makes balances miss the total", () => {
+    const dom = new JSDOM(tableLayoutHtml, {
+      url: "https://www.cathaybk.com.tw/OnlineBanking/LoanInq/L0101_LoanInq",
+    });
+    dom.window.document.querySelector("tbody > tr")?.remove();
+
+    const extraction = extractCathayLoanOverviewDom(dom.window.document);
+    expect(extraction.diagnostics.recognizedLoanCardCount).toBe(4);
+    expect(extraction.loanTotalBalanceMatches).toBe(false);
+    expect(extraction.pageState).toBe("incomplete");
+    const partial = parseCathayLoanOverviewForSync(extraction);
+    expect(partial.complete).toBe(false);
+    expect(partial.loanRecords).toHaveLength(4);
+    expect(() => parseCathayLoanOverview(extraction)).toThrow(
+      "Cathay loan overview query did not complete.",
+    );
+  });
+
+  it("returns visible loans as partial when a non-empty overview has no total", () => {
+    const extraction = extractHtml(
+      tableLayoutHtml.replace(/<p>貸款總餘額：[^<]*<\/p>/, ""),
+    );
+
+    expect(extraction.pageState).toBe("incomplete");
+    expect(extraction.loanTotalBalanceMatches).toBe(false);
+    expect(parseCathayLoanOverviewForSync(extraction)).toMatchObject({
+      complete: false,
+      loanRecords: expect.arrayContaining([
+        expect.objectContaining({ accountNumber: "0000000000000001" }),
+      ]),
+    });
+    expect(parseCathayLoanOverviewForSync(extraction).loanRecords).toHaveLength(
+      5,
+    );
   });
 });
 
@@ -191,13 +238,55 @@ describe("Cathay loan overview query completion", () => {
       "Cathay loan overview is under maintenance.",
     );
 
-    const emptyDocument = new JSDOM(
-      "<h1>貸款帳戶總覽</h1><h2>貸款總餘額：$0</h2><p>目前無貸款資料</p>",
-    ).window.document;
+    const emptyDocument = new JSDOM(emptyOverviewHtml).window.document;
     const empty = extractCathayLoanOverviewDom(emptyDocument);
     expect(empty.pageState).toBe("empty");
+    expect(empty.diagnostics.totalSectionFound).toBe(false);
+    expect(empty.loanTotalBalanceMatches).toBeNull();
     expect(isCathayLoanOverviewQuerySettled(emptyDocument)).toBe(true);
     expect(parseCathayLoanOverview(empty)).toEqual([]);
+    expect(parseCathayLoanOverviewForSync(empty)).toEqual({
+      loanRecords: [],
+      complete: true,
+    });
+
+    const footerOnlyDocument = new JSDOM(
+      "<h1>貸款帳戶總覽</h1><footer><p>目前無貸款資料</p></footer>",
+    ).window.document;
+    const footerOnly = extractCathayLoanOverviewDom(footerOnlyDocument);
+    expect(footerOnly.pageState).toBe("incomplete");
+    expect(isCathayLoanOverviewQuerySettled(footerOnlyDocument)).toBe(false);
+
+    const loadingWithEmptyDocument = new JSDOM(
+      emptyOverviewHtml.replace(
+        "</section>",
+        '<div aria-busy="true">載入中</div></section>',
+      ),
+    ).window.document;
+    const loadingWithEmpty = extractCathayLoanOverviewDom(
+      loadingWithEmptyDocument,
+    );
+    expect(loadingWithEmpty.pageState).toBe("loading");
+    expect(isCathayLoanOverviewQuerySettled(loadingWithEmptyDocument)).toBe(
+      false,
+    );
+
+    const maintenanceWithEmptyDocument = new JSDOM(
+      emptyOverviewHtml.replace(
+        "</section>",
+        "<p>系統維護中，暫停服務</p></section>",
+      ),
+    ).window.document;
+    const maintenanceWithEmpty = extractCathayLoanOverviewDom(
+      maintenanceWithEmptyDocument,
+    );
+    expect(maintenanceWithEmpty.pageState).toBe("maintenance");
+    expect(isCathayLoanOverviewQuerySettled(maintenanceWithEmptyDocument)).toBe(
+      true,
+    );
+    expect(() => parseCathayLoanOverview(maintenanceWithEmpty)).toThrow(
+      "Cathay loan overview is under maintenance.",
+    );
 
     const unconfirmedEmpty = extractHtml(
       "<h1>貸款帳戶總覽</h1><h2>貸款總餘額：$0</h2>",
@@ -305,13 +394,19 @@ describe("Cathay loan overview DOM extraction", () => {
     },
   );
 
-  it("does not emit loan diagnostics by default", () => {
+  it("suppresses loan diagnostics by default", () => {
     const extraction = extractHtml(fullLayoutHtml);
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
     try {
       expect(parseCathayLoanOverview(extraction)).toHaveLength(5);
-      expect(log).not.toHaveBeenCalled();
+      const serializedLogs = log.mock.calls
+        .map((call) => String(call[0]))
+        .join("\n");
+      expect(serializedLogs).toBe("");
+      for (const privateFixtureValue of sensitiveLoanValues(extraction)) {
+        expect(serializedLogs).not.toContain(privateFixtureValue);
+      }
     } finally {
       log.mockRestore();
     }
@@ -334,7 +429,13 @@ describe("Cathay loan overview DOM extraction", () => {
             !Object.hasOwn(loan, "installmentsTotal"),
         ),
       ).toBe(true);
-      expect(log).not.toHaveBeenCalled();
+      const serializedLogs = log.mock.calls
+        .map((call) => String(call[0]))
+        .join("\n");
+      expect(serializedLogs).toBe("");
+      for (const privateFixtureValue of sensitiveLoanValues(extraction)) {
+        expect(serializedLogs).not.toContain(privateFixtureValue);
+      }
     } finally {
       log.mockRestore();
     }
@@ -354,7 +455,13 @@ describe("Cathay loan overview DOM extraction", () => {
       expect(loans[0]).not.toHaveProperty("loanCategory");
       expect(loans[0]).not.toHaveProperty("interestRate");
       expect(loans[0]).not.toHaveProperty("installmentsPaid");
-      expect(log).not.toHaveBeenCalled();
+      const serializedLogs = log.mock.calls
+        .map((call) => String(call[0]))
+        .join("\n");
+      expect(serializedLogs).toBe("");
+      for (const privateFixtureValue of sensitiveLoanValues(extraction)) {
+        expect(serializedLogs).not.toContain(privateFixtureValue);
+      }
     } finally {
       log.mockRestore();
     }
@@ -365,17 +472,26 @@ describe("Cathay loan overview DOM extraction", () => {
     { field: "paymentDueOrStatus" as const },
     { field: "balance" as const },
   ])(
-    "rejects a missing core $field without emitting diagnostics",
+    "rejects a missing core $field without emitting loan diagnostics",
     ({ field }) => {
       const extraction = extractHtml(fullLayoutHtml);
       extraction.loanAccounts[0]![field] = null;
       const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
       try {
+        const partial = parseCathayLoanOverviewForSync(extraction);
+        expect(partial.complete).toBe(false);
+        expect(partial.loanRecords).toHaveLength(4);
         expect(() => parseCathayLoanOverview(extraction)).toThrow(
           "Cathay loan overview card could not be parsed.",
         );
-        expect(log).not.toHaveBeenCalled();
+        const serializedLogs = log.mock.calls
+          .map((call) => String(call[0]))
+          .join("\n");
+        expect(serializedLogs).toBe("");
+        for (const privateFixtureValue of sensitiveLoanValues(extraction)) {
+          expect(serializedLogs).not.toContain(privateFixtureValue);
+        }
       } finally {
         log.mockRestore();
       }
