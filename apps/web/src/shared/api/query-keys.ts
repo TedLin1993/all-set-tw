@@ -18,6 +18,7 @@ export const queryKeys = {
   invoiceTransactionMappings: ["invoice-transaction-mappings"] as const,
   manualAssets: ["manualAssets"] as const,
   exchangeRates: ["exchange-rates"] as const,
+  exchangeRateCurrencies: ["exchange-rates", "currencies"] as const,
   netWorthHistory: ["netWorthHistory"] as const,
   syncJobs: ["sync-jobs"] as const,
   latestSyncReport: ["sync-reports", "latest"] as const,

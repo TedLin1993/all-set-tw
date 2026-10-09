@@ -4,6 +4,7 @@ import { honoFactory } from "../../platform/hono";
 import { jsonError } from "../../platform/http";
 import {
   ExchangeRateProviderError,
+  getExchangeRateCurrencies,
   getExchangeRates,
   refreshExchangeRates,
 } from "./service";
@@ -14,6 +15,10 @@ registerExchangeRateRoutes(exchangeRateRoutes);
 function registerExchangeRateRoutes(api: Hono<AppBindings>) {
   api.get("/exchange-rates", async (c) =>
     c.json(await getExchangeRates(c.env.DB)),
+  );
+
+  api.get("/exchange-rates/currencies", async (c) =>
+    c.json(await getExchangeRateCurrencies(c.env.DB)),
   );
 
   api.post("/exchange-rates/refresh", async (c) => {

@@ -1,5 +1,8 @@
+import { matchCardAuthorizations } from "../../features/sync/card-authorization-matching";
+
 export interface SinopacMatchTransaction {
   id: string;
+  accountId: string;
   sourceId: string;
   authorizedAt: string;
   amount: number;
@@ -50,6 +53,11 @@ function score(
 ) {
   if (!identity(a.sourceId) || identity(a.sourceId) !== identity(b.sourceId))
     return 0;
+  if (
+    a.accountId.replace(/:[A-Z]{3}$/, "") !==
+    b.accountId.replace(/:[A-Z]{3}$/, "")
+  )
+    return 0;
   if (Math.sign(a.amount) !== Math.sign(b.amount) || !a.amount || !b.amount)
     return 0;
   if (/手續費|服務費|FEE/i.test(`${a.description} ${b.description}`)) return 0;
@@ -69,9 +77,42 @@ function score(
   return (exact ? 2000 : 0) + 1000 * name + 100 * proximity;
 }
 
-// Hungarian assignment: dummy columns leave unsupported candidates unmatched.
-// Sorting identities makes tied scores stable across API ordering changes.
 export function matchSinopacAuthorizations(
+  authorizations: SinopacMatchTransaction[],
+  posted: SinopacMatchTransaction[],
+  rates: Record<string, number>,
+) {
+  const eligible = (row: SinopacMatchTransaction) =>
+    !/手續費|服務費|FEE/i.test(row.description);
+  const candidate = (row: SinopacMatchTransaction) => ({
+    ...row,
+    cardId: identity(row.sourceId)?.split(":")[0],
+  });
+  const links = matchCardAuthorizations(
+    authorizations.filter(eligible).map(candidate),
+    posted.filter(eligible).map(candidate),
+    { matchesReference: (left, right) => left.id === right.id },
+  );
+  const usedAuthorizations = new Set(links.map((link) => link.id));
+  const usedDetails = new Set(links.map((link) => link.posted));
+  const byAuthorization = new Map(authorizations.map((row) => [row.id, row]));
+  const byDetail = new Map(posted.map((row) => [row.id, row]));
+  return [
+    ...links.map((link) => ({
+      authorization: byAuthorization.get(link.id)!,
+      posted: byDetail.get(link.posted)!,
+    })),
+    ...matchSinopacAdjustedAuthorizations(
+      authorizations.filter((row) => !usedAuthorizations.has(row.id)),
+      posted.filter((row) => !usedDetails.has(row.id)),
+      rates,
+    ),
+  ];
+}
+
+// Foreign-currency and adjusted amounts retain the bank's evidence-based scoring.
+// Hungarian assignment leaves unsupported candidates unmatched.
+function matchSinopacAdjustedAuthorizations(
   authorizations: SinopacMatchTransaction[],
   posted: SinopacMatchTransaction[],
   rates: Record<string, number>,

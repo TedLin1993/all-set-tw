@@ -578,11 +578,17 @@ sources/
 | `lock.ts`、`errors.ts`                           | 共用 lease／heartbeat、使用者操作判定與錯誤訊息／log 脫敏。                                                                                |
 | `execution.ts`、`run-state.ts`                   | 每次同步的期限、失鎖取消、D1 owner guard，以及 durable run 的停滯／重試狀態。                                                              |
 | `record-mapper.ts`、`persistence.ts`             | 將 connector result 轉成 write record，透過 staging table 與 D1 batch 寫入正式資料表。                                                     |
+| `card-authorization-matching.ts`                 | 依正規化的帳戶、卡片、消費日、幣別與正負金額，按穩定順序逐一配對授權與明細；不依賴 D1 或來源協定。                                         |
+| `card-authorization-write.ts`                    | 共用配對保存、可靠時刻與分類／排除／發票移轉；合併歷史候選、排除既有關係，晚到的舊識別更新已建立的目標。                                   |
 | `transaction-merge.ts`、`card-reconciliation.ts` | 共用舊交易合併與單卡摘要帳戶修復；保留使用者偏好、分類與發票關聯。                                                                         |
 
 Worker 的 `sources/<connectorId>/sync.ts` 負責設定解密、connector 呼叫與同步資料寫入；單次銀行流程也處理互動式 challenge，override 型別與來源 colocate。`ctbc/authorizations.ts` 管信用卡授權合併，`hncb/repository.ts` 管華南舊交易／帳戶修復，`nextbank/deposits.ts` 與 `obank/time-deposits.ts` 管存款生命週期。共用同步管理留在 `features/sync`，來源之間共用的外部取資料工具留在 `sources` 根目錄。
 
-台新由 `deposit-protocol.ts` 查詢臺外幣活存，與信用卡完整授權／未出帳／帳單合併後交給共用 mapper。`taishin/authorizations.ts` 只配對同卡、同消費日、同幣別同額及可確認店名的唯一授權與入帳關係；原 pending 列持續保存，以共用可見性規則排除重複計算。來源 `sync.ts` 將配對、偏好與發票移轉、canonical 帳戶關聯、金融資料 promotion 及 cursor 放在同一 D1 batch，並以既有同步鎖及原憑證版本保護。銀行協定與真實帳戶驗收限制見連接器文件。
+玉山、台新、永豐、中信、第一銀行、華南與兆豐提供來源的卡片識別後，使用共用 `card-authorization-matching.ts`：同帳戶、同卡、台灣時區同消費日、同幣別同額同方向的群組，依授權時刻與 `sourceId`、明細的 `sourceId` 順序逐一分配，每筆明細只配一次，不比店名。兩側筆數不等時只配可對應的筆數，其餘持續顯示；既有配對與被占用的目標不重新分配。核心可先執行來源提供的雙向唯一可靠識別比對；雙方授權碼明確不同時，禁止金額 fallback。永豐精確配對後仍以來源策略處理外幣／調整金額。
+
+交易只保留 `pending`／`posted`，不新增已出帳狀態；帳單明細沿用原本補抓／更新用途，帳單摘要仍計算負債。`card-authorization-write.ts` 在同一 promotion batch 保存配對、補可靠時刻及移轉使用者設定，目標既有決定優先，發票衝突保留。第一銀行、華南、兆豐直接使用共用 preparation；玉山、台新、永豐與中信維持來源適配與舊 ID 相容。玉山先把即時授權接到未入帳歷史明細，再接正式入帳，依序移轉時刻與設定；中信保留原授權 ID 並完成合併，發票衝突時不刪除交易。來源差異與尚未提供待入帳資料的銀行見連接器文件。
+
+台新由 `deposit-protocol.ts` 查詢臺外幣活存，與信用卡完整授權／未出帳／帳單合併後交給共用 mapper。原 pending 列持續保存，以共用可見性規則排除重複計算。來源 `sync.ts` 將配對、偏好與發票移轉、canonical 帳戶關聯、金融資料 promotion 及 cursor 放在同一 D1 batch，並以既有同步鎖及原憑證版本保護。銀行協定與真實帳戶驗收限制見連接器文件。
 
 各來源直接引用同一來源目錄的 protocol／adapter，以及 `features/sync` 的共用 record mapper、persistence，不經由 `manual-sync.ts` 匯出，也不互相依賴其他來源。電子發票與集保的 `sync.ts`／`run-repository.ts` 管理 durable Queue 流程，集保不再保留另一套單次同步實作。目錄調整不改變驗證、session、cursor 與 D1 promotion／finalize 的原子邊界。
 
@@ -639,6 +645,11 @@ invocation 因此不必等待下一個 10 分鐘 Cron，且擁有獨立的 Worke
 初始 Cron kick 不延遲。Queue consumer 使用 batch size 1 與 concurrency 1，維持 connector
 逐一執行。是否到期仍由 D1 sync job 狀態判斷；沒有可執行工作時 consumer 不再送出訊息，
 結束本次串接。
+
+這段 20 秒延遲只作用於不同 Queue 工作之間。同一個 connector invocation 的登入頁
+復原可能重新取得 Browser session，由共用 browser adapter 在確認舊 session 關閉後
+處理 acquisition 限流等待與額度重查。登入準備每輪最多 60 秒、共用總預算 180 秒；
+額度查詢、取得瀏覽器與限流等待都算入總預算，來源原有較短期限與取消 signal 仍優先適用。
 
 Demo 模式（`DEMO_MODE`）不執行背景同步：Cron 不送出 scheduler 啟動訊息，Queue consumer
 不處理任何訊息，避免啟用 Demo 前殘留的訊息繼續以已儲存的憑證登入外部服務。scheduler 啟動訊息
@@ -731,12 +742,15 @@ Connector 不得直接寫入金融資料表。
 永豐信用卡取得 `LatestTx.Items` 與 `OutstandingDetail.Detail` 後，在 `bank_transactions`
 原表保存授權，以 `matched_transaction_id` 記錄已入帳關係，不另設授權表或停用欄位。
 配對僅限同卡、同消費日，不跨日；排除手續費、服務費、不同金額方向與卡片識別不足的資料。
-既有相同 sourceId 優先，其次同幣別同金額，再以正規化店名相似度及目前匯率金額接近度
-計分；同組採最大總分的一對一分配，無合理候選則不配對。跨幣別不要求人工確認。
+既有相同 sourceId 優先；同帳戶、同幣別同金額交給共用核心按穩定順序逐一配對，不比店名。
+剩餘外幣／調整金額以正規化店名相似度及目前匯率金額接近度計分，同卡同消費日採最大總分的
+一對一分配，無合理候選則不配對；跨幣別限同一信用卡摘要帳戶的不同幣別，不要求人工確認。
 已配對關係不重新分配；已入帳保留正式金額、幣別、入帳日與原始 payload，繼承授權時刻。
 配對後優先沿用待入帳名稱作為 description 與 counterparty，供顯示、搜尋及規則分類；
 空白或預設「永豐信用卡消費」名稱不覆蓋正式名稱。每次同步也修復既有配對，即使銀行
 不再回傳該交易；同 ID 入帳沿用已保存名稱。舊版已覆蓋且來源不再提供的名稱無法復原。
+同 ID 入帳以 `raw.authorizationMatched` 保存完成狀態；保有授權時刻的舊已入帳列也保留
+原時刻與名稱，不再作為另一筆授權的配對目標。
 在同一 D1 batch upsert 交易、保存配對、補入時刻，並於首次配對移轉原授權的個別分類、
 計算偏好（已入帳既有設定優先）及發票關係。原授權與設定持續保存。
 活動、搜尋、發票配對候選與收支統計僅排除 `status = 'pending'` 且
@@ -778,6 +792,17 @@ Connector 不得直接寫入金融資料表。
   不存在的報告回傳 404。報告 30 天清理會級聯清除明細。
 
 新增資料筆數保留現有定義；此版不追蹤任意欄位修改歷史，也不新增活動頁同步排序。
+
+## 匯率更新
+
+`features/exchange-rates` 的更新流程取得 USD、JPY、EUR，加上有效銀行／信用卡帳戶、
+各 connector／asset type 最新投資持倉與手動資產的其他幣別。帳戶讀取最新餘額，手動資產讀取最新估值；
+清單與更新流程共用 `shared/exchange-rates.ts`，排除 TWD、NAN 等非有效貨幣代碼並去重，
+只略過實際金額為 0 的資產，不將外幣四捨五入後再判斷。
+`GET /api/exchange-rates/currencies` 回傳預設幣別與有非零金額的資產幣別，避免依賴前端資產列表的分頁。
+外部來源以 TWD 為基準，儲存時取倒數作為原幣換算 TWD 的匯率，使用來源更新時間。
+來源未提供的額外幣別略過並保留已有匯率；來源回傳無效匯率或預設幣別缺值時不寫入。
+取得的匯率以單一 D1 batch upsert，不再清空整張匯率表；`GET /api/exchange-rates` 回傳所有已儲存幣別。
 
 ## 新增一般功能
 

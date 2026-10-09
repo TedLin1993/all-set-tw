@@ -5,6 +5,7 @@
     useQueryClient,
   } from "@tanstack/svelte-query";
   import { RefreshCw } from "@lucide/svelte";
+  import { DEFAULT_EXCHANGE_CURRENCIES } from "@taiwan-fin-hub/shared";
   import Card from "@/shared/ui/Card.svelte";
   import CardHeader from "@/shared/ui/CardHeader.svelte";
   import CardContent from "@/shared/ui/CardContent.svelte";
@@ -12,17 +13,15 @@
   import type { ApiClient } from "@/shared/api/client";
   import { messageFromError } from "@/shared/api/client";
   import { queryKeys } from "@/shared/api/query-keys";
-  import { exchangeRatesQuery } from "@/data/assets/queries";
+  import {
+    exchangeRateCurrenciesQuery,
+    exchangeRatesQuery,
+  } from "@/data/assets/queries";
   import type { ExchangeRateRow } from "@/data/assets/types";
   import { formatDateTime } from "@/shared/format/financial";
 
   const EXCHANGE_RATE_SOURCE_URL = "https://www.exchangerate-api.com";
-  const currencies = ["USD", "JPY", "EUR"] as const;
-  const currencyLabels: Record<(typeof currencies)[number], string> = {
-    USD: "美元",
-    JPY: "日圓",
-    EUR: "歐元",
-  };
+  const currencyNames = new Intl.DisplayNames("zh-TW", { type: "currency" });
 
   let {
     api,
@@ -35,19 +34,27 @@
   } = $props();
 
   const rates = createQuery(exchangeRatesQuery(() => api));
+  const currencyList = createQuery(exchangeRateCurrenciesQuery(() => api));
+  const currencies = $derived(
+    $currencyList.data ?? DEFAULT_EXCHANGE_CURRENCIES,
+  );
   const queryClient = useQueryClient();
   const refresh = createMutation({
     mutationFn: () =>
       api.post<ExchangeRateRow[]>("/api/exchange-rates/refresh"),
-    onSuccess: (data) =>
-      queryClient.setQueryData(queryKeys.exchangeRates, data),
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.exchangeRates, data);
+      return queryClient.invalidateQueries({
+        queryKey: queryKeys.exchangeRateCurrencies,
+      });
+    },
   });
 
   const lastUpdatedAt = $derived(
     ($rates.data ?? []).find((rate) => rate.updatedAt)?.updatedAt,
   );
 
-  function rateFor(currency: (typeof currencies)[number]) {
+  function rateFor(currency: string) {
     return ($rates.data ?? []).find((rate) => rate.currency === currency);
   }
 
@@ -64,7 +71,7 @@
       <div class="min-w-0">
         <h2 class="text-base font-bold">匯率</h2>
         <p class="mt-1 text-sm text-muted-foreground">
-          目前支援美元、日圓與歐元，供資產與活動換算使用。
+          更新美元、日圓、歐元及持有非零金額的其他幣別，供資產與活動換算使用。
         </p>
       </div>
       <div class="flex flex-wrap items-start justify-end gap-x-4 gap-y-2">
@@ -85,6 +92,11 @@
           {#if $refresh.error}
             <p role="alert" class="text-coral">
               {messageFromError($refresh.error)} 目前仍保留原有匯率。
+            </p>
+          {/if}
+          {#if $currencyList.isError || $rates.isError}
+            <p role="alert" class="text-coral">
+              無法載入完整匯率清單，請稍後再按更新。
             </p>
           {/if}
         </div>
@@ -113,7 +125,7 @@
           class="grid gap-1 border-t border-border px-4 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_180px_1fr] sm:items-center sm:gap-0"
         >
           <span class="font-semibold"
-            >{currencyLabels[currency]}（{currency}）</span
+            >{currencyNames.of(currency)}（{currency}）</span
           >
           <span class="font-mono text-right sm:text-left"
             >1 {currency} = NT$ {displayRate(rate)}</span
@@ -132,7 +144,7 @@
         <div>
           <h2 class="text-lg font-semibold">匯率</h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            供資產與活動換算使用的參考匯率。
+            依資產幣別列出參考匯率；零金額的其他幣別不列出。
           </p>
         </div>
         <Button
@@ -153,7 +165,7 @@
           {@const rate = rateFor(currency)}
           <div class="flex items-center justify-between gap-3 text-sm">
             <span class="font-semibold"
-              >{currencyLabels[currency]}（{currency}）</span
+              >{currencyNames.of(currency)}（{currency}）</span
             >
             <span class="font-mono">1 {currency} = NT$ {displayRate(rate)}</span
             >
@@ -177,6 +189,11 @@
         {#if $refresh.error}
           <p role="alert" class="text-coral">
             {messageFromError($refresh.error)} 目前仍保留原有匯率。
+          </p>
+        {/if}
+        {#if $currencyList.isError || $rates.isError}
+          <p role="alert" class="text-coral">
+            無法載入完整匯率清單，請稍後再按更新。
           </p>
         {/if}
       </div>

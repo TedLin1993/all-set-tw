@@ -1,5 +1,10 @@
 import type { SyncWriteRecord } from "../../features/sync/persistence";
-import { taishinMerchantNamesMatch, normalizeMerchantName } from "./protocol";
+import { cardAuthorizationLinkStatements } from "../../features/sync/card-authorization-write";
+import {
+  cardAuthorizationMatchKey,
+  matchCardAuthorizations,
+} from "../../features/sync/card-authorization-matching";
+import { normalizeMerchantName } from "./protocol";
 
 type CardRow = {
   id: string;
@@ -14,43 +19,33 @@ type CardRow = {
   matched_transaction_id: string | null;
 };
 
-function cardDetails(row: CardRow) {
+function cardLast4(row: CardRow) {
   try {
     const raw = JSON.parse(row.raw_payload || "{}") as Record<string, unknown>;
-    const last4 =
-      typeof raw.cardLast4 === "string" && /^\d{4}$/.test(raw.cardLast4)
-        ? raw.cardLast4
-        : undefined;
-    return {
-      last4,
-      identityDescription:
-        typeof raw.identityDescription === "string"
-          ? raw.identityDescription
-          : undefined,
-    };
+    return typeof raw.cardLast4 === "string" && /^\d{4}$/.test(raw.cardLast4)
+      ? raw.cardLast4
+      : undefined;
   } catch {
-    return { last4: undefined, identityDescription: undefined };
+    return undefined;
   }
 }
 
+function candidate(row: CardRow) {
+  return {
+    id: row.id,
+    sourceId: row.source_id,
+    accountId: row.account_id,
+    cardId: cardLast4(row),
+    authorizedAt: row.authorized_at,
+    amount: row.amount,
+    currency: row.currency,
+  };
+}
+
 function samePurchase(left: CardRow, right: CardRow) {
-  const a = cardDetails(left);
-  const b = cardDetails(right);
-  if (
-    !a.last4 ||
-    a.last4 !== b.last4 ||
-    !left.authorized_at ||
-    !right.authorized_at ||
-    left.account_id !== right.account_id ||
-    left.authorized_at.slice(0, 10) !== right.authorized_at.slice(0, 10) ||
-    left.currency !== right.currency ||
-    left.amount !== right.amount
-  )
-    return false;
-  return [left.description, a.identityDescription].some((name) =>
-    [right.description, b.identityDescription].some((other) =>
-      taishinMerchantNamesMatch(name ?? undefined, other ?? undefined),
-    ),
+  const key = cardAuthorizationMatchKey(candidate(left));
+  return (
+    key !== undefined && key === cardAuthorizationMatchKey(candidate(right))
   );
 }
 
@@ -161,84 +156,17 @@ export async function prepareTaishinAuthorizationWrite(
   const posted = [...rows.values()].filter(
     (row) => row.status === "posted" && !targeted.has(row.id),
   );
-  const links: Array<{
-    id: string;
-    posted: string;
-    authorizedAt: string | null;
-  }> = [];
-  for (const authorization of pending) {
-    const candidates = posted.filter((row) => samePurchase(authorization, row));
-    if (candidates.length !== 1) continue;
-    const target = candidates[0]!;
-    if (pending.filter((row) => samePurchase(row, target)).length !== 1)
-      continue;
-    links.push({
-      id: authorization.id,
-      posted: target.id,
-      authorizedAt: authorization.authorized_at,
-    });
-  }
-  const json = JSON.stringify(links);
-  const guard =
-    encryptedConfig == null
-      ? ""
-      : " AND EXISTS (SELECT 1 FROM connector_settings WHERE connector_id = 'taishin' AND encrypted_config = ?)";
-  const statement = (sql: string, ...bindings: string[]) =>
-    db
-      .prepare(sql.replace("/* settings guard */", guard))
-      .bind(...bindings, ...(encryptedConfig == null ? [] : [encryptedConfig]));
+  const links = matchCardAuthorizations(
+    pending.map(candidate),
+    posted.map(candidate),
+  );
   return {
     records: [...updated.values()],
-    afterPromoteStatements:
-      links.length === 0
-        ? []
-        : [
-            statement(
-              `UPDATE bank_transactions SET matched_transaction_id = json_extract(link.value, '$.posted')
-        FROM json_each(?) link WHERE bank_transactions.connector_id = 'taishin'
-          AND bank_transactions.id = json_extract(link.value, '$.id')
-          AND bank_transactions.status = 'pending' AND bank_transactions.matched_transaction_id IS NULL /* settings guard */`,
-              json,
-            ),
-            statement(
-              `UPDATE bank_transactions SET authorized_at = json_extract(link.value, '$.authorizedAt')
-        FROM json_each(?) link WHERE bank_transactions.connector_id = 'taishin'
-          AND bank_transactions.id = json_extract(link.value, '$.posted')
-          AND bank_transactions.status = 'posted' AND length(COALESCE(bank_transactions.authorized_at, '')) <= 10
-          AND length(COALESCE(json_extract(link.value, '$.authorizedAt'), '')) > 10 /* settings guard */`,
-              json,
-            ),
-            statement(
-              `INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at)
-        SELECT json_extract(link.value, '$.posted'), preference.excluded_from_calculation, preference.created_at, preference.updated_at
-        FROM json_each(?) link JOIN bank_transaction_preferences preference
-          ON preference.transaction_id = json_extract(link.value, '$.id')
-        WHERE true /* settings guard */ ON CONFLICT(transaction_id) DO NOTHING`,
-              json,
-            ),
-            statement(
-              `INSERT INTO classification_overrides (id, target_type, target_id, category_id, created_at, updated_at)
-        SELECT 'override:bank_transaction:' || json_extract(link.value, '$.posted'), 'bank_transaction',
-          json_extract(link.value, '$.posted'), preference.category_id, preference.created_at, preference.updated_at
-        FROM json_each(?) link JOIN classification_overrides preference
-          ON preference.target_type = 'bank_transaction' AND preference.target_id = json_extract(link.value, '$.id')
-        WHERE true /* settings guard */ ON CONFLICT(target_type, target_id) DO NOTHING`,
-              json,
-            ),
-            statement(
-              `UPDATE invoice_transaction_preferences SET transaction_id = (
-          SELECT json_extract(link.value, '$.posted') FROM json_each(?) link
-          WHERE json_extract(link.value, '$.id') = invoice_transaction_preferences.transaction_id
-        ) WHERE transaction_id IN (SELECT json_extract(value, '$.id') FROM json_each(?))
-        AND NOT EXISTS (
-          SELECT 1 FROM invoice_transaction_preferences existing JOIN json_each(?) link
-            ON existing.transaction_id = json_extract(link.value, '$.posted')
-          WHERE existing.decision = 'linked' AND json_extract(link.value, '$.id') = invoice_transaction_preferences.transaction_id
-        ) /* settings guard */`,
-              json,
-              json,
-              json,
-            ),
-          ],
+    afterPromoteStatements: cardAuthorizationLinkStatements(
+      db,
+      "taishin",
+      links,
+      encryptedConfig,
+    ),
   };
 }

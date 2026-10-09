@@ -1,4 +1,5 @@
 import type { SyncWriteRecord } from "../../features/sync/persistence";
+import { cardAuthorizationLinkStatements } from "../../features/sync/card-authorization-write";
 import {
   matchSinopacAuthorizations,
   type SinopacMatchTransaction,
@@ -6,6 +7,7 @@ import {
 
 type StoredTransaction = {
   id: string;
+  account_id: string;
   source_id: string;
   authorized_at: string;
   amount: number;
@@ -19,6 +21,7 @@ const candidate = (
   row: Omit<StoredTransaction, "status" | "raw_payload">,
 ): SinopacMatchTransaction => ({
   id: row.id,
+  accountId: row.account_id,
   sourceId: row.source_id,
   authorizedAt: row.authorized_at,
   amount: row.amount,
@@ -34,7 +37,7 @@ export async function prepareSinopacAuthorizationWrite(
   const [stored, rateRows] = await Promise.all([
     db
       .prepare(
-        `SELECT id, source_id, authorized_at, amount, currency, description, raw_payload, status, matched_transaction_id
+        `SELECT id, account_id, source_id, authorized_at, amount, currency, description, raw_payload, status, matched_transaction_id
       FROM bank_transactions WHERE connector_id = 'sinopac' AND source_id LIKE 'sinopac:card:tx:v2:%'`,
       )
       .all<StoredTransaction>(),
@@ -44,8 +47,24 @@ export async function prepareSinopacAuthorizationWrite(
   ]);
   const authorizations = new Map(
     stored.results
-      .filter((row) => row.status === "pending" || row.matched_transaction_id)
-      .map((row) => [row.source_id, row]),
+      .filter(
+        (row) =>
+          row.status === "pending" ||
+          row.matched_transaction_id ||
+          row.authorized_at?.includes("T") ||
+          JSON.parse(row.raw_payload || "{}").authorizationMatched,
+      )
+      .map((row) => [
+        row.source_id,
+        {
+          ...row,
+          // A same-ID promotion is an established match too. Keep its original
+          // clock/name and reserve the posted row for subsequent syncs.
+          matched_transaction_id:
+            row.matched_transaction_id ??
+            (row.status === "posted" ? row.id : null),
+        },
+      ]),
   );
   const pending = [
     ...stored.results.filter((row) => row.status === "pending"),
@@ -87,8 +106,7 @@ export async function prepareSinopacAuthorizationWrite(
   const matches = matchSinopacAuthorizations(
     [...authorizations.values()]
       .filter(
-        (row) =>
-          !row.matched_transaction_id && row.authorized_at?.includes("T"),
+        (row) => !row.matched_transaction_id && Boolean(row.authorized_at),
       )
       .map(candidate),
     [...posted.values()].filter((row) => !used.has(row.id)).map(candidate),
@@ -122,6 +140,15 @@ export async function prepareSinopacAuthorizationWrite(
           payload: {
             ...record.payload,
             authorized_at: authorization.authorized_at,
+            ...(record.payload.status === "posted" &&
+            authorization.id === record.recordKey
+              ? {
+                  raw_payload: JSON.stringify({
+                    ...JSON.parse(String(record.payload.raw_payload || "{}")),
+                    authorizationMatched: true,
+                  }),
+                }
+              : {}),
             ...(authorization.description?.trim() &&
             authorization.description !== "永豐信用卡消費"
               ? {
@@ -134,20 +161,15 @@ export async function prepareSinopacAuthorizationWrite(
       : record;
   });
   const linksJson = JSON.stringify(linked);
-  const newLinksJson = JSON.stringify(
-    matches.map((match) => authorizations.get(match.authorization.sourceId)),
-  );
+  const newLinks = matches.map((match) => ({
+    id: match.authorization.id,
+    posted: match.posted.id,
+    authorizedAt: match.authorization.authorizedAt,
+  }));
   return {
     records: updatedRecords,
     afterPromoteStatements: [
-      db
-        .prepare(
-          `UPDATE bank_transactions SET matched_transaction_id = (
-        SELECT json_extract(value, '$.matched_transaction_id') FROM json_each(?)
-        WHERE json_extract(value, '$.id') = bank_transactions.id
-      ) WHERE connector_id = 'sinopac' AND id IN (SELECT json_extract(value, '$.id') FROM json_each(?))`,
-        )
-        .bind(linksJson, linksJson),
+      ...cardAuthorizationLinkStatements(db, "sinopac", newLinks),
       // Reapply names for all saved links, including older matches no longer
       // returned by the bank. Keep the posted raw payload and financial fields.
       db
@@ -172,42 +194,6 @@ export async function prepareSinopacAuthorizationWrite(
       )`,
         )
         .bind(linksJson, linksJson),
-      db
-        .prepare(
-          `INSERT INTO bank_transaction_preferences
-        (transaction_id, excluded_from_calculation, created_at, updated_at)
-        SELECT json_extract(link.value, '$.matched_transaction_id'), preference.excluded_from_calculation,
-          preference.created_at, preference.updated_at
-        FROM json_each(?) link JOIN bank_transaction_preferences preference
-          ON preference.transaction_id = json_extract(link.value, '$.id')
-        WHERE true ON CONFLICT(transaction_id) DO NOTHING`,
-        )
-        .bind(newLinksJson),
-      db
-        .prepare(
-          `INSERT INTO classification_overrides
-        (id, target_type, target_id, category_id, created_at, updated_at)
-        SELECT 'override:bank_transaction:' || json_extract(link.value, '$.matched_transaction_id'),
-          'bank_transaction', json_extract(link.value, '$.matched_transaction_id'), preference.category_id,
-          preference.created_at, preference.updated_at
-        FROM json_each(?) link JOIN classification_overrides preference
-          ON preference.target_type = 'bank_transaction' AND preference.target_id = json_extract(link.value, '$.id')
-        WHERE true ON CONFLICT(target_type, target_id) DO NOTHING`,
-        )
-        .bind(newLinksJson),
-      db
-        .prepare(
-          `UPDATE invoice_transaction_preferences SET transaction_id = (
-        SELECT json_extract(link.value, '$.matched_transaction_id') FROM json_each(?) link
-        WHERE json_extract(link.value, '$.id') = invoice_transaction_preferences.transaction_id
-      ) WHERE transaction_id IN (SELECT json_extract(value, '$.id') FROM json_each(?))
-        AND NOT EXISTS (
-          SELECT 1 FROM invoice_transaction_preferences existing JOIN json_each(?) link
-            ON existing.transaction_id = json_extract(link.value, '$.matched_transaction_id')
-          WHERE existing.decision = 'linked' AND json_extract(link.value, '$.id') = invoice_transaction_preferences.transaction_id
-        )`,
-        )
-        .bind(newLinksJson, newLinksJson, newLinksJson),
     ],
   };
 }

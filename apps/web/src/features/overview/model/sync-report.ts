@@ -50,11 +50,6 @@ export function financialChangeUnavailableMessage(
   return null;
 }
 
-export function zeroRateCurrenciesMessage(missingCurrencies: string[]) {
-  if (missingCurrencies.length === 0) return null;
-  return `缺少 ${missingCurrencies.join("、")} 匯率，相關資產以 NT$0 計算。`;
-}
-
 export function signedFinancialChange(
   value: number,
   positiveChangeIsFavorable = true,

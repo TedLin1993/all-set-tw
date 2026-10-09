@@ -119,7 +119,7 @@ async function loginWithBrowser(
   const { browser, value: prepared } = await prepareBrowserLoginWithRetry({
     binding: browserBinding,
     connectorId: "esun",
-    prepare: async (browser, observePage) => {
+    prepare: async (browser, observePage, _signal, _attempt, reportStage) => {
       const page = await browser.newPage();
       observePage(page);
       const state: { txnDupToken?: string } = {};
@@ -127,14 +127,17 @@ async function loginWithBrowser(
         const token = response.headers().txnduptoken;
         if (token) state.txnDupToken = token;
       });
+      reportStage("configure_page");
       await page.setViewport({ width: 390, height: 844, isMobile: true });
       await page.setUserAgent(
         "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/147.0.0.0 Mobile/15E148 Safari/604.1",
       );
+      reportStage("navigate");
       await page.goto(PORTAL_URL, {
         waitUntil: "domcontentloaded",
         timeout: 15_000,
       });
+      reportStage("form");
       await page.waitForSelector('input[name="id"]', { timeout: 15_000 });
       await page.waitForSelector('input[name="userName"]', { timeout: 15_000 });
       await page.waitForSelector('input[name="pxssword"]', { timeout: 15_000 });

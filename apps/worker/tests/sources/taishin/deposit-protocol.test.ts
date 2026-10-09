@@ -3,6 +3,7 @@ import {
   fetchTaishinDeposits,
   parseTaishinTwdDepositTransactions,
   parseTaishinFxDepositTransactions,
+  TaishinDepositProtocolError,
 } from "../../../src/sources/taishin/deposit-protocol";
 import {
   bankNow,
@@ -11,7 +12,22 @@ import {
   FX_ACCOUNT,
   twdTransactions,
   fxTransactions,
+  fxOverview,
 } from "./fixtures/bank-data";
+
+async function fxAccountError(accounts: unknown) {
+  const result = await fetchTaishinDeposits(
+    (path, body) =>
+      path.endsWith("/getRB08000100Data")
+        ? Promise.resolve({ error: null, data: { FCS_ACCOUNT: accounts } })
+        : depositRequest(path, body),
+    bankNow,
+  ).catch((error: unknown) => error);
+  expect(result).toBeInstanceOf(TaishinDepositProtocolError);
+  if (!(result instanceof TaishinDepositProtocolError))
+    throw new Error("預期外幣清單驗證失敗");
+  return result;
+}
 
 describe("台新臺外幣活存", () => {
   it("採帳戶餘額與原幣精度，保留零餘額且不加上綜存定存，輸出不含完整帳號", async () => {
@@ -163,6 +179,152 @@ describe("台新臺外幣活存", () => {
     expect(() =>
       parseTaishinTwdDepositTransactions(invalid, TWD_ACCOUNT),
     ).toThrow("金額");
+  });
+
+  it("外幣驗證定位巢狀欄位，陣列與物件映射都遮罩帳戶鍵、索引與欄位值", async () => {
+    const group = fxOverview.data.FCS_ACCOUNT[0]!;
+    const sensitiveName = "合成帳戶別名";
+    const sensitiveAmount = "87654.32";
+    const invalid = {
+      ...group,
+      ACCOUNT_NAME: sensitiveName,
+      FCS_ACCOUNT_DETAIL: [
+        {
+          ...group.FCS_ACCOUNT_DETAIL[0],
+          BALANCE: sensitiveAmount,
+          CURRENCY_CODE: null,
+          token: "synthetic-secret-token",
+        },
+      ],
+    };
+    for (const accounts of [
+      [invalid],
+      { [FX_ACCOUNT]: invalid },
+      { ACCOUNT_NO: invalid },
+      { FCS_ACCOUNT_DETAIL: invalid },
+    ]) {
+      const error = await fxAccountError(accounts);
+      expect(error.diagnostics).toEqual({
+        issues: [
+          {
+            path: "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL[*].CURRENCY_CODE",
+            code: "invalid_type",
+            expected: "string",
+            received: "null",
+          },
+        ],
+        truncated: false,
+      });
+      expect(error.message).toContain("格式驗證失敗");
+      expect(error.message).toContain("CURRENCY_CODE");
+      expect(error.cause).toBeUndefined();
+      const output = error.message + JSON.stringify(error);
+      for (const secret of [
+        FX_ACCOUNT,
+        sensitiveName,
+        sensitiveAmount,
+        "synthetic-secret-token",
+      ])
+        expect(output).not.toContain(secret);
+    }
+  });
+
+  it("外幣清單缺省、null、巢狀形狀與金融欄位不符仍失敗，診斷僅包含型別", async () => {
+    const group = fxOverview.data.FCS_ACCOUNT[0]!;
+    const detail = group.FCS_ACCOUNT_DETAIL[0]!;
+    const detailAccounts = (fields: Record<string, unknown>) => [
+      { ...group, FCS_ACCOUNT_DETAIL: [{ ...detail, ...fields }] },
+    ];
+    for (const [accounts, path, code, expected, received] of [
+      [undefined, "FCS_ACCOUNT", "invalid_union", "array|object", "missing"],
+      [null, "FCS_ACCOUNT", "invalid_union", "array|object", "null"],
+      [
+        [{ ...group, FCS_ACCOUNT_DETAIL: {} }],
+        "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL",
+        "invalid_type",
+        "array",
+        "object",
+      ],
+      [
+        [{ ...group, ACCOUNT_NAME: null }],
+        "FCS_ACCOUNT[*].ACCOUNT_NAME",
+        "invalid_type",
+        "string",
+        "null",
+      ],
+      [
+        detailAccounts({ ACCOUNT_NO: null }),
+        "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL[*].ACCOUNT_NO",
+        "invalid_type",
+        "string",
+        "null",
+      ],
+      [
+        detailAccounts({ BALANCE: undefined }),
+        "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL[*].BALANCE",
+        "invalid_union",
+        "string|number",
+        "missing",
+      ],
+      [
+        detailAccounts({ BALANCE: null }),
+        "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL[*].BALANCE",
+        "invalid_union",
+        "string|number",
+        "null",
+      ],
+      [
+        detailAccounts({ CURRENCY_CODE: "" }),
+        "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL[*].CURRENCY_CODE",
+        "invalid_format",
+        "string",
+        "string",
+      ],
+      [
+        [{ ...group, ACCOUNT_NO: "" }],
+        "FCS_ACCOUNT[*].ACCOUNT_NO",
+        "too_small",
+        "string",
+        "string",
+      ],
+    ]) {
+      const error = await fxAccountError(accounts);
+      expect(error.diagnostics).toEqual({
+        issues: [{ path, code, expected, received }],
+        truncated: false,
+      });
+      expect(error.incomplete).toBe(false);
+    }
+  });
+
+  it("去識別後合併相同診斷，最多保留五項並標示截斷", async () => {
+    const group = fxOverview.data.FCS_ACCOUNT[0]!;
+    const repeated = await fxAccountError(
+      Array.from({ length: 10 }, () => ({
+        ...group,
+        FCS_ACCOUNT_DETAIL: [
+          { ...group.FCS_ACCOUNT_DETAIL[0], CURRENCY_CODE: null },
+        ],
+      })),
+    );
+    expect(repeated.diagnostics?.issues).toHaveLength(1);
+    expect(repeated.diagnostics?.truncated).toBe(false);
+    const multiple = await fxAccountError([
+      {
+        ACCOUNT_NO: null,
+        ACCOUNT_NAME: null,
+        FCS_ACCOUNT_DETAIL: [
+          {
+            ACCOUNT_NO: null,
+            ACCOUNT_ALIAS: 123,
+            CURRENCY_CODE: null,
+            BALANCE: null,
+          },
+        ],
+      },
+    ]);
+    expect(multiple.diagnostics?.issues).toHaveLength(5);
+    expect(multiple.diagnostics?.truncated).toBe(true);
   });
 
   it("筆數截斷時拆分不重疊期間，單日仍不完整則失敗", async () => {

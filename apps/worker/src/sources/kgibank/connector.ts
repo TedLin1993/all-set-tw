@@ -5,6 +5,7 @@ import {
   connectBrowserWithCancellation,
   prepareBrowserLoginWithRetry,
   closeBrowserSession,
+  type ReportBrowserLoginStage,
 } from "../browser.js";
 import puppeteer, {
   type Browser,
@@ -179,14 +180,25 @@ export function createKgibankConnector(
               error instanceof KgibankActionTimeoutError ||
               (error instanceof KgibankConnectionError &&
                 /^凱基登入頁沒有在期限內/.test(error.message)),
-            prepare: async (browser, observePage) => {
+            prepare: async (
+              browser,
+              observePage,
+              _signal,
+              _attempt,
+              reportStage,
+            ) => {
               const pages = await browser.pages();
               const page = pages[0] ?? (await browser.newPage());
               observePage(page);
+              reportStage("configure_page");
               await configurePage(page);
               const headerWatch = watchAuthHeaders(page);
               try {
-                const capture = await openLoginAndCaptureCaptcha(page, config);
+                const capture = await openLoginAndCaptureCaptcha(
+                  page,
+                  config,
+                  reportStage,
+                );
                 return { page, headerWatch, capture };
               } catch (error) {
                 headerWatch.dispose();
@@ -395,12 +407,19 @@ async function loginWithOcr(
   );
 }
 
-async function openLoginAndCaptureCaptcha(page: Page, config: KgibankConfig) {
+async function openLoginAndCaptureCaptcha(
+  page: Page,
+  config: KgibankConfig,
+  reportStage?: ReportBrowserLoginStage,
+) {
+  reportStage?.("navigate");
   await gotoAllowingTimeout(page, LOGIN_URL);
+  reportStage?.("form");
   const frame = await findLoginFrame(page);
   await fillInput(frame, "#loginInputIdNo", config.userId ?? "");
   await fillInput(frame, "#loginInputUserNo", config.account ?? "");
   await fillInput(frame, "#loginInputPassword", config.password ?? "");
+  reportStage?.("captcha");
   return { frame, captcha: await readCaptchaImage(frame) };
 }
 

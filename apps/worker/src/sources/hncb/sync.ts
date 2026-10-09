@@ -1,4 +1,5 @@
 import { createSyncExecution } from "../../features/sync/execution";
+import { prepareCardAuthorizationWrite } from "../../features/sync/card-authorization-write";
 import type { Env } from "../../platform/env";
 import { canonicalSyncLockRowId } from "../../features/sync/lock";
 import {
@@ -225,9 +226,19 @@ export async function syncHncb(
     );
   }
 
-  const newRecords = await persistStagedSyncWrite(env.DB, {
+  const prepared = await prepareCardAuthorizationWrite(
+    env.DB,
+    connectorId,
     records,
+    {
+      sourcePattern: "hncb:card:tx:v2:%",
+      cardId: (row) => row.source_id.match(/^hncb:card:tx:v2:(\d{4}):/)?.[1],
+    },
+  );
+  const newRecords = await persistStagedSyncWrite(env.DB, {
+    records: prepared.records,
     afterPromoteStatements: [
+      ...prepared.afterPromoteStatements,
       ...(bankTransactions.some((transaction) =>
         transaction.sourceId.startsWith("hncb:card:tx:v2:"),
       )

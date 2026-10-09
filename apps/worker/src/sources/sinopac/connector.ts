@@ -5,6 +5,7 @@ import {
   connectBrowserWithCancellation,
   prepareBrowserLoginWithRetry,
   closeBrowserSession,
+  type ReportBrowserLoginStage,
 } from "../browser.js";
 import puppeteer, {
   type Browser,
@@ -456,12 +457,14 @@ export async function loginSinopacWithOcr(
         /^永豐(?:行動網銀登入頁沒有取得圖形驗證碼|圖形驗證碼影像為空白)/.test(
           error.message,
         ),
-      prepare: async (browser, observePage) => {
+      prepare: async (browser, observePage, _signal, _attempt, reportStage) => {
         const pages = await browser.pages();
         const page = pages[0] ?? (await browser.newPage());
         observePage(page);
+        reportStage("configure_page");
         await configurePage(page);
-        await openLoginAndFill(page, config);
+        await openLoginAndFill(page, config, reportStage);
+        reportStage("captcha");
         return { page, imageBytes: await captureSinopacCaptcha(page) };
       },
     });
@@ -580,11 +583,17 @@ async function configurePage(page: Page) {
   await page.setUserAgent(ANDROID_USER_AGENT);
 }
 
-async function openLoginAndFill(page: Page, config: SinopacConfig) {
+async function openLoginAndFill(
+  page: Page,
+  config: SinopacConfig,
+  reportStage?: ReportBrowserLoginStage,
+) {
+  reportStage?.("navigate");
   await page.goto(LOGIN_URL, {
     waitUntil: "domcontentloaded",
     timeout: 20_000,
   });
+  reportStage?.("form");
   const userIdSelector =
     'input[placeholder="ID"], input[placeholder*="身分證"]';
   const accountSelector =
