@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import {
     createMutation,
     createQuery,
     useQueryClient,
   } from "@tanstack/svelte-query";
-  import { Clock3, Save } from "@lucide/svelte";
+  import { Check, Clock3, LoaderCircle } from "@lucide/svelte";
   import Card from "@/shared/ui/Card.svelte";
   import Button from "@/shared/ui/Button.svelte";
   import Select from "@/shared/ui/Select.svelte";
@@ -51,13 +51,29 @@
   let intervalMinutes = $state(1440);
   let preferredTime = $state("06:00");
   let preferredWeekday = $state(1);
+  let timePickerOpen = $state(false);
+  let timeBeforePickerOpened = "06:00";
+  let savedSchedule = $state<SyncScheduleSettings>();
+  type ScheduleInput = Pick<
+    SyncScheduleSettings,
+    "intervalMinutes" | "preferredTime" | "preferredWeekday"
+  >;
+  const draft = $derived({
+    intervalMinutes,
+    preferredTime,
+    preferredWeekday,
+  });
+  const isDirty = $derived(
+    savedSchedule !== undefined && !sameSchedule(draft, savedSchedule),
+  );
   const inheritedJobs = $derived(
     jobs.filter((job) => job.scheduleMode === "inherit").length,
   );
 
   onMount(() =>
     schedule.subscribe((result) => {
-      if (!result.data) return;
+      if (!result.data || isDirty || $save.isPending) return;
+      savedSchedule = result.data;
       intervalMinutes = result.data.intervalMinutes;
       preferredTime = result.data.preferredTime;
       preferredWeekday = result.data.preferredWeekday;
@@ -65,16 +81,58 @@
   );
 
   const save = createMutation({
-    mutationFn: () =>
-      api.put<SyncScheduleSettings>("/api/sync-schedule", {
-        intervalMinutes,
-        preferredTime,
-        preferredWeekday,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.syncSchedule });
+    scope: { id: "sync-schedule" },
+    mutationFn: (input: ScheduleInput) =>
+      api.put<SyncScheduleSettings>("/api/sync-schedule", input),
+    onMutate: () =>
+      queryClient.cancelQueries({ queryKey: queryKeys.syncSchedule }),
+    onSuccess: (data) => {
+      savedSchedule = data;
+      queryClient.setQueryData(queryKeys.syncSchedule, data);
       queryClient.invalidateQueries({ queryKey: queryKeys.syncJobs });
     },
+  });
+  const saveFailed = $derived(
+    $save.isError && sameSchedule(draft, $save.variables),
+  );
+  const saveQueued = $derived(
+    !demoMode && isDirty && !timePickerOpen && !$save.isPending && !saveFailed,
+  );
+
+  function sameSchedule(left: ScheduleInput, right: ScheduleInput | undefined) {
+    return (
+      right !== undefined &&
+      left.intervalMinutes === right.intervalMinutes &&
+      left.preferredTime === right.preferredTime &&
+      left.preferredWeekday === right.preferredWeekday
+    );
+  }
+
+  function setTimePickerOpen(open: boolean) {
+    if (open) timeBeforePickerOpened = preferredTime;
+    timePickerOpen = open;
+  }
+
+  $effect(() => {
+    if (!saveQueued) return;
+    const input = draft;
+    const timer = setTimeout(() => $save.mutate(input), 500);
+    return () => clearTimeout(timer);
+  });
+
+  onDestroy(() => {
+    const input = timePickerOpen
+      ? { ...draft, preferredTime: timeBeforePickerOpened }
+      : draft;
+    if (
+      demoMode ||
+      !savedSchedule ||
+      sameSchedule(input, savedSchedule) ||
+      (($save.isError || $save.isPending) &&
+        sameSchedule(input, $save.variables))
+    )
+      return;
+    $save.mutate(input);
   });
 </script>
 
@@ -116,7 +174,10 @@
   <div class="flex flex-col gap-4 p-5 md:flex-row md:flex-wrap md:items-end">
     <label class="grid gap-1.5 text-sm font-medium md:w-44">
       同步頻率
-      <Select bind:value={intervalMinutes}>
+      <Select
+        bind:value={intervalMinutes}
+        disabled={demoMode || !$schedule.data}
+      >
         {#each intervalOptions as option (option.minutes)}
           <option value={option.minutes}>{option.label}</option>
         {/each}
@@ -125,7 +186,10 @@
     {#if intervalMinutes === 10080}
       <label class="grid gap-1.5 text-sm font-medium md:w-36">
         執行日
-        <Select bind:value={preferredWeekday}>
+        <Select
+          bind:value={preferredWeekday}
+          disabled={demoMode || !$schedule.data}
+        >
           {#each weekdayOptions as weekday, index (weekday)}
             <option value={index}>{weekday}</option>
           {/each}
@@ -135,7 +199,11 @@
     {#if intervalMinutes >= 1440}
       <label class="grid gap-1.5 text-sm font-medium md:w-44">
         開始時間
-        <TimePicker bind:value={preferredTime} />
+        <TimePicker
+          bind:value={preferredTime}
+          bind:open={() => timePickerOpen, setTimePickerOpen}
+          disabled={demoMode || !$schedule.data}
+        />
       </label>
     {:else}
       <div class="grid gap-1.5 text-sm font-medium md:w-52">
@@ -147,29 +215,40 @@
         </div>
       </div>
     {/if}
-    <p
-      class="text-sm leading-relaxed text-muted-foreground md:min-w-52 md:flex-1 md:pb-2"
+    <div
+      class="text-sm leading-relaxed text-muted-foreground md:min-w-52 md:flex-1"
     >
-      修改後只會影響「跟隨預設」的來源；自訂排程不會改變。
-    </p>
-    <Button
-      disabled={demoMode || $save.isPending}
-      onclick={() => $save.mutate()}
-    >
-      <Save class="size-4" />{$save.isPending ? "儲存中…" : "儲存預設"}
-    </Button>
+      <p>變更會自動儲存，僅影響「跟隨預設」的來源。</p>
+      <p
+        role="status"
+        aria-live="polite"
+        class="mt-1 flex min-h-5 items-center gap-1.5 text-sm font-medium"
+      >
+        {#if saveQueued || $save.isPending}
+          <LoaderCircle class="size-4 animate-spin" />儲存中…
+        {:else if $save.isSuccess && !isDirty}
+          <Check class="size-4 text-moss" /><span class="text-moss">已儲存</span
+          >
+        {:else if timePickerOpen && isDirty}
+          完成時間選擇後會自動儲存。
+        {/if}
+      </p>
+    </div>
   </div>
-  {#if $save.isSuccess}
-    <p
-      class="border-t border-border bg-moss/5 px-5 py-2 text-sm font-medium text-moss"
+  {#if saveFailed}
+    <div
+      role="alert"
+      class="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-coral/5 px-5 py-3 text-sm font-medium text-coral"
     >
-      預設同步排程已更新，跟隨此設定的連接器也已重新排程。
-    </p>
-  {:else if $save.isError}
-    <p
-      class="border-t border-border bg-coral/5 px-5 py-2 text-sm font-medium text-coral"
-    >
-      預設排程儲存失敗，請稍後再試。
-    </p>
+      <p>預設排程儲存失敗，請重試。</p>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={demoMode}
+        onclick={() => $save.mutate(draft)}
+      >
+        重試
+      </Button>
+    </div>
   {/if}
 </Card>
