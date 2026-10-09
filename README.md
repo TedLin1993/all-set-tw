@@ -52,7 +52,12 @@
 
 本專案使用的 Workers、D1、Queues、Workers AI 與 Browser Run 均提供免費額度。各項免費額度並非無限；超過服務限制時，相關功能可能暫停至額度重置。
 
-**需要：** [Cloudflare 帳號](https://dash.cloudflare.com/signup)、[GitHub 帳號](https://github.com/signup)
+### 部署前準備：註冊帳號
+
+請先註冊並登入以下兩個帳號；已有帳號可直接登入：
+
+- [Cloudflare 帳號](https://dash.cloudflare.com/sign-up)：用來部署網站、儲存金融資料與設定登入保護。
+- [GitHub 帳號](https://github.com/signup)：用來存放部署用的程式碼，並接收後續版本更新。
 
 ### 步驟一：一鍵部署
 
@@ -74,7 +79,7 @@ openssl rand -hex 32
 
 <img src="images/deploy-setup.png" alt="Cloudflare 部署頁的 CONFIG_ENCRYPTION_KEY 欄位" width="700">
 
-將 **Build command** 設為 `npm run build`、**Deploy command** 設為 `npm run deploy`，資源名稱可保留預填值。在同一頁開啟 **Protect with Cloudflare Access**，設定：
+將 **Build command** 設為 `npm run build`、**Deploy command** 設為 `npm run deploy`，資源名稱可保留預填值。關閉 **Enable Preview builds**，再開啟 **Protect with Cloudflare Access**，設定：
 
 - **Scope：All traffic**，保護正式與預覽部署
 - **Authentication policy：Cloudflare account**，限定你的 Cloudflare 帳戶成員登入
@@ -82,13 +87,15 @@ openssl rand -hex 32
 
 <img src="images/deploy-access-on-create.png" alt="部署頁開啟 Cloudflare Access，選擇 All traffic 與 Cloudflare account" width="700">
 
-確認後點擊 **Deploy**。前往 **Worker → Settings → Builds**，等該次 build 顯示成功後重新整理 Worker 頁面，再開啟網站。登入驗證設定會自動取得，後續更新也會沿用。
+確認後點擊 **Deploy**，頁面會自動跳轉至 **Builds**。登入驗證設定會自動取得，後續更新也會沿用。
 
 ### 步驟二：確認部署
 
-1. 開啟 Worker 的 `workers.dev` 網址，確認會先要求 Cloudflare Access 登入
-2. 登入後前往「設定 → 資料來源」設定連接器
+1. 等該次 build 顯示成功後，點擊右上角的 **Visit** 開啟 Worker 的 `workers.dev` 網址；若未出現 **Visit** 按鈕，請先重新整理 Worker 頁面
+2. 進入網站後，前往「設定 → 資料來源」設定連接器
 3. 點擊同步以取得最新資料
+
+<a href="images/deploy-success.png"><img src="images/deploy-success.png" alt="Cloudflare build 成功畫面與右上角的 Visit 按鈕" width="700"></a>
 
 ### 延長登入期限（選用）
 
