@@ -162,8 +162,8 @@ export class TaishinSyncStageError extends TaishinConnectionError {
 }
 
 class TaishinCaptchaUnavailableError extends TaishinConnectionError {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, cause?: unknown) {
+    super(message, undefined, undefined, cause);
     this.name = "TaishinCaptchaUnavailableError";
   }
 }
@@ -1132,9 +1132,29 @@ async function captureCaptcha(page: BrowserPage) {
     );
   }
   const image = await page.$(target.selector);
-  if (!image) throw new TaishinConnectionError("台新圖形驗證碼已失效。");
-  const bytes = await image.screenshot({ type: "jpeg" });
-  return { bytes, digitCount: target.digitCount };
+  if (!image)
+    throw new TaishinCaptchaUnavailableError("台新圖形驗證碼已失效。");
+  try {
+    const bytes = await image.screenshot({ type: "jpeg" });
+    return { bytes, digitCount: target.digitCount };
+  } catch (error) {
+    // The image can disappear between readiness checks and the screenshot.
+    // No login has been submitted, so use the existing preparation retry.
+    if (
+      error instanceof Error &&
+      /^(?:Node is either not visible or not an HTMLElement|Node is detached from document|Node has 0 (?:width|height)\.)$/.test(
+        error.message,
+      )
+    ) {
+      throw new TaishinCaptchaUnavailableError(
+        "台新圖形驗證碼尚未顯示或已更新，請稍後再試。",
+        error,
+      );
+    }
+    throw error;
+  } finally {
+    await image.dispose();
+  }
 }
 
 async function submitLogin(
