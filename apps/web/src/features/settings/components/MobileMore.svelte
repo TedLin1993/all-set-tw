@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { Clock3, Database, Settings, WalletCards } from "@lucide/svelte";
+  import {
+    Clock3,
+    Database,
+    Info,
+    Settings,
+    WalletCards,
+  } from "@lucide/svelte";
   import Card from "@/shared/ui/Card.svelte";
   import CardContent from "@/shared/ui/CardContent.svelte";
   import type { ApiClient } from "@/shared/api/client";
@@ -134,6 +140,19 @@
           ><span class="text-sm font-semibold text-steel"
             >{customRuleCount} 條自訂　›</span
           ></button
+        >
+        <button
+          type="button"
+          class="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left"
+          onclick={() => navigate("about")}
+          ><span
+            class="flex size-10 items-center justify-center rounded-xl bg-steel/10 text-steel"
+            ><Info class="size-5" /></span
+          ><span class="flex-1"
+            ><span class="block font-semibold">關於</span><span
+              class="block text-sm text-ink/45">Commit、分支與組建時間</span
+            ></span
+          ><span class="text-sm font-semibold text-steel">›</span></button
         >
       </div></Card
     >

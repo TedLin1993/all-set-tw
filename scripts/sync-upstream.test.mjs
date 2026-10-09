@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { getBuildInfo } from "./build-info.mjs";
 
 const scriptPath = fileURLToPath(
   new URL("./sync-upstream.mjs", import.meta.url),
@@ -230,5 +231,36 @@ test("先前同步後的非衝突使用者修改會保留，且不引入上游 p
       git(deployment.worktree, "show", "-s", "--format=%B", "HEAD"),
       new RegExp(`Taiwan-Fin-Hub-Upstream: ${upstreamV3}`),
     );
+  });
+});
+
+test("獨立部署的組建資訊辨識實際上游版本，並保留同步後的版本紀錄", () => {
+  withTemporaryRepository((root) => {
+    const upstream = createUpstream(root);
+    const deployment = createImportedDeployment(root, upstream);
+
+    const buildCheckout = path.join(root, "cloudflare-build");
+    run("git", [
+      "clone",
+      "--depth=1",
+      pathToFileURL(deployment.bare).href,
+      buildCheckout,
+    ]);
+    const imported = getBuildInfo(buildCheckout, upstream.bare);
+    assert.equal(imported.repository, "TedLin1993/all-set-tw");
+    assert.equal(imported.commit, upstream.firstCommit);
+    assert.equal(imported.branch, "main");
+    assert.ok(Number.isFinite(Date.parse(imported.builtAt)));
+
+    const result = runUpdater(deployment.worktree, upstream.bare);
+    assert.equal(result.status, 0, result.stderr);
+    write(deployment.worktree, "user-note.txt", "deployment note\n");
+    const deploymentCommit = commitAll(deployment.worktree, "user note");
+    git(deployment.worktree, "checkout", "-b", "private-deployment");
+
+    const synced = getBuildInfo(deployment.worktree, upstream.bare);
+    assert.equal(synced.commit, upstream.latestCommit);
+    assert.notEqual(synced.commit, deploymentCommit);
+    assert.equal(synced.branch, "main");
   });
 });

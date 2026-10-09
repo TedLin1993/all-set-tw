@@ -48,6 +48,13 @@ apps/web/src/
 
 跨目錄 import 使用 `@/` 指向 `apps/web/src`；同一小型目錄內可使用相對路徑。避免建立會隱藏 feature 邊界的大型 barrel file。
 
+## 關於與組建資訊
+
+`features/settings/components/AboutPanel.svelte` 透過 `#/about` 顯示上游版本的 Commit、分支與 UTC 組建時間，
+並提供複製診斷資訊。桌面「設定 → 關於」與手機「更多 → 關於」皆提供入口，沿用設定頁的 lazy loading。
+Vite 在組建時注入 `__BUILD_INFO__`，型別宣告位於 `src/vite-env.d.ts`；頁面不另查版本 API。
+Commit 顯示前七碼，複製內容包含來源專案與完整上游 SHA。資訊來源與本機開發時間的定義見部署文件。
+
 ## 驗證
 
 前端 `typecheck` 使用 `svelte-check --tsgo` 進行 TypeScript 7 型別檢查；

@@ -19,6 +19,7 @@
   import { notificationConfigQuery } from "@/data/notifications/queries";
   import type { ConnectorId } from "@/data/connectors/types";
   import { formatDateTime } from "@/shared/format/financial";
+  import AboutPanel from "./components/AboutPanel.svelte";
   import ClassificationRulesPanel from "./components/ClassificationRulesPanel.svelte";
   import DefaultSchedulePanel from "./components/DefaultSchedulePanel.svelte";
   import ExchangeRatesPanel from "./components/ExchangeRatesPanel.svelte";
@@ -55,6 +56,7 @@
     { view: "sync-notifications" as const, label: "同步與通知" },
     { view: "exchange-rates" as const, label: "匯率" },
     { view: "classification-rules" as const, label: "分類規則" },
+    { view: "about" as const, label: "關於" },
   ];
   const jobs = createQuery(syncJobsQuery(() => api));
   const rules = createQuery(classificationRulesQuery(() => api));
@@ -214,6 +216,11 @@
       {api}
       {openConnector}
     />
+  {:else if mobileView === "about"}
+    <div class="grid min-w-0 gap-4">
+      <h2 class="hidden text-2xl font-bold tracking-tight md:block">關於</h2>
+      <AboutPanel />
+    </div>
   {:else if mobileView === "data-sources"}
     <div class="grid min-w-0 gap-4">
       <section aria-label="資料來源頁標題" class="hidden min-w-0 md:block">

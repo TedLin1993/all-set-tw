@@ -80,4 +80,8 @@ export const mobileSettingsLabels: Record<
     label: "分類規則",
     description: "讓銀行交易依條件自動分類。",
   },
+  about: {
+    label: "關於",
+    description: "查看上游版本的 Commit、分支與本次組建時間。",
+  },
 };

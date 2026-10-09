@@ -196,6 +196,18 @@ workflow 會：
 
 更新流程會保留部署 repository 目前安裝的 workflow，因此上游若修正更新流程，仍需手動替換 workflow 檔案。
 
+## 組建版本資訊
+
+「關於」頁面顯示 `TedLin1993/all-set-tw` 的上游 Commit、追蹤分支 `main` 與本次部署的 UTC 組建時間，並可一次複製診斷資訊。
+`scripts/build-info.mjs` 在 Vite 組建時辨識採用的上游版本，再由 `apps/web/vite.config.ts` 寫入前端產物。
+
+- 官方 repository 的 checkout 使用 `HEAD` 作為上游 Commit。
+- 獨立部署優先使用更新器寫入 commit message 的 `Taiwan-Fin-Hub-Upstream` 紀錄。
+- 沒有紀錄的 fork／首次一鍵部署會在暫存 Git repository 取得官方 `main`，以共同 Git history 或原始碼快照比對版本；比對時忽略部署流程未複製的 `.github/workflows`。
+
+版本比對只讀取上游，不變更部署 repository。首次辨識需要連線 GitHub；無法辨識時 Commit 顯示「未知」。
+本機 Vite dev server 的時間代表啟動時刻，正式組建則代表該次 Vite build 的時間；重新部署既有產物不會改變時間。
+
 ## 本機開發
 
 建立私人設定檔並填入開發用 D1 Database ID 與加密金鑰：
