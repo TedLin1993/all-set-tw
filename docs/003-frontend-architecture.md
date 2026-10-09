@@ -105,5 +105,10 @@ npm run verify:web
 
 ## 同步狀態與重試
 
+預設同步排程在變更後自動儲存，連續修改會合併送出；時間選擇器關閉後才儲存完整時間。
+儲存期間保留新的修改並依序送出，離開頁面時送出尚未儲存的變更。畫面顯示儲存中／已儲存，
+失敗時保留選擇並提供重試；成功後更新共用排程快取與同步工作資料，僅影響跟隨預設的來源。
+Demo 模式與排程資料尚未載入時停用編輯。
+
 `ConnectorPanel` 依 `GET /api/sync-jobs` 的 `running` 與 `phase` 追蹤電子發票／集保 active run，不能只依 connector lock 到期判定完成。API 同時提供 run ID、最近狀態更新時間與最短重試等待秒數；一般同步的狀態時間可能包含 heartbeat，不能當成金融資料更新時間。
 `phase = stalled` 時保留 polling，顯示停滯提示與「重試同步」，補送既有 run 的 continuation；集保保留原 run 的 scope。有效 lease 下的工作仍禁止重複同步，重試排入 Queue 後須等待 lifecycle 完成才顯示成功。

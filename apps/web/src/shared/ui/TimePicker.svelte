@@ -6,17 +6,18 @@
 
   let {
     value = $bindable("06:00"),
+    open = $bindable(false),
     disabled = false,
     minuteStep = 10,
     onchange,
   }: {
     value?: string;
+    open?: boolean;
     disabled?: boolean;
     minuteStep?: number;
     onchange?: (value: string) => void;
   } = $props();
 
-  let open = $state(false);
   const hours = Array.from({ length: 24 }, (_, hour) =>
     String(hour).padStart(2, "0"),
   );
