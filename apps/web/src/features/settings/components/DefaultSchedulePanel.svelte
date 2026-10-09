@@ -52,6 +52,7 @@
   let preferredTime = $state("06:00");
   let preferredWeekday = $state(1);
   let timePickerOpen = $state(false);
+  let timeBeforePickerOpened = "06:00";
   let savedSchedule = $state<SyncScheduleSettings>();
   type ScheduleInput = Pick<
     SyncScheduleSettings,
@@ -107,6 +108,11 @@
     );
   }
 
+  function setTimePickerOpen(open: boolean) {
+    if (open) timeBeforePickerOpened = preferredTime;
+    timePickerOpen = open;
+  }
+
   $effect(() => {
     if (!saveQueued) return;
     const input = draft;
@@ -115,14 +121,18 @@
   });
 
   onDestroy(() => {
+    const input = timePickerOpen
+      ? { ...draft, preferredTime: timeBeforePickerOpened }
+      : draft;
     if (
       demoMode ||
-      !isDirty ||
-      saveFailed ||
-      ($save.isPending && sameSchedule(draft, $save.variables))
+      !savedSchedule ||
+      sameSchedule(input, savedSchedule) ||
+      (($save.isError || $save.isPending) &&
+        sameSchedule(input, $save.variables))
     )
       return;
-    $save.mutate(draft);
+    $save.mutate(input);
   });
 </script>
 
@@ -191,7 +201,7 @@
         開始時間
         <TimePicker
           bind:value={preferredTime}
-          bind:open={timePickerOpen}
+          bind:open={() => timePickerOpen, setTimePickerOpen}
           disabled={demoMode || !$schedule.data}
         />
       </label>
