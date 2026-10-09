@@ -1,0 +1,31 @@
+name: 問題回報
+description: 回報使用問題，請先從「關於」頁複製診斷資訊。
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交問題前，請先開啟「關於」頁，點選「複製診斷資訊」，再將完整內容貼到下方的「診斷資訊」欄位。
+
+        - 桌面版：設定 → 關於
+        - 手機版：更多 → 關於
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 診斷資訊
+      description: 請貼上完整診斷資訊。若版本沒有「關於」頁或無法取得，請填「無法取得」並說明原因。
+      placeholder: |
+        不用記帳 ALL SET
+        上游專案: TedLin1993/all-set-tw
+        Commit: <完整 SHA 或未知>
+        分支: main
+        組建時間: <時間> UTC
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 問題描述
+      description: 請說明遇到的問題、預期的結果，以及重現問題的操作步驟。
+    validations:
+      required: true
