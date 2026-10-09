@@ -4,6 +4,7 @@
   import Card from "@/shared/ui/Card.svelte";
   import CardContent from "@/shared/ui/CardContent.svelte";
   import Icon from "@/shared/ui/Icon.svelte";
+  import Textarea from "@/shared/ui/Textarea.svelte";
 
   const buildInfo = __BUILD_INFO__;
   const buildTime = `${buildInfo.builtAt.slice(0, 19).replace("T", " ")} UTC`;
@@ -79,10 +80,19 @@
       class={`text-sm ${copyStatus === "error" ? "mt-3 text-coral" : copyStatus === "copied" ? "mt-3 text-moss" : ""}`}
     >
       {#if copyStatus === "error"}
-        無法複製，請手動選取上方資訊。
+        無法自動複製，請選取下方診斷資訊手動複製。
       {:else if copyStatus === "copied"}
         診斷資訊已複製到剪貼簿。
       {/if}
     </p>
+    {#if copyStatus === "error"}
+      <Textarea
+        aria-label="診斷資訊"
+        value={diagnostics}
+        readonly
+        rows={7}
+        class="mt-3 font-mono"
+      />
+    {/if}
   </CardContent>
 </Card>

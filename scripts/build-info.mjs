@@ -49,26 +49,17 @@ function resolveUpstreamCommit(directory, upstreamUrl) {
       upstreamUrl,
       `refs/heads/${UPSTREAM_BRANCH}:refs/heads/upstream`,
     );
-    git(
-      temporary,
-      "fetch",
-      "--quiet",
-      "--no-tags",
-      directory,
-      "HEAD:refs/heads/source",
-    );
-    const baseline = optionalGit(temporary, "merge-base", "source", "upstream");
-    if (baseline) return baseline;
+    const head = git(directory, "rev-parse", "HEAD");
+    const upstreamCommits = git(temporary, "rev-list", "upstream").split("\n");
+    if (upstreamCommits.includes(head)) return head;
 
-    const sourceCommits = [
-      "HEAD",
-      ...git(directory, "rev-list", "--max-parents=0", "HEAD").split("\n"),
-    ];
-    const importedTrees = new Set(
-      sourceCommits.map((commit) => sourceTree(directory, commit)),
-    );
-    for (const commit of git(temporary, "rev-list", "upstream").split("\n")) {
-      if (importedTrees.has(sourceTree(temporary, commit))) return commit;
+    // 淺層 checkout 會隱藏 parent，直接讀取 commit header 辨識自行新增的 commit。
+    const header = git(directory, "cat-file", "-p", "HEAD").split("\n\n", 1)[0];
+    if (/^parent /m.test(header)) return "";
+
+    const importedTree = sourceTree(directory, "HEAD");
+    for (const commit of upstreamCommits) {
+      if (importedTree === sourceTree(temporary, commit)) return commit;
     }
     return "";
   } finally {
@@ -84,11 +75,9 @@ export function getBuildInfo(directory, upstreamUrl = UPSTREAM_URL) {
     );
   const recordedMessage = optionalGit(
     directory,
-    "log",
-    "--first-parent",
-    "-1",
+    "show",
+    "-s",
     "--format=%B",
-    "--grep=^Taiwan-Fin-Hub-Upstream:",
     "HEAD",
   );
   let commit = [

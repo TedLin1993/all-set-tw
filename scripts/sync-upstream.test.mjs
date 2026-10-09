@@ -234,15 +234,26 @@ test("先前同步後的非衝突使用者修改會保留，且不引入上游 p
   });
 });
 
-test("獨立部署的組建資訊辨識實際上游版本，並保留同步後的版本紀錄", () => {
+test("獨立部署辨識匯入與同步版本，自行新增 commit 後顯示未知", () => {
   withTemporaryRepository((root) => {
     const upstream = createUpstream(root);
+    assert.equal(
+      getBuildInfo(upstream.worktree, upstream.bare).commit,
+      upstream.latestCommit,
+    );
     const deployment = createImportedDeployment(root, upstream);
+    git(
+      deployment.worktree,
+      "push",
+      "origin",
+      `${deployment.rootCommit}:refs/heads/imported-snapshot`,
+    );
 
     const buildCheckout = path.join(root, "cloudflare-build");
     run("git", [
       "clone",
       "--depth=1",
+      "--branch=imported-snapshot",
       pathToFileURL(deployment.bare).href,
       buildCheckout,
     ]);
@@ -251,16 +262,52 @@ test("獨立部署的組建資訊辨識實際上游版本，並保留同步後�
     assert.equal(imported.commit, upstream.firstCommit);
     assert.equal(imported.branch, "main");
     assert.ok(Number.isFinite(Date.parse(imported.builtAt)));
+    assert.equal(
+      getBuildInfo(deployment.worktree, upstream.bare).commit,
+      "未知",
+    );
+    git(buildCheckout, "fetch", "--depth=1", "origin", "main");
+    git(buildCheckout, "checkout", "--detach", "FETCH_HEAD");
+    assert.equal(getBuildInfo(buildCheckout, upstream.bare).commit, "未知");
 
     const result = runUpdater(deployment.worktree, upstream.bare);
     assert.equal(result.status, 0, result.stderr);
-    write(deployment.worktree, "user-note.txt", "deployment note\n");
-    const deploymentCommit = commitAll(deployment.worktree, "user note");
-    git(deployment.worktree, "checkout", "-b", "private-deployment");
-
     const synced = getBuildInfo(deployment.worktree, upstream.bare);
     assert.equal(synced.commit, upstream.latestCommit);
-    assert.notEqual(synced.commit, deploymentCommit);
     assert.equal(synced.branch, "main");
+
+    const syncedCheckout = path.join(root, "synced-build");
+    run("git", [
+      "clone",
+      "--depth=1",
+      pathToFileURL(deployment.bare).href,
+      syncedCheckout,
+    ]);
+    assert.equal(
+      getBuildInfo(syncedCheckout, upstream.bare).commit,
+      upstream.latestCommit,
+    );
+
+    write(deployment.worktree, "user-note.txt", "deployment note\n");
+    commitAll(deployment.worktree, "user note");
+    git(deployment.worktree, "checkout", "-b", "private-deployment");
+
+    const customized = getBuildInfo(deployment.worktree, upstream.bare);
+    assert.equal(customized.commit, "未知");
+    assert.equal(customized.branch, "main");
+
+    git(deployment.worktree, "push", "origin", "private-deployment");
+    const customizedCheckout = path.join(root, "customized-build");
+    run("git", [
+      "clone",
+      "--depth=1",
+      "--branch=private-deployment",
+      pathToFileURL(deployment.bare).href,
+      customizedCheckout,
+    ]);
+    assert.equal(
+      getBuildInfo(customizedCheckout, upstream.bare).commit,
+      "未知",
+    );
   });
 });
