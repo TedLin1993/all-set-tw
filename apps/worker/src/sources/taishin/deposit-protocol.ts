@@ -9,7 +9,98 @@ import { BANK_SYNC_MONTHS } from "../sync-window";
 
 // Field meanings follow the official RWD RB0100/0101/0102 and RB0800/0802 pages.
 const moneySchema = z.union([z.string(), z.number()]);
-const currencySchema = z.string().regex(/^[A-Z]{3}$/);
+// 銀行回傳的幣別不一定是三碼大寫（可能夾空白、小寫、數字代碼或中文名稱）；請求沿用原值，
+// 儲存與比對一律用 normalizeTaishinCurrency 換成 ISO 三碼。無法換算時驗證失敗。
+const currencySchema = z
+  .string()
+  .refine((value) => normalizeTaishinCurrency(value) !== undefined, {
+    error: "unsupported currency",
+  });
+
+// 外幣清單可能含沒有幣別的空白佔位列（例如綜存尚未開立任何外幣），先放行，
+// 由 fetchTaishinDeposits 在餘額為零時略過、有餘額時失敗。
+const fxDetailCurrencySchema = z
+  .string()
+  .refine(
+    (value) =>
+      value.trim() === "" || normalizeTaishinCurrency(value) !== undefined,
+    { error: "unsupported currency" },
+  );
+
+const NUMERIC_CURRENCIES: Record<string, string> = {
+  "000": "TWD",
+  "901": "TWD",
+  "840": "USD",
+  "392": "JPY",
+  "978": "EUR",
+  "156": "CNY",
+  "344": "HKD",
+  "036": "AUD",
+  "826": "GBP",
+  "124": "CAD",
+  "756": "CHF",
+  "702": "SGD",
+  "554": "NZD",
+  "710": "ZAR",
+  "752": "SEK",
+  "764": "THB",
+};
+const NAMED_CURRENCIES: Array<[RegExp, string]> = [
+  [/新臺幣|新台幣|臺幣|台幣/, "TWD"],
+  [/美元|美金/, "USD"],
+  [/日圓|日元|日幣/, "JPY"],
+  [/歐元/, "EUR"],
+  [/人民幣/, "CNY"],
+  [/港幣|港元/, "HKD"],
+  [/澳幣|澳元/, "AUD"],
+  [/英鎊/, "GBP"],
+  [/加幣|加元/, "CAD"],
+  [/瑞士法郎|瑞郎/, "CHF"],
+  [/新加坡幣|新幣/, "SGD"],
+  [/紐幣|紐元/, "NZD"],
+  [/南非幣/, "ZAR"],
+  [/瑞典幣|瑞典克朗/, "SEK"],
+  [/泰銖|泰幣/, "THB"],
+];
+
+export function normalizeTaishinCurrency(value: string): string | undefined {
+  // 收集所有可辨識的幣別線索（三碼、ISO 數字代碼、中文名稱），全部一致才採用；
+  // 同時指向不同幣別（例如「美元/日圓」）或含無法辨識的數字代碼時視為無法判斷。
+  const text = value.trim().toUpperCase();
+  const found = new Set<string>();
+  for (const match of text.matchAll(/(?<![A-Z])([A-Z]{3})(?![A-Z])/g))
+    found.add(match[1] === "NTD" ? "TWD" : match[1]!);
+  for (const match of text.matchAll(/(?<!\d)(\d{1,3})(?!\d)/g)) {
+    const code = NUMERIC_CURRENCIES[match[1]!.padStart(3, "0")];
+    if (!code) return undefined;
+    found.add(code);
+  }
+  for (const [pattern, code] of NAMED_CURRENCIES)
+    if (pattern.test(value)) found.add(code);
+  return found.size === 1 ? [...found][0] : undefined;
+}
+
+/** 不含實際值的字元形狀，例如 "AAA_"（大寫、小寫 a、數字 9、空白 _、中文 C、其他 ?）。 */
+function currencyShape(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const shape = [...value]
+    .slice(0, 12)
+    .map((char) =>
+      /[A-Z]/.test(char)
+        ? "A"
+        : /[a-z]/.test(char)
+          ? "a"
+          : /\d/.test(char)
+            ? "9"
+            : /\s/.test(char)
+              ? "_"
+              : /\p{Script=Han}/u.test(char)
+                ? "C"
+                : "?",
+    )
+    .join("");
+  return `${shape}${value.length > 12 ? "…" : ""}（長度 ${value.length}）`;
+}
 const twdAccountSchema = z.object({
   accountNo: z.string().min(1),
   accountTypeName: z.string(),
@@ -18,7 +109,7 @@ const twdAccountSchema = z.object({
 const fxDetailSchema = z.object({
   ACCOUNT_NO: z.string().optional(),
   ACCOUNT_ALIAS: z.string().nullish(),
-  CURRENCY_CODE: currencySchema,
+  CURRENCY_CODE: fxDetailCurrencySchema,
   BALANCE: moneySchema,
 });
 const fxAccountSchema = z.object({
@@ -85,6 +176,8 @@ type FxAccountDiagnosticIssue = {
     | "array|object"
     | "unknown";
   received: DiagnosticValueType;
+  /** 幣別欄位格式不符時的字元形狀（不含實際值）。 */
+  shape?: string;
 };
 type FxAccountDiagnostics = {
   issues: FxAccountDiagnosticIssue[];
@@ -119,7 +212,7 @@ function checked<T>(
       ? `台新存款${label}格式驗證失敗。`
       : `台新存款${label}格式已改變。`;
     const detail = first
-      ? `（${first.path}：${first.code}，預期 ${first.expected}，收到 ${first.received}。）`
+      ? `（${first.path}：${first.code}，預期 ${first.expected}，收到 ${first.received}${first.shape ? `，形狀 ${first.shape}` : ""}。）`
       : "";
     throw new TaishinDepositProtocolError(message + detail, false, diagnostics);
   }
@@ -238,6 +331,14 @@ function fxAccountDiagnostics(
           diagnostic.code = issue.code;
           diagnostic.expected = "string";
           break;
+        case "custom":
+          if (diagnostic.path.endsWith(".CURRENCY_CODE")) {
+            diagnostic.code = "invalid_format";
+            diagnostic.expected = "string";
+            const shape = currencyShape(receivedValue);
+            if (shape) diagnostic.shape = shape;
+          }
+          break;
         case "invalid_union":
           diagnostic.code = issue.code;
           diagnostic.expected =
@@ -308,6 +409,14 @@ function amount(value: string | number) {
   if (!/^[+-]?\d+(?:\.\d+)?$/.test(text) || !Number.isFinite(Number(text)))
     throw new TaishinDepositProtocolError("台新存款金額格式已改變。");
   return Number(text);
+}
+
+function isZeroOrBlankAmount(value: string | number) {
+  if (typeof value === "number") return value === 0;
+  const text = plainText(value).replaceAll(",", "").trim();
+  return (
+    text === "" || (/^[+-]?\d+(?:\.\d+)?$/.test(text) && Number(text) === 0)
+  );
 }
 
 function accountIdentity(value: string) {
@@ -392,7 +501,7 @@ function normalizeTransactions(
   const occurrences = new Map<string, number>();
   return rows.map((row) => {
     const twd = "sysdate" in row;
-    if (!twd && row.CCY_CODE !== currency)
+    if (!twd && normalizeTaishinCurrency(row.CCY_CODE) !== currency)
       throw new TaishinDepositProtocolError("台新外幣交易幣別與查詢不符。");
     const authorizedAt = dateTime(
       twd ? row.sysdate : row.TRANSACTION_DATE_TIME_DSC,
@@ -602,7 +711,28 @@ export async function fetchTaishinDeposits(
     }
   }
 
-  const fxGroups = Object.values(fxAccounts);
+  let blankCurrencyDetails = 0;
+  const fxGroups = Object.values(fxAccounts).flatMap((group) => {
+    const details = group.FCS_ACCOUNT_DETAIL.filter((detail) => {
+      if (detail.CURRENCY_CODE.trim() !== "") return true;
+      if (!isZeroOrBlankAmount(detail.BALANCE))
+        throw new TaishinDepositProtocolError(
+          "台新外幣帳戶有餘額但未提供幣別，無法判斷幣別。",
+        );
+      blankCurrencyDetails += 1;
+      return false;
+    });
+    // 整個帳戶只有空白佔位列時，銀行的交易查詢清單也不會有它，整組略過。
+    if (group.FCS_ACCOUNT_DETAIL.length > 0 && details.length === 0) return [];
+    return [{ ...group, FCS_ACCOUNT_DETAIL: details }];
+  });
+  if (blankCurrencyDetails > 0)
+    console.log(
+      JSON.stringify({
+        event: "taishin_fx_blank_currency_skipped",
+        count: blankCurrencyDetails,
+      }),
+    );
   if (fxGroups.length > 0) {
     // RB0802's mounted hook initializes through RB0812 even for in-year queries.
     const options = checked(
@@ -656,14 +786,16 @@ export async function fetchTaishinDeposits(
           balances.length !== 1 ||
           accountIdentity(balances[0]!.ACCT_NO) !==
             accountIdentity(group.ACCOUNT_NO) ||
-          balances[0]!.CURRENCY_CODE !== detail.CURRENCY_CODE
+          normalizeTaishinCurrency(balances[0]!.CURRENCY_CODE) !==
+            normalizeTaishinCurrency(detail.CURRENCY_CODE)
         )
           throw new TaishinDepositProtocolError(
             "台新外幣即時餘額與查詢帳戶或幣別不符。",
           );
+        const currency = normalizeTaishinCurrency(detail.CURRENCY_CODE)!;
         addAccount(
           group.ACCOUNT_NO,
-          detail.CURRENCY_CODE,
+          currency,
           group.ACCOUNT_NAME ?? "",
           amount(balances[0]!.BALANCE),
         );
@@ -684,7 +816,7 @@ export async function fetchTaishinDeposits(
           parseTaishinFxDepositTransactions(
             payload,
             group.ACCOUNT_NO,
-            detail.CURRENCY_CODE,
+            currency,
           ),
         );
       }

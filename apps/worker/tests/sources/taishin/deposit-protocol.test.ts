@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   fetchTaishinDeposits,
+  normalizeTaishinCurrency,
   parseTaishinTwdDepositTransactions,
   parseTaishinFxDepositTransactions,
   TaishinDepositProtocolError,
@@ -274,7 +275,7 @@ describe("台新臺外幣活存", () => {
         "null",
       ],
       [
-        detailAccounts({ CURRENCY_CODE: "" }),
+        detailAccounts({ CURRENCY_CODE: "X1" }),
         "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL[*].CURRENCY_CODE",
         "invalid_format",
         "string",
@@ -290,11 +291,143 @@ describe("台新臺外幣活存", () => {
     ]) {
       const error = await fxAccountError(accounts);
       expect(error.diagnostics).toEqual({
-        issues: [{ path, code, expected, received }],
+        issues: [expect.objectContaining({ path, code, expected, received })],
         truncated: false,
       });
       expect(error.incomplete).toBe(false);
     }
+  });
+
+  it("幣別容許空白、小寫、數字代碼與中文名稱，換成 ISO 三碼", () => {
+    expect(normalizeTaishinCurrency("USD")).toBe("USD");
+    expect(normalizeTaishinCurrency(" usd ")).toBe("USD");
+    expect(normalizeTaishinCurrency("840")).toBe("USD");
+    expect(normalizeTaishinCurrency("36")).toBe("AUD");
+    expect(normalizeTaishinCurrency("美元")).toBe("USD");
+    expect(normalizeTaishinCurrency("USD 美元")).toBe("USD");
+    expect(normalizeTaishinCurrency("日圓")).toBe("JPY");
+    expect(normalizeTaishinCurrency("NTD")).toBe("TWD");
+    expect(normalizeTaishinCurrency("")).toBeUndefined();
+    expect(normalizeTaishinCurrency("X1")).toBeUndefined();
+    expect(normalizeTaishinCurrency("USD/JPY")).toBeUndefined();
+    expect(normalizeTaishinCurrency("840 美元")).toBe("USD");
+    expect(normalizeTaishinCurrency("美元/日圓")).toBeUndefined();
+    expect(normalizeTaishinCurrency("840 日圓")).toBeUndefined();
+    expect(normalizeTaishinCurrency("999")).toBeUndefined();
+  });
+
+  it("外幣清單的幣別為小寫加空白或中文時，請求沿用原值，帳戶以 ISO 三碼保存", async () => {
+    const overview = structuredClone(fxOverview);
+    const details = overview.data.FCS_ACCOUNT[0]!.FCS_ACCOUNT_DETAIL;
+    const requested: unknown[] = [];
+    const rawCodes = details.map((detail, index) => {
+      const raw =
+        index === 0 ? ` ${detail.CURRENCY_CODE.toLowerCase()} ` : "日圓";
+      detail.CURRENCY_CODE = raw;
+      return raw;
+    });
+    const data = await fetchTaishinDeposits((path, body) => {
+      if (path.endsWith("/getRB08000100QueryRealtimeBalance"))
+        requested.push((body as { requestCcyCode: string }).requestCcyCode);
+      return path.endsWith("/getRB08000100Data")
+        ? Promise.resolve(structuredClone(overview))
+        : depositRequest(path, body);
+    }, bankNow);
+    expect(requested).toEqual(rawCodes);
+    expect(data.bankAccounts.map((row) => row.currency)).toEqual([
+      "TWD",
+      "USD",
+      "JPY",
+    ]);
+  });
+
+  it("略過幣別空白且餘額為零的佔位列；整個帳戶只有佔位列時不查交易", async () => {
+    const overview = structuredClone(fxOverview);
+    const group = overview.data.FCS_ACCOUNT[0]!;
+    group.FCS_ACCOUNT_DETAIL.push({
+      ...group.FCS_ACCOUNT_DETAIL[0]!,
+      CURRENCY_CODE: "   ",
+      BALANCE: "0.00",
+    });
+    overview.data.FCS_ACCOUNT.push({
+      ...group,
+      ACCOUNT_NO: "20000000000002",
+      FCS_ACCOUNT_DETAIL: [
+        {
+          ...group.FCS_ACCOUNT_DETAIL[0]!,
+          ACCOUNT_NO: "20000000000002",
+          CURRENCY_CODE: "",
+          BALANCE: "",
+        },
+      ],
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const data = await fetchTaishinDeposits(
+      (path, body) =>
+        path.endsWith("/getRB08000100Data")
+          ? Promise.resolve(structuredClone(overview))
+          : depositRequest(path, body),
+      bankNow,
+    );
+    expect(data.bankAccounts.map((row) => row.currency)).toEqual([
+      "TWD",
+      "USD",
+      "JPY",
+    ]);
+    expect(log).toHaveBeenCalledWith(
+      JSON.stringify({ event: "taishin_fx_blank_currency_skipped", count: 2 }),
+    );
+    log.mockRestore();
+  });
+
+  it("幣別空白但有餘額時失敗，不猜幣別", async () => {
+    const group = fxOverview.data.FCS_ACCOUNT[0]!;
+    const result = await fetchTaishinDeposits(
+      (path, body) =>
+        path.endsWith("/getRB08000100Data")
+          ? Promise.resolve({
+              error: null,
+              data: {
+                FCS_ACCOUNT: [
+                  {
+                    ...group,
+                    FCS_ACCOUNT_DETAIL: [
+                      {
+                        ...group.FCS_ACCOUNT_DETAIL[0],
+                        CURRENCY_CODE: "   ",
+                        BALANCE: "12.5",
+                      },
+                    ],
+                  },
+                ],
+              },
+            })
+          : depositRequest(path, body),
+      bankNow,
+    ).catch((error: unknown) => error);
+    expect(result).toBeInstanceOf(TaishinDepositProtocolError);
+    expect((result as Error).message).toContain("有餘額但未提供幣別");
+  });
+
+  it("無法辨識的幣別回報不含實際值的字元形狀", async () => {
+    const group = fxOverview.data.FCS_ACCOUNT[0]!;
+    const error = await fxAccountError([
+      {
+        ...group,
+        FCS_ACCOUNT_DETAIL: [
+          { ...group.FCS_ACCOUNT_DETAIL[0], CURRENCY_CODE: "Q1 x" },
+        ],
+      },
+    ]);
+    expect(error.diagnostics?.issues[0]).toEqual({
+      path: "FCS_ACCOUNT[*].FCS_ACCOUNT_DETAIL[*].CURRENCY_CODE",
+      code: "invalid_format",
+      expected: "string",
+      received: "string",
+      shape: "A9_a（長度 4）",
+    });
+    expect(error.message).toContain("形狀 A9_a（長度 4）");
+    expect(error.message).not.toContain("Q1 x");
   });
 
   it("去識別後合併相同診斷，最多保留五項並標示截斷", async () => {
