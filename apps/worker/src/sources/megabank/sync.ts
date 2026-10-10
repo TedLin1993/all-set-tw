@@ -96,7 +96,7 @@ export async function prepareMegabankCaptchaSession(env: Env) {
         await encryptJson(
           {
             ...stored,
-            // 首次取得驗證碼時固定虛擬裝置，之後登入都沿用，簡訊驗證才可能只需一次。
+            // 首次取得驗證碼時固定虛擬裝置，之後登入都沿用，但不保證免簡訊。
             ...prepared.device,
             pendingSession: prepared.pendingSession,
             pendingSessionExpiresAt: prepared.pendingSessionExpiresAt,
