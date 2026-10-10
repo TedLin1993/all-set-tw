@@ -113,6 +113,7 @@
   let interruptedSyncEnableSchedule = false;
   let interruptedSyncTimer: ReturnType<typeof setTimeout> | undefined;
   let syncStartLastRunAt: string | null = null;
+  let syncStartJobKnown = false;
   let destroyed = false;
   const job = $derived(
     ($jobs.data ?? []).find(
@@ -287,6 +288,8 @@
           ? `/api/connectors/${connectorId}/sync/${target}`
           : `/api/connectors/${connectorId}/sync`;
       pendingSyncTarget = target;
+      // 送出前的 lastRunAt 是請求中斷時分辨背景結果的基準；狀態尚未載入時沒有基準。
+      syncStartJobKnown = Boolean(job);
       syncStartLastRunAt = job?.lastRunAt ?? null;
       const runSync = () =>
         connectorId === "einvoice" || connectorId === "tdcc"
@@ -816,6 +819,12 @@
   }
   function startInterruptedSyncPolling(enableSchedule: boolean) {
     error = "";
+    if (!syncStartJobKnown) {
+      // 沒有送出前的基準，無法分辨背景結果是否屬於這次同步，不猜測。
+      interruptedSync = "timeout";
+      qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
+      return;
+    }
     interruptedSync = "polling";
     interruptedSyncEnableSchedule = enableSchedule;
     interruptedSyncPreviousLastRunAt = syncStartLastRunAt;
