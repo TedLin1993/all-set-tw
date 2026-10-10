@@ -357,6 +357,174 @@ export function parseMegabankData(
   };
 }
 
+/** 貸款解析結果；無法辨識時只略過貸款並回報原因，不影響存款與信用卡同步。 */
+export type MegabankLoanData = {
+  bankAccounts: Account[];
+  bankBalanceSnapshots: Snapshot[];
+  issue?:
+    | "loan_list_missing"
+    | "loan_number_missing"
+    | "loan_balance_missing"
+    | "loan_terms_missing";
+};
+
+const LOAN_NUMBER_KEYS = ["loanNo", "loanAccNo", "loanAcctNo", "acctNo"];
+const LOAN_BALANCE_KEYS = ["loanBal", "loanBalance"];
+
+/**
+ * 兆豐貸款：貸款清單與條件取「我的貸款」`/fln/fln01001/home`，剩餘本金優先用同一筆的
+ * `loanBal`，沒有時以貸款帳號對應存款總覽 `/fco/fco10001/home` 的 `loanInfoList`。
+ * 貸款種類含住宅／購屋／房屋／房貸即視為自住房貸（loanCategory = "housing"），
+ * 其他貸款為 "other"；sourceId 一律是 `loan:megabank:<hash>`。帳號只用於對應與雜湊，raw 只留末四碼。
+ */
+export function parseMegabankLoans(
+  deposits: unknown,
+  loanList: unknown,
+  now = new Date(),
+): MegabankLoanData {
+  const empty = { bankAccounts: [], bankBalanceSnapshots: [] };
+  const loanRows = findLoanRows(dataAt(loanList));
+  if (!loanRows) return { ...empty, issue: "loan_list_missing" };
+  const overviewBalances = new Map<string, number>();
+  for (const row of arrayAt(dataAt(deposits), "loanInfoList")) {
+    if (!isRecord(row)) continue;
+    const loanNo = firstString(row, LOAN_NUMBER_KEYS);
+    const balance = firstNumber(row, LOAN_BALANCE_KEYS);
+    if (loanNo && balance !== undefined) overviewBalances.set(loanNo, balance);
+  }
+  const asOfAt = now.toISOString();
+  const bankAccounts: Account[] = [];
+  const bankBalanceSnapshots: Snapshot[] = [];
+  for (const row of loanRows) {
+    const loanNo = firstString(row, LOAN_NUMBER_KEYS);
+    if (!loanNo) return { ...empty, issue: "loan_number_missing" };
+    const balance =
+      firstNumber(row, LOAN_BALANCE_KEYS) ?? overviewBalances.get(loanNo);
+    if (balance === undefined) {
+      return { ...empty, issue: "loan_balance_missing" };
+    }
+    const loanType =
+      firstString(row, ["loanName", "loanTypeName", "loanType"]) || "兆豐貸款";
+    const loanTypeText = ["loanName", "loanTypeName", "loanType"]
+      .map((key) => stringAt(row, key))
+      .join(" ");
+    const initialAmount = numberAt(row.loanAmt);
+    const annualRatePct = numberAt(stringAt(row, "intRate").replace(/%$/, ""));
+    const drawdownDate = loanDateAt(row.loanStartDate);
+    const endDate = loanDateAt(row.loanEndDate);
+    if (initialAmount === undefined || !drawdownDate) {
+      return { ...empty, issue: "loan_terms_missing" };
+    }
+    const totalPeriods = endDate ? monthsBetween(drawdownDate, endDate) : 0;
+    const currentPeriod = digitsAt(row.payPeriod);
+    const housing = /住宅|購屋|房屋|房貸/.test(loanTypeText);
+    const sourceId = `loan:megabank:${hash(loanNo)}`;
+    const currency = currencyAt(row.loanCurr) ?? "TWD";
+    const remaining = -Math.abs(balance);
+    const remainingPeriods =
+      totalPeriods > 0 && currentPeriod !== undefined
+        ? Math.max(0, totalPeriods - currentPeriod + 1)
+        : undefined;
+    const paymentAmount = numberAt(row.payAmt);
+    bankAccounts.push({
+      sourceId,
+      institutionName: "兆豐銀行",
+      accountName: `${loanType} 末四碼 ${last4(loanNo)}`,
+      accountType: "loan",
+      loanCategory: housing ? "housing" : "other",
+      ...(annualRatePct !== undefined
+        ? { loanInterestRate: annualRatePct }
+        : {}),
+      currency,
+      raw: {
+        last4: last4(loanNo),
+        initialAmount,
+        totalPeriods: totalPeriods > 0 ? totalPeriods : undefined,
+        remainingPeriods,
+        annualRatePct,
+        paymentDay: digitsAt(row.deductionDate),
+        nextPaymentDate: loanDateAt(row.payDate),
+        nextPaymentAmount: numberAt(row.payAmt),
+        drawdownDate,
+      },
+    });
+    bankBalanceSnapshots.push({
+      accountId: sourceId,
+      sourceId: `snapshot:${sourceId}:${asOfAt.slice(0, 10)}`,
+      balance: remaining,
+      currency,
+      asOfAt,
+      ...(paymentAmount !== undefined
+        ? { loanPaymentAmount: paymentAmount }
+        : {}),
+      ...(totalPeriods > 0 && remainingPeriods !== undefined
+        ? {
+            loanInstallmentsPaid: totalPeriods - remainingPeriods,
+            loanInstallmentsTotal: totalPeriods,
+          }
+        : {}),
+      raw: { balance: remaining },
+    });
+  }
+  return { bankAccounts, bankBalanceSnapshots };
+}
+
+/** 回應內第一個元素帶有貸款帳號欄位的陣列（含一層巢狀）；找不到回傳 undefined。 */
+function findLoanRows(data: JsonRecord): JsonRecord[] | undefined {
+  const candidates = [
+    ...Object.values(data),
+    ...Object.values(data).flatMap((value) =>
+      isRecord(value) ? Object.values(value) : [],
+    ),
+  ];
+  for (const value of candidates) {
+    if (
+      Array.isArray(value) &&
+      value.length > 0 &&
+      value.every(isRecord) &&
+      value.every((row) => firstString(row, LOAN_NUMBER_KEYS))
+    ) {
+      return value;
+    }
+  }
+  return undefined;
+}
+function firstString(row: JsonRecord, keys: string[]): string {
+  for (const key of keys) {
+    const value = stringAt(row, key);
+    if (value) return value;
+  }
+  return "";
+}
+function firstNumber(row: JsonRecord, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = numberAt(row[key]);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+function digitsAt(value: unknown): number | undefined {
+  const match = /\d+/.exec(
+    typeof value === "number" ? String(value) : String(value ?? ""),
+  );
+  return match ? Number(match[0]) : undefined;
+}
+/** 西元 yyyy/mm/dd、yyyymmdd 或民國 yyy/mm/dd。 */
+function loanDateAt(value: unknown): string | undefined {
+  const western = dateAt(value);
+  if (western) return western;
+  if (typeof value !== "string") return undefined;
+  const roc = /^(\d{3})[-\/]?(\d{2})[-\/]?(\d{2})$/.exec(value.trim());
+  return roc
+    ? dateAt(`${Number(roc[1]) + 1911}-${roc[2]}-${roc[3]}`)
+    : undefined;
+}
+function monthsBetween(start: string, end: string): number {
+  const [startYear, startMonth] = start.split("-").map(Number);
+  const [endYear, endMonth] = end.split("-").map(Number);
+  return (endYear! - startYear!) * 12 + (endMonth! - startMonth!);
+}
+
 function dataAt(value: unknown): JsonRecord {
   return isRecord(value) && isRecord(value.rsData) ? value.rsData : {};
 }

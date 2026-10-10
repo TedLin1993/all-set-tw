@@ -3,6 +3,7 @@ import type { SyncResult } from "../types";
 import forge from "node-forge";
 import {
   parseMegabankData,
+  parseMegabankLoans,
   type MegabankConfig,
   type MegabankPayloads,
 } from "./protocol";
@@ -435,11 +436,53 @@ async function fetchMegabankData(
   ) {
     throw new MegabankProtocolError("兆豐信用卡資料無法辨識，未更新資料。");
   }
+  const loans = await fetchMegabankLoans(session, deposits);
   return {
     records: [],
     ...parsed,
+    bankAccounts: [...parsed.bankAccounts, ...loans.bankAccounts],
+    bankBalanceSnapshots: [
+      ...parsed.bankBalanceSnapshots,
+      ...loans.bankBalanceSnapshots,
+    ],
     cursor: JSON.stringify({ syncedAt: new Date().toISOString() }),
   };
+}
+
+/**
+ * 貸款是附加資料：存款總覽明確沒有貸款時不查；「我的貸款」查詢或解析失敗只略過貸款，
+ * 不讓存款與信用卡同步失敗（連線錯誤除外）。
+ */
+async function fetchMegabankLoans(
+  session: MegabankSession,
+  deposits: JsonRecord,
+) {
+  const loanInfo = dataAt(deposits).loanInfoList;
+  if (Array.isArray(loanInfo) && loanInfo.length === 0) {
+    return { bankAccounts: [], bankBalanceSnapshots: [] };
+  }
+  let loanList: JsonRecord | undefined;
+  try {
+    loanList = await session.resource(
+      "megapmb",
+      "/fln/fln01001/home",
+      {},
+      "fln01001",
+      "home",
+    );
+  } catch (error) {
+    if (error instanceof MegabankConnectionError) throw error;
+    logLoansSkipped("loan_query_failed");
+    return { bankAccounts: [], bankBalanceSnapshots: [] };
+  }
+  const loans = parseMegabankLoans(deposits, loanList);
+  if (loans.issue) logLoansSkipped(loans.issue);
+  return loans;
+}
+
+/** 只記事件名稱與原因，不含帳號、金額或回應內容。 */
+function logLoansSkipped(reason: string) {
+  console.warn(JSON.stringify({ event: "megabank_loans_skipped", reason }));
 }
 
 class MegabankSession {

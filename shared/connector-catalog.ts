@@ -323,7 +323,7 @@ export const connectorCatalog = {
   rakuten: {
     id: "rakuten",
     title: "樂天國際銀行",
-    description: "臺幣活存帳戶、每日餘額與交易明細",
+    description: "臺幣活存帳戶、每日餘額、交易明細與貸款餘額／條件",
     connectionMode: "browser_captcha_session",
     scopes: ["all"],
     capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
@@ -360,7 +360,7 @@ export const connectorCatalog = {
   megabank: {
     id: "megabank",
     title: "兆豐銀行",
-    description: "存款帳戶、餘額與交易明細；信用卡帳單與消費",
+    description: "存款帳戶、餘額與交易明細；信用卡帳單與消費；貸款餘額與條件",
     connectionMode: "api_captcha_session",
     scopes: ["all"],
     capabilities: [

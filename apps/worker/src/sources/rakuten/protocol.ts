@@ -34,17 +34,37 @@ export function parseRakutenConfig(config: unknown): RakutenConfig {
   return rakutenConfigSchema.parse(config);
 }
 
-/** 解析器輸入：首頁 API JSON 優先，取不到時改用頁面文字。 */
+/** 解析器輸入：存款、貸款各自可用 API JSON 或頁面文字，JSON 優先。 */
 export type RakutenPayloads = {
   /** 首頁 API（CHMQU0001）回應，含 depositInfo。 */
   dashboardPayload?: unknown;
+  /** 貸款 API 回應，含 loanProjects／loanList。 */
+  loanPayload?: unknown;
   /** 「臺幣存款」頁面文字，存款 JSON 取不到時的備援。 */
   depositPageText?: string;
+  /** 貸款頁（我的貸款）的頁面文字，貸款 JSON 取不到時的備援。 */
+  loanPageText?: string;
   /**
    * 臺幣活存明細 API（CTWQU0001/010 當月、CTWQU0001/011 指定月份）的回應，
    * 每個元素是一個月份的 rsData；沒有就不產生交易。
    */
   depositTxnPayloads?: unknown[];
+};
+
+export type RakutenLoan = {
+  title: string;
+  remainingAmount: number;
+  initialAmount?: number;
+  remainingPeriods?: number;
+  totalPeriods?: number;
+  annualRatePct?: number;
+  paymentDay?: number;
+  nextPaymentDate?: string;
+  nextPaymentAmount?: number;
+  /** 撥款日（起息日），YYYY-MM-DD；估算歷史餘額回溯用。 */
+  drawdownDate?: string;
+  /** API 的貸款編號（頁面文字沒有）。 */
+  loanNo?: string;
 };
 
 export type RakutenData = {
@@ -72,7 +92,10 @@ type ParsedAccount = {
   depositAccountNo?: string;
 };
 
-/** 存款優先使用 JSON，JSON 沒有解析出資料才改用頁面文字。 */
+/**
+ * 存款與貸款各自獨立解析：各自優先使用 JSON，JSON 沒有解析出資料才改用
+ * 頁面文字，最後合併。任一方的 JSON 成功都不會讓另一方的文字被忽略。
+ */
 export function parseRakutenData(
   payloads: RakutenPayloads,
   now = new Date(),
@@ -86,7 +109,18 @@ export function parseRakutenData(
     depositsFromJson.length > 0
       ? depositsFromJson
       : depositAccountsFromText(payloads.depositPageText, asOfAt);
+  const loansFromJson = loansFromPayload(payloads.loanPayload);
+  const loansFromText = payloads.loanPageText
+    ? parseLoanText(payloads.loanPageText)
+    : [];
+  const loans = loanAccounts(
+    loansFromJson.length > 0
+      ? withTermsFromText(loansFromJson, loansFromText)
+      : loansFromText,
+    asOfAt,
+  );
 
+  const parsed = [...deposits, ...loans];
   const { transactions, stats } = parseRakutenDepositTransactions(
     payloads.depositTxnPayloads ?? [],
     deposits.flatMap((item) =>
@@ -101,8 +135,8 @@ export function parseRakutenData(
     ),
   );
   return {
-    bankAccounts: deposits.map((item) => item.account),
-    bankBalanceSnapshots: deposits.map((item) => item.snapshot),
+    bankAccounts: parsed.map((item) => item.account),
+    bankBalanceSnapshots: parsed.map((item) => item.snapshot),
     bankTransactions: transactions,
     transactionStats: stats,
   };
@@ -173,6 +207,211 @@ function depositAccountsFromText(
       },
     },
   ];
+}
+
+function loansFromPayload(payload: unknown): RakutenLoan[] {
+  if (!isRecord(payload)) return [];
+  const projects = Array.isArray(payload.loanProjects)
+    ? payload.loanProjects
+    : Array.isArray(payload.loanList)
+      ? payload.loanList
+      : [];
+  return projects
+    .filter(isRecord)
+    .map(loanFromProject)
+    .filter((loan): loan is RakutenLoan => loan !== undefined);
+}
+
+const LOAN_TERM_KEYS = [
+  "initialAmount",
+  "remainingPeriods",
+  "totalPeriods",
+  "annualRatePct",
+  "paymentDay",
+  "nextPaymentDate",
+  "nextPaymentAmount",
+  "drawdownDate",
+] as const;
+
+/**
+ * 首頁送出的精簡版貸款 API 每筆只有名稱與剩餘金額；貸款頁的完整版才有利率、
+ * 期數、下次扣款等條件。JSON 缺少條件時，依名稱對到唯一一筆畫面文字的貸款
+ * 補上（剩餘金額仍以 JSON 為準）；對不到或名稱重複就不補。
+ */
+function withTermsFromText(
+  loans: RakutenLoan[],
+  textLoans: RakutenLoan[],
+): RakutenLoan[] {
+  return loans.map((loan) => {
+    const matches = textLoans.filter((text) => text.title === loan.title);
+    if (matches.length !== 1) return loan;
+    const text = matches[0]!;
+    const merged: RakutenLoan = { ...loan };
+    for (const key of LOAN_TERM_KEYS) {
+      if (merged[key] === undefined && text[key] !== undefined) {
+        (merged as Record<string, unknown>)[key] = text[key];
+      }
+    }
+    return merged;
+  });
+}
+
+// 樂天貸款頁面（clnqu0001 模組）使用的欄位名稱排在前面，其餘為備援候選；
+// 找不到剩餘金額的項目直接略過（不記成 0），讓流程改走頁面文字。
+const LOAN_TITLE_KEYS = ["marketingName", "loanName", "productName"];
+const LOAN_REMAINING_KEYS = ["remainLoanAmount", "loanBal", "remainAmt"];
+const LOAN_INITIAL_KEYS = [
+  "initLoanAmount",
+  "loanAmount",
+  "contractAmt",
+  "origLoanAmt",
+];
+const LOAN_REMAINING_PERIOD_KEYS = ["remainPeriod", "remainTerm"];
+const LOAN_TOTAL_PERIOD_KEYS = [
+  "initPeriod",
+  "totalPeriod",
+  "totalTerm",
+  "loanTerm",
+];
+const LOAN_RATE_KEYS = ["currentRate", "loanRate", "interestRate", "rate"];
+// 貸款頁「每月繳款日」顯示的是 monthlyRepayDay（實際自動扣款日）；monthlyPayDay 在正式
+// 資料裡是另一個日期，不能排在前面。
+const LOAN_PAYMENT_DAY_KEYS = [
+  "monthlyRepayDay",
+  "monthlyPayDay",
+  "payDay",
+  "paymentDay",
+  "deductDay",
+];
+const LOAN_NEXT_DATE_KEYS = [
+  "nextRepaymentDate",
+  "nextPayDate",
+  "nextPaymentDate",
+];
+const LOAN_NEXT_AMOUNT_KEYS = [
+  "nextRepaymentAmount",
+  "currentPeriodAmount",
+  "nextPayAmt",
+  "nextPaymentAmount",
+];
+const LOAN_NUMBER_KEYS = ["loanAcctNo", "loanNo", "acctNo", "contractNo"];
+/** 貸款完整版 API（CLNQU0001/010）的撥款日／起息日欄位候選，格式 "YYYY/MM/DD"。 */
+const LOAN_DRAWDOWN_DATE_KEYS = ["lastDrawdownDate", "effectiveDate"];
+
+function firstNumber(
+  record: JsonRecord,
+  keys: readonly string[],
+): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (value === undefined || value === null || value === "") continue;
+    const parsed =
+      typeof value === "string" ? parseAmount(value) : Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function firstString(
+  record: JsonRecord,
+  keys: readonly string[],
+): string | undefined {
+  for (const key of keys) {
+    const value = accountNoOf(record[key]);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function loanFromProject(project: JsonRecord): RakutenLoan | undefined {
+  const remainingAmount = firstNumber(project, LOAN_REMAINING_KEYS);
+  if (remainingAmount === undefined) return undefined;
+  const nextPaymentDate = firstString(project, LOAN_NEXT_DATE_KEYS);
+  const drawdownDate = firstString(project, LOAN_DRAWDOWN_DATE_KEYS);
+  return {
+    title: firstString(project, LOAN_TITLE_KEYS) ?? "樂天信貸",
+    remainingAmount,
+    initialAmount: firstNumber(project, LOAN_INITIAL_KEYS),
+    remainingPeriods: firstNumber(project, LOAN_REMAINING_PERIOD_KEYS),
+    totalPeriods: firstNumber(project, LOAN_TOTAL_PERIOD_KEYS),
+    annualRatePct: firstNumber(project, LOAN_RATE_KEYS),
+    paymentDay: firstNumber(project, LOAN_PAYMENT_DAY_KEYS),
+    nextPaymentDate: nextPaymentDate
+      ? normalizeLoanDate(nextPaymentDate)
+      : undefined,
+    nextPaymentAmount: firstNumber(project, LOAN_NEXT_AMOUNT_KEYS),
+    drawdownDate: drawdownDate ? normalizeLoanDate(drawdownDate) : undefined,
+    loanNo: firstString(project, LOAN_NUMBER_KEYS),
+  };
+}
+
+/**
+ * 貸款 sourceId 的識別鍵：只用貸款名稱。
+ *
+ * 樂天貸款 API（CLNQU0001/010）的首頁精簡版只有名稱與剩餘金額，貸款頁完整版
+ * 才有貸款編號、初始金額與期數；頁面文字也不一定解析得到。每條路徑都一定
+ * 拿得到、且每期還款後不會變的只有名稱，用它各路徑才會對同一筆貸款產生相同
+ * ID。格式沿用「名稱::」（與正式環境 JSON 路徑已建立的帳戶相同）；同名貸款
+ * 在同一次同步內以序號區分。
+ */
+function loanIdentityKey(loan: RakutenLoan): string {
+  return `${loan.title}::`;
+}
+
+function loanAccounts(loans: RakutenLoan[], asOfAt: string): ParsedAccount[] {
+  const seen = new Map<string, number>();
+  return loans.map((loan) => {
+    const key = loanIdentityKey(loan);
+    const occurrence = (seen.get(key) ?? 0) + 1;
+    seen.set(key, occurrence);
+    // 同一次同步內條件完全相同的貸款加上序號，避免互相覆蓋
+    const hash = stableHash(key) + (occurrence > 1 ? `-${occurrence}` : "");
+    const sourceId = `loan:rakuten:${hash}`;
+    const balance = -Math.abs(loan.remainingAmount);
+    return {
+      account: {
+        sourceId,
+        institutionName: "樂天國際銀行",
+        accountName: loan.title,
+        accountType: "loan",
+        loanCategory: "other",
+        ...(loan.annualRatePct !== undefined
+          ? { loanInterestRate: loan.annualRatePct }
+          : {}),
+        currency: "TWD",
+        raw: {
+          initialAmount: loan.initialAmount,
+          remainingPeriods: loan.remainingPeriods,
+          totalPeriods: loan.totalPeriods,
+          annualRatePct: loan.annualRatePct,
+          paymentDay: loan.paymentDay,
+          nextPaymentDate: loan.nextPaymentDate,
+          nextPaymentAmount: loan.nextPaymentAmount,
+          drawdownDate: loan.drawdownDate,
+          // 貸款編號只保留末四碼，raw 不存完整帳號。
+          loanNoLast4: loan.loanNo ? loan.loanNo.slice(-4) : undefined,
+        },
+      },
+      snapshot: {
+        accountId: sourceId,
+        sourceId: snapshotSourceId(`snapshot:loan:rakuten:${hash}`, asOfAt),
+        balance,
+        currency: "TWD",
+        asOfAt,
+        ...(loan.nextPaymentAmount !== undefined
+          ? { loanPaymentAmount: loan.nextPaymentAmount }
+          : {}),
+        ...(loan.totalPeriods !== undefined &&
+        loan.remainingPeriods !== undefined
+          ? {
+              loanInstallmentsPaid: loan.totalPeriods - loan.remainingPeriods,
+              loanInstallmentsTotal: loan.totalPeriods,
+            }
+          : {}),
+        raw: { balance },
+      },
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -433,9 +672,93 @@ function findDepositAccountNo(
   return found[0]?.accountNo;
 }
 
+function parseLoanText(text: string): RakutenLoan[] {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const markerIndexes = lines
+    .map((line, index) => (line === "剩餘貸款金額" ? index : -1))
+    .filter((index) => index >= 0);
+
+  const loans: RakutenLoan[] = [];
+  for (let m = 0; m < markerIndexes.length; m += 1) {
+    const idx = markerIndexes[m];
+    if (idx === undefined) continue;
+    const nextIdx = markerIndexes[m + 1] ?? lines.length;
+    const title = idx > 0 ? lines[idx - 1] : undefined;
+    if (!title || title === "貸款總覽" || title === "查看還款明細") continue;
+
+    let remainingAmount: number | undefined;
+    const amountSearchEnd = Math.min(idx + 3, nextIdx);
+    for (let i = idx + 1; i < amountSearchEnd; i += 1) {
+      const amountMatch = lines[i]?.match(/\$\s*(-?[\d,]+)/);
+      if (amountMatch?.[1] !== undefined) {
+        remainingAmount = parseAmount(amountMatch[1]);
+        break;
+      }
+    }
+    if (remainingAmount === undefined) continue;
+
+    const block = lines.slice(idx, nextIdx).join("\n");
+    const initialMatch = block.match(/初始貸款金額\s*\$?\s*([\d,]+)/);
+    const periodsMatch = block.match(
+      /剩餘[／/]初始期數\s*([\d]+)\s*[／/]\s*([\d]+)/,
+    );
+    const rateMatch = block.match(/當期年利率\s*([\d.]+)\s*%/);
+    const paymentDayMatch = block.match(/每月繳款日\s*([\d]+)\s*日/);
+    const nextPaymentMatch = block.match(
+      /下次將於\s*([\d]{4}\/[\d]{1,2}\/[\d]{1,2})\s*扣款\s*\$?\s*([\d,]+)/,
+    );
+
+    loans.push({
+      title,
+      remainingAmount,
+      initialAmount: initialMatch?.[1]
+        ? parseAmount(initialMatch[1])
+        : undefined,
+      remainingPeriods: periodsMatch?.[1] ? Number(periodsMatch[1]) : undefined,
+      totalPeriods: periodsMatch?.[2] ? Number(periodsMatch[2]) : undefined,
+      annualRatePct: rateMatch?.[1] ? Number(rateMatch[1]) : undefined,
+      paymentDay: paymentDayMatch?.[1] ? Number(paymentDayMatch[1]) : undefined,
+      nextPaymentDate: nextPaymentMatch?.[1]
+        ? normalizeSlashDate(nextPaymentMatch[1])
+        : undefined,
+      nextPaymentAmount: nextPaymentMatch?.[2]
+        ? parseAmount(nextPaymentMatch[2])
+        : undefined,
+    });
+  }
+  return loans;
+}
+
 function parseAmount(value: string): number {
   if (!value) return 0;
   const cleaned = value.replace(/[$, ]/g, "").trim();
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : 0;
+}
+
+/** 2026/10/17、2026-10-17、20261017 → 2026-10-17；無法辨識就不記。 */
+function normalizeLoanDate(value: string): string | undefined {
+  const compact = value.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  const normalized = normalizeSlashDate(value.replace(/-/g, "/"));
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : undefined;
+}
+
+function normalizeSlashDate(value: string): string {
+  const parts = value.split("/");
+  if (parts.length !== 3) return value;
+  const [year, month, day] = parts;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function stableHash(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
