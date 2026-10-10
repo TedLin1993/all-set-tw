@@ -75,6 +75,7 @@ async function recognizeCaptcha(
     throw new ValidateNumberOcrError();
 
   const model: string = VALIDATE_NUMBER_MODEL;
+  const startedAt = Date.now();
   const input = {
     messages: [
       {
@@ -130,8 +131,42 @@ async function recognizeCaptcha(
       "驗證碼辨識服務暫時無法使用，請稍後重試。",
     );
 
-  const value = readMessageContent(response).trim();
-  if (!expectedPattern.test(value)) throw new ValidateNumberOcrError();
+  const content = readMessageContent(response);
+  const value = content?.trim() ?? "";
+  if (!expectedPattern.test(value)) {
+    const choice = Array.isArray(response.choices)
+      ? response.choices[0]
+      : undefined;
+    const finishReason = isRecord(choice)
+      ? safeFinishReason(choice.finish_reason)
+      : "missing";
+    const characterPattern = characterDescription.startsWith("digits")
+      ? /^\d+$/
+      : /^[A-Za-z0-9]+$/;
+    const reason =
+      content === undefined
+        ? "invalid_response"
+        : finishReason === "length"
+          ? "truncated_output"
+          : value.length === 0
+            ? "empty_output"
+            : characterPattern.test(value)
+              ? "wrong_length"
+              : "unexpected_characters";
+    console.warn(
+      JSON.stringify({
+        event: "captcha_ocr_failed",
+        model: VALIDATE_NUMBER_MODEL,
+        reason,
+        expectedLength: characterCount,
+        outputLength: value.length,
+        finishReason,
+        imageByteLength: imageBytes.byteLength,
+        elapsedMs: Date.now() - startedAt,
+      }),
+    );
+    throw new ValidateNumberOcrError();
+  }
   return {
     value,
     model: VALIDATE_NUMBER_MODEL,
@@ -140,17 +175,37 @@ async function recognizeCaptcha(
 
 function readMessageContent(response: Record<string, unknown>) {
   const choices = response.choices;
-  if (!Array.isArray(choices)) return "";
+  if (!Array.isArray(choices)) return undefined;
   const choice = choices[0];
-  if (!isRecord(choice) || !isRecord(choice.message)) return "";
+  if (!isRecord(choice) || !isRecord(choice.message)) return undefined;
   const content = choice.message.content;
   if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
+  if (content === null) return "";
+  if (!Array.isArray(content)) return undefined;
+  if (
+    content.length > 0 &&
+    !content.some((part) => isRecord(part) && typeof part.text === "string")
+  )
+    return undefined;
   return content
     .map((part) =>
       isRecord(part) && typeof part.text === "string" ? part.text : "",
     )
     .join("");
+}
+
+function safeFinishReason(value: unknown) {
+  if (value === undefined || value === null) return "missing";
+  return typeof value === "string" &&
+    [
+      "stop",
+      "length",
+      "tool_calls",
+      "content_filter",
+      "function_call",
+    ].includes(value)
+    ? value
+    : "unknown";
 }
 
 function arrayBufferToBase64(bytes: ArrayBuffer) {
