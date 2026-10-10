@@ -23,6 +23,7 @@
   import TimePicker from "@/shared/ui/TimePicker.svelte";
   import type { ApiClient } from "@/shared/api/client";
   import { ApiRequestError } from "@/shared/api/client";
+  import { isRequestInterrupted } from "@/shared/api/interrupted";
   import { queryKeys } from "@/shared/api/query-keys";
   import {
     connectorSettingsQuery,
@@ -104,6 +105,15 @@
   let tdccSyncPolling = $state<"awaiting-active" | "active" | null>(null);
   let tdccSyncPreviousLastRunAt = $state<string | null>(null);
   let tdccSyncPollingTimer: ReturnType<typeof setTimeout> | undefined;
+  // 手動同步是一個長請求；iPhone 鎖定畫面時 Safari 會中斷它（"Load failed"），但伺服器仍會跑完。
+  // 這時改為輪詢同步工作狀態，等背景結果出來再更新畫面，不把連線中斷當成同步失敗。
+  let interruptedSync = $state<"polling" | "timeout" | null>(null);
+  let interruptedSyncPreviousLastRunAt: string | null = null;
+  let interruptedSyncDeadline = 0;
+  let interruptedSyncEnableSchedule = false;
+  let interruptedSyncTimer: ReturnType<typeof setTimeout> | undefined;
+  let syncStartLastRunAt: string | null = null;
+  let syncStartJobKnown = false;
   let destroyed = false;
   const job = $derived(
     ($jobs.data ?? []).find(
@@ -214,10 +224,24 @@
         : 0;
       updateMegabankOtpCountdown();
     }, 1_000);
-    return () => clearInterval(timer);
+    const onVisible = () => {
+      if (
+        document.visibilityState === "visible" &&
+        interruptedSync === "polling"
+      ) {
+        clearTimeout(interruptedSyncTimer);
+        void pollInterruptedSync();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   });
   onDestroy(() => {
     destroyed = true;
+    stopInterruptedSyncPolling();
     clearTimeout(einvoiceSyncQueuedTimer);
     stopEinvoiceSyncPolling();
     clearTimeout(tdccSyncQueuedTimer);
@@ -264,6 +288,9 @@
           ? `/api/connectors/${connectorId}/sync/${target}`
           : `/api/connectors/${connectorId}/sync`;
       pendingSyncTarget = target;
+      // 送出前的 lastRunAt 是請求中斷時分辨背景結果的基準；狀態尚未載入時沒有基準。
+      syncStartJobKnown = Boolean(job);
+      syncStartLastRunAt = job?.lastRunAt ?? null;
       const runSync = () =>
         connectorId === "einvoice" || connectorId === "tdcc"
           ? api.post<QueuedSyncResponse>(path, {})
@@ -302,38 +329,13 @@
         tdccSetupStep = "complete";
         return;
       }
-      invalidateLatestSyncReport();
-      qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
-      qc.invalidateQueries({ queryKey: queryKeys.summary });
-      enableScheduleAfterSuccessfulSync(context.enableSchedule);
-      qc.invalidateQueries({ queryKey: queryKeys.exchangeRates });
-      if (
-        connectorId === "esun" ||
-        connectorId === "cathaybk" ||
-        connectorId === "ctbc"
-      ) {
-        qc.invalidateQueries({ queryKey: queryKeys.bank });
-        if (connectorId !== "esun")
-          qc.invalidateQueries({ queryKey: queryKeys.bills });
-      } else if (browserBank) {
-        qc.invalidateQueries({
-          queryKey: queryKeys.connectorSettings(connectorId),
-        });
-        qc.invalidateQueries({ queryKey: queryKeys.bank });
-        qc.invalidateQueries({ queryKey: queryKeys.bills });
-      } else {
-        if (
-          pendingSyncTarget === "default" ||
-          pendingSyncTarget === "investments"
-        )
-          qc.invalidateQueries({ queryKey: queryKeys.investments });
-        if (pendingSyncTarget === "default" || pendingSyncTarget === "trades")
-          qc.invalidateQueries({ queryKey: queryKeys.investmentTransactions });
-        if (pendingSyncTarget === "default" || pendingSyncTarget === "bank")
-          qc.invalidateQueries({ queryKey: queryKeys.bank });
-      }
+      refreshAfterManualSync(context.enableSchedule);
     },
-    onError: (e) => {
+    onError: (e, _target, context) => {
+      if (isRequestInterrupted(e)) {
+        startInterruptedSyncPolling(context?.enableSchedule ?? false);
+        return;
+      }
       if (handleTdccVerificationRequired(e)) return;
       if (handleCathayVerificationRequired(e)) return;
       if (connectorId === "megabank" && isMegabankOtpRequired(e)) {
@@ -783,6 +785,94 @@
       tdccSyncQueued = false;
     }, 5_000);
   }
+  function refreshAfterManualSync(enableSchedule: boolean) {
+    invalidateLatestSyncReport();
+    qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
+    qc.invalidateQueries({ queryKey: queryKeys.summary });
+    enableScheduleAfterSuccessfulSync(enableSchedule);
+    qc.invalidateQueries({ queryKey: queryKeys.exchangeRates });
+    if (
+      connectorId === "esun" ||
+      connectorId === "cathaybk" ||
+      connectorId === "ctbc"
+    ) {
+      qc.invalidateQueries({ queryKey: queryKeys.bank });
+      if (connectorId !== "esun")
+        qc.invalidateQueries({ queryKey: queryKeys.bills });
+    } else if (browserBank) {
+      qc.invalidateQueries({
+        queryKey: queryKeys.connectorSettings(connectorId),
+      });
+      qc.invalidateQueries({ queryKey: queryKeys.bank });
+      qc.invalidateQueries({ queryKey: queryKeys.bills });
+    } else {
+      if (
+        pendingSyncTarget === "default" ||
+        pendingSyncTarget === "investments"
+      )
+        qc.invalidateQueries({ queryKey: queryKeys.investments });
+      if (pendingSyncTarget === "default" || pendingSyncTarget === "trades")
+        qc.invalidateQueries({ queryKey: queryKeys.investmentTransactions });
+      if (pendingSyncTarget === "default" || pendingSyncTarget === "bank")
+        qc.invalidateQueries({ queryKey: queryKeys.bank });
+    }
+  }
+  function startInterruptedSyncPolling(enableSchedule: boolean) {
+    error = "";
+    if (!syncStartJobKnown) {
+      // 沒有送出前的基準，無法分辨背景結果是否屬於這次同步，不猜測。
+      interruptedSync = "timeout";
+      qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
+      return;
+    }
+    interruptedSync = "polling";
+    interruptedSyncEnableSchedule = enableSchedule;
+    interruptedSyncPreviousLastRunAt = syncStartLastRunAt;
+    interruptedSyncDeadline = Date.now() + 5 * 60_000;
+    clearTimeout(interruptedSyncTimer);
+    void pollInterruptedSync();
+  }
+  function stopInterruptedSyncPolling() {
+    clearTimeout(interruptedSyncTimer);
+    interruptedSyncTimer = undefined;
+  }
+  async function pollInterruptedSync() {
+    const syncJobs = await qc
+      .fetchQuery({ ...syncJobsQuery(() => api), staleTime: 0 })
+      .catch(() => undefined);
+    if (destroyed || interruptedSync !== "polling") return;
+    const current = syncJobs?.find(
+      (syncJob) =>
+        syncJob.connectorId === connectorId && syncJob.scope === "all",
+    );
+    if (
+      current &&
+      !current.running &&
+      current.lastRunAt !== interruptedSyncPreviousLastRunAt
+    ) {
+      interruptedSync = null;
+      stopInterruptedSyncPolling();
+      if (current.lastStatus === "success") {
+        refreshAfterManualSync(interruptedSyncEnableSchedule);
+      } else {
+        error = current.lastError?.trim() || "同步失敗";
+        if (browserBank)
+          qc.invalidateQueries({
+            queryKey: queryKeys.connectorSettings(connectorId),
+          });
+      }
+      return;
+    }
+    if (Date.now() > interruptedSyncDeadline) {
+      interruptedSync = "timeout";
+      stopInterruptedSyncPolling();
+      return;
+    }
+    interruptedSyncTimer = setTimeout(
+      () => void pollInterruptedSync(),
+      document.visibilityState === "visible" ? 3_000 : 10_000,
+    );
+  }
   function startEinvoiceSyncPolling() {
     einvoiceSyncPolling = "awaiting-active";
     einvoiceSyncPreviousLastRunAt = job?.lastRunAt ?? null;
@@ -1006,6 +1096,8 @@
                 cathayVerificationStep === "sms"))}
           onclick={() => {
             error = "";
+            interruptedSync = null;
+            stopInterruptedSyncPolling();
             $sync.mutate("default");
           }}
           ><RefreshCw
@@ -1387,6 +1479,14 @@
           : job?.lastError?.trim()
             ? `上次同步：${job.lastError}`
             : "上次同步失敗，但未取得錯誤原因。"}
+      </p>{/if}
+    {#if interruptedSync}<p
+        class="mt-2 text-sm text-muted-foreground"
+        role="status"
+      >
+        {interruptedSync === "polling"
+          ? "畫面關閉或網路中斷，同步仍在背景進行，完成後會自動更新結果。"
+          : "仍無法確認同步結果，請稍後重新整理頁面查看。"}
       </p>{/if}
   </div>
   <section class="mt-4 overflow-hidden rounded-xl border border-border">
