@@ -310,6 +310,10 @@ describe("台新臺外幣活存", () => {
     expect(normalizeTaishinCurrency("")).toBeUndefined();
     expect(normalizeTaishinCurrency("X1")).toBeUndefined();
     expect(normalizeTaishinCurrency("USD/JPY")).toBeUndefined();
+    expect(normalizeTaishinCurrency("840 美元")).toBe("USD");
+    expect(normalizeTaishinCurrency("美元/日圓")).toBeUndefined();
+    expect(normalizeTaishinCurrency("840 日圓")).toBeUndefined();
+    expect(normalizeTaishinCurrency("999")).toBeUndefined();
   });
 
   it("外幣清單的幣別為小寫加空白或中文時，請求沿用原值，帳戶以 ISO 三碼保存", async () => {

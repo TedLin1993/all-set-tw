@@ -64,16 +64,20 @@ const NAMED_CURRENCIES: Array<[RegExp, string]> = [
 ];
 
 export function normalizeTaishinCurrency(value: string): string | undefined {
+  // 收集所有可辨識的幣別線索（三碼、ISO 數字代碼、中文名稱），全部一致才採用；
+  // 同時指向不同幣別（例如「美元/日圓」）或含無法辨識的數字代碼時視為無法判斷。
   const text = value.trim().toUpperCase();
-  if (/^[A-Z]{3}$/.test(text)) return text === "NTD" ? "TWD" : text;
-  const codes = [...text.matchAll(/(?<![A-Z])([A-Z]{3})(?![A-Z])/g)].map(
-    (match) => match[1]!,
-  );
-  if (codes.length === 1) return codes[0] === "NTD" ? "TWD" : codes[0];
-  const digits = text.replace(/\s/g, "");
-  if (/^\d{1,3}$/.test(digits))
-    return NUMERIC_CURRENCIES[digits.padStart(3, "0")];
-  return NAMED_CURRENCIES.find(([pattern]) => pattern.test(value))?.[1];
+  const found = new Set<string>();
+  for (const match of text.matchAll(/(?<![A-Z])([A-Z]{3})(?![A-Z])/g))
+    found.add(match[1] === "NTD" ? "TWD" : match[1]!);
+  for (const match of text.matchAll(/(?<!\d)(\d{1,3})(?!\d)/g)) {
+    const code = NUMERIC_CURRENCIES[match[1]!.padStart(3, "0")];
+    if (!code) return undefined;
+    found.add(code);
+  }
+  for (const [pattern, code] of NAMED_CURRENCIES)
+    if (pattern.test(value)) found.add(code);
+  return found.size === 1 ? [...found][0] : undefined;
 }
 
 /** 不含實際值的字元形狀，例如 "AAA_"（大寫、小寫 a、數字 9、空白 _、中文 C、其他 ?）。 */
