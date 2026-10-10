@@ -41,7 +41,7 @@ type SessionState = {
   clientNo: string;
 };
 
-/** 固定的虛擬裝置識別；沿用同一組讓銀行把簡訊驗證過的裝置視為同一台。 */
+/** 固定的虛擬裝置識別；後續登入沿用同一組，不代表正式裝置綁定或保證免簡訊。 */
 export type MegabankDevice = {
   deviceCode: string;
   deviceUKey: string;
@@ -72,7 +72,7 @@ export class MegabankOtpRequiredError extends MegabankVerificationRequiredError 
     message: string,
     readonly pendingSession: string,
     readonly pendingSessionExpiresAt: string,
-    /** 待驗證登入所用的虛擬裝置；自動辨識驗證碼路徑也要保存，簡訊驗證才只需一次。 */
+    /** 待驗證登入所用的虛擬裝置；自動辨識驗證碼路徑也要保存，供後續登入沿用。 */
     readonly device: MegabankDevice,
   ) {
     super(message);
@@ -97,7 +97,10 @@ export class MegabankConnectionError extends Error {
   }
 }
 export class MegabankProtocolError extends Error {
-  constructor(message = "兆豐銀行回應格式已變更。") {
+  constructor(
+    message = "兆豐銀行回應格式已變更。",
+    readonly code?: string,
+  ) {
     super(message);
     this.name = "MegabankProtocolError";
   }
@@ -232,22 +235,31 @@ export function createMegabankConnector(
             "兆豐銀行要求雙重驗證，連接器尚未支援，請改用官方 App 查詢。",
           );
         }
-        if (gate.highIpFar) {
-          if (!options.allowOtpRequest) {
-            throw new MegabankVerificationRequiredError(
-              "兆豐銀行要求簡訊驗證，請改用手動同步並輸入簡訊驗證碼。",
-            );
+        try {
+          return await fetchMegabankData(session);
+        } catch (error) {
+          // 異地旗標不一定限制查帳；只有實際權限不足且符合異地驗證條件時才要求簡訊。
+          if (
+            !(error instanceof MegabankProtocolError) ||
+            error.code !== "SYS014" ||
+            !gate.highIpFar
+          ) {
+            throw error;
           }
-          const checkCode = await session.requestVerifyCode("sms");
-          keepSession = true;
-          throw new MegabankOtpRequiredError(
-            `兆豐銀行已寄出簡訊驗證碼${checkCode ? `（簡訊檢核碼 ${checkCode}）` : ""}，請於三分鐘內輸入。`,
-            session.serialize(),
-            new Date(Date.now() + OTP_SESSION_TTL_MS).toISOString(),
-            session.device(),
+        }
+        if (!options.allowOtpRequest) {
+          throw new MegabankVerificationRequiredError(
+            "兆豐銀行要求簡訊驗證，請改用手動同步並輸入簡訊驗證碼。",
           );
         }
-        return await fetchMegabankData(session);
+        const checkCode = await session.requestVerifyCode("sms");
+        keepSession = true;
+        throw new MegabankOtpRequiredError(
+          `兆豐銀行已寄出簡訊驗證碼${checkCode ? `（簡訊檢核碼 ${checkCode}）` : ""}，請於三分鐘內輸入。`,
+          session.serialize(),
+          new Date(Date.now() + OTP_SESSION_TTL_MS).toISOString(),
+          session.device(),
+        );
       } finally {
         if (!keepSession) await session.logout();
       }
@@ -658,7 +670,7 @@ class MegabankSession {
     const loginData = dataAt(response);
     this.authenticated = true;
     await this.adapterRequest("resource/login", {});
-    // 與官方前端相同：secondFactorFlag 為 Y 走雙重驗證；否則異地登入需簡訊或 Email 驗證碼。
+    // secondFactorFlag 為 Y 仍須雙重驗證；異地旗標交由查詢結果決定是否進入簡訊流程。
     return {
       requiresTwoFactor: stringAt(loginData, "secondFactorFlag") === "Y",
       highIpFar: loginData.isHighIpFar === true,
@@ -766,6 +778,7 @@ class MegabankSession {
     if (!skipCodeCheck && code !== "0000" && code !== "1120") {
       throw new MegabankProtocolError(
         `兆豐銀行查詢失敗（代碼 ${code}）。${code === "SYS014" ? "若目前已登入兆豐網銀，請登出後再試。" : ""}`,
+        code,
       );
     }
     return result;

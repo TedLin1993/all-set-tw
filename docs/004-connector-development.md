@@ -588,12 +588,12 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 - 使用 App 2.5.19 的 MobileFirst API：OAuth client credentials、`/main/init`、App 初始化、五位數字驗證碼、E2EE RSA／TripleDES 帳密登入。一般登入不要求快速登入或裝置綁定。
 - 人工驗證碼的待登入 session 只保存於 `encrypted_config`，兩分鐘到期，成功或失敗後清除；排程同步使用 Workers AI 辨識。`sync_cursor` 只含同步時間。
 - 登入回應的 `resultType` 與官方網銀前端相同：`0` 成功、`1` 重複登入、`3` 提示綁定裝置、`6` 已有兩台裝置、`7` 已綁定等；`3` 不影響查詢權限，連接器不做裝置綁定。`isTrustUser` 是信託戶旗標，與裝置信任無關。
-- 登入後依官方前端 `do2FactorCheck` 判斷：`secondFactorFlag=Y` 為雙重驗證，連接器不支援，登出並中止；否則 `isHighIpFar=true` 表示異地登入，必須完成簡訊或 Email 驗證碼，未驗證前查詢回 `SYS014`「權限不足」。簡訊驗證只在短時間內有效：驗證後約 15 分鐘內再登入不需簡訊，約一小時後同一個虛擬裝置再登入仍會被標為異地，因此排程同步無法長期免簡訊。
-- 異地登入只在手動同步處理：以 `megapmb` 呼叫 `/fco/fco00001/getverifycode`（`type=sms`）請銀行寄簡訊，回應的 `checkCode`（簡訊檢核碼）放入 `MEGABANK_SMS_OTP_REQUIRED` 訊息供使用者對照；已登入的工作階段以 `authenticated=true` 序列化後寫回 `encrypted_config` 的 `pendingSession`，三分鐘到期、只供這一次驗證使用。使用者送出 `otp` 後呼叫 `/fco/fco00001/validatecode`，`success=true` 才接續同一個登入查詢並登出；`success=false` 回 `MEGABANK_OTP_INVALID` 並保留工作階段讓使用者重輸；非 `0000` 代碼、逾時或其他錯誤一律登出並清除狀態。排程同步遇到異地登入直接登出、標記需要使用者處理，不觸發簡訊。
+- 登入後 `secondFactorFlag=Y` 為雙重驗證，連接器不支援，登出並中止；其餘先查詢帳務，即使 `isHighIpFar=true`（異地登入旗標）也不預先要求簡訊。只有存款或信用卡查詢實際回 `SYS014`「權限不足」，且登入回應帶有異地旗標時，才進入既有簡訊驗證流程；以結構化銀行回應碼判斷，不比對錯誤文字。存款或信用卡等必要查詢失敗時，不回傳部分帳務；貸款查詢依下方的附加資料政策處理。
+- 查詢權限不足後的異地驗證只在手動同步處理：以 `megapmb` 呼叫 `/fco/fco00001/getverifycode`（`type=sms`）請銀行寄簡訊，回應的 `checkCode`（簡訊檢核碼）放入 `MEGABANK_SMS_OTP_REQUIRED` 訊息供使用者對照；已登入的工作階段以 `authenticated=true` 序列化後寫回 `encrypted_config` 的 `pendingSession`，三分鐘到期、只供這一次驗證使用。使用者送出 `otp` 後呼叫 `/fco/fco00001/validatecode`，`success=true` 才接續同一個登入重新查詢完整帳務並登出；`success=false` 回 `MEGABANK_OTP_INVALID` 並保留工作階段讓使用者重輸；非 `0000` 代碼、逾時或其他錯誤一律登出並清除狀態。排程同步同樣先查詢，只有查詢權限不足且帶有異地旗標時才登出、標記需要使用者處理，不觸發簡訊。
 - 新一輪同步若發現上一輪等待驗證碼的已登入工作階段仍在設定中，會先盡力登出再重新登入。
-- 虛擬裝置識別（`deviceCode`、`deviceUKey`、`deviceSeed`）在第一次人工取得驗證碼時產生並寫入 `encrypted_config`，之後的驗證碼 session 與登入都沿用同一組，比照 App 同一台裝置，讓短時間內的連續同步沿用剛完成的簡訊驗證；它不等於 App 的「綁定裝置」（登入回應 `resultType=3` 的提示），無法讓之後的登入長期免簡訊；帳密變更時依 `resetOnCredentialChangeFields` 重設。它只是裝置識別，不含 cookie 或 token，不屬於重用銀行 session。
+- 虛擬裝置識別（`deviceCode`、`deviceUKey`、`deviceSeed`）在第一次人工取得驗證碼時產生並寫入 `encrypted_config`，自動辨識路徑進入簡訊驗證時也會保存，之後的驗證碼 session 與登入都沿用同一組；它不等於 App 的「綁定裝置」（登入回應 `resultType=3` 的提示），不保證之後的登入免簡訊。過去實測驗證後約 15 分鐘內再登入不需簡訊、約一小時後同一個虛擬裝置仍需要驗證，這是當時觀察，不是固定有效期限或銀行政策。帳密變更時依 `resetOnCredentialChangeFields` 重設。它只是裝置識別，不含 cookie 或 token，不屬於重用銀行 session。
 - 登入後無論同步成功或失敗，都依 App 流程呼叫 `/fco/fco02011/logout` 釋放銀行工作階段；登出失敗不覆蓋同步結果或原始錯誤。
-- 查詢回 `SYS014` 時會提示先登出網銀再試，連接器不自動接管其他登入。
+- 查詢回 `SYS014` 但沒有異地旗標，或完成簡訊後查詢仍回 `SYS014` 時，保留原本的查詢錯誤與先登出網銀再試的提示，不再寄簡訊；其他查詢錯誤也原樣中止。連接器不自動接管其他登入。
 - 驗證碼準備及同步後的設定寫入會比對當初讀取的加密設定；promotion batch 也先檢查同一版本，期間若憑證已更新，不寫入舊帳務、舊憑證或同步游標。
 - 兆豐同步工作建立時停用；首次成功同步後會比照永豐、台新與王道自動啟用。若使用者之後手動停用，再次手動同步不會重新啟用。
 - 存款清單取 `/fco/fco10001/home`；臺幣交易按帳戶查 `/fao/fao01001/query`，最多回溯三個月並處理 `tsqName` 分頁。外幣帳戶與餘額會同步，不查詢外幣交易。
