@@ -583,7 +583,7 @@ describe("台新必要金融查詢", () => {
     }
   });
 
-  it("使用完整即時消費端點，無卡回應只略過信用卡並保留存款", async () => {
+  it("使用完整即時消費端點，無卡只略過信用卡，無查詢權限的存款帳戶只略過該帳戶", async () => {
     const successful = responsePage(() => undefined);
     const data = await fetchTaishinBankData(successful.page, () => {}, bankNow);
     expect(data.bankTransactions).toHaveLength(6);
@@ -607,6 +607,29 @@ describe("台新必要金融查詢", () => {
       "JPY",
     ]);
     expect(deposits.bankTransactions).toHaveLength(5);
+    // 實際證券交割戶查餘額的完整回應（只有 RESULT 與 ERRORMSG）。
+    const noPermission = responsePage((input) =>
+      input.path.endsWith("/web1/rb0101/query")
+        ? { RESULT: "ERROR", ERRORMSG: "(EBF0015)無交易權限" }
+        : undefined,
+    );
+    const withoutTwd = await fetchTaishinBankData(
+      noPermission.page,
+      () => {},
+      bankNow,
+    );
+    expect(
+      withoutTwd.bankAccounts.map((row) => [row.accountType, row.currency]),
+    ).toEqual([
+      ["savings", "USD"],
+      ["savings", "JPY"],
+      ["credit", "TWD"],
+    ]);
+    expect(
+      noPermission.evaluate.mock.calls.some(([, input]) =>
+        input.path.endsWith("/web1/rb0102/query"),
+      ),
+    ).toBe(false);
   });
 
   it("即時消費忙碌重試耗盡時整次失敗，不能以空清單成功", async () => {

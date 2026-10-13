@@ -195,6 +195,14 @@ export class TaishinDepositProtocolError extends Error {
   }
 }
 
+/** The bank answers EBF0015 for a listed account online banking cannot query. */
+export class TaishinDepositNoPermissionError extends Error {
+  constructor() {
+    super("台新存款帳戶沒有網銀查詢權限。");
+    this.name = "TaishinDepositNoPermissionError";
+  }
+}
+
 function checked<T>(
   schema: z.ZodType<T>,
   value: unknown,
@@ -656,13 +664,23 @@ export async function fetchTaishinDeposits(
         throw new TaishinDepositProtocolError(
           "台新存款帳戶未出現在交易查詢清單。",
         );
+      const balancePayload = await request(`${root}/web1/rb0101/query`, {
+        account: account.accountNo,
+      }).catch((error: unknown) => {
+        if (error instanceof TaishinDepositNoPermissionError) return undefined;
+        throw error;
+      });
+      // A securities settlement account can be listed but not queried; skip it
+      // and keep syncing the other accounts and credit cards.
+      if (balancePayload === undefined) {
+        console.log(
+          JSON.stringify({ event: "taishin_deposit_no_permission_skipped" }),
+        );
+        continue;
+      }
       const balance = checked(
         z.object({ balance: moneySchema, availbalance: moneySchema.nullish() }),
-        twdData(
-          await request(`${root}/web1/rb0101/query`, {
-            account: account.accountNo,
-          }),
-        ),
+        twdData(balancePayload),
         "臺幣即時餘額",
       );
       addAccount(
