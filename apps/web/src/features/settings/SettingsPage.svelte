@@ -566,7 +566,10 @@
           {#if syncJobsState === "ready"}
             <button
               class="mt-4 rounded-lg bg-steel px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-steel/90"
-              onclick={() => navigate("data-sources")}
+              onclick={() =>
+                actionSource
+                  ? openConnector(actionSource.id)
+                  : navigate("data-sources")}
               >{needsAction ? "查看連接器" : "管理資料來源"}</button
             >
           {/if}
