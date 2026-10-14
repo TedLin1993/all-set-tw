@@ -322,7 +322,6 @@ export async function completeSyncJob(
   db: D1Database,
   job: SyncJobRow,
   runId: string,
-  options: { enableAfterFirstSuccess?: boolean } = {},
 ) {
   const now = new Date();
   const nextRunAt = nextSyncRunAt(
@@ -332,14 +331,10 @@ export async function completeSyncJob(
     job.next_run_at,
     job.preferred_weekdays,
   );
-  const enable =
-    options.enableAfterFirstSuccess &&
-    !job.enabled &&
-    job.last_success_at === null;
   const result = await createDrizzle(db)
     .update(syncJobs)
     .set({
-      ...(enable ? { enabled: 1 } : {}),
+      enabled: sql`CASE WHEN ${syncJobs.lastSuccessAt} IS NULL THEN 1 ELSE ${syncJobs.enabled} END`,
       lastStatus: "success",
       lastError: null,
       lastErrorCode: null,
@@ -407,7 +402,6 @@ export async function markManualSyncSuccess(
   connectorId: string,
   scope: string,
   runId: string,
-  options: { enableAfterFirstSuccess?: boolean } = {},
 ) {
   const jobId = `${connectorId}:${scope}`;
   const job = await createDrizzle(db)
@@ -421,7 +415,7 @@ export async function markManualSyncSuccess(
     });
   if (!job) return;
 
-  return completeSyncJob(db, job, runId, options);
+  return completeSyncJob(db, job, runId);
 }
 
 export async function markManualSyncFailure(

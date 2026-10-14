@@ -41,14 +41,6 @@ import {
 
 const MANUAL_SYNC_MAX_CAPACITY_RETRIES = 3;
 
-/** 這些來源首次同步成功時，若排程仍關閉便自動開啟；之後使用者手動關閉會保留。 */
-const SCHEDULE_ENABLED_AFTER_FIRST_SYNC = new Set<ConnectorId>([
-  "sinopac",
-  "taishin",
-  "obank",
-  "megabank",
-]);
-
 type ManualSyncOwner = {
   connectorId: ConnectorId;
   scope: SyncScope;
@@ -105,10 +97,7 @@ async function runLockedManualSync(
           : null;
       await beginActivityRun(syncEnv.DB, runId, recoveryBatchId, connectorId);
       const outcome = await task(syncEnv);
-      await markManualSyncSuccess(syncEnv.DB, connectorId, scope, runId, {
-        enableAfterFirstSuccess:
-          SCHEDULE_ENABLED_AFTER_FIRST_SYNC.has(connectorId),
-      });
+      await markManualSyncSuccess(syncEnv.DB, connectorId, scope, runId);
       if (connectorId !== "tdcc" || scope === SYNC_SCOPE_ALL) {
         await recoverLatestScheduledSyncSource(syncEnv.DB, {
           connectorId,

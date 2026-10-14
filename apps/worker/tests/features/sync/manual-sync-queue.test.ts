@@ -74,7 +74,7 @@ describe("背景手動同步（隔離 D1）", () => {
   async function syncJob(id = "esun:all") {
     return harness.binding
       .prepare(
-        "SELECT locked_by, lock_phase, enabled, last_status, last_error, last_error_code FROM sync_jobs WHERE id = ?",
+        "SELECT locked_by, lock_phase, enabled, schedule_mode, interval_minutes, preferred_time, preferred_weekdays, last_status, last_error, last_error_code FROM sync_jobs WHERE id = ?",
       )
       .bind(id)
       .first();
@@ -129,7 +129,7 @@ describe("背景手動同步（隔離 D1）", () => {
         .first(),
     ).toMatchObject({ active: 0 });
 
-    await insertSyncJob("sinopac", 1);
+    await insertSyncJob("sinopac", 0);
     mocks.runConnectorSync.mockResolvedValue({
       ...outcome,
       connectorId: "sinopac",
@@ -138,6 +138,7 @@ describe("背景手動同步（隔離 D1）", () => {
       captcha: "123456",
     });
     expect(inline.status).toBe(200);
+    expect(await syncJob("sinopac:all")).toMatchObject({ enabled: 1 });
     expect(mocks.runConnectorSync).toHaveBeenLastCalledWith(
       expect.anything(),
       "sinopac",
@@ -148,26 +149,45 @@ describe("背景手動同步（隔離 D1）", () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
-  it("首次同步成功自動開啟排程，之後使用者關閉的排程保持關閉", async () => {
-    await insertSyncJob("sinopac", 0);
-    mocks.runConnectorSync.mockResolvedValue({
-      ...outcome,
-      connectorId: "sinopac",
-    });
-    const first = await startQueuedManualSync(env, "sinopac");
-    await processQueuedManualSync(env, first.run.id);
-    expect(await syncJob("sinopac:all")).toMatchObject({
-      enabled: 1,
-      last_status: "success",
-    });
+  it.each([
+    { connectorId: "sinopac", scheduleMode: "inherit" },
+    { connectorId: "ctbc", scheduleMode: "custom" },
+  ] as const)(
+    "$connectorId 首次成功啟用排程並保留 $scheduleMode 設定，之後關閉不再自動啟用",
+    async ({ connectorId, scheduleMode }) => {
+      const jobId = `${connectorId}:all`;
+      await insertSyncJob(connectorId, 0);
+      await harness.binding
+        .prepare(
+          `UPDATE sync_jobs SET schedule_mode = ?, interval_minutes = 10080,
+           preferred_time = '09:30', preferred_weekdays = '[1,3,5]' WHERE id = ?`,
+        )
+        .bind(scheduleMode, jobId)
+        .run();
+      const schedule = {
+        schedule_mode: scheduleMode,
+        interval_minutes: 10080,
+        preferred_time: "09:30",
+        preferred_weekdays: "[1,3,5]",
+      };
+      mocks.runConnectorSync.mockResolvedValue({ ...outcome, connectorId });
+      const first = await startQueuedManualSync(env, connectorId);
+      await processQueuedManualSync(env, first.run.id);
+      expect(await syncJob(jobId)).toMatchObject({
+        ...schedule,
+        enabled: 1,
+        last_status: "success",
+      });
 
-    await harness.binding
-      .prepare("UPDATE sync_jobs SET enabled = 0 WHERE id = 'sinopac:all'")
-      .run();
-    const second = await startQueuedManualSync(env, "sinopac");
-    await processQueuedManualSync(env, second.run.id);
-    expect(await syncJob("sinopac:all")).toMatchObject({ enabled: 0 });
-  });
+      await harness.binding
+        .prepare("UPDATE sync_jobs SET enabled = 0 WHERE id = ?")
+        .bind(jobId)
+        .run();
+      const second = await startQueuedManualSync(env, connectorId);
+      await processQueuedManualSync(env, second.run.id);
+      expect(await syncJob(jobId)).toMatchObject({ ...schedule, enabled: 0 });
+    },
+  );
 
   it("來源已有其他同步時拒絕手動同步；搶輸 lock 的 run 取消且不釋放對方的鎖", async () => {
     const lock = {
@@ -233,6 +253,9 @@ describe("背景手動同步（隔離 D1）", () => {
   });
 
   it("需要使用者處理時保存錯誤代碼；Browser 容量不足在登入前放回佇列，不記為失敗", async () => {
+    await harness.binding
+      .prepare("UPDATE sync_jobs SET enabled = 0 WHERE id = 'esun:all'")
+      .run();
     mocks.runConnectorSync.mockRejectedValueOnce(
       new ManualCaptchaRequiredError("請輸入驗證碼。"),
     );
@@ -244,6 +267,7 @@ describe("背景手動同步（隔離 D1）", () => {
       lastError: "請輸入驗證碼。",
     });
     expect(await syncJob()).toMatchObject({
+      enabled: 0,
       locked_by: null,
       last_status: "needs_user_action",
       last_error_code: "MANUAL_CAPTCHA_REQUIRED",
@@ -282,6 +306,7 @@ describe("背景手動同步（隔離 D1）", () => {
       errorCode: "BROWSER_BUSY",
     });
     expect(await syncJob()).toMatchObject({
+      enabled: 0,
       last_status: "failed",
       last_error_code: "BROWSER_BUSY",
     });

@@ -1515,6 +1515,12 @@
       >
     {/if}
 
+    {#if job && !job.lastSuccessAt}
+      <p class="mt-2 text-sm text-muted-foreground">
+        首次同步成功後會自動開啟排程；若之後手動關閉，後續同步會保留此設定。
+      </p>
+    {/if}
+
     {#if connectorId === "nextbank"}
       <p class="mt-2 text-sm text-muted-foreground">
         {job?.enabled

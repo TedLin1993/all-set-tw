@@ -541,7 +541,8 @@ async function finalizeEinvoiceRun(
     ),
     env.DB.prepare(
       `UPDATE sync_jobs
-       SET last_status = ?,
+       SET enabled = CASE WHEN ? = 'success' AND last_success_at IS NULL THEN 1 ELSE enabled END,
+           last_status = ?,
            last_error = ?,
            last_error_code = ?,
            last_run_at = ?,
@@ -554,6 +555,7 @@ async function finalizeEinvoiceRun(
            updated_at = ?
        WHERE id = ? AND locked_by = ? AND ${activeGuard}`,
     ).bind(
+      status,
       status,
       error,
       failure?.code ?? null,
