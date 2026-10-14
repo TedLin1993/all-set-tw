@@ -55,7 +55,11 @@ import {
   promoteStagedSyncWrite,
 } from "../../../src/features/sync/persistence";
 import { connectorCursorStatement } from "../../../src/features/sync/connector-repository";
-import { failTdccSyncRun } from "../../../src/sources/tdcc/sync";
+import {
+  failTdccSyncRun,
+  processTdccSyncChunk,
+} from "../../../src/sources/tdcc/sync";
+import { encryptJson } from "../../../src/platform/crypto";
 
 const now = "2026-09-13T00:00:00.000Z";
 
@@ -614,12 +618,76 @@ describe("同步鎖與原子寫入（隔離 D1）", () => {
     ).toBe(true);
   });
 
+  it("集保首次完成分段同步啟用排程，後續成功與重送保留手動關閉及自訂排程", async () => {
+    const db = harness.binding;
+    const key = "11".repeat(32);
+    const encryptedConfig = await encryptJson(
+      { userId: "A123456789", password: "synthetic" },
+      key,
+    );
+    const encryptedSession = await encryptJson(
+      {
+        deviceId: "synthetic-device",
+        devType: "Android",
+        devModel: "synthetic",
+        session: { tokenId: "synthetic-token", richUrl: null },
+      },
+      key,
+    );
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO sync_jobs (id, connector_id, scope, enabled, schedule_mode, interval_minutes, preferred_time, preferred_weekdays, next_run_at, created_at, updated_at)
+           VALUES ('tdcc:all', 'tdcc', 'all', 0, 'custom', 10080, '09:30', '[1,3,5]', ?, ?, ?)`,
+        )
+        .bind(now, now, now),
+      db
+        .prepare(
+          "INSERT INTO connector_settings (id, connector_id, encrypted_config, created_at, updated_at) VALUES ('tdcc', 'tdcc', ?, ?, ?)",
+        )
+        .bind(encryptedConfig, now, now),
+    ]);
+    const env = { DB: db, CONFIG_ENCRYPTION_KEY: key } as Env;
+    const schedule = {
+      schedule_mode: "custom",
+      interval_minutes: 10080,
+      preferred_time: "09:30",
+      preferred_weekdays: "[1,3,5]",
+    };
+    const job = () => db.prepare("SELECT * FROM sync_jobs").first();
+    for (const [index, id] of ["first", "second"].entries()) {
+      await createOrGetActiveTdccRun(db, {
+        id,
+        trigger: "manual",
+        encryptedConfig,
+        encryptedSession,
+        phase: "promote",
+      });
+      await updateTdccRunState(db, { runId: id, status: "processing" });
+      expect(await processTdccSyncChunk(env, id)).toEqual({
+        status: "completed",
+      });
+      expect(await job()).toMatchObject({
+        ...schedule,
+        enabled: index === 0 ? 1 : 0,
+        last_status: "success",
+        last_success_at: expect.any(String),
+        locked_by: null,
+      });
+      await db.prepare("UPDATE sync_jobs SET enabled = 0").run();
+      expect(await processTdccSyncChunk(env, id)).toEqual({
+        status: "terminal",
+      });
+      expect(await job()).toMatchObject({ ...schedule, enabled: 0 });
+    }
+  });
+
   it("集保失敗結案、結果與 staging 清理一起提交，失敗時全部回滾", async () => {
     const db = harness.binding;
     await db
       .prepare(
-        `INSERT INTO sync_jobs (id, connector_id, scope, interval_minutes, next_run_at, created_at, updated_at)
-      VALUES ('tdcc:all', 'tdcc', 'all', 1440, ?, ?, ?)`,
+        `INSERT INTO sync_jobs (id, connector_id, scope, enabled, interval_minutes, next_run_at, created_at, updated_at)
+      VALUES ('tdcc:all', 'tdcc', 'all', 0, 1440, ?, ?, ?)`,
       )
       .bind(now, now, now)
       .run();
@@ -641,8 +709,10 @@ describe("同步鎖與原子寫入（隔離 D1）", () => {
       await db.prepare("SELECT status FROM tdcc_sync_runs").first("status"),
     ).toBe("queued");
     expect(
-      await db.prepare("SELECT locked_by, last_status FROM sync_jobs").first(),
-    ).toEqual({ locked_by: "run", last_status: null });
+      await db
+        .prepare("SELECT locked_by, last_status, enabled FROM sync_jobs")
+        .first(),
+    ).toEqual({ locked_by: "run", last_status: null, enabled: 0 });
     expect(
       await db
         .prepare("SELECT COUNT(*) AS count FROM sync_write_staging")
@@ -656,8 +726,10 @@ describe("同步鎖與原子寫入（隔離 D1）", () => {
       await db.prepare("SELECT status FROM tdcc_sync_runs").first("status"),
     ).toBe("failed");
     expect(
-      await db.prepare("SELECT locked_by, last_status FROM sync_jobs").first(),
-    ).toEqual({ locked_by: null, last_status: "failed" });
+      await db
+        .prepare("SELECT locked_by, last_status, enabled FROM sync_jobs")
+        .first(),
+    ).toEqual({ locked_by: null, last_status: "failed", enabled: 0 });
     expect(
       await db
         .prepare("SELECT COUNT(*) AS count FROM sync_write_staging")

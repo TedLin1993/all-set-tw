@@ -676,7 +676,8 @@ async function promoteTdccRun(env: Env, run: TdccRunRow) {
     finalizeStatements.push(
       env.DB.prepare(
         `UPDATE sync_jobs
-           SET last_status = 'success', last_error = NULL, last_error_code = NULL,
+           SET enabled = CASE WHEN last_success_at IS NULL THEN 1 ELSE enabled END,
+               last_status = 'success', last_error = NULL, last_error_code = NULL,
                last_run_at = ?, last_success_at = ?, next_run_at = ?,
                updated_at = ?
            WHERE id = ? AND locked_by = ?`,

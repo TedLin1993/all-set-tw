@@ -113,6 +113,8 @@ npm run verify:web
 
 ## 同步狀態與重試
 
+所有來源的 `ConnectorPanel` 在首次成功同步前提示會自動開啟排程；之後手動關閉的設定會保留。
+
 中信的 `CtbcVerification` 子元件使用設定 API 的驗證方式與到期時間顯示 App 核准或
 四位 Email OTP，手動呼叫同一 `/api/connectors/ctbc/sync` 接續驗證。
 等待期間停用一般同步按鈕，不自動輪詢銀行或重送 OTP；到期後由使用者按「重新開始驗證」。

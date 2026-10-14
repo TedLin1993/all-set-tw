@@ -14,7 +14,10 @@ import {
   mergeEinvoiceRunItems,
   promoteEinvoiceRunRecords,
 } from "../../../src/sources/einvoice/run-repository";
-import { startEinvoiceSyncRun } from "../../../src/sources/einvoice/sync";
+import {
+  processEinvoiceSyncChunk,
+  startEinvoiceSyncRun,
+} from "../../../src/sources/einvoice/sync";
 import { syncRoutes } from "../../../src/features/sync/route";
 import { encryptJson } from "../../../src/platform/crypto";
 import type { Env } from "../../../src/platform/env";
@@ -50,16 +53,28 @@ describe("發票分段同步的正式資料（隔離 D1）", () => {
         .bind(version, version),
       db
         .prepare(
-          `INSERT INTO sync_jobs (id, connector_id, scope, interval_minutes, next_run_at, created_at, updated_at)
-        VALUES ('einvoice:all', 'einvoice', 'all', 1440, ?, ?, ?)`,
+          `INSERT INTO sync_jobs (id, connector_id, scope, enabled, interval_minutes, next_run_at, created_at, updated_at)
+        VALUES ('einvoice:all', 'einvoice', 'all', 0, 1440, ?, ?, ?)`,
         )
         .bind(version, version, version),
     ]);
   });
-  async function syncEnv() {
+  async function syncEnv(withSession = false) {
     const key = "11".repeat(32);
     const encrypted = await encryptJson(
-      { mobile: "0912345678", password: "synthetic" },
+      {
+        mobile: "0912345678",
+        password: "synthetic",
+        ...(withSession
+          ? {
+              sid: "synthetic-sid",
+              token: "synthetic-token",
+              loginAppId: "synthetic-app",
+              loginLiat: 1,
+              loginSsMe: "synthetic-session",
+            }
+          : {}),
+      },
       key,
     );
     await db
@@ -74,11 +89,11 @@ describe("發票分段同步的正式資料（隔離 D1）", () => {
       SYNC_QUEUE: { send: vi.fn().mockResolvedValue(undefined) },
     } as unknown as Env;
   }
-  async function prepareRun(done = true) {
+  async function prepareRun(done = true, id = "run", createdAt = version) {
     const { run } = await createOrGetActiveEinvoiceRun(db, {
-      id: "run",
+      id,
       trigger: "manual",
-      now: version,
+      now: createdAt,
     });
     await mergeEinvoiceRunItems(
       db,
@@ -116,9 +131,9 @@ describe("發票分段同步的正式資料（隔離 D1）", () => {
     );
     await db
       .prepare(
-        "UPDATE einvoice_sync_runs SET status = 'processing', settings_version = ? WHERE id = ?",
+        "UPDATE einvoice_sync_runs SET status = 'processing', settings_version = (SELECT updated_at FROM connector_settings WHERE connector_id = 'einvoice') WHERE id = ?",
       )
-      .bind(version, run.id)
+      .bind(run.id)
       .run();
     return run;
   }
@@ -183,8 +198,10 @@ describe("發票分段同步的正式資料（隔離 D1）", () => {
       await db.prepare("SELECT status FROM einvoice_sync_runs").first("status"),
     ).toBe("failed");
     expect(
-      await db.prepare("SELECT locked_by, last_status FROM sync_jobs").first(),
-    ).toEqual({ locked_by: null, last_status: "failed" });
+      await db
+        .prepare("SELECT locked_by, last_status, enabled FROM sync_jobs")
+        .first(),
+    ).toEqual({ locked_by: null, last_status: "failed", enabled: 0 });
     await db.prepare("DROP TRIGGER fail_initial_cursor").run();
     expect(
       (await startEinvoiceSyncRun(env, { trigger: "manual" })).created,
@@ -250,6 +267,44 @@ describe("發票分段同步的正式資料（隔離 D1）", () => {
       }),
     ).toBe(false);
     expect(await snapshot()).toEqual(after);
+  });
+
+  it("完整分段同步首次成功啟用排程；重送及後續同步保留手動關閉與自訂排程", async () => {
+    const env = await syncEnv(true);
+    await db
+      .prepare(
+        "UPDATE sync_jobs SET schedule_mode = 'custom', interval_minutes = 10080, preferred_time = '09:30', preferred_weekdays = '[1,3,5]'",
+      )
+      .run();
+    const schedule = {
+      schedule_mode: "custom",
+      interval_minutes: 10080,
+      preferred_time: "09:30",
+      preferred_weekdays: "[1,3,5]",
+    };
+    const job = () => db.prepare("SELECT * FROM sync_jobs").first();
+    const first = await prepareRun(true, "first", new Date().toISOString());
+    expect(await processEinvoiceSyncChunk(env, first.id)).toEqual({
+      status: "completed",
+    });
+    expect(await job()).toMatchObject({
+      ...schedule,
+      enabled: 1,
+      last_status: "success",
+      last_success_at: expect.any(String),
+      locked_by: null,
+    });
+
+    await db.prepare("UPDATE sync_jobs SET enabled = 0").run();
+    expect(await processEinvoiceSyncChunk(env, first.id)).toEqual({
+      status: "terminal",
+    });
+    expect(await job()).toMatchObject({ ...schedule, enabled: 0 });
+    const second = await prepareRun(true, "second", new Date().toISOString());
+    expect(await processEinvoiceSyncChunk(env, second.id)).toEqual({
+      status: "completed",
+    });
+    expect(await job()).toMatchObject({ ...schedule, enabled: 0 });
   });
 
   it.each(["settings-changed", "incomplete"])(
