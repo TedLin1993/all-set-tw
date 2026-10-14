@@ -907,8 +907,8 @@ async function postJson(
         throw new TaishinVerificationRequiredError(
           "台新銀行 session 已失效，需要重新登入。",
         );
-      // Online banking may list an account it cannot query, such as a
-      // securities settlement account; the bank answers EBF0015 for it.
+      // Online banking may list an account whose live balance it cannot
+      // query, such as a securities settlement account; it answers EBF0015.
       if (path.endsWith("/web1/rb0101/query") && detail.startsWith("(EBF0015)"))
         throw new TaishinDepositNoPermissionError();
       throw new TaishinConnectionError(
