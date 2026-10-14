@@ -670,11 +670,18 @@ export async function fetchTaishinDeposits(
         if (error instanceof TaishinDepositNoPermissionError) return undefined;
         throw error;
       });
-      // A securities settlement account can be listed but not queried; skip it
-      // and keep syncing the other accounts and credit cards.
+      // Query-only members and securities settlement accounts are listed by
+      // RB0100 with a balance, but RB0101 answers EBF0015. Keep the account
+      // with the RB0100 balance and skip only its transaction details.
       if (balancePayload === undefined) {
+        addAccount(
+          account.accountNo,
+          "TWD",
+          account.accountTypeName,
+          amount(account.balance),
+        );
         console.log(
-          JSON.stringify({ event: "taishin_deposit_no_permission_skipped" }),
+          JSON.stringify({ event: "taishin_deposit_overview_balance_used" }),
         );
         continue;
       }
