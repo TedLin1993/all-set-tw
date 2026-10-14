@@ -23,8 +23,13 @@ type AccessJwks = {
   keys: Array<JsonWebKey & { kid?: string }>;
 };
 
+const JWKS_CACHE_TTL_MS = 60 * 60 * 1000;
+
+// Per-isolate only: the Cache API is unavailable to Workers behind Access.
+// Concurrent cold requests share one fetch, and imported keys are reused.
 let cachedJwks:
-  { url: string; expiresAt: number; value: AccessJwks } | undefined;
+  { url: string; expiresAt: number; value: Promise<AccessJwks> } | undefined;
+const verifyKeys = new Map<string, Promise<CryptoKey>>();
 
 export async function verifyAccessIdentity(
   request: Request,
@@ -80,17 +85,7 @@ async function verifyAccessJwt(token: string, env: AccessAuthEnv) {
     throw new Error("Unsupported JWT header.");
 
   const teamDomain = normalizeTeamDomain(env.TEAM_DOMAIN);
-  const jwks = await getAccessJwks(teamDomain);
-  const jwk = jwks.keys.find((key) => key.kid === header.kid);
-  if (!jwk) throw new Error("JWT signing key not found.");
-
-  const key = await crypto.subtle.importKey(
-    "jwk",
-    jwk,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["verify"],
-  );
+  const key = await getVerifyKey(teamDomain, header.kid);
   const signatureValid = await crypto.subtle.verify(
     { name: "RSASSA-PKCS1-v1_5" },
     key,
@@ -111,24 +106,54 @@ async function verifyAccessJwt(token: string, env: AccessAuthEnv) {
   return payload;
 }
 
-async function getAccessJwks(teamDomain: string) {
+async function getVerifyKey(teamDomain: string, kid: string) {
+  const jwks = getAccessJwks(teamDomain);
+  const cacheKey = `${teamDomain}\u0000${kid}`;
+  const cached = verifyKeys.get(cacheKey);
+  if (cached) return cached;
+
+  const key = jwks.then((value) => {
+    const jwk = value.keys.find((candidate) => candidate.kid === kid);
+    if (!jwk) throw new Error("JWT signing key not found.");
+    return crypto.subtle.importKey(
+      "jwk",
+      jwk,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+  });
+  verifyKeys.set(cacheKey, key);
+  key.catch(() => {
+    if (verifyKeys.get(cacheKey) === key) verifyKeys.delete(cacheKey);
+  });
+  return key;
+}
+
+function getAccessJwks(teamDomain: string) {
   const url = `${teamDomain}/cdn-cgi/access/certs`;
   const now = Date.now();
   if (cachedJwks?.url === url && cachedJwks.expiresAt > now) {
     return cachedJwks.value;
   }
 
+  const value = fetchAccessJwks(url);
+  const entry = { url, expiresAt: now + JWKS_CACHE_TTL_MS, value };
+  cachedJwks = entry;
+  // Imported keys belong to the previous JWKS response.
+  verifyKeys.clear();
+  value.catch(() => {
+    if (cachedJwks === entry) cachedJwks = undefined;
+  });
+  return value;
+}
+
+async function fetchAccessJwks(url: string) {
   const response = await fetch(url);
   if (!response.ok)
     throw new Error("Could not fetch Cloudflare Access signing keys.");
 
-  const value = await response.json<AccessJwks>();
-  cachedJwks = {
-    url,
-    expiresAt: now + 60 * 60 * 1000,
-    value,
-  };
-  return value;
+  return response.json<AccessJwks>();
 }
 
 function normalizeTeamDomain(value: string) {

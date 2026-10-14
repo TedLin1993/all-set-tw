@@ -62,28 +62,47 @@ export async function resolveClassifications(
 ): Promise<Map<string, ClassificationResult>> {
   if (transactions.length === 0) return new Map();
 
-  // URL paths normalize backslashes, so compare override ids in their normalized form.
-  const normalizeId = (id: string) => id.replace(/\\/g, "/");
-  const transactionIds = [
+  const [overrides, rules] = await Promise.all([
+    listClassificationOverrides(
+      db,
+      classificationOverrideLookupIds(transactions),
+    ),
+    listEnabledClassificationRules(db),
+  ]);
+  return classifyTransactions(transactions, overrides, rules);
+}
+
+// URL paths normalize backslashes, so compare override ids in their normalized form.
+const normalizeOverrideId = (id: string) => id.replace(/\\/g, "/");
+
+export function classificationOverrideLookupIds(
+  transactions: Array<Pick<ClassifiedTransaction, "id">>,
+) {
+  return [
     ...new Set(
       transactions.flatMap((transaction) => [
         transaction.id,
-        normalizeId(transaction.id),
+        normalizeOverrideId(transaction.id),
       ]),
     ),
   ];
-  const [overrides, rules] = await Promise.all([
-    listClassificationOverrides(db, transactionIds),
-    listEnabledClassificationRules(db),
-  ]);
+}
 
+export function classifyTransactions(
+  transactions: ClassifiedTransaction[],
+  overrides: ClassificationOverrideRow[],
+  rules: ClassificationRuleMatchRow[],
+): Map<string, ClassificationResult> {
   const overrideMap = new Map(
-    overrides.map((override) => [normalizeId(override.target_id), override]),
+    overrides.map((override) => [
+      normalizeOverrideId(override.target_id),
+      override,
+    ]),
   );
   const result = new Map<string, ClassificationResult>();
 
   for (const transaction of transactions) {
-    const override = overrideMap.get(normalizeId(transaction.id));
+    const override = overrideMap.get(normalizeOverrideId(transaction.id));
     if (override) {
       result.set(transaction.id, {
         categoryId: override.category_id,
@@ -278,4 +297,6 @@ import {
   updateClassificationRule,
   updateClassificationRuleOrder,
   upsertClassificationOverride,
+  type ClassificationOverrideRow,
+  type ClassificationRuleMatchRow,
 } from "./repository";

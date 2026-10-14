@@ -482,6 +482,20 @@ X-Next-Cursor: <opaque-cursor>
 
 只有 `X-Has-More` 為 `true` 時，才需要回傳 `X-Next-Cursor`。
 
+## 讀取 API 效能
+
+線上讀取耗時主要來自 D1 往返與冷啟動，個別查詢的執行時間通常只有數毫秒。
+因此優先減少每頁請求數與循序 D1 往返，再處理查詢本身。
+`wrangler.toml` 已開啟 `observability.traces`，可在 Workers trace 檢視 D1 與對外 fetch 的耗時。
+
+- 只需帳戶與餘額的頁面使用 `GET /api/bank/accounts`，不載入交易、轉帳配對與分類。
+- 資料來源卡片的設定狀態沿用 `/api/sync-jobs` 的 `configured`；開啟連接器詳情時才讀取 `/api/connectors/:connectorId/settings`。
+- `GET /api/activity/invoice-mappings` 接受與其他區間 API 相同的 `from`／`to` 月份。發票與交易必須同一個台北日才能連結，因此頁面只讀取區間內發票的決定；未帶區間時回傳全部。
+- 銀行交易分類時，分類規則與第一輪查詢並行，當頁交易的分類覆寫與轉帳候選並行；只有頁面外的轉帳候選需要再查一次覆寫。
+- 各 connector／asset type 的最新持倉統一使用 `db/investment-positions.ts`，以一次 GROUP BY 取得最新日期，不逐列執行 MAX 子查詢。
+- Cloudflare Access 公鑰只在 isolate 記憶體快取；Access 後方的 Worker 無法使用 Cache API。同一 isolate 的並行請求共用同一次下載與匯入後的金鑰。
+- 以日期 expression 篩選區間時，需同時保留可走索引的原始欄位範圍條件，並以 EXPLAIN QUERY PLAN 確認。
+
 ## Connector 同步架構
 
 共用同步管理位於 `features/sync`，各來源實作位於 Worker 根層的 `sources`：

@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import type {
+  BankAccountResponse,
   BankDataResponse,
   CreditCardBillResponse,
 } from "@taiwan-fin-hub/shared";
@@ -18,6 +19,7 @@ import {
 } from "../../platform/month-range";
 import { validationHook } from "../../platform/validation";
 import {
+  getBankAccounts,
   getBankPage,
   getBankRange,
   getCreditCardBillPage,
@@ -40,6 +42,11 @@ export const bankRoutes = honoFactory.createApp();
 registerBankRoutes(bankRoutes);
 
 function registerBankRoutes(api: Hono<AppBindings>) {
+  // Pages that only show balances skip transaction classification.
+  api.get("/bank/accounts", async (c) =>
+    c.json((await getBankAccounts(c.env.DB)) satisfies BankAccountResponse[]),
+  );
+
   api.get(
     "/bank",
     zValidator(

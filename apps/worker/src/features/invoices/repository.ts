@@ -8,6 +8,20 @@ const invoiceDay = sql`CASE WHEN length(${invoices.invoiceDate}) > 10
   THEN COALESCE(date(${invoices.invoiceDate}, '+8 hours'), substr(${invoices.invoiceDate}, 1, 10))
   ELSE ${invoices.invoiceDate} END`;
 
+/**
+ * Taipei-day range on invoices. The raw invoice_date bounds widen by one day
+ * on each side (covering any UTC offset) so idx_invoices_page can narrow the
+ * scan before the exact day expression is evaluated.
+ */
+export function invoiceDayInRange(range: MonthDateRange) {
+  return and(
+    sql`${invoices.invoiceDate} >= date(${range.from}, '-1 day')`,
+    sql`${invoices.invoiceDate} < date(${range.to}, '+1 day')`,
+    sql`(${invoiceDay}) >= ${range.from}`,
+    sql`(${invoiceDay}) < ${range.to}`,
+  );
+}
+
 const invoiceSummaryColumns = {
   id: invoices.id,
   connectorId: sql<ConnectorId>`${invoices.connectorId}`,
@@ -85,10 +99,7 @@ export async function listInvoicesInRange(
     .where(
       days
         ? sql`(${invoiceDay}) IN (SELECT value FROM json_each(${JSON.stringify(days)}))`
-        : and(
-            sql`(${invoiceDay}) >= ${range.from}`,
-            sql`(${invoiceDay}) < ${range.to}`,
-          ),
+        : invoiceDayInRange(range),
     )
     .orderBy(
       desc(invoices.invoiceDate),

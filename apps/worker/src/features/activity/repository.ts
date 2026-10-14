@@ -10,6 +10,7 @@ import {
   asc,
   desc,
   eq,
+  inArray,
   isNotNull,
   isNull,
   ne,
@@ -18,6 +19,8 @@ import {
   sql,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
+import { invoiceDayInRange } from "../invoices/repository";
+import type { MonthDateRange } from "../../platform/month-range";
 
 const bankTx = alias(bankTransactions, "bank_tx");
 const account = alias(bankAccounts, "account");
@@ -44,7 +47,10 @@ export type MappingTransactionRow = {
   accountType: string | null;
 };
 
-export async function listInvoiceTransactionPreferences(db: D1Database) {
+export async function listInvoiceTransactionPreferences(
+  db: D1Database,
+  range?: MonthDateRange,
+) {
   const drizzle = createDrizzle(db);
   return drizzle
     .select({
@@ -58,17 +64,30 @@ export async function listInvoiceTransactionPreferences(db: D1Database) {
     })
     .from(invoiceTransactionPreferences)
     .where(
-      notExists(
-        drizzle
-          .select({ id: bankTx.id })
-          .from(bankTx)
-          .where(
-            and(
-              eq(bankTx.id, invoiceTransactionPreferences.transactionId),
-              eq(bankTx.status, "pending"),
-              isNotNull(bankTx.matchedTransactionId),
+      and(
+        // Linking requires the same Taipei day, so a page only needs the
+        // decisions for invoices inside its range.
+        range
+          ? inArray(
+              invoiceTransactionPreferences.invoiceId,
+              drizzle
+                .select({ id: invoices.id })
+                .from(invoices)
+                .where(invoiceDayInRange(range)),
+            )
+          : undefined,
+        notExists(
+          drizzle
+            .select({ id: bankTx.id })
+            .from(bankTx)
+            .where(
+              and(
+                eq(bankTx.id, invoiceTransactionPreferences.transactionId),
+                eq(bankTx.status, "pending"),
+                isNotNull(bankTx.matchedTransactionId),
+              ),
             ),
-          ),
+        ),
       ),
     )
     .orderBy(

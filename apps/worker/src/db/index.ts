@@ -2,6 +2,10 @@ export { createDrizzle } from "./client";
 export { sanitizeDatabaseError } from "./errors";
 export type { AppDatabase } from "./client";
 export * from "./schema";
+export {
+  isLatestInvestmentPosition,
+  LATEST_INVESTMENT_POSITION_SCOPES_SQL,
+} from "./investment-positions";
 
 import { eq, sql } from "drizzle-orm";
 import { createDrizzle } from "./client";

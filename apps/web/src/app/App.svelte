@@ -47,7 +47,10 @@
   const pagePromises: Partial<Record<PageKey, Promise<LazyPageModule>>> = {};
 
   const api = createApiClient();
-  let view = $state<View>("overview");
+  // Read the hash before the first render so deep links do not mount the
+  // overview page and fire its queries first.
+  const initialRouteView = parseViewHash(window.location.hash);
+  let view = $state<View>(initialRouteView ?? "overview");
   let connectorTarget = $state<ConnectorId | null>(null);
   let runtime = $state<RuntimeInfo>({ demoMode: false });
   const isDetail = (v: View): v is DetailView => Object.hasOwn(detailLabels, v);
@@ -101,9 +104,7 @@
   }
 
   onMount(() => {
-    const routeView = parseViewHash(window.location.hash);
-    if (routeView) view = routeView;
-    else
+    if (!initialRouteView)
       window.history.replaceState(
         null,
         "",

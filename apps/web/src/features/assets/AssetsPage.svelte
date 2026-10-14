@@ -2,7 +2,7 @@
   import { createQuery } from "@tanstack/svelte-query";
   import { ChevronRight } from "@lucide/svelte";
   import { exchangeRatesQuery, manualAssetsQuery } from "@/data/assets/queries";
-  import { bankQuery, creditCardBillsQuery } from "@/data/bank/queries";
+  import { bankAccountsQuery, creditCardBillsQuery } from "@/data/bank/queries";
   import {
     investmentsQuery,
     investmentTransactionsQuery,
@@ -28,7 +28,7 @@
 
   let { api }: { api: ApiClient } = $props();
 
-  const bank = createQuery(bankQuery(() => api));
+  const bank = createQuery(bankAccountsQuery(() => api));
   const bills = createQuery(creditCardBillsQuery(() => api));
   const investments = createQuery(investmentsQuery(() => api));
   const trades = createQuery(investmentTransactionsQuery(() => api));
@@ -37,7 +37,7 @@
 
   const summary = $derived(
     calculateAssetSummary({
-      bank: $bank.data ?? { accounts: [], transactions: [] },
+      bank: { accounts: $bank.data ?? [], transactions: [] },
       investments: $investments.data ?? [],
       manualAssets: $manual.data ?? [],
       rates: $rates.data,

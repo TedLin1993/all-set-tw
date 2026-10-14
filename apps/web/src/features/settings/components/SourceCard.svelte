@@ -1,14 +1,11 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { ChartCandlestick, Landmark, ReceiptText } from "@lucide/svelte";
-  import { toStore } from "svelte/store";
-  import { createQuery } from "@tanstack/svelte-query";
   import Button from "@/shared/ui/Button.svelte";
   import Badge from "@/shared/ui/Badge.svelte";
   import Card from "@/shared/ui/Card.svelte";
   import CardContent from "@/shared/ui/CardContent.svelte";
   import type { ApiClient } from "@/shared/api/client";
-  import { connectorSettingsQuery } from "@/data/connectors/queries";
   import type { ConnectorId, SyncJobRow } from "@/data/connectors/types";
   import {
     getSyncSourceStatus,
@@ -17,7 +14,6 @@
   import { formatDateTime } from "@/shared/format/financial";
   import { formatScheduleWeekdays } from "../model/schedule";
   let {
-    api,
     id,
     title,
     description,
@@ -39,17 +35,14 @@
     compactCard?: boolean;
     children?: Snippet;
   } = $props();
-  const settings = createQuery(
-    toStore(() => connectorSettingsQuery(() => api, id)),
-  );
   const job = $derived(
     (jobs ?? []).find(
       (item) => item.connectorId === id && item.scope === "all",
     ),
   );
-  const sourceStatus = $derived(
-    getSyncSourceStatus(job, $settings.data?.configured ?? job?.configured),
-  );
+  // sync-jobs already reports whether connector settings exist, so each card
+  // does not need its own settings request.
+  const sourceStatus = $derived(getSyncSourceStatus(job));
   const needsAction = $derived(sourceStatus === "needs_action");
   const scheduleLabel = $derived(
     !job?.enabled

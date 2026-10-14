@@ -70,7 +70,7 @@
     invoicesRangeQuery(() => api, currentMonthRange),
   );
   const invoiceMappings = createQuery(
-    invoiceTransactionMappingsQuery(() => api),
+    invoiceTransactionMappingsQuery(() => api, currentMonthRange),
   );
   const manualAssets = createQuery(manualAssetsQuery(() => api));
   const rates = createQuery(exchangeRatesQuery(() => api));
