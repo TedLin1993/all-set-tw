@@ -90,7 +90,7 @@ test.beforeEach(async ({ page }) => {
     }
     let body: unknown;
     if (path === "/api/runtime") body = { demoMode: true };
-    else if (path === "/api/bank") body = bankData;
+    else if (path === "/api/bank/accounts") body = bankData.accounts;
     else if (path === "/api/bank/bills")
       body = [
         {

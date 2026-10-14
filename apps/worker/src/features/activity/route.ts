@@ -4,6 +4,10 @@ import { z } from "zod";
 import type { AppBindings } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
 import { jsonError, parseKeysetPagination } from "../../platform/http";
+import {
+  monthRangeQuerySchema,
+  resolveMonthDateRange,
+} from "../../platform/month-range";
 import { validationHook } from "../../platform/validation";
 import { searchActivity } from "./search-service";
 import { listInvoiceTransactionPreferences } from "./repository";
@@ -62,8 +66,20 @@ function registerActivityRoutes(api: Hono<AppBindings>) {
     },
   );
 
-  api.get("/activity/invoice-mappings", async (c) =>
-    c.json(await listInvoiceTransactionPreferences(c.env.DB)),
+  api.get(
+    "/activity/invoice-mappings",
+    zValidator(
+      "query",
+      monthRangeQuerySchema,
+      validationHook("INVALID_REQUEST", "Invalid month range."),
+    ),
+    async (c) =>
+      c.json(
+        await listInvoiceTransactionPreferences(
+          c.env.DB,
+          resolveMonthDateRange(c.req.valid("query")),
+        ),
+      ),
   );
 
   api.put(

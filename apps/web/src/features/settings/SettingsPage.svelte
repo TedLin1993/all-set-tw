@@ -3,7 +3,6 @@
   import type { ApiClient } from "@/shared/api/client";
   import type { MobileSettingsView, View } from "@/app/types";
   import { exchangeRatesQuery } from "@/data/assets/queries";
-  import { bankQuery } from "@/data/bank/queries";
   import { classificationRulesQuery } from "@/data/classification/queries";
   import {
     connectorDefinitions,
@@ -52,7 +51,6 @@
   ];
   const jobs = createQuery(syncJobsQuery(() => api));
   const rules = createQuery(classificationRulesQuery(() => api));
-  const bank = createQuery(bankQuery(() => api));
   const rates = createQuery(exchangeRatesQuery(() => api));
   const notifications = createQuery(notificationConfigQuery(() => api));
   let selectedConnector = $state<ConnectorId | null | undefined>(undefined);
@@ -203,7 +201,6 @@
       jobsLoading={$jobs.isPending}
       jobsError={$jobs.isError}
       rules={$rules.data ?? []}
-      bank={$bank.data ?? { accounts: [], transactions: [] }}
       {navigate}
       {api}
       {openConnector}

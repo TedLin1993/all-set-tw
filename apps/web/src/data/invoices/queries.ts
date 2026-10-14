@@ -48,11 +48,14 @@ export const invoiceDetailQuery = (
     enabled: Boolean(invoiceId),
   });
 
-export const invoiceTransactionMappingsQuery = (getApi: ApiProvider) =>
+export const invoiceTransactionMappingsQuery = (
+  getApi: ApiProvider,
+  range: MonthRange,
+) =>
   queryOptions({
-    queryKey: queryKeys.invoiceTransactionMappings,
+    queryKey: queryKeys.invoiceTransactionMappingsRange(range.from, range.to),
     queryFn: () =>
       getApi().get<InvoiceTransactionPreference[]>(
-        "/api/activity/invoice-mappings",
+        `/api/activity/invoice-mappings?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
       ),
   });

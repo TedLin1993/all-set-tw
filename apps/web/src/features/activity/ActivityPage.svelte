@@ -102,7 +102,7 @@
   const bank = createQuery(bankRangeQuery(() => api, activityRange));
   const invoices = createQuery(invoicesRangeQuery(() => api, activityRange));
   const invoiceMappings = createQuery(
-    invoiceTransactionMappingsQuery(() => api),
+    invoiceTransactionMappingsQuery(() => api, activityRange),
   );
   const trades = createQuery(
     investmentTransactionsRangeQuery(() => api, activityRange),
@@ -773,8 +773,8 @@
     );
   }
   function updateMappingPreference(preference: InvoiceTransactionPreference) {
-    qc.setQueryData<InvoiceTransactionPreference[]>(
-      queryKeys.invoiceTransactionMappings,
+    qc.setQueriesData<InvoiceTransactionPreference[]>(
+      { queryKey: queryKeys.invoiceTransactionMappings },
       (current = []) => [
         preference,
         ...current.filter((row) => row.invoiceId !== preference.invoiceId),

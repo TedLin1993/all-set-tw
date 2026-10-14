@@ -10,7 +10,6 @@
   import CardContent from "@/shared/ui/CardContent.svelte";
   import type { ApiClient } from "@/shared/api/client";
   import type { View } from "@/app/types";
-  import type { BankData } from "@/data/bank/types";
   import type { ClassificationRuleRow } from "@/data/classification/types";
   import { connectorDefinitions } from "@/data/connectors/definitions";
   import {
@@ -27,7 +26,6 @@
     jobsLoading = false,
     jobsError = false,
     rules,
-    bank,
     navigate,
     openConnector,
   }: {
@@ -37,7 +35,6 @@
     jobsLoading?: boolean;
     jobsError?: boolean;
     rules: ClassificationRuleRow[];
-    bank: BankData;
     navigate: (view: View) => void;
     openConnector: (id: ConnectorId) => void;
   } = $props();

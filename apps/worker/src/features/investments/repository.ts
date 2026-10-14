@@ -2,8 +2,9 @@ import {
   createDrizzle,
   investmentPositions,
   investmentTransactions,
+  isLatestInvestmentPosition,
 } from "../../db";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, sql } from "drizzle-orm";
 import type { MonthDateRange } from "../../platform/month-range";
 
 const investmentTransactionColumns = {
@@ -75,15 +76,7 @@ export async function listLatestInvestmentPositions(
     .where(
       and(
         // Latest as_of_date is per connector + asset type, not a global max.
-        eq(
-          investmentPositions.asOfDate,
-          sql`(
-            SELECT MAX(p2.as_of_date)
-            FROM investment_positions p2
-            WHERE p2.connector_id = ${investmentPositions.connectorId}
-              AND p2.asset_type = ${investmentPositions.assetType}
-          )`,
-        ),
+        isLatestInvestmentPosition(),
         cursor
           ? sql`(
               ${investmentPositions.asOfDate} < ${cursor.asOfDate}

@@ -4,6 +4,7 @@ import {
   bankBalanceSnapshots,
   investmentPositions,
   invoices,
+  isLatestInvestmentPosition,
 } from "../../db";
 import { and, isNull, sql } from "drizzle-orm";
 
@@ -25,14 +26,8 @@ export async function loadDashboardSummary(db: D1Database) {
             ),
         })
         .from(investmentPositions)
-        .where(
-          // Latest as_of_date is per connector + asset type, not a global max.
-          sql`${investmentPositions.asOfDate} = (
-            SELECT MAX(p2.as_of_date) FROM investment_positions p2
-            WHERE p2.connector_id = ${investmentPositions.connectorId}
-              AND p2.asset_type = ${investmentPositions.assetType}
-          )`,
-        )
+        // Latest as_of_date is per connector + asset type, not a global max.
+        .where(isLatestInvestmentPosition())
         .get(),
       database
         .select({ count: sql<number>`count(*)`.as("count") })

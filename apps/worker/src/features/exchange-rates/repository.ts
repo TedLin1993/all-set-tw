@@ -4,6 +4,7 @@ import {
   createDrizzle,
   exchangeRates,
   investmentPositions,
+  isLatestInvestmentPosition,
   manualAssets,
   netWorthHistory,
 } from "../../db";
@@ -76,17 +77,7 @@ export async function listAssetCurrencyAmounts(db: D1Database) {
             ),
         })
         .from(investmentPositions)
-        .where(
-          eq(
-            investmentPositions.asOfDate,
-            sql`(
-              SELECT MAX(latest.as_of_date)
-              FROM investment_positions latest
-              WHERE latest.connector_id = ${investmentPositions.connectorId}
-                AND latest.asset_type = ${investmentPositions.assetType}
-            )`,
-          ),
-        ),
+        .where(isLatestInvestmentPosition()),
     )
     .unionAll(
       database
