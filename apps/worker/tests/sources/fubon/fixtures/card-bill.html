@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<!-- 台北富邦網銀頁面去識別化 fixture：帳號、卡號、繳款帳號、token、商店名稱已替換；金額與欄位格式保留。 -->
+<html>
+<body class="main"><form id="form1" name="form1" method="post" action="/B2C/cccqu/cccqu003/CCCQU003_Home.faces" enctype="application/x-www-form-urlencoded"><input type="hidden" name="signonToken" value="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" /><input type="hidden" name="uniqueToken" value="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" />
+		<div class="page">
+	        <dl class="top_page" style="">
+	            <dt class="path"><a href="#" onclick="parent.$('#menu_CCC').click();return false;">信用卡/簽帳金融卡</a>&nbsp;&gt;&nbsp;<a href="#" onclick="parent.doAjaxToggleFavorite('CCC02', this);return false;" class="add_Myfav"  title="加入我的最愛"></a>&nbsp;<a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&frameMode=false&popupMode=false" onclick="screenMask();trackClick('CCCQU002','CCC02','99');return true;">信用卡帳務/繳款</a>&nbsp;&gt;&nbsp;<a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&frameMode=false&popupMode=false" onclick="screenMask();trackClick('CCCQU003','CCC0202','99');return true;">帳單明細查詢</a><a href="#"></a></dt> 
+	            <dt class="f-right">
+	            </dt>
+	        </dl><div id="form1:global_warning_message"></div>
+		<div class="menu_lv3">
+        	<ul>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CCC0201" onclick="screenMask();trackClick('CCCQU002','CCC0201','07');return true;" class="">繳款及額度查詢</a>
+		            	</li>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CCC0202" onclick="screenMask();trackClick('CCCQU003','CCC0202','07');return true;" class="current">帳單明細查詢</a>
+		            	</li>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CCC0203" onclick="screenMask();trackClick('CCCQU004','CCC0203','07');return true;" class="">未出帳單消費明細</a>
+		            	</li>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CCC0204" onclick="screenMask();trackClick('CCCQU019','CCC0204','07');return true;" class="">消費分析</a>
+		            	</li>
+            </ul>
+        </div>
+		<div id="con_white">
+			<div class="area_bg">
+		        	<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+		                <tr>
+		                    <td><div class="tit1">帳單明細查詢</div></td>
+		                    <td class="rt"><a href="javascript:void(0);" onclick="window.open('/B2C/common/Print.faces?printKey=parent','','resizable=1, height=450, width=1000, menubar=1, scrollbars=yes');" title="友善列印" class="print"></a>
+		                    </td>
+		                </tr>
+		          	</table>
+					<div class="menu_lv5 clear">
+						<ul>
+							<li><a href="javascript:void(0);" onclick="doChangePeriodAction('1');" class="current">本期</a></li>
+							<li><a href="javascript:void(0);" onclick="doChangePeriodAction('2');" class="nothing">前一期</a></li>
+							<li><a href="javascript:void(0);" onclick="doChangePeriodAction('3');" class="nothing">前二期</a></li>
+								<li><a href="javascript:void(0);" onclick="doChangePeriodAction('4');" class="nothing">前三期</a></li>
+								<li><a href="javascript:void(0);" onclick="doChangePeriodAction('5');" class="nothing">前四期</a></li>
+								<li><a href="javascript:void(0);" onclick="doChangePeriodAction('6');" class="nothing">前五期</a></li>
+						</ul><input type="hidden" id="form1:period" name="form1:period" value="1" />
+ <a href="#" id="form1:doChangePeriodAction" onclick="return doChangePeriodActionOnSubmit();"></a> 
+<input type="hidden" name="form1:doChangePeriodAction" />
+					</div>
+							<div class="card_detail m10">
+								<table width="100%" border="0" cellpadding="0" cellspacing="0" style="padding-left:0px;">
+									<tr>
+										<td class="hd">帳單年月</td>
+										<td class="hd">信用額度</td>
+										<td class="hd">國內預借現金額度</td>
+										<td class="hd">帳單結帳日</td>
+										<td class="hd">繳款截止日</td>
+										<td class="hd">循環信用利率</td>
+										<td class="hd">帳單分期利率</td>
+										<td class="hd">年度累計利息/費用(註一)</td>
+									</tr>
+									<tr>
+										<td>115/09
+										</td>
+										<td>150,000
+										</td>
+										<td>150,000
+										</td>
+										<td>115/09/26
+										</td>
+										<td>115/10/12
+										</td>
+										<td>9.88%
+										</td>
+										<td>---
+										</td>
+										<td>0/365
+										</td>
+									</tr>
+								</table>
+								<div class="line"></div>
+								<table width="100%" border="0" cellpadding="0" cellspacing="0" style="padding-left:0px;">
+									<tr>
+										<td class="hd">前期應繳總額</td>
+										<td class="hd">&nbsp;</td>
+										<td class="hd">繳(退)金額</td>
+										<td class="hd">&nbsp;</td>
+										<td class="hd">本期調整金額</td>
+										<td class="hd">&nbsp;</td>
+										<td class="hd">本期新增</td>
+										<td class="hd">&nbsp;</td>
+										<td class="hd">本期應繳總額(註三)</td>
+										<td class="hd">最低應繳金額</td>
+										<td class="hd">結帳日循環信用本金(註二)</td>
+									</tr>
+									<tr>
+										<td>3,480
+										</td>
+										<td>-</td>
+										<td>3,480
+										</td>
+										<td>-</td>
+										<td>0
+										</td>
+										<td>+</td>
+										<td>1,340
+										</td>
+										<td>=</td>
+										<td>1,340
+										</td>
+										<td>1,000
+										</td>
+										<td>0
+										</td>
+									</tr>
+								</table>
+							</div>
+<input type="hidden" id="j_id992388397_72b3f44e:dataGridCurrentPage" name="j_id992388397_72b3f44e:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id992388397_72b3f44e:dataGridCurrentPageSize" name="j_id992388397_72b3f44e:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id992388397_72b3f44e:dataGridOrderStatus" name="j_id992388397_72b3f44e:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" id="form1:j_id992388397_72b3f44e_DataGridBody">
+<tr>
+<td><div class="txt">您已辦妥台北富邦自動轉帳,自動扣繳帳號:01234500**4321     扣帳金額:本期應繳總額</div></td>
+</tr>
+</table>
+<input type="hidden" id="j_id992388397_72b3f453:dataGridCurrentPage" name="j_id992388397_72b3f453:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id992388397_72b3f453:dataGridCurrentPageSize" name="j_id992388397_72b3f453:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id992388397_72b3f453:dataGridOrderStatus" name="j_id992388397_72b3f453:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1_c" id="form1:j_id992388397_72b3f453_DataGridBody">
+<tr>
+<td class="hd"  width="10%" >
+消費日期</td>
+<td class="hd" >
+消費說明</td>
+<td class="hd"  width="10%" >
+入帳日期</td>
+<td class="hd"  width="15%" >
+外幣折算日/幣別</td>
+<td class="hd"  width="15%" >
+外幣金額/消費地</td>
+<td class="hd"  width="20%" >
+臺幣金額</td>
+</tr>
+<tr>
+<td class="ct">　</td>
+<td>前期應繳總額</td>
+<td class="ct">　</td>
+<td class="ct">　</td>
+<td class="rt">　</td>
+<td class="rt">3,480</td>
+</tr>
+<tr class="odd line_btn">
+<td class="ct">115/09/14</td>
+<td>自動扣繳</td>
+<td class="ct">115/09/15</td>
+<td class="ct">　</td>
+<td class="rt">　</td>
+<td class="rt">-3,480</td>
+</tr>
+<tr>
+<td class="ct"></td>
+<td><span class="card_name">MASTER鈦金正卡末４碼9876</span></td>
+<td class="ct"></td>
+<td class="ct"></td>
+<td class="rt"></td>
+<td class="rt"></td>
+</tr>
+<tr>
+<td class="ct">115/09/09</td>
+<td>測試商店一號</td>
+<td class="ct">115/09/10</td>
+<td class="ct">TWD</td>
+<td class="rt"></td>
+<td class="rt">1,050</td>
+</tr>
+<tr>
+<td class="ct">115/09/09</td>
+<td>測試商店一號</td>
+<td class="ct">115/09/10</td>
+<td class="ct">TWD</td>
+<td class="rt"></td>
+<td class="rt">290</td>
+</tr>
+<tr class="sum">
+<td>　</td>
+<td class="rt">本期應繳總額</td>
+<td>　</td>
+<td class="ct">TWD</td>
+<td class="rt">　</td>
+<td class="rt">1,340</td>
+</tr>
+</table>
+							<div class="btnBlock">
+								<a href="javascript:void(0);" class="btn1" onclick="$('#form1\\:doCCCQU019Action').trigger('click');">消費分析</a>
+									<a href="javascript:void(0);" class="btn1" onclick="checkImmediatelyPaymentZero('1340');">立即繳款</a>
+							</div>
+							<div class="word_area"><input type="hidden" id="j_id992388397_72b3f4bb:dataGridCurrentPage" name="j_id992388397_72b3f4bb:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id992388397_72b3f4bb:dataGridCurrentPageSize" name="j_id992388397_72b3f4bb:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id992388397_72b3f4bb:dataGridOrderStatus" name="j_id992388397_72b3f4bb:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" id="form1:j_id992388397_72b3f4bb_DataGridBody">
+<tr>
+<td colspan="2"><div class="tit">權益訊息：</div></td>
+</tr>
+</table>
+<input type="hidden" id="j_id992388397_72b3f4d0:dataGridCurrentPage" name="j_id992388397_72b3f4d0:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id992388397_72b3f4d0:dataGridCurrentPageSize" name="j_id992388397_72b3f4d0:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id992388397_72b3f4d0:dataGridOrderStatus" name="j_id992388397_72b3f4d0:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb_noline" id="form1:j_id992388397_72b3f4d0_DataGridBody">
+<tr>
+<td class="rt vtop" width="10">&#8226;</td>
+<td>您本期循環信用年利率為專案利率  9.88％，適用於115年09月份至115年11月</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>份帳單。</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10">&#8226;</td>
+<td>台端本期帳單如使用循環信用方式繳款，假設適用之循環信用利率不變，且無新增消費或</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>其他費用，而每月僅依約繳交最低應繳金額時，則繳清全部帳款所需期間約為  2期</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>（按每月一期，每期30天，含本期），應繳納總金額約為        1,340 元</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>以上僅供參考，實際狀況仍視未來各期帳款資料為準。</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10">&#8226;</td>
+<td># J卡日韓泰消費           0元，享3.0%回饋金         0元;一般消費</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>0元，享1.0%回饋金         0元;保費消費           0元，享</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>0.5%回饋金         0元(如設定保費分期則不適用回饋金)；本期退貨消費</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>0元，調整回饋金         0元；指定加碼消費           0元，回饋金</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>0元(加碼回饋規則與上限依網頁公告為準)。</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>J卡回饋金本期新增         0元+上期帳單結餘       450元-本期折抵</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>0元-本期轉換         0元=本期結餘       450元。#</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10">&#8226;</td>
+<td>預借現金額度將隨您的繳款及信用狀況變動，提供您國內外現金提領服務。本期國外預借現金上限</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>為TWD    150,000元，申請預借現金密碼或查詢預借現金可用餘額請電洽本行客服。</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10">&#8226;</td>
+<td>為保護您的權益，提醒您帳單結帳日如遇連續假日，本行將提前至該連續假日首日結算。</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10">&#8226;</td>
+<td>提醒您，國內刷卡台幣計價之交易仍有可能收取國外交易服務費</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>（如：網路交易之交易對象或支付平台所在國為國外者）。</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10">&#8226;</td>
+<td>請核對您的資料：</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>住家電話02 000*****  ，公司電話02 000*****  ，行動電話090*****00</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>(為保障您的隱私，部分資料以*為代表)，若您的資料與上述內容不符，</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>敬請來電本行客服中心修改。</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10">&#8226;</td>
+<td>【卡友信貸限時申辦】115年10月25日前申辦，您可享年利率I+ 6.42 %起</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>（目前為 8.13 %起），最高申貸額度110萬元之卡友專屬信貸優惠，</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>立即撥打申辦專線0809-01-02-03或線上申請(進入本行官網/個人貸款/</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>線上申請信貸，或輸入網址www.fubon.com/bank/PL)(前揭訊息係依您於本行留</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>存資料及信用狀況所試算，實際仍以本行核貸為準。I為本行指數型房貸基準利率，目</td>
+</tr>
+<tr>
+<td class="rt vtop" width="10"></td>
+<td>前為 1.71 %，總費用年百分率計算範例及注意事項詳帳背說明)</td>
+</tr>
+</table>
+<input type="hidden" id="j_id992388397_72b3f4dd:dataGridCurrentPage" name="j_id992388397_72b3f4dd:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id992388397_72b3f4dd:dataGridCurrentPageSize" name="j_id992388397_72b3f4dd:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id992388397_72b3f4dd:dataGridOrderStatus" name="j_id992388397_72b3f4dd:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" id="form1:j_id992388397_72b3f4dd_DataGridBody">
+<tr>
+<td colspan="8"><div class="tit m10">紅利/哩程/好多金：</div></td>
+</tr>
+</table>
+<input type="hidden" id="j_id992388397_72b3f4e2:dataGridCurrentPage" name="j_id992388397_72b3f4e2:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id992388397_72b3f4e2:dataGridCurrentPageSize" name="j_id992388397_72b3f4e2:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id992388397_72b3f4e2:dataGridOrderStatus" name="j_id992388397_72b3f4e2:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1" id="form1:j_id992388397_72b3f4e2_DataGridBody">
+<tr>
+<td class="hd" >
+卡片名稱</td>
+<td class="hd" >
+上期結餘</td>
+<td class="hd" >
+本期使用</td>
+<td class="hd" >
+本期增加</td>
+<td class="hd" >
+調整點數</td>
+<td class="hd" >
+本期結餘</td>
+<td class="hd" >
+最近到期點數</td>
+<td class="hd" >
+到期日</td>
+</tr>
+<tr>
+<td class="hd2">好多金</td>
+<td class="rt">120</td>
+<td class="rt">0</td>
+<td class="rt">15</td>
+<td class="rt">0</td>
+<td class="rt">135</td>
+<td class="rt">135</td>
+<td class="ct">116/03/31</td>
+</tr>
+</table>
+<input type="hidden" id="j_id992388397_72b3f4f7:dataGridCurrentPage" name="j_id992388397_72b3f4f7:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id992388397_72b3f4f7:dataGridCurrentPageSize" name="j_id992388397_72b3f4f7:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id992388397_72b3f4f7:dataGridOrderStatus" name="j_id992388397_72b3f4f7:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb_noline" id="form1:j_id992388397_72b3f4f7_DataGridBody">
+<tr>
+<td class="rt vtop" width="50">註一</td>
+<td>年度累計利息/費用：係指本年度截至本期結帳日止，台端使用本行信用卡已產生之利息/費用累計金額，包含台端 應繳納而尚未繳納部分。</td>
+</tr>
+<tr>
+<td class="rt vtop">註二</td>
+<td>結帳日循環信用本金：係指台端截至本期結帳日止，尚未繳款之循環信用本金，如未於本期帳單繳款期限內全額繳清，其餘額將計入次期循環信用本金(實際循環信用利息之計算請參考本行信用卡約定條款相關說明)。</td>
+</tr>
+<tr>
+<td class="rt vtop">註三</td>
+<td>本期應繳總額欄位為負值時表示您的帳上有溢繳款項，本行將抵付您後續應繳納帳款，或您可來電(02)8751-1313客服中心申請領回(程序及費用悉依本行相關規定辦理)。</td>
+</tr>
+</table>
+							</div>
+							<div class="ps_tit1">注意事項：
+							<ol>
+								<li>為符合「金融監督管理委員會指定非公務機關個人資料檔案安全維護辦法」之規定，本行網路銀行/行動銀行內，涉及個人資料之交易，部份資料將以遮蔽之方式進行保護，若導致您無法確認資料之正確性，請您至本行櫃檯辦理或洽24HR客服中心02-8751-6665將有專人竭誠為您服務。</li>
+								<li>若您卡片回饋方式為LINE Points，請至LINE查詢回饋點數。</li>
+							</ol>
+						</div>
+			</div>
+		</div>
+		<div id="pop_detail" class="popup_com" style="display:none; z-index:2000;">
+			<div class="area" style="width:250px; min-height:125px;">
+				<div class="pop_tit"><a href="javascript:void(0);" onclick="closeDetail()" class="delete">&nbsp;</a></div>
+<input type="hidden" id="payDataGrid:dataGridCurrentPage" name="payDataGrid:dataGridCurrentPage" value="1" />
+<input type="hidden" id="payDataGrid:dataGridCurrentPageSize" name="payDataGrid:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="payDataGrid:dataGridOrderStatus" name="payDataGrid:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="book_tb" id="form1:payDataGrid_DataGridBody">
+</table>
+			</div>
+		</div>
+			<div style="display: none;">
+ <a href="#" id="form1:doCCCQU019Action" onclick="return doCCCQU019ActionOnSubmit();" class="btn1">???cccqu003.button.cccqu005???</a> 
+<input type="hidden" name="form1:doCCCQU019Action" />
+ <a href="#" id="form1:doCCCTX013Action" onclick="return doCCCTX013ActionOnSubmit();" class="btn1">申請帳單分期</a> 
+<input type="hidden" name="form1:doCCCTX013Action" /> 
+			</div>
+		<div class="popup_com" id="IMMEDIATELY_PAYMENT_DIV" style="display: none;">
+			<div class="area" style="width: 400px;">
+				<div class="pop_tit">
+					立即繳款
+					<a href="javascript:void(0);" class="delete" onclick="showOrHideImmediatelyPayment();"></a>
+				</div>
+				<div class="pop_body"><span class="txt-red"><重要訊息>115年11月2日(含)起他行帳戶繳納本行信用卡款將收取交易手續費每筆10元。</span>
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+						<tr>
+							<td><div class="tit1">您可選擇以下方式繳交本期信用卡款！</div></td>
+						</tr>
+					</table>
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb2 m10">
+							<tr>
+								<td>
+									<label><input type="radio" class="paymentMethod" name="red1" value="1" />使用本行帳戶繳卡費</label>
+								</td>
+							</tr>
+							<tr>
+								<td>
+									<label><input type="radio" class="paymentMethod" name="red1" value="2" />使用他行帳戶繳卡費（富邦e化繳費網）</label>
+								</td>
+							</tr>
+							<tr>
+								<td>
+									<label><input type="radio" class="paymentMethod" name="red1" value="3" />使用他行帳戶繳卡費（網路ATM）</label>
+								</td>
+							</tr>
+					</table>
+					<div class="btnBlock">
+						<a href="javascript:void(0);" class="cancel" onclick="showOrHideImmediatelyPayment();">取消</a> 
+						<a href="javascript:void(0);" class="confirm" onclick="immediatelyPaymentSubmit();">確認</a><a href="#" onclick="return myfaces.oam.submitForm('form1','form1:j_id992388397_72b3f282:j_id1169243736_29498dab');" class="doCPYTX009Action"></a>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div class="popup_com" id="IMMEDIATELY_PAYMENT_CHECK_DIV" style="display: none;">
+			<div class="area" style="width: 500px;">
+				<div class="pop_tit">
+					提示訊息
+					<a href="javascript:void(0);" class="delete" onclick="showOrHideImmediatelyPaymentZero();"></a>
+				</div>
+				<div class="pop_body">
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb2 m10">
+						<tr>
+							<td><span class="">親愛的客戶您好：</span>
+							</td>
+						</tr>
+							<br />
+						<tr>
+							<td><span class="">您本期帳單剩餘應繳金額為0，請確認是否進行繳款？</br>建議您可查詢<a href="/B2C/dispatcher?ParamValue=~000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~" class="link1">存款交易明細</a>或<a href="/B2C/dispatcher?ParamValue=~000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~" class="link1">信用卡繳款紀錄</a>。</span>
+							</td>
+						</tr>
+					</table>
+					<div class="btnBlock">
+						<a href="javascript:void(0);" class="cancel" onclick="showOrHideImmediatelyPaymentZero();">取消</a> 
+						<a href="javascript:void(0);" class="confirm" onclick="immediatelyPaymentZeroSubmit();">確認</a>
+					</div>
+				</div>
+			</div>
+		</div>
+		<span id="form1:realMsg" style="display:none">您目前使用鍵盤輸入密碼</span><span id="form1:virtualMsg" style="display:none">您目前使用動態鍵盤輸入密碼</span><input type="hidden" id="form1:viaDynamicKeyboard" name="form1:viaDynamicKeyboard" value="true" />
+		</div>
+	    
+</body>
+</html>

@@ -18,6 +18,7 @@ import { RakutenVerificationRequiredError } from "../../sources/rakuten/connecto
 import { KgibankVerificationRequiredError } from "../../sources/kgibank/connector";
 import { MegabankVerificationRequiredError } from "../../sources/megabank/mobile-api";
 import { CtbcVerificationRequiredError } from "../../sources/ctbc/mobile-api";
+import { FubonVerificationRequiredError } from "../../sources/fubon/connector";
 
 export class SyncAlreadyRunningError extends Error {
   constructor(readonly connectorId: ConnectorId) {
@@ -53,7 +54,8 @@ export function isUserActionError(error: unknown) {
     error instanceof HncbVerificationRequiredError ||
     error instanceof RakutenVerificationRequiredError ||
     error instanceof KgibankVerificationRequiredError ||
-    error instanceof MegabankVerificationRequiredError
+    error instanceof MegabankVerificationRequiredError ||
+    error instanceof FubonVerificationRequiredError
   )
     return true;
   const message = error instanceof Error ? error.message : String(error);

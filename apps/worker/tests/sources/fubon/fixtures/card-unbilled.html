@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<!-- 台北富邦網銀頁面去識別化 fixture：帳號、卡號、繳款帳號、token、商店名稱已替換；金額與欄位格式保留。 -->
+<html>
+<body class="main"><form id="form1" name="form1" method="post" action="/B2C/cccqu/cccqu004/CCCQU004_Home.faces" enctype="application/x-www-form-urlencoded"><input type="hidden" name="signonToken" value="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" /><input type="hidden" name="uniqueToken" value="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" />
+		<div class="page">
+	        <dl class="top_page" style="">
+	            <dt class="path"><a href="#" onclick="parent.$('#menu_CCC').click();return false;">信用卡/簽帳金融卡</a>&nbsp;&gt;&nbsp;<a href="#" onclick="parent.doAjaxToggleFavorite('CCC02', this);return false;" class="add_Myfav"  title="加入我的最愛"></a>&nbsp;<a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&frameMode=false&popupMode=false" onclick="screenMask();trackClick('CCCQU002','CCC02','99');return true;">信用卡帳務/繳款</a>&nbsp;&gt;&nbsp;<a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&frameMode=false&popupMode=false" onclick="screenMask();trackClick('CCCQU004','CCC0203','99');return true;">未出帳單消費明細</a><a href="#"></a></dt> 
+	            <dt class="f-right">
+	            </dt>
+	        </dl><div id="form1:global_warning_message"></div>
+		<div class="menu_lv3">
+        	<ul>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CCC0201" onclick="screenMask();trackClick('CCCQU002','CCC0201','07');return true;" class="">繳款及額度查詢</a>
+		            	</li>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CCC0202" onclick="screenMask();trackClick('CCCQU003','CCC0202','07');return true;" class="">帳單明細查詢</a>
+		            	</li>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CCC0203" onclick="screenMask();trackClick('CCCQU004','CCC0203','07');return true;" class="current">未出帳單消費明細</a>
+		            	</li>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CCC0204" onclick="screenMask();trackClick('CCCQU019','CCC0204','07');return true;" class="">消費分析</a>
+		            	</li>
+            </ul>
+        </div>
+		<div class="page">
+			<div id="con_white">
+				<div class="area_bg">
+			            <div class="titleBlock">
+				       		<div class="f-right">
+				       			<a href="javascript:void(0)" class="download" onclick="showDonwload()" title="下載"></a><a href="javascript:void(0);" onclick="window.open('/B2C/common/Print.faces?printKey=parent','','resizable=1, height=450, width=1000, menubar=1, scrollbars=yes');" title="友善列印" class="print"></a>
+							</div>
+<input type="hidden" id="j_id1118256403_5e695bb9:dataGridCurrentPage" name="j_id1118256403_5e695bb9:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id1118256403_5e695bb9:dataGridCurrentPageSize" name="j_id1118256403_5e695bb9:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id1118256403_5e695bb9:dataGridOrderStatus" name="j_id1118256403_5e695bb9:dataGridOrderStatus" value="" />
+<table width="90%" border="0" cellpadding="0" cellspacing="0" id="form1:j_id1118256403_5e695bb9_DataGridBody">
+<tr>
+<td><div class="tit1">未出帳單消費明細</div></td>
+</tr>
+</table>
+						</div><input type="hidden" id="j_id1118256403_5e695b8e:dataGridCurrentPage" name="j_id1118256403_5e695b8e:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id1118256403_5e695b8e:dataGridCurrentPageSize" name="j_id1118256403_5e695b8e:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id1118256403_5e695b8e:dataGridOrderStatus" name="j_id1118256403_5e695b8e:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb2 m10" id="form1:j_id1118256403_5e695b8e_DataGridBody">
+<tr>
+<td class="hd" width="20%">預計結帳日</td>
+<td>2026/10/26</td>
+</tr>
+<tr>
+<td class="hd" width="20%">臺幣加總金額</td>
+<td>640</td>
+</tr>
+</table>
+<input type="hidden" id="j_id1118256403_5e695b93:dataGridCurrentPage" name="j_id1118256403_5e695b93:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id1118256403_5e695b93:dataGridCurrentPageSize" name="j_id1118256403_5e695b93:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id1118256403_5e695b93:dataGridOrderStatus" name="j_id1118256403_5e695b93:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1_c" id="form1:j_id1118256403_5e695b93_DataGridBody">
+<tr>
+<td class="hd"  width="10%" >
+消費日期</td>
+<td class="hd" >
+消費說明</td>
+<td class="hd"  width="10%" >
+入帳日期</td>
+<td class="hd"  width="15%" >
+消費卡號後四碼</td>
+<td class="hd"  width="10%" >
+外幣幣別</td>
+<td class="hd"  width="10%" >
+外幣金額</td>
+<td class="hd"  width="10%" >
+臺幣金額</td>
+<td class="hd" >
+指定消費分期</td>
+</tr>
+<tr>
+<td class="ct">   </td>
+<td class="ct"><span class="card_name">400000******9876</span></td>
+<td class="ct">   </td>
+<td class="ct">   </td>
+<td class="ct">   </td>
+<td class="rt">   </td>
+<td class="rt">   </td>
+<td class="ct">   </td>
+</tr>
+<tr>
+<td class="ct">2026/09/30</td>
+<td>測試商店一號</td>
+<td class="ct">2026/10/01</td>
+<td class="ct">9876</td>
+<td class="ct"></td>
+<td class="rt"></td>
+<td class="rt">640</td>
+<td class="ct"></td>
+</tr>
+<tr class="sum">
+<td class="rt" colspan="6">臺幣加總金額</td>
+<td class="rt">640</td>
+<td>　</td>
+</tr>
+</table>
+						<div class="btnBlock"><a href="/B2C/chmag/chmag001/CHMAG001_Home.faces" onclick="screenMask();trackClick('CHMAG001','ACM01',10);" class="btn1">記錄收支</a>
+ <a href="#" id="form1:j_id1118256403_5e695bd4" onclick="return j_id1118256403_5e695bd4OnSubmit();" class="btn1">額度調整</a> 
+<input type="hidden" name="form1:j_id1118256403_5e695bd4" />
+						</div>
+						<div class="ps_tit1">注意事項：
+							<ol>
+								<li>未出帳單消費明細為商店已請款或各項退款未結帳前之帳務，正確之帳單總額及應繳金額，仍以結帳之信用卡帳單為準。</li>
+								<li>若您卡片回饋方式為LINE Points，請至LINE查詢回饋點數。</li>
+							</ol>
+						</div>
+				</div>
+			</div>
+		</div>
+		<div id="pop_detail" class="popup_com" style="display:none; z-index:2000;">
+			<div class="area" style="width:250px; min-height:125px;">
+				<div class="pop_tit"><a href="javascript:void(0);" onclick="closeDetail()" class="delete">&nbsp;</a></div>
+<input type="hidden" id="payDataGrid:dataGridCurrentPage" name="payDataGrid:dataGridCurrentPage" value="1" />
+<input type="hidden" id="payDataGrid:dataGridCurrentPageSize" name="payDataGrid:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="payDataGrid:dataGridOrderStatus" name="payDataGrid:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="book_tb" id="form1:payDataGrid_DataGridBody">
+</table>
+			</div>
+		</div>
+			<div id="pop_download" class="popup_com" style="display:none">
+		    	<div class="area" style="width:550px;">
+		        	<div class="pop_tit">檔案下載格式 <a href="javascript:void(0);" onclick="closeDonwloadPop()" class="delete"></a></div>
+		            <div class="pop_body">
+		            	<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb2">
+				            <tr>
+				                <td class="hd" width="25%">檔案格式</td>
+				                <td>
+				                	<label><input type="radio" name="download_format" value="TXT" checked="checked" /><span class="link_txt"> TXT</span></label>
+				                    <label><input type="radio" name="download_format" value="EXCEL" /><span class="link_excel"> EXCEL</span></label>
+				                    <label><input type="radio" name="download_format" value="PDF" /><span class="link_pdf"> PDF</span></label>
+				                </td>
+				            </tr>
+				        </table>
+				        <div class="btnBlock">
+				            <a href="javascript:void(0)" class="cancel" onclick="closeDonwloadPop();">取消</a>
+				            <a href="javascript:void(0)" class="confirm" onclick="downloadSpecificFormat();">確認</a>
+				        </div>
+		            </div>
+		        </div>
+	    	</div>
+		<span id="form1:realMsg" style="display:none">您目前使用鍵盤輸入密碼</span><span id="form1:virtualMsg" style="display:none">您目前使用動態鍵盤輸入密碼</span><input type="hidden" id="form1:viaDynamicKeyboard" name="form1:viaDynamicKeyboard" value="true" />
+		</div>
+	    
+</body>
+</html>

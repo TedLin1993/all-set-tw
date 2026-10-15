@@ -460,6 +460,40 @@ export const connectorCatalog = {
       "captcha",
     ],
   },
+  fubon: {
+    id: "fubon",
+    title: "台北富邦銀行",
+    description: "臺外幣活存帳戶、餘額與臺幣交易明細；信用卡帳單與消費",
+    connectionMode: "browser_captcha_session",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: [],
+    credentialFields: [
+      { key: "userId", label: "身分證字號", type: "text" },
+      { key: "account", label: "使用者代碼", type: "text" },
+      { key: "password", label: "使用者密碼", type: "password" },
+    ],
+    secretStateFields: [
+      "browserSessionId",
+      "captcha",
+      "otpBrowserSessionId",
+      "otp",
+    ],
+    resetOnCredentialChangeFields: [
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captchaDigitCount",
+      "captcha",
+      "otpBrowserSessionId",
+      "otpExpiresAt",
+      "otp",
+    ],
+  },
 } as const satisfies Record<string, ConnectorCatalogEntry>;
 
 export type ConnectorId = keyof typeof connectorCatalog;

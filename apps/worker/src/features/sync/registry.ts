@@ -42,6 +42,11 @@ import {
   type MegabankSyncOverrides,
 } from "../../sources/megabank/sync";
 import {
+  prepareFubonCaptchaSession,
+  syncFubon,
+  type FubonSyncOverrides,
+} from "../../sources/fubon/sync";
+import {
   syncCathaybk,
   type CathaySyncOverrides,
 } from "../../sources/cathaybk/sync";
@@ -141,6 +146,11 @@ export const connectorRuntimeRegistry: Record<
     run: (env, trigger, _scope, overrides) =>
       syncMegabank(env, trigger, overrides as MegabankSyncOverrides),
     prepareChallenge: prepareMegabankCaptchaSession,
+  },
+  fubon: {
+    run: (env, trigger, _scope, overrides) =>
+      syncFubon(env, trigger, overrides as FubonSyncOverrides),
+    prepareChallenge: prepareFubonCaptchaSession,
   },
 };
 

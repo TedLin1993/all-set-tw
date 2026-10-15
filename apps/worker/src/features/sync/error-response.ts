@@ -32,6 +32,12 @@ import {
   HncbConnectionError,
 } from "../../sources/hncb/connector";
 import {
+  FubonBrowserCapacityError,
+  FubonConnectionError,
+  FubonOtpInvalidError,
+  FubonOtpRequiredError,
+} from "../../sources/fubon/connector";
+import {
   KgibankBrowserCapacityError,
   KgibankConnectionError,
 } from "../../sources/kgibank/connector";
@@ -127,6 +133,10 @@ export function classifySyncError(error: unknown): ClassifiedSyncError {
     return fail(400, "MEGABANK_SMS_OTP_REQUIRED");
   if (error instanceof MegabankOtpInvalidError)
     return fail(400, "MEGABANK_OTP_INVALID");
+  if (error instanceof FubonOtpRequiredError)
+    return fail(400, "FUBON_OTP_REQUIRED");
+  if (error instanceof FubonOtpInvalidError)
+    return fail(400, "FUBON_OTP_INVALID");
   if (
     error instanceof NeedsUserActionError ||
     error instanceof CtbcVerificationRequiredError
@@ -177,6 +187,10 @@ export function classifySyncError(error: unknown): ClassifiedSyncError {
     error instanceof MegabankProtocolError
   )
     return fail(502, "MEGABANK_CONNECTION_FAILED");
+  if (error instanceof FubonBrowserCapacityError)
+    return busy("FUBON_BROWSER_BUSY", error.retryAfterSeconds, error.message);
+  if (error instanceof FubonConnectionError)
+    return fail(502, "FUBON_CONNECTION_FAILED");
   return fail(500, "SYNC_FAILED");
 }
 

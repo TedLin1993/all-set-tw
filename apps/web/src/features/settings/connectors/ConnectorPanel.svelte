@@ -51,7 +51,7 @@
   import {
     captchaBankFailure,
     isManualCaptchaRequired,
-    isMegabankOtpRequired,
+    isBankOtpRequired,
     megabankOtpFailure,
     needsNextbankCaptcha,
   } from "./captcha-bank";
@@ -103,7 +103,11 @@
   let megabankOtp = $state("");
   let megabankOtpExpiresAt = $state<number | null>(null);
   let megabankOtpSecondsRemaining = $state(0);
-  const MEGABANK_OTP_WINDOW_MS = 3 * 60_000;
+  // 兆豐異地簡訊 3 分鐘；台北富邦雙重驗證 OTP 官方 300 秒，伺服器保留約 4.5 分鐘。
+  const otpWindowMs = $derived(
+    connectorId === "fubon" ? 4.5 * 60_000 : 3 * 60_000,
+  );
+  const otpBankName = $derived(connectorId === "fubon" ? "台北富邦" : "兆豐");
   let pendingSyncTarget = $state<SyncTarget>("default");
   let einvoiceSyncQueued = $state(false);
   let einvoiceSyncQueuedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -206,9 +210,9 @@
     )
       return code;
     if (
-      code === "MEGABANK_SMS_OTP_REQUIRED" &&
+      (code === "MEGABANK_SMS_OTP_REQUIRED" || code === "FUBON_OTP_REQUIRED") &&
       !megabankOtpStep &&
-      Date.parse(job.lastRunAt ?? "") + MEGABANK_OTP_WINDOW_MS > Date.now()
+      Date.parse(job.lastRunAt ?? "") + otpWindowMs > Date.now()
     )
       return code;
     if (
@@ -244,7 +248,10 @@
     ).includes("credit_card_bill"),
   );
   const megabankOtpActive = $derived(
-    connectorId === "megabank" && megabankOtpStep,
+    (connectorId === "megabank" || connectorId === "fubon") && megabankOtpStep,
+  );
+  const otpPattern = $derived(
+    connectorId === "fubon" ? /^\d{6}$/ : /^\d{4,8}$/,
   );
   const tdccConnectionReady = $derived(
     connectorId === "tdcc" && Boolean($settings.data?.sessionAvailable),
@@ -444,11 +451,11 @@
         return;
       }
     }
-    if (connectorId === "megabank" && isMegabankOtpRequired(e)) {
+    if (isBankOtpRequired(connectorId, e)) {
       enterMegabankOtp(
         e instanceof Error && e.message
           ? e.message
-          : "兆豐銀行已寄出簡訊驗證碼，請於三分鐘內輸入。",
+          : `${otpBankName}銀行已寄出驗證碼，請於時限內輸入。`,
         megabankOtpExpiresAt,
       );
       qc.invalidateQueries({
@@ -484,11 +491,13 @@
     if (!job?.lastErrorCode) return;
     error = "";
     const failure = syncJobFailure(job);
-    if (job.lastErrorCode === "MEGABANK_SMS_OTP_REQUIRED") {
-      const expiresAt =
-        Date.parse(job.lastRunAt ?? "") + MEGABANK_OTP_WINDOW_MS;
+    if (
+      job.lastErrorCode === "MEGABANK_SMS_OTP_REQUIRED" ||
+      job.lastErrorCode === "FUBON_OTP_REQUIRED"
+    ) {
+      const expiresAt = Date.parse(job.lastRunAt ?? "") + otpWindowMs;
       if (!(expiresAt > Date.now())) {
-        error = "兆豐簡訊驗證碼已逾時，請重新同步取得新的驗證碼。";
+        error = `${otpBankName}驗證碼已逾時，請重新同步取得新的驗證碼。`;
         return;
       }
       handleSyncFailure(failure, expiresAt);
@@ -595,11 +604,11 @@
         qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
         return;
       }
-      if (connectorId === "megabank" && isMegabankOtpRequired(e)) {
+      if (isBankOtpRequired(connectorId, e)) {
         enterMegabankOtp(
           e instanceof Error
             ? e.message
-            : "兆豐銀行已寄出簡訊驗證碼，請於三分鐘內輸入。",
+            : `${otpBankName}銀行已寄出驗證碼，請於時限內輸入。`,
         );
         qc.invalidateQueries({
           queryKey: queryKeys.connectorSettings(connectorId),
@@ -621,9 +630,13 @@
     mutationFn: () => {
       if (demoMode) throw new Error("Demo site 已停用連接器同步。");
       const trimmed = megabankOtp.trim();
-      if (!/^\d{4,8}$/.test(trimmed))
-        throw new Error("請輸入簡訊收到的 4-8 位數字驗證碼。");
-      return api.post(`/api/connectors/megabank/sync`, { otp: trimmed });
+      if (!otpPattern.test(trimmed))
+        throw new Error(
+          connectorId === "fubon"
+            ? "請輸入簡訊或 Email 收到的 6 位數字驗證碼。"
+            : "請輸入簡訊收到的 4-8 位數字驗證碼。",
+        );
+      return api.post(`/api/connectors/${connectorId}/sync`, { otp: trimmed });
     },
     onSuccess: () => {
       error = "";
@@ -645,7 +658,7 @@
         error =
           e instanceof Error
             ? e.message
-            : "兆豐銀行簡訊驗證碼不正確，請重新輸入。";
+            : `${otpBankName}銀行驗證碼不正確，請重新輸入。`;
         return;
       }
       const failure = captchaBankFailure(e);
@@ -823,7 +836,7 @@
 
   function enterMegabankOtp(
     message: string,
-    expiresAt = Date.now() + MEGABANK_OTP_WINDOW_MS,
+    expiresAt = Date.now() + otpWindowMs,
   ) {
     error = "";
     bankCaptcha = "";
@@ -854,7 +867,7 @@
       Math.ceil((megabankOtpExpiresAt - Date.now()) / 1_000),
     );
     if (megabankOtpSecondsRemaining <= 0) {
-      error = "兆豐簡訊驗證碼已逾時，請重新取得驗證碼。";
+      error = `${otpBankName}驗證碼已逾時，請重新同步。`;
       resetMegabankOtp();
     }
   }
@@ -1408,7 +1421,9 @@
                     ? "兆豐"
                     : connectorId === "rakuten"
                       ? "樂天"
-                      : "永豐"}
+                      : connectorId === "fubon"
+                        ? "台北富邦"
+                        : "永豐"}
       bind:captcha={bankCaptcha}
       captchaImage={bankCaptchaImage}
       digitCount={bankCaptchaDigitCount}
@@ -1945,7 +1960,9 @@
           <Smartphone class="size-4.5" />
         </span>
         <div>
-          <p class="text-sm font-semibold text-fg">簡訊驗證碼已寄出</p>
+          <p class="text-sm font-semibold text-fg">
+            {connectorId === "fubon" ? "雙重驗證碼已寄出" : "簡訊驗證碼已寄出"}
+          </p>
           <p class="mt-0.5 text-sm leading-relaxed text-fg/60">
             {megabankOtpMessage}
           </p>
@@ -1956,14 +1973,16 @@
       </div>
       <div class="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto]">
         <label class="grid gap-1.5 text-sm font-medium">
-          簡訊驗證碼
+          {connectorId === "fubon" ? "簡訊／Email 驗證碼" : "簡訊驗證碼"}
           <Input
             class="bg-card/80 tracking-[0.2em]"
             inputmode="numeric"
             autocomplete="one-time-code"
-            pattern={"[0-9]{4,8}"}
-            maxlength={8}
-            placeholder="4-8 位數字驗證碼"
+            pattern={connectorId === "fubon" ? "[0-9]{6}" : "[0-9]{4,8}"}
+            maxlength={connectorId === "fubon" ? 6 : 8}
+            placeholder={connectorId === "fubon"
+              ? "6 位數字驗證碼"
+              : "4-8 位數字驗證碼"}
             bind:value={megabankOtp}
           />
         </label>
@@ -1971,7 +1990,7 @@
           class="self-end"
           size="sm"
           disabled={$verifyMegabankOtp.isPending ||
-            !/^\d{4,8}$/.test(megabankOtp.trim())}
+            !otpPattern.test(megabankOtp.trim())}
           onclick={() => {
             error = "";
             $verifyMegabankOtp.mutate();
@@ -2021,6 +2040,8 @@
                       ? "中信 App 核准只適用於當次登入，目前尚未支援網銀的信任瀏覽器功能。需要兩階段驗證時請在此完成；銀行仍可能要求再次核准或換密碼。"
                       : connectorId === "rakuten"
                         ? "樂天網銀驗證碼會先以 Workers AI 自動辨識，失敗時改由人工輸入；每次同步都重新登入，結束時登出，不保留 session。"
-                        : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
+                        : connectorId === "fubon"
+                          ? "台北富邦每次同步都會自動辨識 6 位數圖形驗證碼，失敗時可改用人工輸入；同步結束後自動登出。非信任裝置需雙重驗證時，只有手動同步會寄送簡訊／Email 驗證碼，排程同步會標記需要處理。"
+                          : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
   </p>
 </Card>

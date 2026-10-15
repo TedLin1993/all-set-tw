@@ -33,6 +33,7 @@ const connectorLabels: Record<ConnectorId, string> = {
   firstbank: "第一銀行",
   megabank: "兆豐銀行",
   rakuten: "樂天國際銀行",
+  fubon: "台北富邦銀行",
 };
 
 export function syncNotificationPayload(
