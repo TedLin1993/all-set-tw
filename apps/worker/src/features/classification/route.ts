@@ -1,4 +1,10 @@
 import type { Hono } from "hono";
+import {
+  CLASSIFICATION_RULE_FIELDS,
+  CLASSIFICATION_RULE_OPERATORS,
+  type ClassificationCategoryResponse,
+  type ClassificationRuleResponse,
+} from "@taiwan-fin-hub/shared";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import type { AppBindings } from "../../platform/env";
@@ -30,8 +36,8 @@ const createCategorySchema = z.object({
 const createRuleSchema = z.object({
   categoryId: z.string().min(1).max(64),
   targetType: targetTypeSchema.optional(),
-  field: z.enum(["any_text", "description", "counterparty", "source_id"]),
-  operator: z.enum(["contains", "equals", "starts_with", "regex"]),
+  field: z.enum(CLASSIFICATION_RULE_FIELDS),
+  operator: z.enum(CLASSIFICATION_RULE_OPERATORS),
   pattern: z.string().min(1).max(300),
   priority: z.number().int().min(0).max(10_000).optional(),
   description: z.string().max(500).optional(),
@@ -40,7 +46,7 @@ const createRuleSchema = z.object({
 const updateRuleSchema = z
   .object({
     categoryId: z.string().min(1).max(64).optional(),
-    operator: z.enum(["contains", "equals", "starts_with", "regex"]).optional(),
+    operator: z.enum(CLASSIFICATION_RULE_OPERATORS).optional(),
     pattern: z.string().min(1).max(300).optional(),
     priority: z.number().int().min(0).max(10_000).optional(),
     enabled: z.boolean().optional(),
@@ -66,7 +72,11 @@ registerClassificationRoutes(classificationRoutes);
 
 function registerClassificationRoutes(api: Hono<AppBindings>) {
   api.get("/classification/categories", async (c) =>
-    c.json(await getClassificationCategories(c.env.DB)),
+    c.json(
+      (await getClassificationCategories(
+        c.env.DB,
+      )) satisfies ClassificationCategoryResponse[],
+    ),
   );
 
   api.post(
@@ -79,10 +89,10 @@ function registerClassificationRoutes(api: Hono<AppBindings>) {
     async (c) => {
       try {
         return c.json(
-          await createClassificationCategory(
+          (await createClassificationCategory(
             c.env.DB,
             c.req.valid("json").label,
-          ),
+          )) satisfies ClassificationCategoryResponse,
           201,
         );
       } catch (error) {
@@ -99,7 +109,11 @@ function registerClassificationRoutes(api: Hono<AppBindings>) {
   );
 
   api.get("/classification/rules", async (c) =>
-    c.json(await getClassificationRules(c.env.DB)),
+    c.json(
+      (await getClassificationRules(
+        c.env.DB,
+      )) satisfies ClassificationRuleResponse[],
+    ),
   );
 
   api.put(

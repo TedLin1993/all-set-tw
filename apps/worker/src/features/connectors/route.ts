@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import type { ConnectorSettingsResponse } from "@taiwan-fin-hub/shared";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import type { AppBindings } from "../../platform/env";
@@ -20,7 +21,12 @@ registerConnectorSettingsRoutes(connectorRoutes);
 
 function registerConnectorSettingsRoutes(api: Hono<AppBindings>) {
   api.get("/connectors/:connectorId/settings", async (c) =>
-    c.json(await getConnectorSettingsView(c.env, c.get("connectorId"))),
+    c.json(
+      (await getConnectorSettingsView(
+        c.env,
+        c.get("connectorId"),
+      )) satisfies ConnectorSettingsResponse,
+    ),
   );
 
   api.put(

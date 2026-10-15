@@ -53,7 +53,7 @@ export async function getConnectorSettingsView(
       configEncryptionKey(env),
     );
     credentialsComplete = connectorCatalog[connectorId].credentialFields.every(
-      (key) => typeof stored[key] === "string" && stored[key].length > 0,
+      ({ key }) => typeof stored[key] === "string" && stored[key].length > 0,
     );
     if (connectorId === "tdcc") {
       const session = stored.session;
@@ -129,7 +129,8 @@ export async function updateConnectorSettings(
 ) {
   const definition = connectorCatalog[connectorId];
   const publicKeys: readonly string[] = definition.publicFields;
-  const hasSensitive = definition.credentialFields.some(
+  const credentialKeys = definition.credentialFields.map(({ key }) => key);
+  const hasSensitive = credentialKeys.some(
     (key) => rawConfig[key] !== undefined && rawConfig[key] !== "",
   );
   const now = new Date().toISOString();
@@ -160,7 +161,7 @@ export async function updateConnectorSettings(
     };
     shouldClearCursor =
       Boolean(existing) &&
-      fieldsChanged(definition.credentialFields, storedConfig, rawConfig);
+      fieldsChanged(credentialKeys, storedConfig, rawConfig);
     if (shouldClearCursor) {
       for (const key of definition.resetOnCredentialChangeFields) {
         delete mergedConfig[key];

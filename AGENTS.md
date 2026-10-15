@@ -35,6 +35,8 @@
 - `apps/worker/migrations`、`apps/worker/schema-metadata.json`、`apps/worker/seeds`：資料庫遷移、schema 文件語意與 Demo 種子資料。
 - 根目錄 `shared/`：前後端與連接器共用的穩定型別、契約與純活動處理邏輯，以 `@taiwan-fin-hub/shared` 引用。
 - `shared/bank-api.ts`：銀行與信用卡帳單 API response 契約；前端引用，Worker 在 JSON 回傳處檢查。
+- `shared/settings-api.ts`：設定頁的排程、連接器設定狀態與分類規則 API 契約及允許值；前端引用，Worker 在驗證與 JSON 回傳處使用。
+- `shared/api-error-codes.ts`：Worker 會回傳的全部 API 錯誤代碼；Worker 回應與前端錯誤比對都以此型別檢查。
 - `apps/worker/src/sources/types.ts`：僅後端使用的 `Connector` 與 `SyncResult` 型別。
 - `docs/002-backend-architecture.md`：後端分層、相依方向與維護約定的詳細文件。
 - `docs/003-frontend-architecture.md`：前端分層、相依方向與測試 colocate 約定。

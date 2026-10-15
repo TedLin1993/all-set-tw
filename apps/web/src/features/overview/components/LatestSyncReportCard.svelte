@@ -6,6 +6,7 @@
   import { CircleCheckBig, RefreshCw, TriangleAlert } from "@lucide/svelte";
   import {
     connectorCatalog,
+    compareConnectorOrder,
     type ScheduledSyncReport,
   } from "@taiwan-fin-hub/shared";
   import { syncReportActivitiesQuery } from "@/data/sync-reports/queries";
@@ -43,6 +44,12 @@
   );
   const recoveryMessage = $derived(
     report ? syncReportRecoveryMessage(report) : null,
+  );
+  // API 依 job id 字母排序；改用與資料來源頁相同的 catalog 順序。
+  const orderedSources = $derived(
+    [...(report?.sources ?? [])].sort((left, right) =>
+      compareConnectorOrder(left.connectorId, right.connectorId),
+    ),
   );
   const newRecordItems = $derived(
     report
@@ -246,7 +253,7 @@
             <span class="hidden group-open:inline">收合各資料來源</span>
           </summary>
           <div class="mt-3 grid gap-2">
-            {#each report.sources as source (`${report.id}:${source.connectorId}`)}
+            {#each orderedSources as source (`${report.id}:${source.connectorId}`)}
               <div class="border-b border-ink/8 py-3 last:border-b-0">
                 <div
                   class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1"

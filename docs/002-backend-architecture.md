@@ -66,7 +66,9 @@ shared/
 ├── index.ts
 ├── financial-types.ts
 ├── api-types.ts
+├── api-error-codes.ts
 ├── bank-api.ts
+├── settings-api.ts
 ├── connector-catalog.ts
 └── activity-*.ts
 ```
@@ -254,12 +256,16 @@ Browser 登入前復原最多三次嘗試，只包住頁面與驗證碼準備；
 - 金融資料型別。
 - `ConnectorId` 與支援清單。
 - API success/error contract。
+- API 錯誤代碼：同步錯誤 `SyncErrorCode` 與其他 `GeneralApiErrorCode`，合併為 `ApiErrorCode`。
 - 銀行與信用卡帳單 API response contract。
+- 設定頁的排程、連接器設定狀態與分類規則 API response contract，以及排程間隔、分類規則欄位與比對方式的允許值。
 - 活動配對、去重、排序與資料組裝。
 
 不得將 Hono `Context`、D1 row 或 Puppeteer object 放入共用契約。
 
-`index.ts` 只提供匯出；金融正規化資料、API 型別與 connector catalog 分別維護於 `financial-types.ts`、`api-types.ts`／`bank-api.ts` 與 `connector-catalog.ts`。銀行 route 以 `satisfies` 在 JSON 回傳處檢查共用 response 契約；此契約描述現有 JSON 的 nullable 欄位與帳單數值 flag，與 connector 的正規化資料及 repository row 各自獨立。
+`index.ts` 只提供匯出；金融正規化資料、API 型別與 connector catalog 分別維護於 `financial-types.ts`、`api-types.ts`／`bank-api.ts`／`settings-api.ts` 與 `connector-catalog.ts`。銀行、排程、連接器設定與分類 route 以 `satisfies` 在 JSON 回傳處檢查共用 response 契約；此契約描述現有 JSON 的 nullable 欄位與帳單數值 flag，與 connector 的正規化資料及 repository row 各自獨立。
+
+允許值以 `as const` 陣列放在 `shared/`（例如 `SYNC_INTERVAL_MINUTES`、`CLASSIFICATION_RULE_OPERATORS`），Worker 以這些陣列建立 Zod 驗證，前端以同一陣列產生選項；Zod schema 本身留在 Worker。資料庫以一般文字或數字保存的欄位（如分類規則的 `field`／`operator`、排程的 `intervalMinutes`），response 契約維持 `string`／`number`，不宣稱比資料庫更嚴格的型別。
 
 ### `apps/worker/src/db/`
 
@@ -445,6 +451,8 @@ API error 統一為：
 - 外部 connector 暫時無法使用。
 
 Service 應使用明確的 error class 表示，route 再映射成固定 HTTP status 與 error code。
+
+所有錯誤代碼集中宣告於 `shared/api-error-codes.ts`。`jsonError`、`validationHook` 只接受 `ApiErrorCode`；`classifySyncError`、`SyncFailureInput` 與手動同步 run 的結案只接受 `SyncErrorCode`，讀出 sync job 與 run 的 errorCode 時也標為同一型別。新增或改名代碼須先修改共用型別，前端依代碼接續流程的比對會在型別檢查時一併驗證。
 
 ### 未預期錯誤
 
@@ -905,7 +913,7 @@ Connector 不得直接寫入金融資料表。
 3. 需要 Worker binding 時，在同一來源目錄建立 `connector.ts` adapter。
 4. 在同一來源目錄的 `sync.ts` 組合共用 record mapping 與 staged persistence 寫入；來源專用的配對與修復放在相鄰檔案。
 5. 在 `connectorRuntimeRegistry` 註冊手動／排程同步與 challenge handler。
-6. 前端使用受 `ConnectorFormFieldKey` 約束的欄位，不得重複維護 connector 顯示 metadata。
+6. 前端直接使用 catalog 的 `connectorList` 與 `credentialFields` 顯示資料來源與設定表單，不得重複維護 connector 顯示 metadata 或欄位標籤。
 7. 透過 migration 建立預設停用的 `all` sync job。
 8. 依四類核心風險完成必要驗證，不逐層建立相同行為的模擬測試。
 

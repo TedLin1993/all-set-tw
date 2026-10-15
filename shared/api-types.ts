@@ -1,3 +1,4 @@
+import type { ApiErrorCode } from "./api-error-codes";
 import type { ConnectorId } from "./connector-catalog";
 
 export interface Summary {
@@ -6,13 +7,6 @@ export interface Summary {
   totalInvestmentValue: number;
   bankAccountCount: number;
   totalBankBalance: number;
-}
-
-export interface ConnectorSettingsMetadata {
-  connectorId: string;
-  configured: boolean;
-  updatedAt?: string;
-  publicConfig?: Record<string, unknown> | null;
 }
 
 export interface SyncResponse {
@@ -103,7 +97,7 @@ export interface NotificationConfig {
 export interface ApiErrorResponse {
   success: false;
   error: {
-    code: string;
+    code: ApiErrorCode;
     message: string;
   };
 }

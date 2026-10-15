@@ -1,6 +1,6 @@
-import { ApiRequestError } from "@/shared/api/client";
+import { ApiRequestError, type ApiRequestErrorCode } from "@/shared/api/client";
 
-const INVALIDATED_CAPTCHA_SESSION_CODES = new Set([
+const INVALIDATED_CAPTCHA_SESSION_CODES = new Set<ApiRequestErrorCode>([
   "USER_ACTION_REQUIRED",
   "TAISHIN_BROWSER_BUSY",
   "TAISHIN_CONNECTION_FAILED",
@@ -17,7 +17,7 @@ export function isManualCaptchaRequired(error: unknown) {
   );
 }
 
-export function browserCaptchaFailure(error: unknown) {
+export function captchaBankFailure(error: unknown) {
   const message = error instanceof Error ? error.message : "驗證或同步失敗";
   const sessionInvalidated =
     error instanceof ApiRequestError &&
