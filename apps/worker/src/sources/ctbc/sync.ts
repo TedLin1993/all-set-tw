@@ -108,6 +108,8 @@ export async function syncCtbc(
   try {
     const fetcher = createCtbcFetch(env);
     const connector = createCtbcConnector(fetcher, {
+      foreignBalancesOnly: env.CTBC_FOREIGN_BALANCE_TEST === "1",
+      includeCreditCardsInBalanceTest: env.CTBC_CREDIT_CARD_TEST === "1",
       allowInteractiveVerification: trigger === "manual",
       onDeviceSeed: async (seed) => {
         config.deviceSeed = seed;
@@ -134,9 +136,12 @@ export async function syncCtbc(
   const bankBalanceSnapshots = result.bankBalanceSnapshots ?? [];
   const bankTransactions = result.bankTransactions ?? [];
   const creditCardBills = result.creditCardBills ?? [];
-  console.log(
-    `[sync] ${connectorId}/${scope}: accounts=${bankAccounts.length} snapshots=${bankBalanceSnapshots.length} transactions=${bankTransactions.length} bills=${creditCardBills.length}`,
-  );
+  if (env.CTBC_FOREIGN_BALANCE_TEST === "1")
+    console.log("[sync] ctbc: data parsed for isolated test");
+  else
+    console.log(
+      `[sync] ${connectorId}/${scope}: accounts=${bankAccounts.length} snapshots=${bankBalanceSnapshots.length} transactions=${bankTransactions.length} bills=${creditCardBills.length}`,
+    );
 
   const now = new Date().toISOString();
   const records: SyncWriteRecord[] = [

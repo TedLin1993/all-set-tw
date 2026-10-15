@@ -204,6 +204,82 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("從信用卡帳戶可開啟交易明細，包含已入帳與待入帳", async ({ page }) => {
+  await page.clock.setFixedTime(new Date("2026-10-15T04:00:00Z"));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/bank**", async (route) => {
+    if (new URL(route.request().url()).pathname !== "/api/bank")
+      return route.fallback();
+    await route.fulfill({
+      json: {
+        accounts: bankData.accounts,
+        transactions: [
+          {
+            id: "synthetic-posted",
+            connectorId: "taishin",
+            sourceId: "synthetic-posted",
+            accountId: "taishin-card",
+            accountType: "credit",
+            postedDate: "2026-10-12",
+            authorizedAt: "2026-10-11",
+            amount: -12.34,
+            currency: "TWD",
+            description: "合成未出帳消費",
+            status: "posted",
+            excludedFromCalculation: false,
+          },
+          {
+            id: "synthetic-pending",
+            connectorId: "taishin",
+            sourceId: "synthetic-pending",
+            accountId: "taishin-card",
+            accountType: "credit",
+            authorizedAt: "2026-10-14",
+            amount: -7,
+            currency: "TWD",
+            description: "合成即時授權",
+            status: "pending",
+            excludedFromCalculation: false,
+          },
+        ],
+      },
+    });
+  });
+  await page.route(
+    /\/api\/(invoices|activity\/invoice-mappings|classification\/categories)(\?|$)/,
+    (route) => route.fulfill({ json: [] }),
+  );
+  await page.goto("/#/assets");
+  const ledger = page
+    .locator('section[aria-label="資產清冊"]')
+    .filter({ visible: true });
+  await ledger.getByRole("button", { name: /^台新銀行/ }).click();
+  await ledger
+    .getByRole("link", { name: "查看信用卡交易與待入帳" })
+    .first()
+    .click();
+  await expect(page).toHaveURL(/#\/activity$/);
+  await page.getByRole("tab", { name: "信用卡", exact: true }).click();
+  await expect(
+    page
+      .getByText("合成未出帳消費", { exact: true })
+      .filter({ visible: true })
+      .first(),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByText("合成即時授權", { exact: true })
+      .filter({ visible: true })
+      .first(),
+  ).toBeVisible();
+  await expect(
+    page.getByText("已入帳", { exact: true }).filter({ visible: true }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByText("待入帳", { exact: true }).filter({ visible: true }).first(),
+  ).toBeVisible();
+});
+
 test("資產清冊區分待繳與未知金額，並可新增手動資產", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/#/assets");

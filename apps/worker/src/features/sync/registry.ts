@@ -151,6 +151,12 @@ export function runConnectorSync(
   scope: SyncScope = SYNC_SCOPE_ALL,
   overrides: Record<string, unknown> = {},
 ) {
+  if (
+    env.CTBC_FOREIGN_BALANCE_TEST === "1" &&
+    (connectorId !== "ctbc" || trigger !== "manual")
+  ) {
+    throw new Error("測試站只允許手動同步中國信託外幣餘額與指定範圍信用卡。");
+  }
   const supportedScopes: readonly string[] =
     connectorCatalog[connectorId].scopes;
   if (!supportedScopes.includes(scope)) {

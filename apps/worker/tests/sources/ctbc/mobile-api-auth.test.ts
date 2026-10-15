@@ -3,7 +3,10 @@ import {
   createCtbcConnector,
   type CtbcFetch,
 } from "../../../src/sources/ctbc/mobile-api";
-import type { CtbcPendingSession } from "../../../src/sources/ctbc/protocol";
+import type {
+  CtbcConfig,
+  CtbcPendingSession,
+} from "../../../src/sources/ctbc/protocol";
 
 const credentials = {
   userId: "synthetic-id",
@@ -31,7 +34,18 @@ function bankApi(loginResponses: Response[]) {
     }),
     ...loginResponses,
   ];
-  const fetcher: CtbcFetch = vi.fn(async () => {
+  const fetcher: CtbcFetch = vi.fn(async (_input, init) => {
+    // Login tests use the official no-FX-account branch; FX wire cases live
+    // in foreign-deposits.test.ts rather than being inferred from card data.
+    if (String(init?.body).includes('"/twrbm-fx/qu001/010"'))
+      return Response.json({
+        code: "0000",
+        rsData: {
+          fxAcctSummaryResponse: {
+            demDepBalSummaryResponse: { rspCode: "0000", infoList: [] },
+          },
+        },
+      });
     const response = responses.shift();
     if (!response) throw new Error("Unexpected bank request");
     return response;
@@ -78,6 +92,403 @@ function expectPrivateValuesAbsent(logged: string) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("中信登入診斷的憑證保護", () => {
+  it("卡片對照診斷僅查總覽一次，不回傳卡名、末碼、卡號或未知欄位值", async () => {
+    const fetcher = bankApi([
+      loginResponse({ code: "0000", rsData: {} }),
+      Response.json({
+        code: "0000",
+        rsData: {
+          cardDataList: [
+            {
+              cardNoSuffixFour: "unavailable",
+              cardNo: "****1357",
+              cardName: "private-card-name",
+              unknownField: "private-card-field",
+            },
+          ],
+          billData: { TWD: {} },
+        },
+      }),
+      Response.json({ code: "0000" }),
+    ]);
+    const report =
+      await createCtbcConnector(fetcher).inspectCardMetadata(credentials);
+    expect(report.validation).toBe("inspected_without_persistence");
+    expect(report.checks).toMatchObject({
+      cardsPresent: true,
+      nonemptySuffixUnparseable: true,
+      maskedNumberFallbackAvailable: true,
+      parsedNamePairAvailable: true,
+      conflictingSuffixes: false,
+    });
+    const serialized = JSON.stringify(report);
+    for (const value of [
+      "1357",
+      "private-card-name",
+      "private-card-field",
+      "unavailable",
+    ])
+      expect(serialized).not.toContain(value);
+    const paths = vi.mocked(fetcher).mock.calls.flatMap(([, init]) => {
+      try {
+        const b = JSON.parse(String(init?.body));
+        return b.resource ? [b.resource] : [];
+      } catch {
+        return [];
+      }
+    });
+    expect(paths.filter((p) => p.startsWith("/twrbm-card/"))).toEqual([
+      "/twrbm-card/qu002/010",
+    ]);
+    expect(
+      paths.some(
+        (p) => p.startsWith("/twrbm-deposit/") || p.startsWith("/twrbm-fx/"),
+      ),
+    ).toBe(false);
+  });
+
+  it("信用卡唯讀檢查僅最新一期 TWD 與當期交易，輸出不含月份、卡號或金額", async () => {
+    const summary = { billDt: "093026", billAmt: "19.25" };
+    const bill = {
+      purchaseDt: "092626",
+      postingDt: "092726",
+      ntAmt: "19.25",
+      cardNo: "999900001234",
+      description: "synthetic-private-merchant",
+    };
+    const fetcher = bankApi([
+      loginResponse({ code: "0000", rsData: {} }),
+      Response.json({
+        code: "0000",
+        rsData: {
+          billCycle: "30",
+          cardDataList: [{ cardNo: "999900001234" }],
+          billData: {
+            TWD: {
+              "2026/09": { summary, bills: [] },
+              "2026/08": { summary, bills: [] },
+            },
+          },
+        },
+      }),
+      Response.json({ code: "0000", rsData: { summary, bills: [bill] } }),
+      Response.json({
+        code: "0000",
+        rsData: { curOptions: [{ curCode: "TWD" }] },
+      }),
+      Response.json({ code: "0000", rsData: { allItems: [] } }),
+      Response.json({ code: "0000", rsData: { allItems: [] } }),
+      Response.json({ code: "0000" }),
+    ]);
+    const report =
+      await createCtbcConnector(fetcher).inspectCreditCards(credentials);
+    expect(report.validation).toBe("parsed_without_persistence");
+    const serialized = JSON.stringify(report);
+    for (const value of [
+      "2026/09",
+      "2026/08",
+      "999900001234",
+      "19.25",
+      "synthetic-private-merchant",
+    ])
+      expect(serialized).not.toContain(value);
+    expect(serialized).toContain("purchaseDt");
+    expectPrivateValuesAbsent(serialized);
+    expect(JSON.stringify(vi.mocked(fetcher).mock.calls)).not.toContain(
+      "/twrbm-deposit/",
+    );
+  });
+
+  it("測試站正常同步僅取所有外幣餘額，沒有交易也回傳帳戶與快照", async () => {
+    const rows = ["USD", "JPY"].map((curCode, index) => ({
+      accountId: "000000001234",
+      curCode,
+      currentBal: index ? "0" : "12.3456",
+      avialBal: index ? "0" : "12.3456",
+    }));
+    const fetcher = bankApi([
+      loginResponse({ code: "0000", rsData: {} }),
+      Response.json({
+        code: "0000",
+        rsData: {
+          fxAcctSummaryResponse: {
+            demDepBalSummaryResponse: { rspCode: "0000", infoList: rows },
+          },
+        },
+      }),
+      Response.json({ code: "0000", rsData: { infoList: rows } }),
+      Response.json({ code: "0000", rsData: { infoList: rows } }),
+      Response.json({ code: "0000" }),
+    ]);
+    const result = await createCtbcConnector(fetcher, {
+      foreignBalancesOnly: true,
+    }).sync(credentials);
+    expect(result.bankAccounts?.map((row) => row.currency)).toEqual([
+      "USD",
+      "JPY",
+    ]);
+    expect(result.bankBalanceSnapshots?.map((row) => row.balance)).toEqual([
+      12.3456, 0,
+    ]);
+    expect(result.bankTransactions).toEqual([]);
+    expect(result.creditCardBills ?? []).toEqual([]);
+    const resources = vi
+      .mocked(fetcher)
+      .mock.calls.map(([, init]) => {
+        try {
+          return JSON.parse(String(init?.body)).resource;
+        } catch {
+          return undefined;
+        }
+      })
+      .filter(Boolean);
+    expect(
+      resources.filter((resource) => resource.startsWith("/twrbm-fx/")),
+    ).toEqual(["/twrbm-fx/qu002/010", "/twrbm-fx/qu002/010"]);
+    expect(
+      resources.filter((resource) => resource.startsWith("/twrbm-deposit/")),
+    ).toEqual(["/twrbm-deposit/qu001/010"]);
+    expect(
+      resources.some((resource) => resource.startsWith("/twrbm-creditcard/")),
+    ).toBe(false);
+  });
+
+  it.each([false, true])(
+    "全幣別餘額檢查不查交易或暴露數值，部分失敗=%s",
+    async (fail) => {
+      const rows = ["USD", "JPY"].map((curCode) => ({
+        accountId: "000000001234",
+        curCode,
+        currentBal: "12.3456",
+        avialBal: "12.3456",
+      }));
+      const fetcher = bankApi([
+        loginResponse({ code: "0000", rsData: {} }),
+        Response.json({
+          code: "0000",
+          rsData: {
+            fxAcctSummaryResponse: {
+              demDepBalSummaryResponse: { rspCode: "0000", infoList: rows },
+            },
+          },
+        }),
+        Response.json({ code: "0000", rsData: { infoList: rows } }),
+        Response.json(
+          fail
+            ? { code: "9999" }
+            : { code: "0000", rsData: { infoList: rows } },
+        ),
+        Response.json({ code: "0000" }),
+      ]);
+      const report = await createCtbcConnector(fetcher).inspectForeignDeposits(
+        credentials,
+        {},
+        { balancesOnly: true },
+      );
+      expect(report).toMatchObject({
+        scope: "all_foreign_demand_balances_only",
+        validation: fail ? "not_confirmed" : "parsed_without_persistence",
+        coverage: fail ? "not_confirmed" : "all_returned_accounts_validated",
+      });
+      if (fail)
+        expect(report.failureReason).toBe("initialization_query_failed");
+      else expect(report).not.toHaveProperty("failureReason");
+      expect(report.foreign.map((row) => row.stage)).toEqual([
+        "overview",
+        "initialization",
+      ]);
+      expect(JSON.stringify(vi.mocked(fetcher).mock.calls)).not.toContain(
+        "/twrbm-fx/qu002/011",
+      );
+      const serialized = JSON.stringify(report);
+      for (const value of ["USD", "JPY", "000000001234", "12.3456"])
+        expect(serialized).not.toContain(value);
+      expectPrivateValuesAbsent(serialized);
+    },
+  );
+
+  it("外幣研究格式不符時仍保留安全結構並明確標示未確認，不留下原始值", async () => {
+    const fetcher = bankApi([
+      loginResponse({ code: "0000", rsData: {} }),
+      Response.json({
+        code: "0000",
+        rsData: {
+          fxAcctSummaryResponse: {
+            demDepBalSummaryResponse: {
+              rspCode: "0000",
+              infoList: [
+                {
+                  accountId: privateFields.accountId,
+                  curCode: "USD",
+                  currentBal: privateValue,
+                },
+              ],
+            },
+          },
+        },
+      }),
+      Response.json({ code: "0000" }),
+    ]);
+    const report =
+      await createCtbcConnector(fetcher).inspectForeignDeposits(credentials);
+    expect(report.validation).toBe("not_confirmed");
+    expect(report.foreign.map((row) => row.stage)).toEqual(["overview"]);
+    expectPrivateValuesAbsent(JSON.stringify(report));
+    expect(JSON.stringify(report)).toContain("currentBal");
+  });
+
+  it("總覽檢查等待 App 核准時不查帳，核准後接續同次登入", async () => {
+    const config: CtbcConfig = {
+      ...credentials,
+      deviceCode: crypto.randomUUID(),
+    };
+    const fetcher = bankApi([
+      loginResponse({
+        code: "0000",
+        rsData: { isTwoStageLogin: true, twoStageCountDownSec: 120 },
+      }),
+      Response.json({
+        code: "0000",
+        rsData: { keepListen: false, twoStageVerifySuccess: true },
+      }),
+      Response.json({ code: "0000", rsData: {} }),
+      Response.json({
+        code: "0000",
+        rsData: {
+          twdAcctSummaryResponse: {
+            demDepBalSummaryResponse: { infoList: [] },
+          },
+        },
+      }),
+      Response.json({ code: "0000" }),
+    ]);
+    const connector = createCtbcConnector(fetcher, {
+      allowInteractiveVerification: true,
+      onPendingSession: async (pending) => {
+        config.pendingSession = pending;
+      },
+    });
+    await expect(
+      connector.inspectDepositOverview(config),
+    ).rejects.toMatchObject({ method: "app" });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(config.pendingSession).toBeDefined();
+    await expect(
+      connector.inspectDepositOverview(config, { verification: "check" }),
+    ).resolves.toHaveProperty("fields");
+    expect(config.pendingSession).toBeUndefined();
+    const requests = vi
+      .mocked(fetcher)
+      .mock.calls.slice(3)
+      .map(([, init]) => JSON.parse(String(init?.body)));
+    expect(requests.map((request) => request.resource)).toEqual([
+      "/twrbm-general/ot001/010",
+      "/twrbm-general/ot001/002",
+      "/twrbm-general/ot001/010",
+      "/twrbm-deposit/qu001/010",
+      "/twrbm-general/ot002/010",
+    ]);
+    expect(new Set(requests.map((request) => request.deviceIxd)).size).toBe(1);
+  });
+
+  it("本機結構檢查只查既有存款總覽並登出，不查明細或信用卡", async () => {
+    const fetcher = bankApi([
+      loginResponse({ code: "0000", rsData: {} }),
+      Response.json({
+        code: "0000",
+        rsData: {
+          twdAcctSummaryResponse: {
+            demDepBalSummaryResponse: {
+              infoList: [
+                { accountId: privateFields.accountId, balance: "42.125" },
+              ],
+            },
+          },
+          [privateValue]: { [privateFields.accountId]: "42.125" },
+        },
+      }),
+      Response.json({ code: "0000" }),
+    ]);
+    const result =
+      await createCtbcConnector(fetcher).inspectDepositOverview(credentials);
+    expectPrivateValuesAbsent(JSON.stringify(result));
+    expect(JSON.stringify(result)).not.toContain("42.125");
+    expect(result.fields).toContainEqual({
+      path: "$.rsData.twdAcctSummaryResponse.demDepBalSummaryResponse.infoList[*].balance",
+      type: "string",
+    });
+    const requests = vi
+      .mocked(fetcher)
+      .mock.calls.slice(3)
+      .map(([, init]) => JSON.parse(String(init?.body)).resource);
+    expect(requests).toEqual([
+      "/twrbm-general/ot001/010",
+      "/twrbm-deposit/qu001/010",
+      "/twrbm-general/ot002/010",
+    ]);
+    expect(result).not.toHaveProperty("cursor");
+    expect(result).not.toHaveProperty("bankAccounts");
+  });
+
+  it.each(["init", "query"])(
+    "存款 %s 失敗不將帳號或銀行動態鍵寫入診斷，仍然登出",
+    async (stage) => {
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      const accountId = "9876543210987654";
+      const responses = [
+        loginResponse({ code: "0000", rsData: {} }),
+        Response.json({
+          code: "0000",
+          rsData: {
+            twdAcctSummaryResponse: {
+              demDepBalSummaryResponse: {
+                infoList: [
+                  { accountId, balance: "42.125", [privateValue]: true },
+                ],
+              },
+            },
+          },
+        }),
+        ...(stage === "query"
+          ? [
+              Response.json({
+                code: "0000",
+                rsData: { accountId, [privateValue]: true },
+              }),
+            ]
+          : []),
+        Response.json({ code: "9999", message: privateValue }),
+        Response.json({ code: "0000" }),
+      ];
+      const fetcher = bankApi(responses);
+      await expect(
+        createCtbcConnector(fetcher).sync(credentials),
+      ).rejects.toMatchObject({
+        name: "CtbcConnectionError",
+      });
+      const diagnostics = warn.mock.calls.map(([value]) =>
+        JSON.parse(String(value)),
+      );
+      expect(
+        diagnostics.find(
+          (value) => value.event === `ctbc_deposit_${stage}_failed`,
+        ),
+      ).toEqual({
+        event: `ctbc_deposit_${stage}_failed`,
+      });
+      const logged = JSON.stringify(diagnostics);
+      expectPrivateValuesAbsent(logged);
+      expect(logged).not.toContain(accountId);
+      expect(logged).not.toContain(accountId.slice(-4));
+      expect(
+        JSON.parse(String(vi.mocked(fetcher).mock.calls.at(-1)?.[1]?.body))
+          .resource,
+      ).toBe("/twrbm-general/ot002/010");
+    },
+  );
+
   it("依公開 App 5.2.26 協定送出加密登入，無待驗證訊號時完成同步", async () => {
     const fetcher = bankApi([
       loginResponse({ code: "0000", rsData: { isTwoStageLogin: false } }),
@@ -124,7 +535,7 @@ describe("中信登入診斷的憑證保護", () => {
     }
     expect(String(loginInit?.body)).not.toContain(credentials.account);
     expect(String(loginInit?.body)).not.toContain(credentials.password);
-    expect(calls).toHaveLength(7);
+    expect(calls).toHaveLength(8);
     expect(JSON.parse(String(calls.at(-1)?.[1]?.body)).resource).toBe(
       "/twrbm-general/ot002/010",
     );
@@ -331,6 +742,7 @@ describe("中信登入診斷的憑證保護", () => {
       "/twrbm-general/ot001/010",
       "/twrbm-deposit/qu001/010",
       "/twrbm-card/qu002/010",
+      "/twrbm-fx/qu001/010",
       "/twrbm-general/ot002/010",
     ]);
     expect(new Set(requests.map((request) => request.deviceIxd))).toEqual(
@@ -488,6 +900,7 @@ describe("中信登入診斷的憑證保護", () => {
         "/twrbm-general/ot001/010",
         "/twrbm-deposit/qu001/010",
         "/twrbm-card/qu002/010",
+        "/twrbm-fx/qu001/010",
         "/twrbm-general/ot002/010",
       ]);
       expect(requests[2].rqData).toEqual({

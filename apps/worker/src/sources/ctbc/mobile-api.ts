@@ -1,9 +1,16 @@
+import { inspectCtbcDepositStructure } from "./deposit-structure";
+import {
+  CtbcForeignDepositError,
+  fetchCtbcForeignDeposits,
+} from "./foreign-deposits";
 import type { SyncResult } from "../types";
 import { reportSyncProgress } from "../sync-progress";
 
 import forge from "node-forge";
+import { fetchCtbcCardStatements, fetchCtbcPagedCardItems } from "./card-data";
 import {
   parseCtbcData,
+  inspectCtbcCardMetadata,
   type CtbcConfig,
   type CtbcPayloads,
   type CtbcPendingSession,
@@ -23,7 +30,6 @@ const CTBC_USER_AGENT =
 // MobileFirst client-credential value shipped in the public Android package.
 const CTBC_PUBLIC_CLIENT_TOKEN = "2ae74c0ad7a14739a2aab7340616d70e";
 const REQUEST_TIMEOUT_MS = 45_000;
-const MAX_PAGES = 20;
 const PASSWORD_CHANGE_MESSAGE =
   "中國信託要求變更密碼，自動同步已暫停。請至官方 App 完成變更，再更新這裡的密碼並手動同步。";
 
@@ -87,6 +93,8 @@ export type CtbcSyncOverrides = {
 };
 
 type CtbcConnectorOptions = {
+  foreignBalancesOnly?: boolean;
+  includeCreditCardsInBalanceTest?: boolean;
   allowInteractiveVerification?: boolean;
   onDeviceSeed?: (seed: string) => Promise<void>;
   onPendingSession?: (session: CtbcPendingSession | undefined) => Promise<void>;
@@ -178,59 +186,286 @@ export function createCtbcConnector(
   fetcher: CtbcFetch = globalThis.fetch.bind(globalThis),
   options: CtbcConnectorOptions = {},
 ) {
+  // One lifecycle for normal sync and the local overview-only inspection.
+  // Approval, resume and logout semantics stay identical.
+  async function withSession<T>(
+    config: CtbcConfig,
+    overrides: CtbcSyncOverrides,
+    read: (session: CtbcMobileSession) => Promise<T>,
+  ): Promise<T> {
+    const credentials = requireCtbcCredentials(config);
+    const session = new CtbcMobileSession(
+      fetcher,
+      config.deviceCode ?? crypto.randomUUID(),
+      config.deviceSeed ?? config.pendingSession?.seed,
+      options,
+    );
+    try {
+      if (overrides.verification === "restart") {
+        if (!options.allowInteractiveVerification)
+          throw new CtbcVerificationRequiredError("請手動重新開始中信驗證。");
+        await options.onPendingSession?.(undefined);
+      } else if (config.pendingSession) {
+        await session.resumeLogin(config.pendingSession, overrides);
+      } else if (overrides.verification || overrides.otp) {
+        throw new CtbcVerificationExpiredError();
+      }
+      if (!session.isLoggedIn) {
+        await session.bootstrap();
+        await session.login(credentials);
+      }
+      return await read(session);
+    } catch (error) {
+      throw classifyCtbcError(error);
+    } finally {
+      await session.logout();
+    }
+  }
+
   return {
     id: "ctbc" as const,
     name: "中國信託商業銀行",
+
+    /** Local-only inspection; no cursor, normalized financial data or D1 write. */
+    async inspectDepositOverview(
+      config: CtbcConfig,
+      overrides: CtbcSyncOverrides = {},
+    ) {
+      return withSession(config, overrides, async (session) =>
+        inspectCtbcDepositStructure(
+          await session.resource(DEPOSIT_OVERVIEW_RESOURCE, {}),
+        ),
+      );
+    },
+
+    /** Local-only card metadata inspection: a single overview, no detail feeds. */
+    async inspectCardMetadata(
+      config: CtbcConfig,
+      overrides: CtbcSyncOverrides = {},
+    ) {
+      return withSession(config, overrides, async (session) => {
+        const overview = await session.resource(CREDIT_CARD_BILLS_RESOURCE, {});
+        const data = responseData(overview);
+        return {
+          scope: "ctbc_card_metadata_overview_only",
+          structure: inspectCtbcDepositStructure(
+            { rsData: { cardDataList: data.cardDataList } },
+            "card_overview",
+          ),
+          checks: inspectCtbcCardMetadata(overview),
+          validation: "inspected_without_persistence",
+        };
+      });
+    },
+
+    /** Local research scope: one selected currency and one calendar month. */
+    async inspectForeignDeposits(
+      config: CtbcConfig,
+      overrides: CtbcSyncOverrides = {},
+      scope: { currency?: string; month?: string; balancesOnly?: boolean } = {},
+    ) {
+      return withSession(config, overrides, async (session) => {
+        const overview = await session.resource(DEPOSIT_OVERVIEW_RESOURCE, {});
+        const structures: Array<{
+          stage: string;
+          structure: ReturnType<typeof inspectCtbcDepositStructure>;
+        }> = [];
+        let validation = "parsed_without_persistence";
+        let coverage = "not_confirmed";
+        let failureReason: string | undefined;
+        try {
+          const result = await fetchCtbcForeignDeposits(
+            (resource, data) => session.resource(resource, data),
+            overview,
+            new Date(),
+            {
+              months: 1,
+              firstAccountOnly: !scope.balancesOnly,
+              balancesOnly: scope.balancesOnly,
+              currency: scope.currency,
+              month: scope.month,
+              onStructure: (stage, structure) => {
+                const entry = { stage, structure };
+                if (
+                  !structures.some(
+                    (existing) =>
+                      JSON.stringify(existing) === JSON.stringify(entry),
+                  )
+                )
+                  structures.push(entry);
+              },
+            },
+          );
+          coverage =
+            result.bankAccounts.length === 0
+              ? "no_foreign_accounts"
+              : "all_returned_accounts_validated";
+        } catch (error) {
+          validation = "not_confirmed";
+          failureReason =
+            error instanceof CtbcForeignDepositError
+              ? error.reason
+              : "query_or_format_unconfirmed";
+        }
+        return {
+          existingOverview: inspectCtbcDepositStructure(overview),
+          foreign: structures,
+          validation,
+          ...(failureReason ? { failureReason } : {}),
+          ...(scope.balancesOnly
+            ? { scope: "all_foreign_demand_balances_only", coverage }
+            : {}),
+        };
+      });
+    },
+
+    /** User-confirmed research: latest TWD statement, unbilled and authorizations. */
+    async inspectCreditCards(
+      config: CtbcConfig,
+      overrides: CtbcSyncOverrides = {},
+    ) {
+      return withSession(config, overrides, async (session) => {
+        const structures: Array<{
+          stage: string;
+          structure: ReturnType<typeof inspectCtbcDepositStructure>;
+        }> = [];
+        let stage = "card_overview";
+        const query = async (resource: string, data: JsonRecord) => {
+          stage =
+            resource === CREDIT_CARD_BILLS_RESOURCE
+              ? "card_overview"
+              : resource.startsWith("/twrbm-card/qu002/")
+                ? "card_statement"
+                : resource === UNBILLED_INIT_RESOURCE
+                  ? "card_unbilled_init"
+                  : "card_items";
+          const response = await session.resource(resource, data);
+          const entry = {
+            stage,
+            structure: inspectCtbcDepositStructure(
+              response,
+              stage as
+                | "card_overview"
+                | "card_statement"
+                | "card_unbilled_init"
+                | "card_items",
+            ),
+          };
+          if (
+            !structures.some(
+              (existing) => JSON.stringify(existing) === JSON.stringify(entry),
+            )
+          )
+            structures.push(entry);
+          return response;
+        };
+        try {
+          const overview = await query(CREDIT_CARD_BILLS_RESOURCE, {});
+          if (hasNoCtbcCreditCard(overview))
+            return {
+              scope: "ctbc_latest_twd_statement_unbilled_authorizations",
+              structures,
+              validation: "parsed_without_persistence",
+              coverage: "no_credit_cards",
+            };
+          const creditCards = await fetchCtbcCardStatements(query, overview, {
+            months: 1,
+            currency: "TWD",
+          });
+          await query(UNBILLED_INIT_RESOURCE, {});
+          const unbilled = await fetchCtbcPagedCardItems(
+            query,
+            UNBILLED_RESOURCE,
+            UNBILLED_PAGE_RESOURCE,
+            { curCode: "TWD" },
+            "unbilled",
+          );
+          const realtime = await fetchCtbcPagedCardItems(
+            query,
+            REALTIME_RESOURCE,
+            REALTIME_PAGE_RESOURCE,
+            {},
+            "realtime",
+          );
+          stage = "parsing";
+          parseCtbcData({
+            depositOverview: {},
+            depositTransactions: {},
+            creditCards,
+            unbilled,
+            realtime,
+          });
+          return {
+            scope: "ctbc_latest_twd_statement_unbilled_authorizations",
+            structures,
+            validation: "parsed_without_persistence",
+          };
+        } catch {
+          return {
+            scope: "ctbc_latest_twd_statement_unbilled_authorizations",
+            structures,
+            validation: "not_confirmed",
+            failureStage: stage,
+          };
+        }
+      });
+    },
 
     async sync(
       config: CtbcConfig,
       _cursor?: string,
       overrides: CtbcSyncOverrides = {},
     ): Promise<SyncResult<never>> {
-      const credentials = requireCtbcCredentials(config);
-      const session = new CtbcMobileSession(
-        fetcher,
-        config.deviceCode ?? crypto.randomUUID(),
-        config.deviceSeed ?? config.pendingSession?.seed,
-        options,
-      );
-      try {
-        if (overrides.verification === "restart") {
-          if (!options.allowInteractiveVerification)
-            throw new CtbcVerificationRequiredError("請手動重新開始中信驗證。");
-          await options.onPendingSession?.(undefined);
-        } else if (config.pendingSession) {
-          await session.resumeLogin(config.pendingSession, overrides);
-        } else if (overrides.verification || overrides.otp) {
-          throw new CtbcVerificationExpiredError();
-        }
-        if (!session.isLoggedIn) {
-          await session.bootstrap();
-          await session.login(credentials);
-        }
+      return withSession(config, overrides, async (session) => {
         reportSyncProgress("fetching");
 
         const depositOverview = await session.resource(
           DEPOSIT_OVERVIEW_RESOURCE,
           {},
         );
-        const depositTransactions = await fetchDepositTransactions(
-          session,
-          depositOverview,
-        );
-        const creditCards = await session.resource(
+        if (
+          options.foreignBalancesOnly &&
+          !options.includeCreditCardsInBalanceTest
+        ) {
+          const foreign = await fetchCtbcForeignDeposits(
+            (resource, data) => session.resource(resource, data),
+            depositOverview,
+            new Date(),
+            { balancesOnly: true },
+          );
+          return {
+            records: [],
+            ...foreign,
+            cursor: JSON.stringify({ syncedAt: new Date().toISOString() }),
+          };
+        }
+        const depositTransactions = options.foreignBalancesOnly
+          ? {}
+          : await fetchDepositTransactions(session, depositOverview);
+        let creditCards = await session.resource(
           CREDIT_CARD_BILLS_RESOURCE,
           {},
         );
         const noCreditCard = hasNoCtbcCreditCard(creditCards);
+        if (!noCreditCard)
+          creditCards = await fetchCtbcCardStatements(
+            (resource, data) => session.resource(resource, data),
+            creditCards,
+            options.foreignBalancesOnly
+              ? { months: 1, currency: "TWD" }
+              : undefined,
+          );
         // The summary call refreshes the same session data used by the official
         // App (available credit and billed/unbilled totals). Its raw response is
         // intentionally not persisted until those fields have a stable mapping.
-        if (!noCreditCard)
+        if (!noCreditCard && !options.foreignBalancesOnly)
           await session.resource(CREDIT_CARD_SUMMARY_RESOURCE, {});
         const unbilled = noCreditCard
           ? undefined
-          : await fetchUnbilledTransactions(session);
+          : await fetchUnbilledTransactions(
+              session,
+              options.foreignBalancesOnly ? "TWD" : undefined,
+            );
         const realtime = noCreditCard
           ? undefined
           : await fetchPagedCardItems(
@@ -240,23 +475,29 @@ export function createCtbcConnector(
               {},
             );
         const payloads: CtbcPayloads = {
-          depositOverview,
+          depositOverview: options.foreignBalancesOnly ? {} : depositOverview,
           depositTransactions,
           creditCards: noCreditCard ? undefined : creditCards,
           unbilled,
           realtime,
         };
-        const parsed = parseCtbcData(payloads, new Date());
+        const now = new Date();
+        const parsed = parseCtbcData(payloads, now);
+        const foreign = await fetchCtbcForeignDeposits(
+          (resource, data) => session.resource(resource, data),
+          depositOverview,
+          now,
+          options.foreignBalancesOnly ? { balancesOnly: true } : undefined,
+        );
+        parsed.bankAccounts.push(...foreign.bankAccounts);
+        parsed.bankBalanceSnapshots.push(...foreign.bankBalanceSnapshots);
+        parsed.bankTransactions.push(...foreign.bankTransactions);
         return {
           records: [],
           ...parsed,
           cursor: JSON.stringify({ syncedAt: new Date().toISOString() }),
         };
-      } catch (error) {
-        throw classifyCtbcError(error);
-      } finally {
-        await session.logout();
-      }
+      });
     },
   };
 }
@@ -682,7 +923,8 @@ class CtbcMobileSession {
     const statusCode = stringValue(response.statusCode);
     const system = stringValue(response.sys || response.systemId);
     if (
-      resource === CREDIT_CARD_BILLS_RESOURCE &&
+      (resource === CREDIT_CARD_BILLS_RESOURCE ||
+        resource.startsWith("/twrbm-fx/")) &&
       isVerificationResponse(response)
     ) {
       throw new CtbcVerificationRequiredError(
@@ -796,12 +1038,6 @@ async function fetchDepositTransactions(
       console.warn(
         JSON.stringify({
           event: "ctbc_deposit_init_failed",
-          accountIndex: account.overviewIndex,
-          accountCount: accounts.length,
-          overviewFields: account.fields,
-          requestedLast4: last4(accountId),
-          requestedLength: accountId.length,
-          requestedMasked: /[*Ｘx#•]/.test(accountId),
         }),
       );
       throw error;
@@ -818,27 +1054,9 @@ async function fetchDepositTransactions(
           type: "custom",
         });
       } catch (error) {
-        const initData = responseData(initial);
-        const firstSelection = [
-          ...arrayValue(initData.accountSelections),
-          ...arrayValue(initData.accountInfoList),
-        ].find(isRecord);
         console.warn(
           JSON.stringify({
             event: "ctbc_deposit_query_failed",
-            initFields: Object.keys(initData).sort(),
-            selectionFields: firstSelection
-              ? Object.keys(firstSelection).sort()
-              : [],
-            requestedLast4: last4(accountId),
-            queryLast4: last4(queryAccountId),
-            requestedLength: accountId.length,
-            queryLength: queryAccountId.length,
-            queryChanged: queryAccountId !== accountId,
-            requestedMasked: /\D/.test(accountId),
-            queryMasked: /\D/.test(queryAccountId),
-            startDate: range.startDate,
-            endDate: range.endDate,
           }),
         );
         throw error;
@@ -875,11 +1093,18 @@ function selectTransactionAccountId(
   );
 }
 
-async function fetchUnbilledTransactions(session: CtbcMobileSession) {
+async function fetchUnbilledTransactions(
+  session: CtbcMobileSession,
+  selectedCurrency?: string,
+) {
   const initial = await session.resource(UNBILLED_INIT_RESOURCE, {});
   const currencies = extractCurrencyCodes(responseData(initial));
   const allItems: unknown[] = [];
-  for (const currency of currencies.length ? currencies : ["TWD"]) {
+  for (const currency of selectedCurrency
+    ? [selectedCurrency]
+    : currencies.length
+      ? currencies
+      : ["TWD"]) {
     const response = await fetchPagedCardItems(
       session,
       UNBILLED_RESOURCE,
@@ -901,33 +1126,23 @@ async function fetchPagedCardItems(
   pageResource: string,
   rqData: JsonRecord,
 ) {
-  const initial = await session.resource(initialResource, rqData);
-  const data = responseData(initial);
-  const allItems = [...arrayValue(data.allItems)];
-  const pageCount = numberValue(data.pageCount) ?? 100;
-  const totalRows = numberValue(data.totalRow) ?? allItems.length;
-  const displayPaging =
-    data.displayPaging === true || data.displayPaging === "Y";
-  const totalPages = displayPaging
-    ? Math.min(MAX_PAGES, Math.max(1, Math.ceil(totalRows / pageCount)))
-    : 1;
-  for (let pageNum = 2; pageNum <= totalPages; pageNum += 1) {
-    const page = await session.resource(pageResource, { pageNum });
-    allItems.push(...arrayValue(responseData(page).allItems));
-  }
-  return { rsData: { ...data, allItems } };
+  return fetchCtbcPagedCardItems(
+    (resource, data) => session.resource(resource, data),
+    initialResource,
+    pageResource,
+    rqData,
+    initialResource === REALTIME_RESOURCE ? "realtime" : "unbilled",
+  );
 }
 
 function extractDepositAccounts(payload: JsonRecord) {
   const rsData = responseData(payload);
   const twd = recordValue(rsData.twdAcctSummaryResponse);
   const demand = recordValue(twd.demDepBalSummaryResponse);
-  return arrayValue(demand.infoList).flatMap((value, overviewIndex) => {
+  return arrayValue(demand.infoList).flatMap((value) => {
     if (!isRecord(value)) return [];
     const accountId = stringValue(value.accountId).trim();
-    return accountId
-      ? [{ accountId, fields: Object.keys(value).sort(), overviewIndex }]
-      : [];
+    return accountId ? [{ accountId }] : [];
   });
 }
 
@@ -1102,10 +1317,6 @@ function recordValue(value: unknown): JsonRecord {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
-}
-
-function last4(value: string) {
-  return value.match(/(\d{4})\D*$/)?.[1] ?? "unknown";
 }
 
 function isNonEmptyString(value: unknown): value is string {

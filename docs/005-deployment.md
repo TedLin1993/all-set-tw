@@ -2,6 +2,8 @@
 
 本文件補充 README 的部署流程，說明 Cloudflare Access、Secrets、自動更新、本機開發與既有 D1 部署。Cloudflare Dashboard 的名稱與位置可能調整；若畫面不同，請以官方文件為準。
 
+中信外幣活存餘額與信用卡明細的獨立測試使用[專用測試部署確認稿](ctbc-balance-test-deployment.md)，包含獨立 Worker、D1、Queue、Access 與限制查詢範圍的入口；不得直接沿用本文一般部署指令操作該測試站。測試部署仍須使用者確認後才執行。
+
 ## 部署前準備
 
 - [Cloudflare 帳號](https://dash.cloudflare.com/sign-up)

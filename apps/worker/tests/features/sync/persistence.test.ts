@@ -22,6 +22,8 @@ import { prepareEsunAuthorizationWrite } from "../../../src/sources/esun/authori
 import { prepareSinopacAuthorizationWrite } from "../../../src/sources/sinopac/authorizations";
 import { prepareCtbcAuthorizationWrite } from "../../../src/sources/ctbc/authorizations";
 import { prepareCardAuthorizationWrite } from "../../../src/features/sync/card-authorization-write";
+import { parseCtbcData } from "../../../src/sources/ctbc/protocol";
+import { fetchCtbcForeignDeposits } from "../../../src/sources/ctbc/foreign-deposits";
 import { parseFirstbankData } from "../../../src/sources/firstbank/protocol";
 import { parseHncbData } from "../../../src/sources/hncb/protocol";
 import { parseMegabankData } from "../../../src/sources/megabank/protocol";
@@ -161,6 +163,114 @@ describe("同步資料完整性（隔離 D1）", () => {
       ],
     });
   }
+
+  it("合成中信多幣別正規化資料保留小數與零餘額，重抓不增交易副本", async () => {
+    // Synthetic wire fixtures follow the public Android schema. This is an
+    // isolated parser-to-persistence check, not a real-bank synchronization.
+    const samples = [
+      { currency: "TWD", balance: 321, amount: -12 },
+      { currency: "USD", balance: 123.4567, amount: -0.0123 },
+      { currency: "JPY", balance: 456, amount: 1 },
+      { currency: "EUR", balance: 0, amount: -0.01 },
+    ];
+    const accountId = "000000001234";
+    const twd = parseCtbcData(
+      {
+        depositOverview: {
+          rsData: {
+            twdAcctSummaryResponse: {
+              demDepBalSummaryResponse: {
+                infoList: [
+                  { accountId, balance: "321", availableBalance: "321" },
+                ],
+              },
+            },
+          },
+        },
+        depositTransactions: {
+          rsData: {
+            detailList: [
+              {
+                sourceAccountId: accountId,
+                trnDtFull: "20260901",
+                dbAmt: "12",
+                crAmt: "0",
+              },
+            ],
+          },
+        },
+        creditCards: {},
+      },
+      new Date(now),
+    );
+    const fxRows = samples
+      .filter((row) => row.currency !== "TWD")
+      .map((row) => ({
+        accountId,
+        curCode: row.currency,
+        currentBal: String(row.balance),
+        avialBal: String(row.balance),
+      }));
+    const fx = await fetchCtbcForeignDeposits(
+      async (resource, data) =>
+        resource.endsWith("/010")
+          ? { rsData: { infoList: fxRows } }
+          : {
+              rsData: {
+                detailList: samples
+                  .filter((row) => row.currency === data.curCode)
+                  .map((row) => ({
+                    trnDtRaw: "20260901",
+                    debitAmt: row.amount < 0 ? String(-row.amount) : "0",
+                    creditAmt: row.amount > 0 ? String(row.amount) : "0",
+                  })),
+              },
+            },
+      {
+        rsData: {
+          fxAcctSummaryResponse: {
+            demDepBalSummaryResponse: { rspCode: "0000", infoList: fxRows },
+          },
+        },
+      },
+      new Date(now),
+      { months: 1 },
+    );
+    const records = [
+      ...[...twd.bankAccounts, ...fx.bankAccounts].map((row) =>
+        bankAccountRecord("ctbc", row, now),
+      ),
+      ...[...twd.bankBalanceSnapshots, ...fx.bankBalanceSnapshots].map((row) =>
+        bankBalanceSnapshotRecord("ctbc", row, now),
+      ),
+      ...[...twd.bankTransactions, ...fx.bankTransactions].map((row) =>
+        bankTransactionRecord("ctbc", row, now),
+      ),
+    ];
+    await persistStagedSyncWrite(db, { records });
+    await persistStagedSyncWrite(db, { records });
+    const accounts = await listBankAccounts(db);
+    const transactions = await listBankTransactions(db, 20);
+    expect(accounts).toHaveLength(samples.length);
+    expect(transactions).toHaveLength(samples.length);
+    for (const { currency, balance, amount } of samples) {
+      expect(accounts.find((row) => row.currency === currency)).toMatchObject({
+        currency,
+        balance,
+        availableBalance: balance,
+      });
+      expect(
+        transactions.find((row) => row.currency === currency),
+      ).toMatchObject({ currency, amount });
+    }
+    expect(
+      await db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM bank_balance_snapshots WHERE connector_id = 'ctbc'",
+        )
+        .first("count"),
+    ).toBe(samples.length);
+  });
 
   it("貸款六個 mapper 欄位經 insert/update 後可由 bank API 查詢", async () => {
     const sourceId = "loan:cathaybk:0000000000000001";
