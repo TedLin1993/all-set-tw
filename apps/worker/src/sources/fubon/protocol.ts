@@ -863,11 +863,14 @@ export function parseFubonDepositTransactionRow(
   };
 }
 
-/** 資料列是否可能被分頁截斷（列數達到頁面每頁筆數）。 */
+/** 解析成功與格式拒絕的資料列數達到每頁筆數時，頁面可能被截斷。 */
 export function isFubonTransactionPageTruncated(
   page: FubonDepositTransactionPage,
 ) {
-  return page.pageSize !== undefined && page.rows.length >= page.pageSize;
+  return (
+    page.pageSize !== undefined &&
+    page.rows.length + page.rejected.length >= page.pageSize
+  );
 }
 
 // ---------------------------------------------------------------------------

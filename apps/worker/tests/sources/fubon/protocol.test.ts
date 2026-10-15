@@ -166,6 +166,18 @@ describe("台北富邦存款", () => {
     ).toBeUndefined();
   });
 
+  it("格式不符而拒絕的資料列仍計入交易頁截斷判斷", () => {
+    const page = parseFubonDepositTransactionsPage(transactionsHtml);
+    expect(
+      isFubonTransactionPageTruncated({
+        ...page,
+        rows: page.rows.slice(0, -1),
+        rejected: ["台北富邦交易明細日期無法解析。"],
+        pageSize: page.rows.length,
+      }),
+    ).toBe(true);
+  });
+
   it("無法辨識的交易明細頁面不當成查無交易", () => {
     expect(() =>
       parseFubonDepositTransactionsPage("<html><body>系統維護中</body></html>"),
