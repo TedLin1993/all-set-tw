@@ -11,6 +11,7 @@
   import Select from "@/shared/ui/Select.svelte";
   import TimePicker from "@/shared/ui/TimePicker.svelte";
   import WeekdayPicker from "./WeekdayPicker.svelte";
+  import { syncIntervalOptions } from "../model/schedule";
   import type { ApiClient } from "@/shared/api/client";
   import { queryKeys } from "@/shared/api/query-keys";
   import { syncScheduleQuery } from "@/data/connectors/queries";
@@ -33,13 +34,6 @@
 
   const queryClient = useQueryClient();
   const schedule = createQuery(syncScheduleQuery(() => api));
-  const intervalOptions = [
-    { label: "每小時", minutes: 60 },
-    { label: "每 6 小時", minutes: 360 },
-    { label: "每 12 小時", minutes: 720 },
-    { label: "每天", minutes: 1440 },
-    { label: "每週", minutes: 10080 },
-  ];
   let intervalMinutes = $state(1440);
   let preferredTime = $state("06:00");
   let preferredWeekdays = $state([1]);
@@ -170,7 +164,7 @@
         bind:value={intervalMinutes}
         disabled={demoMode || !$schedule.data}
       >
-        {#each intervalOptions as option (option.minutes)}
+        {#each syncIntervalOptions as option (option.minutes)}
           <option value={option.minutes}>{option.label}</option>
         {/each}
       </Select>

@@ -1,3 +1,4 @@
+import type { SyncErrorCode } from "@taiwan-fin-hub/shared";
 import {
   CtbcConnectionError,
   CtbcTwoStageRequiredError,
@@ -62,7 +63,7 @@ import {
 
 export type ClassifiedSyncError = {
   status: 400 | 409 | 429 | 500 | 502 | 503;
-  code: string;
+  code: SyncErrorCode;
   message: string;
   /** 只有瀏覽器容量不足等可稍後重試的錯誤才有值。 */
   retryAfterSeconds?: number;
@@ -72,11 +73,11 @@ export type ClassifiedSyncError = {
 export function classifySyncError(error: unknown): ClassifiedSyncError {
   const fail = (
     status: ClassifiedSyncError["status"],
-    code: string,
+    code: SyncErrorCode,
     message = safeErrorMessage(error),
   ): ClassifiedSyncError => ({ status, code, message });
   const busy = (
-    code: string,
+    code: SyncErrorCode,
     retryAfterSeconds: number,
     message = safeErrorMessage(error),
   ): ClassifiedSyncError => ({ status: 429, code, message, retryAfterSeconds });

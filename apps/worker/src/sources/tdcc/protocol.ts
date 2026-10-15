@@ -6,7 +6,7 @@ import type {
   InvestmentPosition,
   InvestmentTransaction,
   NetWorthHistoryPoint,
-} from "@taiwan-fin-hub/shared";
+} from "../financial-types";
 import { z } from "zod";
 import {
   EPassbookClient,

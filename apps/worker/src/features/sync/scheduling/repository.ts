@@ -15,7 +15,7 @@ import type {
   SyncStatus,
   SyncTrigger,
 } from "../../../db";
-import type { ConnectorId } from "@taiwan-fin-hub/shared";
+import type { ConnectorId, SyncErrorCode } from "@taiwan-fin-hub/shared";
 
 export type DefaultSyncSchedule = {
   intervalMinutes: number;
@@ -137,7 +137,8 @@ export async function listSyncJobs(db: D1Database) {
       lastSuccessAt: syncJobs.lastSuccessAt,
       lastStatus: sql<SyncStatus | null>`${syncJobs.lastStatus}`,
       lastError: syncJobs.lastError,
-      lastErrorCode: syncJobs.lastErrorCode,
+      // 寫入端只接受 SyncErrorCode（見 SyncFailureInput）。
+      lastErrorCode: sql<SyncErrorCode | null>`${syncJobs.lastErrorCode}`,
       updatedAt: syncJobs.updatedAt,
     })
     .from(syncJobs)

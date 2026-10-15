@@ -1,5 +1,5 @@
 import type { SyncResult } from "../types";
-import type { BankAccount, BankTransaction } from "@taiwan-fin-hub/shared";
+import type { BankAccount, BankTransaction } from "../financial-types";
 import {
   bankBalanceSnapshotRecord,
   bankTransactionRecord,

@@ -1,10 +1,10 @@
-import type { ActivityItem } from "./activity-types";
-import { compareActivityItems, isActivityDateTime } from "./activity-list";
+import type { ActivityItem } from "./types";
+import { compareActivityItems, isActivityDateTime } from "./list";
 import type {
   MatchingTransaction,
   MatchingInvoice,
   InvoiceTransactionMatches,
-} from "./activity-matching";
+} from "./matching";
 export interface ActivityAccount {
   id: string;
   institutionName?: string | null;

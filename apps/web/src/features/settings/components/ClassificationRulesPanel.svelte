@@ -25,24 +25,30 @@
     ClassificationCategoryRow,
     ClassificationRuleRow,
   } from "@/data/classification/types";
+  import type { ClassificationRuleOperator } from "@taiwan-fin-hub/shared";
 
-  type RuleOperator = "contains" | "equals" | "starts_with" | "regex";
   type EditableRule = {
     id: string;
     categoryId: string;
     pattern: string;
-    operator: RuleOperator;
+    operator: ClassificationRuleOperator;
     excludedFromCalculation: boolean;
   };
 
   let { api }: { api: ApiClient } = $props();
 
-  const operatorLabels: Record<string, string> = {
+  const operatorLabels = {
     contains: "包含",
     equals: "完全等於",
     starts_with: "開頭為",
     regex: "符合正規表示式",
-  };
+  } satisfies Record<ClassificationRuleOperator, string>;
+  function operatorLabel(operator: string) {
+    return (
+      (operatorLabels as Record<string, string | undefined>)[operator] ??
+      operator
+    );
+  }
   const systemAutoRules = [
     {
       title: "帳戶互轉",
@@ -83,7 +89,7 @@
       id: rule.id,
       categoryId: rule.categoryId,
       pattern: rule.pattern,
-      operator: rule.operator as RuleOperator,
+      operator: rule.operator as ClassificationRuleOperator,
       excludedFromCalculation: rule.excludedFromCalculation,
     };
   }
@@ -444,8 +450,7 @@
                     {/if}
                   </div>
                   <p class="mt-1.5 break-words text-foreground/80">
-                    {operatorLabels[rule.operator] ??
-                      rule.operator}「{rule.pattern}」
+                    {operatorLabel(rule.operator)}「{rule.pattern}」
                   </p>
                 </div>
                 {#if !rule.isSystem}

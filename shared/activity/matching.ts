@@ -16,7 +16,7 @@ export interface MatchingInvoice {
   amount: number;
 }
 export interface InvoiceTransactionPreference {
-  updatedAt?: string;
+  updatedAt: string;
   invoiceId: string;
   transactionId: string | null;
   decision: "linked" | "separate";

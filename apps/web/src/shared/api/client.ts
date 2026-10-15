@@ -1,4 +1,7 @@
-import type { ApiErrorResponse } from "@taiwan-fin-hub/shared";
+import type { ApiErrorCode, ApiErrorResponse } from "@taiwan-fin-hub/shared";
+
+/** Worker 回傳的錯誤代碼，加上前端在回應不是 API 錯誤格式時使用的 `REQUEST_FAILED`。 */
+export type ApiRequestErrorCode = ApiErrorCode | "REQUEST_FAILED";
 
 export interface ApiClient {
   get<T>(path: string): Promise<T>;
@@ -14,7 +17,7 @@ function isApiError(value: unknown): value is ApiErrorResponse {
 
 export class ApiRequestError extends Error {
   constructor(
-    public readonly code: string,
+    public readonly code: ApiRequestErrorCode,
     message: string,
     public readonly status: number,
   ) {
@@ -42,7 +45,9 @@ export function createApiClient(): ApiClient {
       );
     }
     if (!response.ok) {
-      const error = isApiError(data)
+      const error: { code: ApiRequestErrorCode; message: string } = isApiError(
+        data,
+      )
         ? data.error
         : { code: "REQUEST_FAILED", message: "請求失敗。" };
       throw new ApiRequestError(error.code, error.message, response.status);

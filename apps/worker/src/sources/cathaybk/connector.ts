@@ -17,7 +17,7 @@ import type {
   BankBalanceSnapshot,
   BankTransaction,
   CreditCardBill,
-} from "@taiwan-fin-hub/shared";
+} from "../financial-types";
 import { BANK_SYNC_MONTHS } from "../sync-window";
 import { reportSyncProgress } from "../sync-progress";
 import { isNoCreditCardMessage } from "../credit-card-status";

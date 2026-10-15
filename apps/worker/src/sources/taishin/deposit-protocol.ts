@@ -4,7 +4,7 @@ import type {
   BankAccount,
   BankBalanceSnapshot,
   BankTransaction,
-} from "@taiwan-fin-hub/shared";
+} from "../financial-types";
 import { BANK_SYNC_MONTHS } from "../sync-window";
 
 // Field meanings follow the official RWD RB0100/0101/0102 and RB0800/0802 pages.

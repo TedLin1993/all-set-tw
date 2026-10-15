@@ -2,7 +2,7 @@ import type {
   BankAccount,
   BankBalanceSnapshot,
   CreditCardBill,
-} from "@taiwan-fin-hub/shared";
+} from "../financial-types";
 import { BANK_SYNC_MONTHS } from "../sync-window";
 import { SkbankProtocolError } from "./protocol";
 

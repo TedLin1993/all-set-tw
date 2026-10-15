@@ -1,4 +1,4 @@
-import type { ConnectorId } from "@taiwan-fin-hub/shared";
+import type { ConnectorId, SyncErrorCode } from "@taiwan-fin-hub/shared";
 import { and, eq, lte, sql } from "drizzle-orm";
 import { createDrizzle, manualSyncRuns, sanitizeDatabaseError } from "../../db";
 import { canonicalSyncLockRowId } from "./lock";
@@ -16,7 +16,7 @@ export type ManualSyncRunRow = {
   connectorId: ConnectorId;
   scope: string;
   status: ManualSyncRunStatus;
-  errorCode: string | null;
+  errorCode: SyncErrorCode | null;
   lastError: string | null;
   retryCount: number;
   createdAt: string;
@@ -30,7 +30,7 @@ const runSelection = {
   connectorId: sql<ConnectorId>`${manualSyncRuns.connectorId}`,
   scope: manualSyncRuns.scope,
   status: sql<ManualSyncRunStatus>`${manualSyncRuns.status}`,
-  errorCode: manualSyncRuns.errorCode,
+  errorCode: sql<SyncErrorCode | null>`${manualSyncRuns.errorCode}`,
   lastError: manualSyncRuns.lastError,
   retryCount: manualSyncRuns.retryCount,
   createdAt: manualSyncRuns.createdAt,
@@ -200,7 +200,7 @@ export async function finishManualSyncRun(
     | { status: "completed" }
     | {
         status: "failed" | "needs_user_action";
-        errorCode: string;
+        errorCode: SyncErrorCode;
         lastError: string;
       },
 ) {
@@ -229,7 +229,7 @@ export async function closeQueuedManualSyncRun(
   id: string,
   input: {
     status: "failed" | "cancelled";
-    errorCode: string;
+    errorCode: SyncErrorCode;
     lastError: string;
   },
 ) {
@@ -251,7 +251,11 @@ export async function closeQueuedManualSyncRun(
 
 export async function expireQueuedManualSyncRuns(
   db: D1Database,
-  input: { createdBefore: string; errorCode: string; lastError: string },
+  input: {
+    createdBefore: string;
+    errorCode: SyncErrorCode;
+    lastError: string;
+  },
 ) {
   const now = new Date().toISOString();
   await createDrizzle(db)
@@ -277,7 +281,7 @@ export async function expireQueuedManualSyncRuns(
 /** Invocation 中斷後 connector lock 會停止續租；沒有有效 lock 的 running run 視為中斷。 */
 export async function failInterruptedManualSyncRuns(
   db: D1Database,
-  input: { errorCode: string; lastError: string },
+  input: { errorCode: SyncErrorCode; lastError: string },
 ) {
   const now = new Date().toISOString();
   await createDrizzle(db)

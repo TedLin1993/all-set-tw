@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { BankAccount, BankBalanceSnapshot } from "@taiwan-fin-hub/shared";
+import type { BankAccount, BankBalanceSnapshot } from "../financial-types";
 
 export const cathaybkConfigSchema = z.object({
   userId: z.string().min(1).optional(),

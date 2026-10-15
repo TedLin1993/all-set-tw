@@ -1,6 +1,6 @@
 import forge from "node-forge";
 import { z } from "zod";
-import type { BankAccount, BankBalanceSnapshot } from "@taiwan-fin-hub/shared";
+import type { BankAccount, BankBalanceSnapshot } from "../financial-types";
 import { SinopacVerificationRequiredError } from "./verification-error";
 
 type SinopacLoanAccount = Omit<BankAccount, "id" | "connectorId">;

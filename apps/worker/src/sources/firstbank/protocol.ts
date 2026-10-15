@@ -3,7 +3,7 @@ import type {
   BankBalanceSnapshot,
   BankTransaction,
   CreditCardBill,
-} from "@taiwan-fin-hub/shared";
+} from "../financial-types";
 import forge from "node-forge";
 import { z } from "zod";
 import { isNoCreditCardMessage } from "../credit-card-status";

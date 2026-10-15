@@ -2,7 +2,7 @@ import type {
   BankAccount,
   BankBalanceSnapshot,
   BankTransaction,
-} from "@taiwan-fin-hub/shared";
+} from "../financial-types";
 import forge from "node-forge";
 import { z } from "zod";
 import { NextbankApiError, type NextbankDepositPayloads } from "./api";

@@ -33,9 +33,10 @@
 - `apps/worker/src/sources` 根目錄：跨來源共用的 browser 工具、設定 registry、純型別與同步回溯 policy。來源的 protocol／client 不依賴 Hono、D1、Worker `Env` 或同步流程。
 - `apps/worker/src/db`：跨後端 feature 共用的 D1 基礎能力與 Drizzle schema／client。
 - `apps/worker/migrations`、`apps/worker/schema-metadata.json`、`apps/worker/seeds`：資料庫遷移、schema 文件語意與 Demo 種子資料。
-- 根目錄 `shared/`：前後端與連接器共用的穩定型別、契約與純活動處理邏輯，以 `@taiwan-fin-hub/shared` 引用。
-- `shared/bank-api.ts`：銀行與信用卡帳單 API response 契約；前端引用，Worker 在 JSON 回傳處檢查。
-- `apps/worker/src/sources/types.ts`：僅後端使用的 `Connector` 與 `SyncResult` 型別。
+- 根目錄 `shared/`：前後端共用的穩定型別、契約與純活動處理邏輯，一律從 `@taiwan-fin-hub/shared` 的 `index.ts` 引用；只有 Worker 使用的型別不放這裡。
+- `shared/api/`：依 API resource 分檔的 HTTP 契約（`errors`、`bank`、`sync`、`sync-reports`、`connectors`、`classification`、`notifications`、`dashboard`）；前端引用，Worker 在驗證與 JSON 回傳處檢查。`errors.ts` 是 Worker 會回傳的全部錯誤代碼。
+- `shared/activity/`：活動配對、去重、排序與資料組裝的純邏輯；`shared/connector-catalog.ts` 是資料來源 catalog。
+- `apps/worker/src/sources/types.ts`、`financial-types.ts`：僅後端使用的 `Connector`／`SyncResult` 與 connector 正規化金融資料型別。
 - `docs/002-backend-architecture.md`：後端分層、相依方向與維護約定的詳細文件。
 - `docs/003-frontend-architecture.md`：前端分層、相依方向與測試 colocate 約定。
 - `docs/004-connector-development.md`：Connector catalog、連接模式、敏感狀態與新增流程規範。
@@ -45,7 +46,7 @@
 - 後端採 feature-oriented Vertical Slice Architecture。
 - `apps/worker/src/index.ts` 是 Composition Root，只負責 middleware、routes、錯誤處理、靜態資源與 scheduled event 的組裝。
 - HTTP concerns 放在 `route.ts`，use case 與商業流程放在 `service.ts`，feature 專用資料存取放在 `repository.ts`；一般 CRUD 預設使用 Drizzle。
-- 共用 API contract 與金融資料型別放在根目錄的 `shared/`，不得混入 Hono `Context`、D1 row 或 Puppeteer object。
+- 共用 API contract 放在根目錄的 `shared/`，不得混入 Hono `Context`、D1 row 或 Puppeteer object。
 - 前端採 feature-first 結構；`features` 可依賴 `data` 與 `shared`，`data`、`shared` 不得反向依賴 feature。
 - 前端金融計算測試與實作 colocate；主要操作流程的 Playwright tests 放在 `apps/web/e2e`。
 - 自動測試只保留金融數字、資料完整性、憑證／授權與主要操作流程四類核心保障；優先擴充既有案例，不要求每個功能、函式或分層都有測試，也不維護獨立 self-check。詳細原則見後端文件的「測試與驗證」。

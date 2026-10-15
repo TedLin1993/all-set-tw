@@ -4,7 +4,7 @@ import type {
   BankAccount,
   BankBalanceSnapshot,
   BankTransaction,
-} from "@taiwan-fin-hub/shared";
+} from "../financial-types";
 import { BANK_SYNC_MONTHS } from "../sync-window";
 
 const envelopeSchema = z

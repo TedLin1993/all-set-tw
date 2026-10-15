@@ -1,3 +1,9 @@
+import type { BankTransactionStatus } from "@taiwan-fin-hub/shared";
+
+/**
+ * Connector 正規化後、寫入 D1 前的金融資料型別；僅供 Worker 與各來源使用。
+ * 對前端公開的 response 契約另見 `shared/`。
+ */
 export interface NetWorthHistoryPoint {
   date: string; // YYYY-MM-DD
   netWorth: number;
@@ -131,8 +137,6 @@ export interface BankBalanceSnapshot {
   asOfAt: string;
   raw?: unknown;
 }
-
-export type BankTransactionStatus = "pending" | "posted";
 
 export interface BankTransaction {
   transferPeer?: { accountId: string; sourceId: string };

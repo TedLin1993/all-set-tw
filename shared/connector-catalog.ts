@@ -17,6 +17,13 @@ export type ConnectorCapability =
   | "investment_transaction"
   | "net_worth_history";
 
+/** 前端設定表單使用的帳密欄位；`key` 同時是 Worker 解析設定時的欄位名稱。 */
+export interface ConnectorCredentialField {
+  key: string;
+  label: string;
+  type: "text" | "password";
+}
+
 export interface ConnectorCatalogEntry {
   id: string;
   title: string;
@@ -25,11 +32,14 @@ export interface ConnectorCatalogEntry {
   scopes: readonly string[];
   capabilities: readonly ConnectorCapability[];
   publicFields: readonly string[];
-  credentialFields: readonly string[];
+  credentialFields: readonly ConnectorCredentialField[];
   secretStateFields: readonly string[];
   resetOnCredentialChangeFields: readonly string[];
 }
 
+/**
+ * 宣告順序即前端顯示順序：依資料來源加入的時間排列，新增的 connector 一律加在最後。
+ */
 export const connectorCatalog = {
   einvoice: {
     id: "einvoice",
@@ -39,7 +49,10 @@ export const connectorCatalog = {
     scopes: ["all"],
     capabilities: ["invoice", "invoice_line_item"],
     publicFields: [],
-    credentialFields: ["mobile", "password"],
+    credentialFields: [
+      { key: "mobile", label: "手機號碼（電子發票帳號）", type: "text" },
+      { key: "password", label: "電子發票 App 登入密碼", type: "password" },
+    ],
     secretStateFields: [
       "userToken",
       "mobileBarcode",
@@ -84,7 +97,10 @@ export const connectorCatalog = {
       "net_worth_history",
     ],
     publicFields: [],
-    credentialFields: ["userId", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號", type: "text" },
+      { key: "password", label: "集保 App 密碼", type: "password" },
+    ],
     secretStateFields: ["deviceId", "devType", "devModel", "session"],
     resetOnCredentialChangeFields: [
       "deviceId",
@@ -108,7 +124,11 @@ export const connectorCatalog = {
       "credit_card_bill",
     ],
     publicFields: [],
-    credentialFields: ["userId", "account", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號／統編", type: "text" },
+      { key: "account", label: "使用者名稱", type: "text" },
+      { key: "password", label: "使用者密碼", type: "password" },
+    ],
     secretStateFields: ["sessionCookies", "sessionExpiresAt"],
     resetOnCredentialChangeFields: ["sessionCookies", "sessionExpiresAt"],
   },
@@ -125,7 +145,11 @@ export const connectorCatalog = {
       "credit_card_bill",
     ],
     publicFields: [],
-    credentialFields: ["userId", "account", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號／統編", type: "text" },
+      { key: "account", label: "用戶代號", type: "text" },
+      { key: "password", label: "網銀密碼", type: "password" },
+    ],
     secretStateFields: [
       "sessionCookies",
       "sessionExpiresAt",
@@ -155,7 +179,11 @@ export const connectorCatalog = {
       "credit_card_bill",
     ],
     publicFields: [],
-    credentialFields: ["userId", "account", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號／統編", type: "text" },
+      { key: "account", label: "行動／網路銀行使用者代碼", type: "text" },
+      { key: "password", label: "網路密碼", type: "password" },
+    ],
     secretStateFields: ["sessionCookies", "browserSessionId", "captcha"],
     resetOnCredentialChangeFields: [
       "sessionCookies",
@@ -182,7 +210,11 @@ export const connectorCatalog = {
       "credit_card_bill",
     ],
     publicFields: [],
-    credentialFields: ["userId", "account", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號／統編", type: "text" },
+      { key: "account", label: "使用者代號", type: "text" },
+      { key: "password", label: "使用者密碼", type: "password" },
+    ],
     secretStateFields: [
       "sessionCookies",
       "sessionCreatedAt",
@@ -211,40 +243,15 @@ export const connectorCatalog = {
       "credit_card_bill",
     ],
     publicFields: [],
-    credentialFields: ["userId", "account", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號／統編", type: "text" },
+      { key: "account", label: "使用者代號", type: "text" },
+      { key: "password", label: "網路密碼", type: "password" },
+    ],
     secretStateFields: ["deviceCode", "deviceSeed", "pendingSession"],
     // A password change ends the pending login, but keeps the same device.
     // Switching customer/account identity also resets deviceCode/deviceSeed.
     resetOnCredentialChangeFields: ["pendingSession"],
-  },
-  skbank: {
-    id: "skbank",
-    title: "新光銀行",
-    description: "臺外幣帳戶、餘額、交易明細與信用卡帳單",
-    connectionMode: "api_credentials",
-    scopes: ["all"],
-    capabilities: [
-      "bank_account",
-      "bank_balance_snapshot",
-      "bank_transaction",
-      "credit_card_bill",
-    ],
-    publicFields: [],
-    credentialFields: ["nationalId", "alias", "password"],
-    secretStateFields: ["deviceId"],
-    resetOnCredentialChangeFields: ["deviceId"],
-  },
-  nextbank: {
-    id: "nextbank",
-    title: "將來銀行",
-    description: "存款、口袋餘額與交易明細（投資尚未接入）",
-    connectionMode: "api_captcha_session",
-    scopes: ["all"],
-    capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
-    publicFields: [],
-    credentialFields: ["userId", "account", "password"],
-    secretStateFields: ["captchaUuid", "captchaExpiresAt"],
-    resetOnCredentialChangeFields: ["captchaUuid", "captchaExpiresAt"],
   },
   obank: {
     id: "obank",
@@ -254,7 +261,11 @@ export const connectorCatalog = {
     scopes: ["all"],
     capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
     publicFields: [],
-    credentialFields: ["userId", "account", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號／統編", type: "text" },
+      { key: "account", label: "使用者代號", type: "text" },
+      { key: "password", label: "網路銀行密碼", type: "password" },
+    ],
     secretStateFields: ["pendingSession", "pendingSessionExpiresAt", "captcha"],
     resetOnCredentialChangeFields: [
       "pendingSession",
@@ -275,7 +286,11 @@ export const connectorCatalog = {
       "credit_card_bill",
     ],
     publicFields: [],
-    credentialFields: ["userId", "account", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號／統編", type: "text" },
+      { key: "account", label: "使用者代號", type: "text" },
+      { key: "password", label: "網路銀行密碼", type: "password" },
+    ],
     secretStateFields: [
       "sessionCookies",
       "sessionCreatedAt",
@@ -290,6 +305,27 @@ export const connectorCatalog = {
       "captchaDigitCount",
       "captcha",
     ],
+  },
+  skbank: {
+    id: "skbank",
+    title: "新光銀行",
+    description: "臺外幣帳戶、餘額、交易明細與信用卡帳單",
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: [],
+    credentialFields: [
+      { key: "nationalId", label: "身分證字號／統編", type: "text" },
+      { key: "alias", label: "網銀使用者代號", type: "text" },
+      { key: "password", label: "網銀密碼", type: "password" },
+    ],
+    secretStateFields: ["deviceId"],
+    resetOnCredentialChangeFields: ["deviceId"],
   },
   firstbank: {
     id: "firstbank",
@@ -304,7 +340,11 @@ export const connectorCatalog = {
       "credit_card_bill",
     ],
     publicFields: [],
-    credentialFields: ["userId", "account", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號／統編", type: "text" },
+      { key: "account", label: "登入代號", type: "text" },
+      { key: "password", label: "網路銀行密碼", type: "password" },
+    ],
     secretStateFields: [
       "sessionCookies",
       "sessionCreatedAt",
@@ -319,26 +359,6 @@ export const connectorCatalog = {
       "browserSessionId",
       "browserSessionExpiresAt",
       "captchaDigitCount",
-      "captcha",
-    ],
-  },
-  rakuten: {
-    id: "rakuten",
-    title: "樂天國際銀行",
-    description: "臺幣活存帳戶、每日餘額、交易明細與貸款餘額／條件",
-    connectionMode: "browser_captcha_session",
-    scopes: ["all"],
-    capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
-    publicFields: [],
-    credentialFields: ["userId", "account", "password"],
-    secretStateFields: [
-      "browserSessionId",
-      "browserSessionExpiresAt",
-      "captcha",
-    ],
-    resetOnCredentialChangeFields: [
-      "browserSessionId",
-      "browserSessionExpiresAt",
       "captcha",
     ],
   },
@@ -350,7 +370,11 @@ export const connectorCatalog = {
     scopes: ["all"],
     capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
     publicFields: [],
-    credentialFields: ["userId", "account", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號", type: "text" },
+      { key: "account", label: "使用者代號", type: "text" },
+      { key: "password", label: "網路銀行密碼", type: "password" },
+    ],
     secretStateFields: ["browserSessionId", "captcha"],
     resetOnCredentialChangeFields: [
       "browserSessionId",
@@ -372,7 +396,11 @@ export const connectorCatalog = {
       "credit_card_bill",
     ],
     publicFields: [],
-    credentialFields: ["userId", "account", "password"],
+    credentialFields: [
+      { key: "userId", label: "身分證字號／居留證號", type: "text" },
+      { key: "account", label: "使用者代號", type: "text" },
+      { key: "password", label: "行動銀行登入密碼", type: "password" },
+    ],
     secretStateFields: [
       "pendingSession",
       "pendingSessionExpiresAt",
@@ -392,13 +420,65 @@ export const connectorCatalog = {
       "deviceSeed",
     ],
   },
+  nextbank: {
+    id: "nextbank",
+    title: "將來銀行",
+    description: "存款、口袋餘額與交易明細（投資尚未接入）",
+    connectionMode: "api_captcha_session",
+    scopes: ["all"],
+    capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
+    publicFields: [],
+    credentialFields: [
+      { key: "userId", label: "身分證字號", type: "text" },
+      { key: "account", label: "使用者代號", type: "text" },
+      { key: "password", label: "使用者密碼", type: "password" },
+    ],
+    secretStateFields: ["captchaUuid", "captchaExpiresAt"],
+    resetOnCredentialChangeFields: ["captchaUuid", "captchaExpiresAt"],
+  },
+  rakuten: {
+    id: "rakuten",
+    title: "樂天國際銀行",
+    description: "臺幣活存帳戶、每日餘額、交易明細與貸款餘額／條件",
+    connectionMode: "browser_captcha_session",
+    scopes: ["all"],
+    capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
+    publicFields: [],
+    credentialFields: [
+      { key: "userId", label: "身分證字號", type: "text" },
+      { key: "account", label: "使用者代號", type: "text" },
+      { key: "password", label: "登入密碼", type: "password" },
+    ],
+    secretStateFields: [
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captcha",
+    ],
+    resetOnCredentialChangeFields: [
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captcha",
+    ],
+  },
 } as const satisfies Record<string, ConnectorCatalogEntry>;
 
 export type ConnectorId = keyof typeof connectorCatalog;
 
 export type ConnectorFormFieldKey<TConnectorId extends ConnectorId> =
-  | (typeof connectorCatalog)[TConnectorId]["credentialFields"][number]
+  | (typeof connectorCatalog)[TConnectorId]["credentialFields"][number]["key"]
   | (typeof connectorCatalog)[TConnectorId]["publicFields"][number];
+
+/** 依 catalog 宣告順序排列的資料來源清單，供前端直接列出。 */
+export const connectorList = Object.values(connectorCatalog);
+
+const connectorOrder = new Map<string, number>(
+  connectorList.map((connector, index) => [connector.id, index]),
+);
+
+/** 依 catalog 宣告順序比較兩個資料來源，用於排序 API 回傳的來源清單。 */
+export function compareConnectorOrder(left: ConnectorId, right: ConnectorId) {
+  return connectorOrder.get(left)! - connectorOrder.get(right)!;
+}
 
 export function isConnectorId(value: string): value is ConnectorId {
   return Object.hasOwn(connectorCatalog, value);

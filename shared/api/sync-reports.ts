@@ -1,46 +1,7 @@
-import type { ConnectorId } from "./connector-catalog";
+import type { ConnectorId } from "../connector-catalog";
+import type { SyncNewRecordCounts, SyncNotificationStatus } from "./sync";
 
-export interface Summary {
-  invoiceCount: number;
-  investmentCount: number;
-  totalInvestmentValue: number;
-  bankAccountCount: number;
-  totalBankBalance: number;
-}
-
-export interface ConnectorSettingsMetadata {
-  connectorId: string;
-  configured: boolean;
-  updatedAt?: string;
-  publicConfig?: Record<string, unknown> | null;
-}
-
-export interface SyncResponse {
-  success: true;
-  connectorId: ConnectorId;
-  scope: string;
-  records: number;
-  newRecords: SyncNewRecordCounts;
-  detailRecords?: number;
-  cursorUpdated: boolean;
-}
-
-export interface QueuedSyncResponse {
-  success: true;
-  connectorId: ConnectorId;
-  scope: string;
-  status: "queued";
-  runId: string;
-}
-
-export type SyncNotificationStatus = "success" | "failed" | "needs_user_action";
-
-export interface SyncNewRecordCounts {
-  invoices: number;
-  bankTransactions: number;
-  investmentTransactions: number;
-}
-
+/** 排程同步報告與各來源活動變化明細的 API 契約。 */
 export interface ScheduledSyncSourceReport {
   connectorId: ConnectorId;
   status: SyncNotificationStatus;
@@ -76,36 +37,6 @@ export interface ScheduledSyncReport {
   missingCurrencies: string[];
   /** Time when a later manual sync repaired one or more sources in this report. */
   recoveredAt: string | null;
-}
-
-export interface NotificationPreferences {
-  success: boolean;
-  failed: boolean;
-  needsUserAction: boolean;
-}
-
-export interface PushSubscriptionInput {
-  endpoint: string;
-  expirationTime: number | null;
-  keys: {
-    p256dh: string;
-    auth: string;
-  };
-}
-
-export interface NotificationConfig {
-  enabled: boolean;
-  publicKey: string | null;
-  subscribedDevices: number;
-  preferences: NotificationPreferences;
-}
-
-export interface ApiErrorResponse {
-  success: false;
-  error: {
-    code: string;
-    message: string;
-  };
 }
 
 export interface SyncActivityDetail {

@@ -12,7 +12,7 @@
     getSyncSourceStatusLabel,
   } from "@/data/connectors/sync-status";
   import { formatDateTime } from "@/shared/format/financial";
-  import { formatScheduleWeekdays } from "../model/schedule";
+  import { formatSyncSchedule } from "../model/schedule";
   let {
     id,
     title,
@@ -49,11 +49,7 @@
       ? "關閉"
       : job.scheduleMode === "inherit"
         ? "跟隨預設"
-        : job.intervalMinutes === 1440
-          ? `每天 ${job.preferredTime}`
-          : job.intervalMinutes === 10080
-            ? `${formatScheduleWeekdays(job.preferredWeekdays)} ${job.preferredTime}`
-            : `每 ${job.intervalMinutes / 60} 小時`,
+        : formatSyncSchedule(job),
   );
   const SourceIcon = $derived(
     id === "einvoice"

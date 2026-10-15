@@ -1,4 +1,4 @@
-import type { ActivityItem } from "./activity-types";
+import type { ActivityItem } from "./types";
 
 const TAIPEI_TIME_ZONE = "Asia/Taipei";
 const ISO_DATE_PREFIX = /^(\d{4})-(\d{2})-(\d{2})/;

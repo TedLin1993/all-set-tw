@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import type { InvoiceTransactionPreference } from "@taiwan-fin-hub/shared";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import type { AppBindings } from "../../platform/env";
@@ -75,10 +76,10 @@ function registerActivityRoutes(api: Hono<AppBindings>) {
     ),
     async (c) =>
       c.json(
-        await listInvoiceTransactionPreferences(
+        (await listInvoiceTransactionPreferences(
           c.env.DB,
           resolveMonthDateRange(c.req.valid("query")),
-        ),
+        )) satisfies InvoiceTransactionPreference[],
       ),
   );
 
@@ -91,16 +92,21 @@ function registerActivityRoutes(api: Hono<AppBindings>) {
     ),
     async (c) =>
       c.json(
-        await linkInvoiceToTransaction(
+        (await linkInvoiceToTransaction(
           c.env.DB,
           c.req.param("invoiceId"),
           c.req.valid("json").transactionId,
-        ),
+        )) satisfies InvoiceTransactionPreference,
       ),
   );
 
   api.delete("/activity/invoice-mappings/:invoiceId", async (c) =>
-    c.json(await keepInvoiceSeparate(c.env.DB, c.req.param("invoiceId"))),
+    c.json(
+      (await keepInvoiceSeparate(
+        c.env.DB,
+        c.req.param("invoiceId"),
+      )) satisfies InvoiceTransactionPreference,
+    ),
   );
 }
 

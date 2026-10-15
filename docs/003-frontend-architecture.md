@@ -25,7 +25,11 @@ apps/web/src/
 - 前後端都使用且穩定的 API contract 應逐步移到根目錄的 `shared/`；只用於前端組合畫面的 view model 可留在 `apps/web/src/data`。
 - 根目錄的 `shared/` 是唯一跨前後端共用的 workspace 套件；資料庫與連接器由 `apps/worker` 管理，前端不得引用 Worker 內部模組。
 
-銀行與信用卡帳單 API 的 response 契約定義於 `shared/bank-api.ts`，前端 `data/bank/types.ts` 僅提供既有名稱的 type re-export。Worker 在銀行 route 的 JSON 回傳處以 `satisfies` 檢查相同契約；欄位保留現有回應的 `null` 與帳單數值 flag，不將 connector 正規化資料或 ORM row 當作 API response 型別。資料來源 ID 保持現有回應的 string，catalog 的 `ConnectorId` 用於已驗證的 connector 註冊與操作。
+銀行與信用卡帳單 API 的 response 契約定義於 `shared/api/bank.ts`，前端 `data/bank/types.ts` 僅提供既有名稱的 type re-export。Worker 在銀行 route 的 JSON 回傳處以 `satisfies` 檢查相同契約；欄位保留現有回應的 `null` 與帳單數值 flag，不將 connector 正規化資料或 ORM row 當作 API response 型別。資料來源 ID 保持現有回應的 string，catalog 的 `ConnectorId` 用於已驗證的 connector 註冊與操作。
+
+同步排程、連接器設定狀態與分類規則的 response 契約分別定義於 `shared/api/` 的 `sync.ts`、`connectors.ts` 與 `classification.ts`，`data/connectors/types.ts` 與 `data/classification/types.ts` 同樣以既有名稱 re-export；發票配對偏好 `InvoiceTransactionPreference` 由 `data/invoices/types.ts` re-export。
+`ApiRequestError.code` 的型別為共用的 `ApiErrorCode` 加上前端自用的 `REQUEST_FAILED`，sync job 的 `lastErrorCode` 與 `manualRun.errorCode` 為 `SyncErrorCode`；比對錯誤代碼時直接比較這些欄位，拼錯或已移除的代碼會在型別檢查失敗。
+排程間隔選項與顯示文字集中於 `features/settings/model/schedule.ts`，由共用的 `SYNC_INTERVAL_MINUTES` 產生；新增間隔時若缺少顯示文字，型別檢查會失敗。
 
 ## Svelte 檔案
 
@@ -103,7 +107,8 @@ npm run verify:web
 
 ## 總覽同步明細
 
-`LatestSyncReportCard` 顯示「最近一次排程同步」，展開「查看各資料來源」後直接列出各來源本次活動。
+`LatestSyncReportCard` 顯示「最近一次排程同步」，展開「查看各資料來源」後直接列出各來源本次活動；
+來源依 `compareConnectorOrder` 按 catalog 順序排列，與資料來源頁一致。
 `SyncActivityDetails` 展示該次同步的活動名稱、標記與原幣金額；來源區塊展開時以一次
 `GET /api/sync-reports/:batchId/activities` 載入全部來源明細並支援重試。
 明細展示新增活動、已入帳、補上發票及原幣金額，沿用全域隱藏金額設定。

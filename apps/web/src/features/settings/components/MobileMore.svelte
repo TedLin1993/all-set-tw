@@ -11,7 +11,7 @@
   import type { ApiClient } from "@/shared/api/client";
   import type { View } from "@/app/types";
   import type { ClassificationRuleRow } from "@/data/classification/types";
-  import { connectorDefinitions } from "@/data/connectors/definitions";
+  import { connectorList } from "@taiwan-fin-hub/shared";
   import {
     getActionableSyncJobs,
     getHealthySyncJobs,
@@ -38,7 +38,7 @@
     navigate: (view: View) => void;
     openConnector: (id: ConnectorId) => void;
   } = $props();
-  const sources = connectorDefinitions;
+  const sources = connectorList;
   const configuredSources = $derived(
     jobs.filter((job) => job.configured && job.scope === "all"),
   );

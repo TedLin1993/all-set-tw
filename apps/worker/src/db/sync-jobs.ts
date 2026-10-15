@@ -11,6 +11,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import type { SyncErrorCode } from "@taiwan-fin-hub/shared";
 import { createDrizzle } from "./client";
 import { sanitizeDatabaseError } from "./errors";
 import { syncJobs, connectorSettings } from "./schema";
@@ -359,7 +360,7 @@ export async function completeSyncJob(
 export type SyncFailureInput = {
   status: SyncStatus;
   errorMessage: string;
-  errorCode?: string | null;
+  errorCode?: SyncErrorCode | null;
 };
 
 export async function failSyncJob(

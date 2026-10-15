@@ -1,15 +1,15 @@
+import type { ConnectorId } from "@taiwan-fin-hub/shared";
 import type {
   BankAccount,
   BankBalanceSnapshot,
   BankTransaction,
-  ConnectorId,
   CreditCardBill,
   InvestmentPosition,
   InvestmentTransaction,
   Invoice,
   InvoiceLineItem,
   NetWorthHistoryPoint,
-} from "@taiwan-fin-hub/shared";
+} from "../../sources/financial-types";
 import { deriveBankMatchKey } from "../bank/display";
 import type { SyncWriteRecord } from "./persistence";
 

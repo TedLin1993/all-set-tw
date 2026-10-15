@@ -1,4 +1,4 @@
-import type { ActivityItem } from "./activity-types";
+import type { ActivityItem } from "./types";
 export type ActivityFlow = "income" | "expense";
 export function activityDisplayAmount(item: ActivityItem) {
   if (item.amount == null) return undefined;

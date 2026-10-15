@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
 
+/** 只比對 API 路徑；開發模式的 `/@fs/.../shared/api/*.ts` 模組不得被當成 API 攔截。 */
+function isApiPath(prefix: string) {
+  return (url: URL) => url.pathname.startsWith(prefix);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -59,7 +64,7 @@ test("excludes a bank transaction from activity calculations and restores it", a
   let excludedFromCalculation = false;
   const month = new Date().toISOString().slice(0, 7);
 
-  await page.route("**/api/bank**", async (route) => {
+  await page.route(isApiPath("/api/bank"), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -162,35 +167,38 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
     updatedAt: string;
   }> = [];
 
-  await page.route("**/api/activity/invoice-mappings**", async (route) => {
-    const request = route.request();
-    const invoiceId = new URL(request.url()).pathname.split("/").at(-1)!;
-    if (request.method() === "PUT") {
-      const body = request.postDataJSON() as { transactionId: string };
-      const preference = {
-        invoiceId,
-        transactionId: body.transactionId,
-        decision: "linked" as const,
-        updatedAt: new Date().toISOString(),
-      };
-      mappings = [preference];
-      await route.fulfill({ json: preference });
-      return;
-    }
-    if (request.method() === "DELETE") {
-      const preference = {
-        invoiceId,
-        transactionId: null,
-        decision: "separate" as const,
-        updatedAt: new Date().toISOString(),
-      };
-      mappings = [preference];
-      await route.fulfill({ json: preference });
-      return;
-    }
-    await route.fulfill({ json: mappings });
-  });
-  await page.route("**/api/bank**", async (route) => {
+  await page.route(
+    isApiPath("/api/activity/invoice-mappings"),
+    async (route) => {
+      const request = route.request();
+      const invoiceId = new URL(request.url()).pathname.split("/").at(-1)!;
+      if (request.method() === "PUT") {
+        const body = request.postDataJSON() as { transactionId: string };
+        const preference = {
+          invoiceId,
+          transactionId: body.transactionId,
+          decision: "linked" as const,
+          updatedAt: new Date().toISOString(),
+        };
+        mappings = [preference];
+        await route.fulfill({ json: preference });
+        return;
+      }
+      if (request.method() === "DELETE") {
+        const preference = {
+          invoiceId,
+          transactionId: null,
+          decision: "separate" as const,
+          updatedAt: new Date().toISOString(),
+        };
+        mappings = [preference];
+        await route.fulfill({ json: preference });
+        return;
+      }
+      await route.fulfill({ json: mappings });
+    },
+  );
+  await page.route(isApiPath("/api/bank"), async (route) => {
     await route.fulfill({
       json: {
         accounts: [
@@ -245,7 +253,7 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
       },
     });
   });
-  await page.route("**/api/invoices**", async (route) => {
+  await page.route(isApiPath("/api/invoices"), async (route) => {
     const path = new URL(route.request().url()).pathname;
     const invoice = {
       id: "invoice-1",

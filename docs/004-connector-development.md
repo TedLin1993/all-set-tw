@@ -6,17 +6,17 @@
 
 Connector 採三層 registry：
 
-| 層級            | 位置                                                                      | 責任                                                  |
-| --------------- | ------------------------------------------------------------------------- | ----------------------------------------------------- |
-| 共用 catalog    | `shared/connector-catalog.ts` 的 `connectorCatalog`                       | ID、顯示名稱、連接模式、scope、資料能力、設定欄位分類 |
-| Config registry | `apps/worker/src/sources/config-registry.ts` 的 `connectorConfigSchemas`  | Zod schema 與設定解析                                 |
-| Worker runtime  | `apps/worker/src/features/sync/registry.ts` 的 `connectorRuntimeRegistry` | 手動／排程同步與互動式 challenge handler              |
+| 層級            | 位置                                                                      | 責任                                                                          |
+| --------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| 共用 catalog    | `shared/connector-catalog.ts` 的 `connectorCatalog`                       | ID、顯示名稱、連接模式、scope、資料能力、設定欄位分類、表單欄位標籤與顯示順序 |
+| Config registry | `apps/worker/src/sources/config-registry.ts` 的 `connectorConfigSchemas`  | Zod schema 與設定解析                                                         |
+| Worker runtime  | `apps/worker/src/features/sync/registry.ts` 的 `connectorRuntimeRegistry` | 手動／排程同步與互動式 challenge handler                                      |
 
 `ConnectorId` 由 `connectorCatalog` 的 key 推得；catalog 每筆 `id` 必須與 key 相同。Config 與 Worker runtime registry 都必須以 `Record<ConnectorId, ...>` 宣告，新增 catalog 項目後，TypeScript 應立即指出尚未補齊的 config 或 runtime。
 
 各來源的同步、connector、protocol、API client 與專用配對／修復集中於 `apps/worker/src/sources/<connectorId>`。電子發票與集保使用該目錄的 `sync.ts`／`run-repository.ts` 執行 Queue 分段同步；runtime registry 的 `run` 拒絕單次呼叫，避免繞過 durable run 的進度與鎖。手動同步控制、排程、報告與共用資料寫入仍位於 `features/sync`。
 
-前端資料來源名稱與顯示順序由 `connectorCatalog` 產生；表單欄位 key 必須符合 catalog 宣告的 credential 或 public field，不得使用未受型別限制的任意字串。新增 connector 應加在 catalog 末尾。
+前端資料來源頁直接使用 `connectorList`（依 catalog 宣告順序排列）顯示名稱、說明與順序，設定表單直接使用 catalog 的 `credentialFields`（`key`、標籤與 `text`／`password` 輸入類型），前端不另外維護 connector 清單或欄位標籤。catalog 依資料來源加入的時間排列，越新越下面；新增 connector 一律加在 catalog 末尾。
 
 ## 連接模式
 
@@ -143,7 +143,7 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 ## 正規化資料契約
 
 - Connector 回傳 `SyncResult`，資料必須符合 `@taiwan-fin-hub/shared`。
-- `Connector` 與 `SyncResult` 定義於 Worker 的 `src/sources/types.ts`；其中的金融資料使用 shared 的正規化型別，與銀行 API response 契約分開。
+- `Connector` 與 `SyncResult` 定義於 Worker 的 `src/sources/types.ts`；其中的金融資料使用同目錄 `financial-types.ts` 的正規化型別，與 `shared/api/bank.ts` 的銀行 API response 契約分開。
 - `sourceId` 必須在重複同步間穩定。一般交易不得使用本次同步時間產生 ID。
 - `BankBalanceSnapshot.accountId`、`BankTransaction.accountId` 與 `CreditCardBill.accountId` 必須等於對應 `BankAccount.sourceId`。
 - 日期使用 ISO 8601；帳單期間使用 `YYYY-MM`；幣別使用大寫代碼。
@@ -208,13 +208,13 @@ promotion 放在同一 D1 batch，沿用來源的 lock 與設定版本 guard。�
 
 ## 新增流程
 
-1. 在 `connectorCatalog` 加入 ID、mode、scope、capabilities 與欄位分類。
+1. 在 `connectorCatalog` 末尾加入 ID、mode、scope、capabilities、欄位分類，以及含標籤與輸入類型的 `credentialFields`。
 2. 在 `apps/worker/src/sources/<connectorId>` 建立 `protocol.ts`、必要的 client 與 parser，並在 `sources/config-registry.ts` 註冊 config schema。
 3. 需要 binding 時，在同一來源目錄建立 `connector.ts` adapter。
 4. 在同一來源目錄的 `sync.ts` 實作單次同步與 challenge use case，使用 `features/sync` 的共用 record mapping 與 staged persistence；需分段續跑的來源則沿用 durable sync 與 `run-repository.ts` 模式。來源專用的配對、存款生命週期與舊資料修復放在相鄰檔案。
    若來源提供直接存款帳戶，確認 `DIRECT_DEPOSIT_CONNECTOR_IDS` 是否需加入，以連結集保交割帳戶。
 5. 在 Worker runtime registry 註冊 sync／challenge handler。
-6. 在前端新增受 `ConnectorFormFieldKey` 約束的表單欄位與必要 challenge UI。
+6. 在前端補上必要的 challenge UI；一般帳密表單由 catalog 的 `credentialFields` 產生，不需另外新增欄位。
 7. 新增 sync job migration。
 8. 依上述核心風險完成必要驗證，並更新 `README.md` 支援資料來源表。
 9. 執行：
