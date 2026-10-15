@@ -1,5 +1,5 @@
 import type { Connector } from "../types";
-import type { Invoice, InvoiceLineItem } from "@taiwan-fin-hub/shared";
+import type { Invoice, InvoiceLineItem } from "../financial-types";
 import { z } from "zod";
 import { currentPeriodIndex, periodFromIndex } from "./invoice-data";
 import { EINVOICE_SYNC_PERIODS } from "../sync-window";

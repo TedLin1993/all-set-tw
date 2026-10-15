@@ -1,13 +1,13 @@
+import type { ConnectorId } from "@taiwan-fin-hub/shared";
 import type {
   BankAccount,
   BankBalanceSnapshot,
   BankTransaction,
-  ConnectorId,
   CreditCardBill,
   InvestmentTransaction,
   InvoiceLineItem,
   NetWorthHistoryPoint,
-} from "@taiwan-fin-hub/shared";
+} from "./financial-types";
 
 export interface SyncResult<TResult> {
   records: TResult[];

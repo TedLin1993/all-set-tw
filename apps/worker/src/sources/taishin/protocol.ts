@@ -3,7 +3,7 @@ import type {
   BankBalanceSnapshot,
   BankTransaction,
   CreditCardBill,
-} from "@taiwan-fin-hub/shared";
+} from "../financial-types";
 import { z } from "zod";
 import { BANK_SYNC_MONTHS } from "../sync-window";
 

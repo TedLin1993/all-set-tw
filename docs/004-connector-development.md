@@ -143,7 +143,7 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 ## 正規化資料契約
 
 - Connector 回傳 `SyncResult`，資料必須符合 `@taiwan-fin-hub/shared`。
-- `Connector` 與 `SyncResult` 定義於 Worker 的 `src/sources/types.ts`；其中的金融資料使用 shared 的正規化型別，與銀行 API response 契約分開。
+- `Connector` 與 `SyncResult` 定義於 Worker 的 `src/sources/types.ts`；其中的金融資料使用同目錄 `financial-types.ts` 的正規化型別，與 `shared/api/bank.ts` 的銀行 API response 契約分開。
 - `sourceId` 必須在重複同步間穩定。一般交易不得使用本次同步時間產生 ID。
 - `BankBalanceSnapshot.accountId`、`BankTransaction.accountId` 與 `CreditCardBill.accountId` 必須等於對應 `BankAccount.sourceId`。
 - 日期使用 ISO 8601；帳單期間使用 `YYYY-MM`；幣別使用大寫代碼。

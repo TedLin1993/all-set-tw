@@ -63,14 +63,25 @@ apps/
 shared/
 ├── package.json
 ├── tsconfig.json
-├── index.ts
-├── financial-types.ts
-├── api-types.ts
-├── api-error-codes.ts
-├── bank-api.ts
-├── settings-api.ts
+├── index.ts               # 唯一匯出入口
 ├── connector-catalog.ts
-└── activity-*.ts
+├── exchange-rates.ts
+├── api/                   # 前後端 HTTP 契約，依 API resource 分檔
+│   ├── errors.ts
+│   ├── bank.ts
+│   ├── classification.ts
+│   ├── connectors.ts
+│   ├── dashboard.ts
+│   ├── notifications.ts
+│   ├── sync.ts
+│   └── sync-reports.ts
+└── activity/              # 活動配對、去重、排序與資料組裝的純邏輯
+    ├── types.ts
+    ├── list.ts
+    ├── flow.ts
+    ├── filter.ts
+    ├── items.ts
+    └── matching.ts
 ```
 
 npm workspaces 僅保留 Web、Worker 與根目錄的 `shared/`。`shared/` 以 `@taiwan-fin-hub/shared` 提供跨前後端共用的型別、契約與純邏輯。資料庫與連接器是 Worker 內部模組，共用相依宣告與型別檢查；透過目錄維持資料存取、外部協定與平台 adapter 的責任分工。
@@ -245,15 +256,14 @@ Middleware 應只處理跨功能的 request concern，不應承擔 feature 商�
 
 實體目錄集中不改變相依邊界：`sync.ts` 可依賴 connector、protocol、client、repository 與明確的共用 service；protocol／client 不得依賴 Hono、D1、Worker `Env`、adapter 或同步流程，也不得直接寫入資料庫。來源之間不引用彼此的內部實作。
 
-`sources` 根目錄只保留跨來源使用的能力：`browser.ts` 管 browser acquisition、capacity 錯誤、登入前頁面停滯復原與有期限的 session 清理，`types.ts` 定義後端 `Connector`／`SyncResult`，`sync-window.ts` 與 `credit-card-status.ts` 提供共同 policy／判斷。`config-registry.ts` 直接引用各來源的純 schema，供設定 feature 使用；同步 handler 仍由 `features/sync/registry.ts` 組裝。Worker 與測試直接引用來源檔案，不建立跨來源的實作匯出入口。
+`sources` 根目錄只保留跨來源使用的能力：`browser.ts` 管 browser acquisition、capacity 錯誤、登入前頁面停滯復原與有期限的 session 清理，`types.ts` 定義後端 `Connector`／`SyncResult`，`financial-types.ts` 定義 connector 正規化後的金融資料（`BankAccount`、`BankTransaction`、`CreditCardBill`、`Invoice` 等），`sync-window.ts` 與 `credit-card-status.ts` 提供共同 policy／判斷。`config-registry.ts` 直接引用各來源的純 schema，供設定 feature 使用；同步 handler 仍由 `features/sync/registry.ts` 組裝。Worker 與測試直接引用來源檔案，不建立跨來源的實作匯出入口。
 
 Browser 登入前復原最多三次嘗試，只包住頁面與驗證碼準備；OCR、送出登入與資料查詢留在來源 adapter，政策細節見 `docs/004-connector-development.md`。
 
 ### `shared/`
 
-前端、Worker 與 connector 共用的穩定契約及純邏輯，包括：
+前端與 Worker 共用的穩定契約及純邏輯，包括：
 
-- 金融資料型別。
 - `ConnectorId` 與支援清單。
 - API success/error contract。
 - API 錯誤代碼：同步錯誤 `SyncErrorCode` 與其他 `GeneralApiErrorCode`，合併為 `ApiErrorCode`。
@@ -263,7 +273,9 @@ Browser 登入前復原最多三次嘗試，只包住頁面與驗證碼準備；
 
 不得將 Hono `Context`、D1 row 或 Puppeteer object 放入共用契約。
 
-`index.ts` 只提供匯出；金融正規化資料、API 型別與 connector catalog 分別維護於 `financial-types.ts`、`api-types.ts`／`bank-api.ts`／`settings-api.ts` 與 `connector-catalog.ts`。銀行、排程、連接器設定與分類 route 以 `satisfies` 在 JSON 回傳處檢查共用 response 契約；此契約描述現有 JSON 的 nullable 欄位與帳單數值 flag，與 connector 的正規化資料及 repository row 各自獨立。
+只有前端與 Worker 都使用的內容才放進 `shared/`；只被 Worker 使用的型別（例如 connector 正規化資料）留在 `apps/worker`。
+
+`index.ts` 是唯一匯出入口，前後端一律從 `@taiwan-fin-hub/shared` 引用，不直接引用內部檔案，因此 `shared/` 內部可自由調整檔案位置。HTTP 契約放在 `api/`，依 API resource 分檔，與前端 `data/` 的分組對應；活動純邏輯放在 `activity/`；connector catalog 與匯率幣別規則留在根層。銀行、排程、連接器設定、分類與發票配對 route 以 `satisfies` 在 JSON 回傳處檢查共用 response 契約；此契約描述現有 JSON 的 nullable 欄位與帳單數值 flag，與 connector 的正規化資料及 repository row 各自獨立。
 
 允許值以 `as const` 陣列放在 `shared/`（例如 `SYNC_INTERVAL_MINUTES`、`CLASSIFICATION_RULE_OPERATORS`），Worker 以這些陣列建立 Zod 驗證，前端以同一陣列產生選項；Zod schema 本身留在 Worker。資料庫以一般文字或數字保存的欄位（如分類規則的 `field`／`operator`、排程的 `intervalMinutes`），response 契約維持 `string`／`number`，不宣稱比資料庫更嚴格的型別。
 
@@ -452,7 +464,7 @@ API error 統一為：
 
 Service 應使用明確的 error class 表示，route 再映射成固定 HTTP status 與 error code。
 
-所有錯誤代碼集中宣告於 `shared/api-error-codes.ts`。`jsonError`、`validationHook` 只接受 `ApiErrorCode`；`classifySyncError`、`SyncFailureInput` 與手動同步 run 的結案只接受 `SyncErrorCode`，讀出 sync job 與 run 的 errorCode 時也標為同一型別。新增或改名代碼須先修改共用型別，前端依代碼接續流程的比對會在型別檢查時一併驗證。
+所有錯誤代碼集中宣告於 `shared/api/errors.ts`。`jsonError`、`validationHook` 只接受 `ApiErrorCode`；`classifySyncError`、`SyncFailureInput` 與手動同步 run 的結案只接受 `SyncErrorCode`，讀出 sync job 與 run 的 errorCode 時也標為同一型別。新增或改名代碼須先修改共用型別，前端依代碼接續流程的比對會在型別檢查時一併驗證。
 
 ### 未預期錯誤
 

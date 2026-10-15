@@ -1,4 +1,4 @@
-import type { BankTransactionStatus } from "./financial-types";
+export type BankTransactionStatus = "pending" | "posted";
 
 /** JSON returned by the bank API; nullable fields preserve the existing wire format. */
 export interface BankAccountResponse {

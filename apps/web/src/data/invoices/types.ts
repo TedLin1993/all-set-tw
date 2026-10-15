@@ -1,5 +1,7 @@
 import type { ConnectorId } from "@taiwan-fin-hub/shared";
 
+export type { InvoiceTransactionPreference } from "@taiwan-fin-hub/shared";
+
 export interface InvoiceLineItemRow {
   id: string;
   invoiceId?: string;
@@ -23,11 +25,4 @@ export interface InvoiceSummaryRow {
 
 export interface InvoiceRow extends InvoiceSummaryRow {
   items: InvoiceLineItemRow[];
-}
-
-export interface InvoiceTransactionPreference {
-  invoiceId: string;
-  transactionId: string | null;
-  decision: "linked" | "separate";
-  updatedAt: string;
 }

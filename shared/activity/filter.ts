@@ -1,6 +1,6 @@
-import { activityCashFlow, type ActivityFlow } from "./activity-flow";
-import { activityDateKey } from "./activity-list";
-import type { ActivityItem } from "./activity-types";
+import { activityCashFlow, type ActivityFlow } from "./flow";
+import { activityDateKey } from "./list";
+import type { ActivityItem } from "./types";
 
 export type ActivityFlowFilter = "all" | ActivityFlow;
 export type ActivitySourceFilter = "all" | "bank" | "card" | "invoice";

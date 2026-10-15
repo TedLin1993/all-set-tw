@@ -1,4 +1,4 @@
-import type { BankTransaction } from "@taiwan-fin-hub/shared";
+import type { BankTransaction } from "../financial-types";
 
 /**
  * 樂天臺幣活存交易明細解析（`CTWQU0001/010` 當月、`CTWQU0001/011` 指定月份）。

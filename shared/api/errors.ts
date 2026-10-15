@@ -81,3 +81,11 @@ export type GeneralApiErrorCode =
 
 /** Worker 回應 `{ success: false, error: { code } }` 時可能出現的全部代碼。 */
 export type ApiErrorCode = SyncErrorCode | GeneralApiErrorCode;
+
+export interface ApiErrorResponse {
+  success: false;
+  error: {
+    code: ApiErrorCode;
+    message: string;
+  };
+}
