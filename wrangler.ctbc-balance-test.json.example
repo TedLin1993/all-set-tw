@@ -1,0 +1,35 @@
+{
+  "name": "all-set-tw-ctbc-balance-test",
+  "main": "apps/worker/src/ctbc-balance-test-entry.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": { "directory": "apps/web/dist", "binding": "ASSETS" },
+  "triggers": { "crons": [] },
+  "queues": {
+    "producers": [
+      { "binding": "SYNC_QUEUE", "queue": "all-set-tw-ctbc-balance-test-sync" }
+    ],
+    "consumers": [
+      {
+        "queue": "all-set-tw-ctbc-balance-test-sync",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_concurrency": 1
+      }
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "all-set-tw-ctbc-balance-test-db",
+      "database_id": "00000000-0000-4000-8000-000000000001",
+      "migrations_dir": "apps/worker/migrations"
+    }
+  ],
+  "secrets": {
+    "required": ["CONFIG_ENCRYPTION_KEY", "TEAM_DOMAIN", "POLICY_AUD"]
+  },
+  "observability": { "enabled": false }
+}

@@ -3,6 +3,39 @@ import { calculateAssetSummary } from "./summary";
 import { formatCurrency } from "@/shared/format/financial";
 
 describe("calculateAssetSummary", () => {
+  it("中信同帳號多幣別保留各幣金額與零餘額，換算不截斷小數", () => {
+    const summary = calculateAssetSummary({
+      bank: {
+        accounts: [
+          { currency: "TWD", balance: 321 },
+          { currency: "USD", balance: 123.4567 },
+          { currency: "JPY", balance: 0 },
+        ].map(({ currency, balance }) => ({
+          id: `ctbc:synthetic:${currency}`,
+          sourceId: `bank:ctbc:1234:synthetic:${currency}`,
+          connectorId: "ctbc",
+          institutionName: "中國信託商業銀行",
+          bankCode: "822",
+          accountType: "savings",
+          currency,
+          balance,
+        })),
+        transactions: [],
+      },
+      investments: [],
+      manualAssets: [],
+      rates: [{ currency: "USD", rateTwd: 30, updatedAt: "2026-10-15" }],
+    });
+    expect(summary.deposits).toHaveLength(3);
+    expect(summary.bankTotal).toBeCloseTo(321 + 123.4567 * 30, 8);
+    expect(summary.institutionGroups).toHaveLength(1);
+    expect(
+      summary.institutionGroups[0].accounts.map((row) => row.currency),
+    ).toEqual(expect.arrayContaining(["TWD", "USD", "JPY"]));
+    expect(summary.missingCurrencies).toEqual([]);
+    expect(formatCurrency(123.4567, "USD")).toBe("US$123.4567");
+  });
+
   it("counts credit-card overpayments toward net worth instead of debt", () => {
     const summary = calculateAssetSummary({
       bank: {

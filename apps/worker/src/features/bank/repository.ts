@@ -35,6 +35,17 @@ const bankTransactionColumns = {
   accountId: sql<string>`${txn.accountId}`.as("accountId"),
   accountSourceId: sql<string>`${account.sourceId}`.as("accountSourceId"),
   accountName: sql<string>`${account.accountName}`.as("accountName"),
+  // Only normalized CTBC card metadata is needed for presentation, never the full payload.
+  cardLast4: sql<string | null>`CASE WHEN ${txn.connectorId} = 'ctbc'
+    AND ${account.accountType} = 'credit' AND json_valid(${txn.rawPayload})
+    THEN CASE WHEN json_type(${txn.rawPayload}, '$.displayCardLast4') IS NOT NULL
+      THEN json_extract(${txn.rawPayload}, '$.displayCardLast4')
+      ELSE json_extract(${txn.rawPayload}, '$.cardLast4') END END`.as(
+    "cardLast4",
+  ),
+  cardMetadata: sql<string | null>`CASE WHEN ${txn.connectorId} = 'ctbc'
+    AND ${account.accountType} = 'credit' AND json_valid(${account.rawPayload})
+    THEN json_extract(${account.rawPayload}, '$.cards') END`.as("cardMetadata"),
   institutionName: sql<string>`${account.institutionName}`.as(
     "institutionName",
   ),
@@ -84,6 +95,8 @@ const creditCardBillColumns = {
 };
 
 export type BankTransactionPageRow = {
+  cardLast4?: string | null;
+  cardMetadata?: string | null;
   id: string;
   connectorId: string;
   accountId: string;

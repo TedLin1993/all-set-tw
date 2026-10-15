@@ -476,6 +476,16 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 
 ### 中國信託銀行
 
+信用卡以 `card-data.ts` 補查各幣別最近三個可用帳期的完整明細（`qu002/011`、`qu002/016`）；未出帳使用 `displayPaging`，即時授權使用 `noMore` 判斷分頁。超過 20 頁、缺清單或筆數不符時明確失敗，不截斷後當成功。欄位來源、有限真實驗證及畫面入口見[信用卡明細紀錄](ctbc-credit-card-details.md)。獨立測試入口另限制為最新一期 TWD 帳單、當期 TWD 未出帳與即時授權，存款仍只查外幣餘額，詳細隔離與核准步驟見[測試部署確認稿](ctbc-balance-test-deployment.md)。
+
+外幣活存路徑已依公開 Android 5.2.26 程式實作，尚未完成真實外幣同步驗收。
+外幣研究的版本、欄位證據、去識別本機檢查及未完成驗收項目見
+[中信外幣存款研究與驗證](ctbc-foreign-deposits.md)。正常同步先沿用總覽已有的外幣分支，
+缺少時才查 `/twrbm-fx/qu001/010`；初始化及交易依帳號加幣別精確查詢。
+本機 `--foreign` 檢查最多第一個幣別、當月明細，不寫 D1；
+不將未知結構當成無外幣，也不記錄原始銀行回應。
+存款初始化／查詢失敗的診斷只記固定事件名稱，不記帳號末碼或任意回應鍵名。
+
 連接器的 `appVer` 使用 `5.2.26`；2026-10-10 核對
 [Google Play 台灣版](https://play.google.com/store/apps/details?id=com.chinatrust.mobilebank&hl=zh_TW&gl=TW)
 與 [App Store 台灣版](https://apps.apple.com/tw/app/id417698185) 的公開最新版均為此版本。

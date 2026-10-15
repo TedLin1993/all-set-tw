@@ -25,6 +25,9 @@ export interface Env {
   LOCAL_DEV_MODE?: string | boolean;
   CTBC_API_RELAY_URL?: string;
   CTBC_API_RELAY_TOKEN?: string;
+  /** Forced by the isolated balance-test entry; never configured in production. */
+  CTBC_FOREIGN_BALANCE_TEST?: string;
+  CTBC_CREDIT_CARD_TEST?: string;
 }
 
 export type Variables = {
