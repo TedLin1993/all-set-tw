@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<!-- 台北富邦網銀頁面去識別化 fixture：帳號、卡號、繳款帳號、token、商店名稱已替換；金額與欄位格式保留。 -->
+<html>
+<body class="main"><form id="form1" name="form1" method="post" action="/B2C/cboqu/cboqu003/CBOQU003_Home.faces" enctype="application/x-www-form-urlencoded"><input type="hidden" name="signonToken" value="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" /><input type="hidden" name="uniqueToken" value="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" />
+		<div class="page">
+	        <dl class="top_page" style="">
+	            <dt class="path"><a href="#" onclick="parent.$('#menu_CDS').click();return false;">存款/外匯/轉帳</a>&nbsp;&gt;&nbsp;<a href="#" onclick="parent.doAjaxToggleFavorite('CDS01', this);return false;" class="add_Myfav_ed"  title="已加入我的最愛"></a>&nbsp;<a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&frameMode=false&popupMode=false" onclick="screenMask();trackClick('CBOQU003','CDS01','99');return true;">我的存款</a>&nbsp;&gt;&nbsp;<a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&frameMode=false&popupMode=false" onclick="screenMask();trackClick('CBOQU003','CDS0102','99');return true;">我的存款</a><a href="#"></a></dt> 
+	            <dt class="f-right"><span class="other_del">
+	                	<span>
+	                        <ul>
+	                        		<li><a href="/B2C/chmag/chmag001/CHMAG001_Home.faces?showLogin=false&amp;menuId=ACM01" onclick="true &amp;&amp;trackClick('CHMAG001','ACM01', '09') ;return processRelatedTask(0, this, {})">紀錄收支</a></li>
+	                        		<li><a href="/B2C/cdsqu/cdsqu002/CDSQU002_Home.faces?type=btnTypeTwdTransfer&amp;showLogin=false&amp;menuId=CDS0402" onclick="true &amp;&amp;trackClick('CDSQU002','CDS0402', '09') ;return processRelatedTask(0, this, {})">預約交易查詢/取消</a></li>
+	                        </ul>
+	                    </span></span>
+	            </dt>
+	        </dl><div id="form1:global_warning_message"></div>
+		<div class="menu_lv3">
+        	<ul>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CDS0102" onclick="screenMask();trackClick('CBOQU003','CDS0102','07');return true;" class="current">我的存款</a>
+		            	</li>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CDS0103" onclick="screenMask();trackClick('CDSQU004','CDS0103','07');return true;" class="">存摺及帳戶明細匯出</a>
+		            	</li>
+            </ul>
+        </div>
+		<div id="con_white"><div class="area_bg">
+			<div id="deny" class="Reminder_message" style="display:none">
+            	<div class="txt_ct">
+                	<span>親愛的客戶您好：<br/>「我的存款」當日執行次數已超過本行設定上
+限，基於安全理由，當日該交易已被鎖定。如有任何疑問，請撥02-8751-6665，將有專人為您
+服務。</span>
+                </div>
+            </div>
+			<div id="apply" style="display:none">
+				<div class="titleBlock">
+		       		<div class="f-right"><a href="/B2C/common/Print.faces?printKey=parent&amp;asPDF=true" target="downloadframe" title="下載" class="download"></a><a href="javascript:void(0);" onclick="window.open('/B2C/common/Print.faces?printKey=parent','','resizable=1, height=450, width=1000, menubar=1, scrollbars=yes');" title="友善列印" class="print"></a>
+					</div>
+<input type="hidden" id="j_id2032716691_51faa7b8:dataGridCurrentPage" name="j_id2032716691_51faa7b8:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id2032716691_51faa7b8:dataGridCurrentPageSize" name="j_id2032716691_51faa7b8:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id2032716691_51faa7b8:dataGridOrderStatus" name="j_id2032716691_51faa7b8:dataGridOrderStatus" value="" />
+<table width="90%" border="0" cellpadding="0" cellspacing="0" class="CBO_totalTb" id="form1:j_id2032716691_51faa7b8_DataGridBody">
+<tr>
+<td class="CBO_tit" width="18%">總存款(約當臺幣)</td>
+<td class="r_line rt" width="15%"><span class="money">156</span></td>
+<td class="tit rt" width="12%">臺幣存款</td>
+<td class="r_line rt" width="15%">50</td>
+<td class="rt vtop" rowspan="2"></td>
+</tr>
+<tr>
+<td class="tit"></td>
+<td class="rt r_line"></td>
+<td class="tit rt">外幣存款</td>
+<td class="r_line rt">106</td>
+</tr>
+</table>
+				</div>
+				<table border="0" cellspacing="0" cellpadding="0" width="100%" class="tb_bkTop">
+	                <tr>
+	                    <td class="hd1">
+	                    	<div class=" f-left"></div>
+	                        <div>
+	                        	<table border="0" cellspacing="0" cellpadding="0" width="100%">
+	                        		<tr>
+	                        			<td>
+		                        			<div style="color:#0099cc">以下您的帳務資料將依系統預設排序，您可依使用習慣點選下表中各欄位<img src="/B2C/inc/img/icon/icon_sortBw_up.gif" style="margin:5px 5px -3px 5px" />進行資料排序。</div>
+	                        			</td>
+		                        			<td>
+		                        				<div class="rt"><a href="#" onclick="showOrHiddenAccount('1')" style="white-space: nowrap; background:url(../../inc/img/btn/btn_Currency2a.gif) no-repeat left top;" class="btn_Cal"><span>顯示全部帳戶</span></a></div>
+		                        			</td>
+	                        			<td>
+	                        				<div class="rt"><a href="#" onclick="showSumGrid()" style="white-space: nowrap;" class="btn_Cal"><span>依幣別加總</span></a></div>
+	                        			</td>
+	                        		</tr>
+	                        	</table>
+	                        </div>
+	                        <div id="sumGrid" class="btn_Cal_pop" style="display:none"><div class="area">
+	                        	<a class="popup_close" href="javascript:void(0);"></a><input type="hidden" id="j_id2032716691_51faa651:dataGridCurrentPage" name="j_id2032716691_51faa651:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id2032716691_51faa651:dataGridCurrentPageSize" name="j_id2032716691_51faa651:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id2032716691_51faa651:dataGridOrderStatus" name="j_id2032716691_51faa651:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock" id="form1:j_id2032716691_51faa651_DataGridBody">
+<tr>
+<td><div class="tit1">活期存款</div></td>
+</tr>
+</table>
+<input type="hidden" id="j_id2032716691_51faa662:dataGridCurrentPage" name="j_id2032716691_51faa662:dataGridCurrentPage" value="1" />
+<input type="hidden" id="j_id2032716691_51faa662:dataGridCurrentPageSize" name="j_id2032716691_51faa662:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="j_id2032716691_51faa662:dataGridOrderStatus" name="j_id2032716691_51faa662:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1_gray m10" id="form1:j_id2032716691_51faa662_DataGridBody">
+<tr>
+<td class="hd" width="20%" >
+幣別</td>
+<td class="hd" width="40%" >
+即時餘額合計</td>
+<td class="hd" width="40%" >
+可用餘額合計</td>
+</tr>
+<tr>
+<td class="ct">臺幣</td>
+<td class="rt">50.00</td>
+<td class="rt">50.00</td>
+</tr>
+<tr>
+<td class="ct">美金</td>
+<td class="rt">3.15</td>
+<td class="rt">3.15</td>
+</tr>
+<tr>
+<td class="ct">人民幣</td>
+<td class="rt">1.20</td>
+<td class="rt">1.20</td>
+</tr>
+</table>
+	                        </div></div>
+	                    </td>
+	                </tr>
+	            </table><input type="hidden" id="resultGrid:dataGridCurrentPage" name="resultGrid:dataGridCurrentPage" value="1" />
+<input type="hidden" id="resultGrid:dataGridCurrentPageSize" name="resultGrid:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="resultGrid:dataGridOrderStatus" name="resultGrid:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb_bkBody m10" id="form1:resultGrid_DataGridBody">
+<tr>
+<td class="hd2" width="11%" >
+ <a href="#" id="form1:btnColumnAccountNo" onclick="return btnColumnAccountNoOnSubmit();" class="bk_sort">帳號</a> 
+<input type="hidden" name="form1:btnColumnAccountNo" /><input type="hidden" name="orderColumn" /><input type="hidden" name="orderType" /></td>
+<td class="hd2" width="14%" >
+ <a href="#" id="form1:btnColumnNickname" onclick="return btnColumnNicknameOnSubmit();" class="bk_sort">帳戶暱稱</a> 
+<input type="hidden" name="form1:btnColumnNickname" /></td>
+<td class="hd2" width="10%" >
+ <a href="#" id="form1:btnColumnAccountType" onclick="return btnColumnAccountTypeOnSubmit();" class="bk_sort">存款類別</a> 
+<input type="hidden" name="form1:btnColumnAccountType" /></td>
+<td class="hd2" width="7%" >
+ <a href="#" id="form1:btnColumnBranch" onclick="return btnColumnBranchOnSubmit();" class="bk_sort">分行</a> 
+<input type="hidden" name="form1:btnColumnBranch" /></td>
+<td class="hd2" width="9%" >
+ <a href="#" id="form1:btnColumnCurrency" onclick="return btnColumnCurrencyOnSubmit();" class="bk_sort current_up">幣別</a> 
+<input type="hidden" name="form1:btnColumnCurrency" /></td>
+<td class="hd2" width="11%" >
+ <a href="#" id="form1:btnColumnCurrentAvailable" onclick="return btnColumnCurrentAvailableOnSubmit();" class="bk_sort">即時餘額</a> 
+<input type="hidden" name="form1:btnColumnCurrentAvailable" /></td>
+<td class="hd2" width="11%" >
+ <a href="#" id="form1:btnColumnAvailable" onclick="return btnColumnAvailableOnSubmit();" class="bk_sort">可用餘額</a> 
+<input type="hidden" name="form1:btnColumnAvailable" /></td>
+<td class="hd2" width="8%" >
+ <a href="#" id="form1:btnColumnSlipNo" onclick="return btnColumnSlipNoOnSubmit();" class="bk_sort">存單號碼</a> 
+<input type="hidden" name="form1:btnColumnSlipNo" /></td>
+<td class="hd2" width="8%" >
+ <a href="#" id="form1:btnColumnEndDate" onclick="return btnColumnEndDateOnSubmit();" class="bk_sort">到期日</a> 
+<input type="hidden" name="form1:btnColumnEndDate" /></td>
+<td class="hd2" width="11%" >
+功能</td>
+</tr>
+<tr>
+<td class="ct"> <a  class="link1"  href="#"  onclick="showDemandDetail('~0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~', '01234500004321');return false;" >01234500004321</a> </td>
+<td><div class="div_input_acc"><input type="text"  id="74304" name="74304" value="常用" size="8" maxlength="8" title="可點選「帳戶暱稱」進行修改" onblur="revertNickname('74304')" onFocus="showChangeLink('74304')" class="input_acc" placeholder="請勿輸入個資" autocomplete="off"></input>
+ <a href="#" id="form1:link_74304" onclick="return link_74304OnSubmit();" class="hide"></a> 
+<input type="hidden" name="form1:link_74304" /><input type="hidden" name="encParams" /></div></td>
+<td width="11%">活儲存款</td>
+<td class="ct">測試分行</td>
+<td class="ct">臺幣</td>
+<td class="rt">50.00</td>
+<td class="rt"> <a  class="link1"  href="javascript:void(0);"  onclick="showIframe('~0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~');return false" >50.00</a> </td>
+<td class="ct"></td>
+<td class="ct"></td>
+<td class="ct"> <a  class="input_sel fastFunctionLinks"  href="javascript:void(0);" >快速功能</a> <div id="input_sel_pop" class="input_sel_pop" style="display: none;"><div id="input_sel_pop_0" class="area" style="width:325px;"> <a  class="popup_close"  href="javascript:void(0);" >　</a> 
+ <a href="#" id="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>轉帳</span></a> 
+<input type="hidden" name="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" /><input type="hidden" name="QUICK_FUNCTION_PARAM" /><input type="hidden" name="param_index" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>臺幣換外幣</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>轉定存</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>買基金</span></a> 
+<input type="hidden" name="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>買黃金</span></a> 
+<input type="hidden" name="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>繳信用卡</span></a> 
+<input type="hidden" name="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>約定自動扣繳</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>帳戶結清</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>交易明細查詢</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" /></div></div></td>
+<td class="hide">常用</td>
+<td class="hide">50.00</td>
+</tr>
+<tr>
+<td class="ct"> <a  class="link1"  href="#"  onclick="showDemandDetail('~0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~', '01234500004321');return false;" >01234500004321</a> </td>
+<td><div class="div_input_acc"><input type="text"  id="input_2" name="input_2" value="" size="8" maxlength="8" title="可點選「帳戶暱稱」進行修改" onblur="revertNickname('input_2')" onFocus="showChangeLink('input_2')" class="input_acc" placeholder="請勿輸入個資" autocomplete="off"></input>
+ <a href="#" id="form1:link_input_2" onclick="return link_input_2OnSubmit();" class="hide"></a> 
+<input type="hidden" name="form1:link_input_2" /></div></td>
+<td width="11%">外幣活存</td>
+<td class="ct">測試分行</td>
+<td class="ct">人民幣</td>
+<td class="rt">1.20</td>
+<td class="rt"> <a  class="link1"  href="javascript:void(0);"  onclick="showIframe('~0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~');return false" >1.20</a> </td>
+<td class="ct"></td>
+<td class="ct"></td>
+<td class="ct"> <a  class="input_sel fastFunctionLinks"  href="javascript:void(0);" >快速功能</a> <div id="input_sel_pop" class="input_sel_pop" style="display: none;"><div id="input_sel_pop_0" class="area" style="width:325px;"> <a  class="popup_close"  href="javascript:void(0);" >　</a> 
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>外幣換外幣</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>外幣轉帳</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>外幣換臺幣</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>轉定存</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>買基金</span></a> 
+<input type="hidden" name="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>買海外ETF</span></a> 
+<input type="hidden" name="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>交易明細查詢</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" /></div></div></td>
+<td class="hide"></td>
+<td class="hide">1.20</td>
+</tr>
+<tr>
+<td class="ct"> <a  class="link1"  href="#"  onclick="showDemandDetail('~0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~', '01234500004321');return false;" >01234500004321</a> </td>
+<td><div class="div_input_acc"><input type="text"  id="input_3" name="input_3" value="" size="8" maxlength="8" title="可點選「帳戶暱稱」進行修改" onblur="revertNickname('input_3')" onFocus="showChangeLink('input_3')" class="input_acc" placeholder="請勿輸入個資" autocomplete="off"></input>
+ <a href="#" id="form1:link_input_3" onclick="return link_input_3OnSubmit();" class="hide"></a> 
+<input type="hidden" name="form1:link_input_3" /></div></td>
+<td width="11%">外幣活存</td>
+<td class="ct">測試分行</td>
+<td class="ct">美金</td>
+<td class="rt">3.15</td>
+<td class="rt"> <a  class="link1"  href="javascript:void(0);"  onclick="showIframe('~0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~');return false" >3.15</a> </td>
+<td class="ct"></td>
+<td class="ct"></td>
+<td class="ct"> <a  class="input_sel fastFunctionLinks"  href="javascript:void(0);" >快速功能</a> <div id="input_sel_pop" class="input_sel_pop" style="display: none;"><div id="input_sel_pop_0" class="area" style="width:325px;"> <a  class="popup_close"  href="javascript:void(0);" >　</a> 
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>外幣換外幣</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>外幣轉帳</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>外幣換臺幣</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>轉定存</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>買基金</span></a> 
+<input type="hidden" name="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>買海外ETF</span></a> 
+<input type="hidden" name="form1:id_00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" />
+ <a href="#" id="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" onclick="return id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000OnSubmit();" class="btn_sel"><span>交易明細查詢</span></a> 
+<input type="hidden" name="form1:id_000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" /></div></div></td>
+<td class="hide"></td>
+<td class="hide">3.15</td>
+</tr>
+</table>
+<div class="ps_tit1">注意事項：</div><ol class="ps1"><li>存款總計以各存款帳戶即時餘額加總計算。</li><li>外幣存款以本行前一營業日<a href="javascript:void (0);" class="link1" onclick="_showPreviousExchangeRate(this);">日終掛牌買匯匯率</a>換算約當臺幣金額，各幣別存款金額採四捨五入計算至元止。</li><li>可用餘額係指除該帳戶帳上存款餘額外，另加上該帳戶可動支之有效額度(包含但不限於貸款與透支金額)，並扣除各種已圈存或已扣押之金額。</li><li>如即時餘額欄位有顯示「已動用金額」，則該帳戶餘額將顯示0.00，實際動用明細請至臺外幣交易明細查詢(若該帳戶為有摺存款，亦可經由補摺而顯示存摺內)。</li><li>新台幣實體定存單已到期且未辦理續存指示者，該筆定存單自到期日起，逾期部分將適用活期存款牌告利率計息。</li><li>若帳戶存款餘額未達起息金額，則未顯示帳戶利率；利率顯示僅供參考，若帳戶適用優惠利率且設有優惠限額，依照本行公告或與本行另行約定之內容為準。</li></ol>
+    <div id="_previous_day_exchange_rate" class="popup_com" style="display:none; z-index:2010">
+    	<div class="area" style="width:300px;">
+        	<div class="pop_tit"><div style="">2026/10/12 日終掛牌買匯匯率<a href="#" onclick="_hidePreviousExchangeRate();return false;" class="delete">&nbsp;</a></div></div>
+            <div class="pop_body"><input type="hidden" id="_previous_day_rateDataGrid:dataGridCurrentPage" name="_previous_day_rateDataGrid:dataGridCurrentPage" value="1" />
+<input type="hidden" id="_previous_day_rateDataGrid:dataGridCurrentPageSize" name="_previous_day_rateDataGrid:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="_previous_day_rateDataGrid:dataGridOrderStatus" name="_previous_day_rateDataGrid:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="1" cellspacing="1" class="CBO_tb" id="form1:j_id2032716691_51faa6c9:_previous_day_rateDataGrid_DataGridBody">
+<tr>
+<td class="hd" width="40%" >
+幣別</td>
+<td class="hd" >
+匯率</td>
+</tr>
+<tr>
+<td class="ct">美金</td>
+<td class="rt">31.8910</td>
+</tr>
+<tr>
+<td class="ct">人民幣</td>
+<td class="rt">4.7462</td>
+</tr>
+<tr>
+<td class="ct">日圓</td>
+<td class="rt">0.1998</td>
+</tr>
+<tr>
+<td class="ct">歐元</td>
+<td class="rt">35.5790</td>
+</tr>
+<tr>
+<td class="ct">港幣</td>
+<td class="rt">4.0426</td>
+</tr>
+<tr>
+<td class="ct">澳幣</td>
+<td class="rt">22.1357</td>
+</tr>
+<tr>
+<td class="ct">南非幣</td>
+<td class="rt">1.8791</td>
+</tr>
+<tr>
+<td class="ct">加拿大幣</td>
+<td class="rt">22.2494</td>
+</tr>
+<tr>
+<td class="ct">英鎊</td>
+<td class="rt">42.0638</td>
+</tr>
+<tr>
+<td class="ct">新加坡幣</td>
+<td class="rt">24.8347</td>
+</tr>
+<tr>
+<td class="ct">瑞士法郎</td>
+<td class="rt">38.2397</td>
+</tr>
+<tr>
+<td class="ct">紐西蘭幣</td>
+<td class="rt">17.7509</td>
+</tr>
+<tr>
+<td class="ct">瑞典幣</td>
+<td class="rt">3.1641</td>
+</tr>
+<tr>
+<td class="ct">泰國銖</td>
+<td class="rt">0.9310</td>
+</tr>
+</table>
+            </div>
+        </div>
+    </div>	
+	<input type="hidden" id="form1:nickname" name="form1:nickname" value="" /><input type="hidden" id="form1:acno" name="form1:acno" value="" /><input type="hidden" id="form1:hiddenFxAccount" name="form1:hiddenFxAccount" value="true" />
+			</div>
+			<div style="display: none;">
+ <a href="#" id="form1:doHiddenOrShowFxEqZeroAction" onclick="return doHiddenOrShowFxEqZeroActionOnSubmit();"></a> 
+<input type="hidden" name="form1:doHiddenOrShowFxEqZeroAction" />
+			</div>
+        </div></div>
+		<div id="pop_data" class="popup_com" style="display:none">
+			<div class="area" style="width:980px;">
+	            <div class="pop_tit">
+            		查詢結果
+            		<a href="javascript:void(0)" onclick="closeIframe();" class="delete"></a>
+            	</div>
+	            <div class="pop_body" style="-webkit-overflow-scrolling:touch;">
+					<iframe id="balance" name="balance" style="position:relative;" scrolling="no" width="100%" frameborder="0" src="/B2C/inc/blank.html"></iframe>
+            	</div>
+	        </div>
+    	</div>
+		<div id="pop_detail" class="popup_com" style="display:none; z-index:2000;">
+			<div class="area" style="width:800px;">
+				<div class="pop_tit">詳細資訊<a href="javascript:void(0);" onclick="closeDetail('pop_detail')" class="delete">&nbsp;</a></div>
+				<div class="pop_body" style="max-height:600px;">
+					<div class="cm_book">
+						<div class="top"></div>
+						<div class="btm">
+							<div class="body"><input type="hidden" id="detailGrid:dataGridCurrentPage" name="detailGrid:dataGridCurrentPage" value="1" />
+<input type="hidden" id="detailGrid:dataGridCurrentPageSize" name="detailGrid:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="detailGrid:dataGridOrderStatus" name="detailGrid:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="book_tb" id="form1:detailGrid_DataGridBody">
+</table>
+							</div>
+							<div class="btnBlock">
+ <a href="#" id="form1:j_id2032716691_51faa521" onclick="return j_id2032716691_51faa521OnSubmit();" class="btn1">利率查詢</a> 
+<input type="hidden" name="form1:j_id2032716691_51faa521" />
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+        <div id="pop_demandDetail" class="popup_com" style="display:none; z-index:2000;">
+			<div class="area" style="width:980px;">
+				<div class="pop_tit">查詢結果<a href="javascript:void(0);" onclick="closeDetail('pop_demandDetail')" class="delete">&nbsp;</a></div>
+				<div class="pop_body" style="-webkit-overflow-scrolling:touch;background-color:#f2e9e0;">
+					<div id="x" style="overflow: auto;-webkit-overflow-scrolling:touch;">
+						<table id="test" width="80%" border="0" cellpadding="0" cellspacing="0" class="titleBlock f-left">
+           					<tr>
+               					<td width="50%"><div class="tit1">活存明細</div></td>
+           					</tr>
+      					</table>
+      					<table width="100%" border="0" cellpadding="1" cellspacing="1" class="tb2 m10 clear">
+							<tbody>
+								<tr>
+									<td class="hd" width="20%">存款帳號</td>
+									<td><span id="acctSpan"></span></td>
+								</tr>
+							</tbody>
+						</table><input type="hidden" id="demandDetailGrid:dataGridCurrentPage" name="demandDetailGrid:dataGridCurrentPage" value="1" />
+<input type="hidden" id="demandDetailGrid:dataGridCurrentPageSize" name="demandDetailGrid:dataGridCurrentPageSize" value="2147483647" />
+<input type="hidden" id="demandDetailGrid:dataGridOrderStatus" name="demandDetailGrid:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1 m10" id="form1:demandDetailGrid_DataGridBody">
+</table>
+					</div>
+				</div>
+			</div>
+		</div>
+        <div id="DIGIT_TYPE_1" class="popup_com" style="display: none;">
+			<div class="area" style="width: 600px;">
+				<div class="pop_tit">
+					數位存款帳戶交易限制說明
+					<a href="#" class="delete" onclick="showOrHide('DIGIT_TYPE_1');"></a>
+				</div>
+				<div class="pop_body f14px ct" style="overflow:hidden;">
+					本帳號為「升級版數位存款帳戶」，在網路銀行中的各項交易限制說明如下：<br />
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1">
+						<tr>
+							<td width="50%" class="hd">交易類型</td>
+							<td width="50%" class="hd">交易限制</td>
+						</tr>
+						<tr>
+							<td>臺幣轉帳</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>臺/外幣定存</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>外幣轉帳</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>換匯交易</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>繳款/費/稅</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>查詢/設定類交易</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>基金信託</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>轉入帳號設定</td>
+							<td>            可交易（註2）</td>
+						</tr>
+					</table>
+					<div class="tal">
+					註1：107年4月16日起開立之數位帳戶適用外幣轉帳及換匯交易，若為110年12月3日起申請開立之帳戶適用基金信託功能。<br />
+					註2：請先至本行任一分行辦理申請線上設定約定轉入帳號服務，始能使用此功能。<br />
+					</div>
+				</div>
+			</div>
+		</div>
+        <div id="DIGIT_TYPE_4" class="popup_com" style="display: none;">
+			<div class="area" style="width: 600px;">
+				<div class="pop_tit">
+					數位存款帳戶交易限制說明
+					<a href="#" class="delete" onclick="showOrHide('DIGIT_TYPE_4');"></a>
+				</div>
+				<div class="pop_body f14px ct" style="overflow:hidden;">
+					本帳號為「基本版數位存款帳戶」，在網路銀行中的各項交易限制說明如下：<br />
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1">
+						<tr>
+							<td width="50%" class="hd">交易類型</td>
+							<td width="50%" class="hd">交易限制</td>
+						</tr>
+						<tr>
+							<td>臺幣轉帳</td>
+							<td>可交易<br />(限轉帳到您在台北富邦銀行的本人帳戶)</td>
+						</tr>
+						<tr>
+							<td>臺/外幣定存</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>外幣轉帳</td>
+							<td>可交易<br />(限轉帳到您在台北富邦銀行的本人帳戶)</td>
+						</tr>
+						<tr>
+							<td>換匯交易</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>繳款/費/稅</td>
+							<td>可交易<br />(不提供繳他行信用卡、繳台灣大哥大、繳遠傳電信、繳學費、繳富邦人壽)</td>
+						</tr>
+						<tr>
+							<td>查詢/設定類交易</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>基金信託</td>
+							<td>            可交易（註2）</td>
+						</tr>
+						<tr>
+							<td>轉入帳號設定</td>
+							<td>不提供</td>
+						</tr>
+					</table>
+					<div class="tal">
+						註1：外幣轉帳及換匯交易限107年4月16日起開立之數位存款帳戶適用。<br />
+						註2：110年12月3日起申請開立之帳戶適用基金信託功能。
+					</div>
+				</div>
+			</div>
+		</div>
+        <div id="DIGIT_TYPE_5" class="popup_com" style="display: none;">
+			<div class="area" style="width: 600px;">
+				<div class="pop_tit">
+					數位存款帳戶交易限制說明
+					<a href="#" class="delete" onclick="showOrHide('DIGIT_TYPE_5');"></a>
+				</div>
+				<div class="pop_body f14px ct" style="overflow:hidden;">
+					本帳號為「基本版數位存款帳戶」，在網路銀行中的各項交易限制說明如下：<br />
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1">
+						<tr>
+							<td class="hd">交易類型</td>
+							<td class="hd">交易限制</td>
+						</tr>
+						<tr>
+							<td>臺幣轉帳</td>
+							<td>            可交易（註2）</td>
+						</tr>
+						<tr>
+							<td>臺/外幣定存</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>外幣轉帳</td>
+							<td>            可交易（註2）</td>
+						</tr>
+						<tr>
+							<td>換匯交易</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>繳款/費/稅</td>
+							<td>            可交易（註3）</td>
+						</tr>
+						<tr>
+							<td>查詢/設定類交易</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>基金信託</td>
+							<td>            可交易（註4）</td>
+						</tr>
+						<tr>
+							<td>轉入帳號設定</td>
+							<td>不提供</td>
+						</tr>
+					</table>
+					<div class="tal">
+						註1：外幣轉帳及換匯交易限107年4月16日起開立之數位存款帳戶適用。<br />
+						註2：轉帳限額為單筆等值臺幣1萬元以下，每日累計等值臺幣3萬元，每月合計等值臺幣5萬元。若提出申請並視訊驗證，且經審核通過，網/行銀即時非約定轉帳限額得提高為單筆等值臺幣5萬元以下，每日累計等值臺幣10萬元，每月合計等值臺幣20萬元。<br />
+					    註3：繳他行信用卡、繳台灣大哥大、繳遠傳電信、繳學費、繳富邦人壽，限額為單筆1萬元，每日累計3萬元，每月合計5萬元；惟若轉入本行代收之繳費帳號或事業費用，則限額為單筆200萬元，當日累計300萬元。<br />
+						註4：110年12月3日起申請開立之帳戶適用基金信託功能。
+					</div>
+				</div>
+			</div>
+		</div>
+        <div id="DIGIT_TYPE_EXFLG_5" class="popup_com" style="display: none;">
+			<div class="area" style="width: 600px;">
+				<div class="pop_tit">
+					數位存款帳戶交易限制說明
+					<a href="#" class="delete" onclick="showOrHide('DIGIT_TYPE_EXFLG_5');"></a>
+				</div>
+				<div class="pop_body f14px ct" style="overflow:hidden;">
+					本帳號為「基本版數位存款帳戶」，在網路銀行中的各項交易限制說明如下：<br />
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1">
+						<tr>
+							<td class="hd">交易類型</td>
+							<td class="hd">交易限制</td>
+						</tr>
+						<tr>
+							<td>臺幣轉帳</td>
+							<td>            可交易（註2）</td>
+						</tr>
+						<tr>
+							<td>臺/外幣定存</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>外幣轉帳</td>
+							<td>            可交易（註2）</td>
+						</tr>
+						<tr>
+							<td>換匯交易</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>繳款/費/稅</td>
+							<td>            可交易（註3）</td>
+						</tr>
+						<tr>
+							<td>查詢/設定類交易</td>
+							<td>可交易</td>
+						</tr>
+						<tr>
+							<td>基金信託</td>
+							<td>            可交易（註4）</td>
+						</tr>
+						<tr>
+							<td>轉入帳號設定</td>
+							<td>不提供</td>
+						</tr>
+					</table>
+					<div class="tal">
+						註1：外幣轉帳及換匯交易限107年4月16日起開立之數位存款帳戶適用。<br />
+						註2：轉帳限額為單筆等值臺幣1萬元以下，每日累計等值臺幣3萬元，每月合計等值臺幣5萬元。若提出申請並視訊驗證，且經審核通過，網/行銀即時非約定轉帳限額得提高為單筆等值臺幣5萬元以下，每日累計等值臺幣10萬元，每月合計等值臺幣20萬元。<br />
+						註3：繳他行信用卡、繳台灣大哥大、繳遠傳電信、繳學費、繳富邦人壽，限額為單筆1萬元，每日累計3萬元，每月合計5萬元；惟若轉入本行代收之繳費帳號或事業費用，則限額為單筆200萬元，當日累計300萬元。<br />
+						註4：110年12月3日起申請開立之帳戶適用基金信託功能。
+					</div>
+				</div>
+			</div>
+		</div>
+		<span id="form1:realMsg" style="display:none">您目前使用鍵盤輸入密碼</span><span id="form1:virtualMsg" style="display:none">您目前使用動態鍵盤輸入密碼</span><input type="hidden" id="form1:viaDynamicKeyboard" name="form1:viaDynamicKeyboard" value="true" />
+		</div>
+	    
+</body>
+</html>

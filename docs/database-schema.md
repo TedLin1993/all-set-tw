@@ -11,7 +11,7 @@
 - Tables：32
 - Explicit indexes：46
 - Other objects：0
-- Migrations：55
+- Migrations：56
 
 ## Tables
 
@@ -1758,6 +1758,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0055_personal_loan_category.sql`](../apps/worker/migrations/0055_personal_loan_category.sql)
 - [`0056_manual_sync_runs.sql`](../apps/worker/migrations/0056_manual_sync_runs.sql)
 - [`0057_sync_job_lock_phase.sql`](../apps/worker/migrations/0057_sync_job_lock_phase.sql)
+- [`0058_fubon_sync_job.sql`](../apps/worker/migrations/0058_fubon_sync_job.sql)
 
 ## 程式碼導覽
 

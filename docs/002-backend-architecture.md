@@ -221,7 +221,7 @@ SQL 應放在使用它的 feature 附近。只有確實被多個 feature 共用�
 
 Cloudflare Worker 與 HTTP 平台層，目前包含：
 
-- Worker bindings 與 Hono binding types。兆豐 App API 的對外請求由 `MegabankEgress` 轉送，物件定義見 `platform/megabank-egress-object.ts`。
+- Worker bindings 與 Hono binding types。兆豐 App API 的對外請求由 `MegabankEgress` 轉送，物件定義見 `platform/megabank-egress-object.ts`。台北富邦網銀的瀏覽器請求由 `FubonEgress` 代發（Browser Run 出口遭銀行重設連線），物件定義見 `platform/fubon-egress-object.ts`，CDP 攔截位於 `sources/fubon/egress.ts`。
 - Hono factory。
 - API error response。
 - Demo 唯讀模式。

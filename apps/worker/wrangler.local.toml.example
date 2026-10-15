@@ -11,9 +11,17 @@ ai = { binding = "AI", remote = true }
 name = "MEGABANK_EGRESS"
 class_name = "MegabankEgress"
 
+[[durable_objects.bindings]]
+name = "FUBON_EGRESS"
+class_name = "FubonEgress"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["MegabankEgress"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["FubonEgress"]
 
 [[queues.producers]]
 binding = "SYNC_QUEUE"

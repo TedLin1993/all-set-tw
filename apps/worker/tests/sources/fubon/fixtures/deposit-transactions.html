@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<!-- 台北富邦網銀頁面去識別化 fixture：帳號、卡號、繳款帳號、token、商店名稱已替換；金額與欄位格式保留。 -->
+<html>
+<body class="main"><form id="form1" name="form1" method="post" action="/B2C/cdsqu/cdsqu001/CDSQU001_Home.faces" enctype="application/x-www-form-urlencoded"><input type="hidden" name="signonToken" value="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" /><input type="hidden" name="uniqueToken" value="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" />
+		<div class="page">
+	        <dl class="top_page" style="">
+	            <dt class="path"><a href="#" onclick="parent.$('#menu_CDS').click();return false;">存款/外匯/轉帳</a>&nbsp;&gt;&nbsp;<a href="#" onclick="parent.doAjaxToggleFavorite('CDS04', this);return false;" class="add_Myfav_ed"  title="已加入我的最愛"></a>&nbsp;<a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&frameMode=false&popupMode=false" onclick="screenMask();trackClick('CDSQU001','CDS04','99');return true;">存款交易查詢</a>&nbsp;&gt;&nbsp;<a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&frameMode=false&popupMode=false" onclick="screenMask();trackClick('CDSQU001','CDS0401','99');return true;">臺外幣交易明細查詢</a><a href="#"></a></dt> 
+	            <dt class="f-right"><span class="other_del">
+	                	<span>
+	                        <ul>
+	                        		<li><a href="/B2C/cpsqu/cpsqu004/CPSQU004_Home.faces?showLogin=false&amp;menuId=CPS0401" onclick="true &amp;&amp;trackClick('CPSQU004','CPS0401', '09') ;return processRelatedTask(0, this, {})">申請電子帳單</a></li>
+	                        		<li><a href="/B2C/cboqu/cboqu003/CBOQU003_Home.faces?showLogin=false&amp;menuId=CDS0102" onclick="true &amp;&amp;trackClick('CBOQU003','CDS0102', '09') ;return processRelatedTask(0, this, {})">我的存款</a></li>
+	                        </ul>
+	                    </span></span>
+	            </dt>
+	        </dl><div id="form1:global_warning_message"></div>
+		<div class="menu_lv3">
+        	<ul>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CDS0401" onclick="screenMask();trackClick('CDSQU001','CDS0401','07');return true;" class="current">臺外幣交易明細查詢</a>
+		            	</li>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CDS0402" onclick="screenMask();trackClick('CDSQU002','CDS0402','07');return true;" class="">預約交易查詢/取消</a>
+		            	</li>
+		            	<li><a href="/B2C/dispatcher?ParamValue=~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~&amp;frameMode=false&amp;popupMode=false&amp;showLogin=false&amp;menuId=CDS0403" onclick="screenMask();trackClick('CDSQU026','CDS0403','07');return true;" class="">換匯申報紀錄查詢</a>
+		            	</li>
+            </ul>
+        </div>
+        <div id="con_white"><div class="area_bg">
+        	<div id="deny" class="Reminder_message" style="display:none">
+            	<div class="txt_ct">
+                	<span></span>
+                </div>
+                <div class="btnBlock">
+                   	<a href="javascript:void(0)" class="btn1" onclick="window.open('https://www.fubon.com/banking/locations/locations.htm')">服務據點</a>
+               	</div>
+            </div>
+        	<div class="Search_bg">
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+                    <tr>
+                        <td>
+                        	<div class="tit1">請選擇查詢內容</div><span class="txt-green titSpan">(提供最近一年的交易明細查詢，每次選擇查詢範圍不可超過六個月)</span>
+                        </td>
+                    </tr>
+                </table>
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb2">
+                    <tr>
+                        <td width="20%" class="hd">帳號</td>
+                        <td>
+                        	<div class="input_sel_s">
+<SCRIPT type="text/javascript">
+var comboAccountItems = new Array();
+comboAccountItems[0] = new Array("01234500004321 (常用)", "012-0001234500004321-TWD-31", "_none");
+</SCRIPT>
+<select name="form1:comboAccount" id="form1:comboAccount" class="Default_Combo" onchange="comboAccountChange();checkAccountType()">
+</select><SCRIPT type="text/javascript">
+function comboAccountOnloadInit() {
+setupComboBox("form1:comboAccount", "_none", "012-0001234500004321-TWD-31", comboAccountItems);
+}
+comboAccountOnloadInit();
+</SCRIPT>
+	                        </div>
+	                        <span id="warn_accountOut"></span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td width="20%" class="hd">查詢項目</td>
+                        <td><span id="form1:rdoTxDetail_span"><label for="form1:rdoTxDetail"><input id="form1:rdoTxDetail" type="radio" name="form1:rdoGroup1" value="1" onclick="changeDateRange()"  checked >交易明細</label></span><span id="form1:rdoInternal_span"><label for="form1:rdoInternal"><input id="form1:rdoInternal" type="radio" name="form1:rdoGroup1" value="2" onclick="changeDateRange()" >國內匯入款</label></span><span id="form1:rdoOverseas_span"><label for="form1:rdoOverseas"><input id="form1:rdoOverseas" type="radio" name="form1:rdoGroup1" value="3" onclick="changeDateRange()" >國外匯入款</label></span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td rowspan="2" class="hd">查詢期間</td>
+                        <td>
+                        	<table width="100%">
+	                        	<tr>
+	                        		<td width="15%" style="border-color: #fff"><span id="form1:rdoFast_span"><label for="form1:rdoFast"><input id="form1:rdoFast" type="radio" name="form1:rdoGroup21" value="1" onclick="checkFast()"  checked  class="queryTime">快速查詢：</label></span>
+	                        		</td>
+	                        		<td style="border-color: #fff"><span id="form1:rdoDay1_span"><label for="form1:rdoDay1"><input id="form1:rdoDay1" type="radio" name="form1:rdoGroup3" value="1" onclick="ajaxGetQueryDate()"  class="queryDate fast">當天</label></span><span id="form1:rdoDay3_span"><label for="form1:rdoDay3"><input id="form1:rdoDay3" type="radio" name="form1:rdoGroup3" value="3" onclick="ajaxGetQueryDate()"  class="queryDate fast">3天內</label></span><span id="form1:rdoDay7_span"><label for="form1:rdoDay7"><input id="form1:rdoDay7" type="radio" name="form1:rdoGroup3" value="7" onclick="ajaxGetQueryDate()"  class="queryDate fast">近一週</label></span><span id="form1:rdoDay14_span"><label for="form1:rdoDay14"><input id="form1:rdoDay14" type="radio" name="form1:rdoGroup3" value="14" onclick="ajaxGetQueryDate()"  class="queryDate fast">近二週</label></span><span id="form1:rdoDay21_span"><label for="form1:rdoDay21"><input id="form1:rdoDay21" type="radio" name="form1:rdoGroup3" value="21" onclick="ajaxGetQueryDate()"  class="queryDate fast">近三週</label></span><br /><br /><span id="form1:rdoDay30_span"><label for="form1:rdoDay30"><input id="form1:rdoDay30" type="radio" name="form1:rdoGroup3" value="30" onclick="ajaxGetQueryDate()"  class="queryDate fast">近1個月</label></span><span id="form1:rdoDay60_span"><label for="form1:rdoDay60"><input id="form1:rdoDay60" type="radio" name="form1:rdoGroup3" value="60" onclick="ajaxGetQueryDate()"  class="queryDate fast">近2個月</label></span><span id="form1:rdoDay90_span"><label for="form1:rdoDay90"><input id="form1:rdoDay90" type="radio" name="form1:rdoGroup3" value="90" onclick="ajaxGetQueryDate()"  checked  class="queryDate fast">近3個月</label></span><span id="form1:rdoDay180_span"><label for="form1:rdoDay180"><input id="form1:rdoDay180" type="radio" name="form1:rdoGroup3" value="180" onclick="ajaxGetQueryDate()"  class="queryDate fast">近6個月</label></span><span id="form1:rdoDay180_365_span"><label for="form1:rdoDay180_365"><input id="form1:rdoDay180_365" type="radio" name="form1:rdoGroup3" value="180_365" onclick="ajaxGetQueryDate()"  class="queryDate fast">6個月前至近1年內</label></span><br /><br /><span id="form1:thisMonth_span"><input id="form1:thisMonth" type="radio" name="form1:rdoGroup3" value="0" class="queryTime fastBtn hide"></span>
+ <a href="#" id="form1:thisMonthBtn" onclick="return thisMonthBtnOnSubmit();" class="btn5">2026/10</a> 
+<input type="hidden" name="form1:thisMonthBtn" /><span id="form1:previousMonth_span"><input id="form1:previousMonth" type="radio" name="form1:rdoGroup3" value="-1" class="queryTime fastBtn hide"></span>
+ <a href="#" id="form1:previousMonthBtn" onclick="return previousMonthBtnOnSubmit();" class="btn5">2026/09</a> 
+<input type="hidden" name="form1:previousMonthBtn" /><span id="form1:perviousTwoMonth_span"><input id="form1:perviousTwoMonth" type="radio" name="form1:rdoGroup3" value="-2" class="queryTime fastBtn hide"></span>
+ <a href="#" id="form1:perviousTwoMonthBtn" onclick="return perviousTwoMonthBtnOnSubmit();" class="btn5">2026/08</a> 
+<input type="hidden" name="form1:perviousTwoMonthBtn" />
+	                        		</td>
+	                        	</tr>
+	                        </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                        	<table width="100%">
+	                        	<tr>
+	                        		<td width="15%" style="border-color: #fff"><span id="form1:rdoCustom_span"><label for="form1:rdoCustom"><input id="form1:rdoCustom" type="radio" name="form1:rdoGroup21" value="2" onclick="uncheckFast()"  class="queryTime">自訂查詢：</label></span>
+	                        		</td>
+	                        		<td style="border-color: #fff">
+			                        	<div class="input_date2">
+<input id="form1:startDate" type="text" name="form1:startDate" maxlength="10" onfocus="$('.queryTime').removeAttr('checked');$('#form1\\:rdoCustom').prop('checked', true)" class="date queryTime" placeholder="YYYY/MM/DD" value="2026/07/13" />&#160;
+			                        	</div>
+			                        	至
+			                        	<div class="input_date2"><input id="form1:endDate" type="text" name="form1:endDate" maxlength="10" onfocus="$('.queryTime').removeAttr('checked');$('#form1\\:rdoCustom').prop('checked', true)" class="date queryTime" placeholder="YYYY/MM/DD" value="2026/10/13" />&#160;
+			                        	</div>
+			                        	<span id="dateMsgEnd"></span>
+	                        		</td>
+	                        	</tr>
+	                        </table>
+                        </td>
+                    </tr>
+                </table>
+	            <div class="btnBlock">
+ <a href="#" id="form1:doValidateAndSubmit" onclick="return doValidateAndSubmitOnSubmit();" class="btn1">開始查詢</a> 
+<input type="hidden" name="form1:doValidateAndSubmit" />
+	            </div>
+	            <div style="diaplay:none">
+ <a href="#" id="form1:doRefreshGrid" onclick="return doRefreshGridOnSubmit();"></a> 
+<input type="hidden" name="form1:doRefreshGrid" />
+	            </div>
+            </div>
+			<div class="ct"><span class="txt-green" id="resultSpan" style="display:none">查詢結果顯示於頁面下方</span></div>
+			<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock" id="resultTitle" style="display:none">
+                <tr>
+                   <td style="white-space:nowrap;width: 5%;"><div class="tit1">查詢結果</div></td>
+                   <td width="75%"><span class="txt-green" id="newString">(請於下述案件選取「匯款性質」後，確認送出，以加速款項入帳，入帳時金額將扣除匯入匯款手續費 ; <span style="color:red;">若有戶名不符、帳號錯誤等情形，本行將有專人與您聯絡；</span>若有疑問，可洽全行國際匯兌中心(02)6618-0678分機6022/6016。)</span></td>
+                    <td class="rt">
+	                    	<a href="javascript:void(0)" id="info" class="fund_icon mt5" onclick="showOrHide('DOWNLOAD_FORMAT_DESC');"></a><a href="/B2C/common/Print.faces?printKey=parent&amp;asPDF=true" id="form1:onlyPDF" name="form1:onlyPDF" target="downloadframe" title="下載" style="display:nonw" class="download"></a>
+                        <a id="multipleDownload" href="javascript:void(0)" class="download" onclick="validateSize()" title="下載" style="display:nonw"></a><a href="javascript:void(0);" onclick="window.open('/B2C/common/Print.faces?printKey=parent','','resizable=1, height=450, width=1000, menubar=1, scrollbars=yes');" title="友善列印" class="print"></a>
+                    </td>
+                </tr>
+          	</table>
+          	<div class="menu_lv5" style="display:none">
+                <ul>
+                    <li>
+ <a href="#" id="form1:btnType1" onclick="return btnType1OnSubmit();">臺幣活期存款</a> 
+<input type="hidden" name="form1:btnType1" /><input type="hidden" name="type" /></li>
+                    <li>
+ <a href="#" id="form1:btnType3" onclick="return btnType3OnSubmit();">外幣活期存款</a> 
+<input type="hidden" name="form1:btnType3" /></li><input type="hidden" id="form1:type" name="form1:type" value="btnType1" />
+                </ul>
+            </div>
+<input type="hidden" id="resultGrid:dataGridCurrentPage" name="resultGrid:dataGridCurrentPage" value="1" />
+<input type="hidden" id="resultGrid:dataGridCurrentPageSize" name="resultGrid:dataGridCurrentPageSize" value="48" />
+<input type="hidden" id="resultGrid:dataGridOrderStatus" name="resultGrid:dataGridOrderStatus" value="" />
+<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb1" id="form1:resultGrid_DataGridBody">
+<tr>
+<td class="hd" width="12%" >
+ <a href="#" id="form1:btnType1Column1" onclick="return btnType1Column1OnSubmit();" class="bw_sort">帳務日期</a> 
+<input type="hidden" name="form1:btnType1Column1" /><input type="hidden" name="orderColumn" /><input type="hidden" name="orderType" /></td>
+<td class="hd" width="12%" >
+ <a href="#" id="form1:btnType1Column2" onclick="return btnType1Column2OnSubmit();" class="bw_sort current_up">交易時間</a> 
+<input type="hidden" name="form1:btnType1Column2" /></td>
+<td class="hd" width="10%" >
+ <a href="#" id="form1:btnType1Column3" onclick="return btnType1Column3OnSubmit();" class="bw_sort">摘要</a> 
+<input type="hidden" name="form1:btnType1Column3" /></td>
+<td class="hd" width="13%" >
+ <a href="#" id="form1:btnType1Column4" onclick="return btnType1Column4OnSubmit();" class="bw_sort">支出金額</a> 
+<input type="hidden" name="form1:btnType1Column4" /></td>
+<td class="hd" width="13%" >
+ <a href="#" id="form1:btnType1Column5" onclick="return btnType1Column5OnSubmit();" class="bw_sort">存入金額</a> 
+<input type="hidden" name="form1:btnType1Column5" /></td>
+<td class="hd" width="13%" >
+ <a href="#" id="form1:btnType1Column6" onclick="return btnType1Column6OnSubmit();" class="bw_sort">即時餘額</a> 
+<input type="hidden" name="form1:btnType1Column6" /></td>
+<td class="hd" width="7%" >
+ <a href="#" id="form1:btnType1Column7" onclick="return btnType1Column7OnSubmit();" class="bw_sort">附註</a> 
+<input type="hidden" name="form1:btnType1Column7" /></td>
+</tr>
+<tr>
+<td class="ct">2026/08/10</td>
+<td class="ct">2026/08/10 10:12:30</td>
+<td class="ct">ＣＤ轉收</td>
+<td class="rt"></td>
+<td class="rt">18,400.00</td>
+<td class="rt">18,520.00</td>
+<td class="lt">自有帳戶轉帳<br/><br/>測試銀行</td>
+</tr>
+<tr>
+<td class="ct">2026/08/12</td>
+<td class="ct">2026/08/12 04:20:00</td>
+<td class="ct">信用卡轉</td>
+<td class="rt">18,450.00</td>
+<td class="rt"></td>
+<td class="rt">70.00</td>
+<td class="lt">台北富邦信用卡款<br/><br/>信用卡處</td>
+</tr>
+<tr>
+<td class="ct">2026/09/11</td>
+<td class="ct">2026/09/10 23:20:15</td>
+<td class="ct">ＣＤ轉收</td>
+<td class="rt"></td>
+<td class="rt">3,500.00</td>
+<td class="rt">3,570.00</td>
+<td class="lt">自有帳戶轉帳<br/><br/>範例銀行</td>
+</tr>
+<tr>
+<td class="ct">2026/09/14</td>
+<td class="ct">2026/09/14 04:30:00</td>
+<td class="ct">信用卡轉</td>
+<td class="rt">3,480.00</td>
+<td class="rt"></td>
+<td class="rt">90.00</td>
+<td class="lt">台北富邦信用卡款<br/><br/>信用卡處</td>
+</tr>
+<tr>
+<td class="ct">2026/09/18</td>
+<td class="ct">2026/09/18 14:02:10</td>
+<td class="ct">ＣＤ轉收</td>
+<td class="rt"></td>
+<td class="rt">5,200.00</td>
+<td class="rt">5,290.00</td>
+<td class="lt">自有帳戶轉帳<br/><br/>測試銀行</td>
+</tr>
+<tr>
+<td class="ct">2026/09/18</td>
+<td class="ct">2026/09/18 14:03:40</td>
+<td class="ct">行動自轉</td>
+<td class="rt">5,200.00</td>
+<td class="rt"></td>
+<td class="rt">90.00</td>
+<td class="lt">自有帳戶轉帳<br/><br/>測試分行 <a  class="link1"  href="javascript:void(0);"  onclick="openDetail('~00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000~');return false" >更多</a> </td>
+</tr>
+<tr>
+<td class="ct">2026/10/12</td>
+<td class="ct">2026/10/12 20:10:05</td>
+<td class="ct">ＣＤ轉收</td>
+<td class="rt"></td>
+<td class="rt">1,300.00</td>
+<td class="rt">1,390.00</td>
+<td class="lt">自有帳戶轉帳<br/><br/>測試銀行</td>
+</tr>
+<tr>
+<td class="ct">2026/10/13</td>
+<td class="ct">2026/10/13 04:35:00</td>
+<td class="ct">信用卡轉</td>
+<td class="rt">1,340.00</td>
+<td class="rt"></td>
+<td class="rt">50.00</td>
+<td class="lt">台北富邦信用卡款<br/><br/>信用卡處</td>
+</tr>
+</table>
+<div class="ps_tit1">注意事項：</div><ol class="ps1"><li>本行提供近一年之交易明細查詢，每次查詢之起日~迄日的設定區間為六個月。</li><li>本資料您可以自行列印或存檔保留，惟不得用作存款餘額證明或往來憑證使用。</li></ol>
+		</div></div>
+			<div id="pop_data" class="popup_com" style="display:none">
+				<div class="area" style="width:800px;">
+		            <div class="pop_tit">
+		            	詳細資訊
+	            		<a href="javascript:void(0)" onclick="closeDetail();" class="delete"></a>
+	            	</div>
+		            <div class="pop_body">
+						<iframe id="detail" name="detail" style="position:relative" scrolling="no" width="780px" height="600px" frameborder="0" src="/B2C/inc/blank.html">
+	           			</iframe>
+	            	</div>
+		        </div>
+    		</div>
+		<div class="popup_com" id="DOWNLOAD_FORMAT_DESC" style="display:none;">
+			<div class="area" style="width: 600px;">
+				<div class="pop_tit">
+					下載格式說明
+					<a href="javascript:void(0);" class="delete" onclick="showOrHide('DOWNLOAD_FORMAT_DESC');"></a>
+				</div>
+				<div class="pop_body">
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+						<tr>
+							<td><div class="tit1">一本萬利檔案下載格式說明</div>
+							</td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="tb1">
+						<tr>
+							<td colspan="3" class="tb_tit">臺幣活期存款</td>
+						</tr>
+						<tr>
+							<td width="40%" class="hd">欄位名稱</td>
+							<td width="20%" class="hd">型態/長度</td>
+							<td class="hd">註解</td>
+						</tr>
+						<tr>
+							<td>帳務日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>交易時間</td>
+							<td class="ct">X(20)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>摘要</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>支出金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>存入金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>即時餘額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>附註（含代辦行資訊）</td>
+							<td class="ct">X(26)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="tb1">
+						<tr>
+							<td colspan="3" class="tb_tit">臺幣定期存款</td>
+						</tr>
+						<tr>
+							<td width="40%" class="hd">欄位名稱</td>
+							<td width="20%" class="hd">型態/長度</td>
+							<td class="hd">註解</td>
+						</tr>
+						<tr>
+							<td>交易日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>帳號</td>
+							<td class="ct">X(12)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>存期</td>
+							<td class="ct">X(6)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>起息日</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>到期日</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>利率別</td>
+							<td class="ct">X(6)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>利率</td>
+							<td class="ct">9(7)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>定存金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>到期續存方式</td>
+							<td class="ct">X(20)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>附註</td>
+							<td class="ct">X(16)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="tb1">
+						<tr>
+							<td colspan="3" class="tb_tit">外幣活期存款</td>
+						</tr>
+						<tr>
+							<td width="40%" class="hd">欄位名稱</td>
+							<td width="20%" class="hd">型態/長度</td>
+							<td class="hd">註解</td>
+						</tr>
+						<tr>
+							<td>帳務日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>交易日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>摘要</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>幣別</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>支出金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>存入金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>即時餘額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>附註</td>
+							<td class="ct">X(26)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="tb1">
+						<tr>
+							<td colspan="3" class="tb_tit">外幣定期存款</td>
+						</tr>
+						<tr>
+							<td width="40%" class="hd">欄位名稱</td>
+							<td width="20%" class="hd">型態/長度</td>
+							<td class="hd">註解</td>
+						</tr>
+						<tr>
+							<td>交易日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>帳號</td>
+							<td class="ct">X(12)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>存期</td>
+							<td class="ct">X(6)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>起息日</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>到期日</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>利率別</td>
+							<td class="ct">X(6)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>利率</td>
+							<td class="ct">9(7)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>幣別</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>定存金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>到期續存方式</td>
+							<td class="ct">X(20)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>附註</td>
+							<td class="ct">X(16)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="tb1">
+						<tr>
+							<td colspan="3" class="tb_tit">基金</td>
+						</tr>
+						<tr>
+							<td width="40%" class="hd">欄位名稱</td>
+							<td width="20%" class="hd">型態/長度</td>
+							<td class="hd">註解</td>
+						</tr>
+						<tr>
+							<td>帳務日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>交易日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>摘要</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>支出單位數</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>存入單位數</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>庫存</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>附註</td>
+							<td class="ct">X(26)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="tb1">
+						<tr>
+							<td colspan="3" class="tb_tit">黃金存摺</td>
+						</tr>
+						<tr>
+							<td width="40%" class="hd">欄位名稱</td>
+							<td width="20%" class="hd">型態/長度</td>
+							<td class="hd">註解</td>
+						</tr>
+						<tr>
+							<td>帳務日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>交易日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>摘要</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>支出克數</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>存入克數</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>庫存</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>附註</td>
+							<td class="ct">X(26)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+					</table>
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+						<tr>
+							<td><div class="tit1">臺幣活存檔案下載格式說明</div>
+							</td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="tb1 m10">
+						<tr>
+							<td width="40%" class="hd">欄位名稱</td>
+							<td width="20%" class="hd">型態/長度</td>
+							<td class="hd">註解</td>
+						</tr>
+						<tr>
+							<td>帳務日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>交易時間</td>
+							<td class="ct">X(20)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>摘要</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>支出金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>存入金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>即時餘額</td>
+							<td class="ct">X(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>附註</td>
+							<td class="ct">X(26)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+					</table>
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+						<tr>
+							<td><div class="tit1">臺幣支存檔案下載格式說明</div>
+							</td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="tb1 m10">
+						<tr>
+							<td width="40%" class="hd">欄位名稱</td>
+							<td width="20%" class="hd">型態/長度</td>
+							<td class="hd">註解</td>
+						</tr>
+						<tr>
+							<td>帳務日期</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>交易時間</td>
+							<td class="ct">X(20)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>支票號碼</td>
+							<td class="ct">X(8)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>摘要</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>支出金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>存入金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>即時餘額</td>
+							<td class="ct">X(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>附註</td>
+							<td class="ct">X(26)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+					</table>
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+						<tr>
+							<td><div class="tit1">外幣活期存款檔案下載格式說明</div>
+							</td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="tb1 m10">
+						<tr>
+							<td width="40%" class="hd">欄位名稱</td>
+							<td width="20%" class="hd">型態/長度</td>
+							<td class="hd">註解</td>
+						</tr>
+						<tr>
+							<td>交易時間</td>
+							<td class="ct">X(20)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>摘要</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>幣別</td>
+							<td class="ct">X(10)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>支出金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>存入金額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>即時餘額</td>
+							<td class="ct">9(18)</td>
+							<td>右靠左補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+						<tr>
+							<td>附註</td>
+							<td class="ct">X(26)</td>
+							<td>左靠右補空白</td>
+						</tr>
+						<tr>
+							<td>FILLER</td>
+							<td class="ct">X(2)</td>
+							<td></td>
+						</tr>
+					</table>
+				</div>
+			</div>
+		</div>
+		<div class="popup_com" id="LUCKY_MONEY_POPUP" style="display:none">
+			<div class="area" style="width: 800px;">
+				<div class="pop_tit">紅包發送紀錄
+					<a href="javascript:void(0);" class="delete" onclick="showOrHide('LUCKY_MONEY_POPUP');"></a>
+				</div>
+				<div class="pop_body content cm_book">
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+						<tr>
+							<td><div class="tit1">紅包編號
+								<span id="luckyMoney_detaNo"></span>
+							</div></td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="book_tb m10">
+						<tr>
+							<td class="book_hd4 ct">發送時間</td>
+							<td class="ct wd25">
+								<span id="luckyMoney_sendDate" style="margin-right:10px;"></span><span id="luckyMoney_sendTime"></span>
+							</td>
+							<td class="book_hd4 ct">到期時間</td>
+							<td class="ct wd25"><span id="luckyMoney_endDate" style="margin-right:10px;"></span><span id="luckyMoney_endTime"></span></td>
+							<td class="book_hd4 ct"></td>
+							<td></td>
+						</tr>
+						<tr>
+							<td class="book_hd4 ct">紅包類型</td>
+							<td class="ct" id="luckyMoney_type"></td>							
+							<td class="book_hd4 ct">紅包狀態</td>
+							<td class="ct" id="luckyMoney_sts"></td>
+							<td class="book_hd4 ct">紅包金額</td>
+							<td class="ct">
+								<span id="luckyMoney_sendAmt"></span></td>
+						</tr>
+						<tr>
+							<td class="book_hd4 ct">紅包個數</td>
+							<td class="ct">
+								<span id="luckyMoney_sendCnt"></span>個
+							</td>							
+							<td class="book_hd4 ct">吉祥話</td>
+							<td colspan="3" id="luckyMoney_goodW"></td>
+						</tr>
+					</table>
+					<table width="100%" id="luckyMoneyDetailHeader" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+						<tr>
+							<td><div class="tit1">紅包領取明細</div></td>
+						</tr>
+					</table>
+					<table id="luckyMoneyDetail" class="book_tb m10" border="0" cellspacing="0" cellpadding="0" width="100%" style="text-align:center;">
+					</table>
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+						<tr>
+							<td><div class="tit1">合計</div></td>
+						</tr>
+					</table>
+					<table border="0" cellspacing="0" cellpadding="0" width="100%" class="book_tb m10" style="text-align:center;">
+						<tr>
+							<td class="book_hd4">領取狀態</td>    
+							<td class="book_hd4">個數</td>   
+							<td class="book_hd4">合計金額</td>  
+						</tr>
+						<tr>
+							<td class="wd20">已領</td>
+							<td class="wd30">
+								<span id="luckyMoney_rcvCntT"></span>個
+							</td>
+							<td class="wd30">
+								<span id="luckyMoney_rcvAmtT"></span>
+							</td>
+						</tr>
+						<tr>
+							<td class="wd20">未領</td>
+							<td class="wd30">
+								<span id="luckyMoney_unCnt"></span>個
+							</td>							
+							<td class="wd30">
+								<span id="luckyMoney_unAmt"></span>
+							</td>
+						</tr>
+					</table>
+				</div>
+				<div class="pop_body errorMsg">
+					<table width="100%" border="0" cellpadding="0" cellspacing="0" class="titleBlock">
+						<tr>
+							<td><div class="tit1">系統訊息</div></td>
+						</tr>
+					</table>
+					<table class="book_tb m10" border="0" cellspacing="0" cellpadding="0" width="100%" style="text-align:center;">
+						<tr>
+							<td class="book_hd4 wd20">狀態</td>
+							<td colspan="5" style="text-align:left;">
+								<span id="luckyMoney_errorMsg"></span>
+							</td>							
+						</tr>
+					</table>
+				</div>
+			</div>
+		</div>
+    		<div id="pop_format" class="popup_com" style="display:none">
+				<div class="area" style="width:600px;">
+		            <div class="pop_tit">
+		            	下載格式說明
+	            		<a href="javascript:void(0)" onclick="closeFormat();" class="delete"></a>
+	            	</div>
+		            <div class="pop_body" style="max-height:450px;">
+						<iframe id="format" name="format" style="position:relative" scrolling="no" width="580px" frameborder="0" src="/B2C/inc/blank.html">
+	           			</iframe>
+	            	</div>
+		        </div>
+    		</div>
+			<div id="pop_download" class="popup_com" style="display:none">
+		    	<div class="area" style="width:550px;">
+		        	<div class="pop_tit">檔案下載格式 <a href="javascript:void(0);" onclick="closeDonwloadPop()" class="delete"></a></div>
+		            <div class="pop_body">
+		            	<table width="100%" border="0" cellpadding="0" cellspacing="0" class="tb2">
+				            <tr>
+				                <td class="hd" width="25%">檔案格式</td>
+				                <td>
+				                	<label><input type="radio" name="download_format" value="TXT" checked="checked" /><span class="link_txt"> TXT</span></label>
+				                    <label><input type="radio" name="download_format" value="EXCEL" /><span class="link_excel"> EXCEL</span></label>
+				                    <label><input type="radio" name="download_format" value="PDF" /><span class="link_pdf"> PDF</span></label>
+				                </td>
+				            </tr>
+				        </table>
+				        <div class="btnBlock">
+				            <a href="javascript:void(0)" class="cancel" onclick="closeDonwloadPop();">取消</a>
+				            <a href="javascript:void(0)" class="confirm" onclick="downloadSpecificFormat();">確認</a>
+				        </div>
+		            </div>
+		        </div>
+	    	</div>
+        <span id="form1:realMsg" style="display:none">您目前使用鍵盤輸入密碼</span><span id="form1:virtualMsg" style="display:none">您目前使用動態鍵盤輸入密碼</span><input type="hidden" id="form1:viaDynamicKeyboard" name="form1:viaDynamicKeyboard" value="true" />
+		</div>
+	    
+</body>
+</html>
