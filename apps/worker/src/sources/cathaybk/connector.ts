@@ -1291,6 +1291,7 @@ async function chooseCathayComboboxOption(
     throw new Error("國泰世華交易頁面找不到帳號或期間選單，未更新資料。");
   }
 
+  await dismissCathayDetailDialog(page);
   await page.focus(`[data-cathay-combobox="${kind}"]`);
   await page.keyboard.press("ArrowDown");
   await page.waitForFunction(
@@ -1334,6 +1335,72 @@ async function chooseCathayComboboxOption(
     kind,
     expected,
   );
+}
+
+/**
+ * 存款明細頁可能跳出公告對話框（例如 2026-10 的「系統維護公告」）蓋住查詢選單。
+ * 只點明確代表「關閉」的按鈕；內容涉及登入、裝置、驗證、授權、密碼或轉帳時一律不點，
+ * 交由原本的逾時處理。
+ * 記錄對話框標題（銀行公告，不含個資）與按鈕文字，方便確認是預期的公告。
+ */
+async function dismissCathayDetailDialog(page: Page) {
+  const result = await page.evaluate(() => {
+    const dialogs = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        "[role='dialog'], [aria-modal='true'], .modal.show, .modal.in",
+      ),
+    ).filter((element) => element.offsetParent !== null);
+    const dialog = dialogs[0];
+    if (!dialog) return null;
+    const text = dialog.innerText.replace(/\s+/g, "");
+    const title = (dialog.innerText.trim().split("\n")[0] ?? "")
+      .trim()
+      .slice(0, 20);
+    const buttons = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        "button, a[role='button'], [role='button']",
+      ),
+    );
+    const labels = buttons.map((button) =>
+      (button.innerText || button.getAttribute("aria-label") || "")
+        .replace(/\s+/g, "")
+        .slice(0, 10),
+    );
+    if (/登入|裝置|驗證|授權|接管|密碼|轉帳/.test(text)) {
+      return { title, labels, clicked: null, blocked: true };
+    }
+    // 「下次再提醒」只關閉公告；「不要再顯示」會改帳戶偏好，不點。
+    const allowed = [
+      "我知道了",
+      "知道了",
+      "關閉",
+      "我已了解",
+      "了解",
+      "下次再提醒",
+      "×",
+      "close",
+      "Close",
+    ];
+    const index = labels.findIndex((label) => allowed.includes(label));
+    if (index < 0) return { title, labels, clicked: null, blocked: false };
+    buttons[index]!.click();
+    return { title, labels, clicked: labels[index], blocked: false };
+  });
+  if (!result) return;
+  console.warn(JSON.stringify({ event: "cathaybk_detail_dialog", ...result }));
+  if (result.clicked) {
+    await page
+      .waitForFunction(
+        () =>
+          !Array.from(
+            document.querySelectorAll<HTMLElement>(
+              "[role='dialog'], [aria-modal='true'], .modal.show, .modal.in",
+            ),
+          ).some((element) => element.offsetParent !== null),
+        { timeout: 5000 },
+      )
+      .catch(() => undefined);
+  }
 }
 
 function assertCathayNotLoggedOut(page: Pick<Page, "url">) {
