@@ -374,7 +374,8 @@ function loanAccounts(loans: RakutenLoan[], asOfAt: string): ParsedAccount[] {
         institutionName: "樂天國際銀行",
         accountName: loan.title,
         accountType: "loan",
-        loanCategory: "other",
+        // 樂天國際銀行的貸款產品為個人信用貸款。
+        loanCategory: "personal",
         ...(loan.annualRatePct !== undefined
           ? { loanInterestRate: loan.annualRatePct }
           : {}),

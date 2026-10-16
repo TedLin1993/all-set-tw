@@ -78,6 +78,7 @@ describe("Rakuten loan parser", () => {
       institutionName: "樂天國際銀行",
       accountName: "樂天測試信貸",
       accountType: "loan",
+      loanCategory: "personal",
       currency: "TWD",
     });
     expect(loan?.raw).toMatchObject({
