@@ -1404,7 +1404,10 @@ async function dismissCathayDetailDialog(page: Page) {
           ).some((element) => element.offsetParent !== null),
         { timeout: 5000 },
       )
-      .catch(() => undefined);
+      .catch(() => {
+        // 公告仍蓋著選單時繼續操作只會再逾時，直接中止並說明原因。
+        throw new Error("國泰世華明細頁公告未能關閉，未更新資料。");
+      });
   }
 }
 
