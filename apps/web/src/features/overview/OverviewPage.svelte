@@ -33,6 +33,7 @@
   import { calculateMonthlyActivityTotals } from "@/data/activity/monthly-totals";
   import type { View } from "@/app/types";
   import {
+    flowAmountSign,
     formatCompactTwd,
     formatCurrency,
     missingExchangeRateCurrencies,
@@ -416,7 +417,9 @@
           <p
             class="mt-2 whitespace-nowrap text-lg font-semibold tracking-tight text-moss tabular-nums md:text-2xl"
           >
-            +{formatCurrency(monthlyIncome)}
+            {flowAmountSign("income", monthlyIncome)}{formatCurrency(
+              Math.abs(monthlyIncome),
+            )}
           </p>
         </div>
         <div class="min-w-0">
@@ -424,7 +427,9 @@
           <p
             class="mt-2 whitespace-nowrap text-lg font-semibold tracking-tight text-coral tabular-nums md:text-2xl"
           >
-            −{formatCurrency(monthlyExpense)}
+            {flowAmountSign("expense", monthlyExpense)}{formatCurrency(
+              Math.abs(monthlyExpense),
+            )}
           </p>
         </div>
         <div class="col-span-2 min-w-0 md:col-span-1">

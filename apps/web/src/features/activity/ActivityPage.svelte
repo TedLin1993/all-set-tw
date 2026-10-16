@@ -72,7 +72,7 @@
   } from "./model/filter";
   import {
     buildActivityCategorySlices,
-    activityCashAmountTwd,
+    activityFlowTotalTwd,
     activityDisplayAmount,
     activityAmountTwd,
   } from "./model/chart";
@@ -83,6 +83,7 @@
   } from "@/data/activity/matching";
   import { getActivityDataStatus } from "./model/load-status";
   import {
+    flowAmountSign,
     formatCompactTwd,
     formatCurrency,
     formatDate,
@@ -340,7 +341,9 @@
     { id: "tax", label: "稅務" },
     { id: "software", label: "軟體服務" },
     { id: "utilities", label: "生活繳費" },
+    { id: "donation", label: "捐款" },
     { id: "other-income", label: "其他收入" },
+    { id: "reward", label: "回饋" },
     { id: "other", label: "未分類" },
   ];
   const categoryOptions = $derived(
@@ -456,10 +459,10 @@
     buildActivityCategorySlices(monthlyCalculatedItems, "expense", rateValues),
   );
   const incomeTotal = $derived(
-    incomeSlices.reduce((sum, slice) => sum + slice.amount, 0),
+    activityFlowTotalTwd(monthlyCalculatedItems, "income", rateValues),
   );
   const expenseTotal = $derived(
-    expenseSlices.reduce((sum, slice) => sum + slice.amount, 0),
+    activityFlowTotalTwd(monthlyCalculatedItems, "expense", rateValues),
   );
   const currentMonth = currentActivityMonthKey();
   const selectedMonthLabel = $derived(`${Number(selectedMonth.slice(5))} 月`);
@@ -474,18 +477,8 @@
       );
       return {
         month,
-        income: items.reduce(
-          (sum, item) =>
-            sum + Math.max(activityCashAmountTwd(item, rateValues), 0),
-          0,
-        ),
-        expense: Math.abs(
-          items.reduce(
-            (sum, item) =>
-              sum + Math.min(activityCashAmountTwd(item, rateValues), 0),
-            0,
-          ),
-        ),
+        income: activityFlowTotalTwd(items, "income", rateValues),
+        expense: activityFlowTotalTwd(items, "expense", rateValues),
       };
     }),
   );
@@ -970,7 +963,7 @@
             >
               {activitySummaryIncomplete
                 ? "—"
-                : `+${formatCurrency(incomeTotal)}`}
+                : `${flowAmountSign("income", incomeTotal)}${formatCurrency(Math.abs(incomeTotal))}`}
             </p>
           </div>
           <div class="min-w-0">
@@ -980,7 +973,7 @@
             >
               {activitySummaryIncomplete
                 ? "—"
-                : `−${formatCurrency(expenseTotal)}`}
+                : `${flowAmountSign("expense", expenseTotal)}${formatCurrency(Math.abs(expenseTotal))}`}
             </p>
           </div>
           <div class="col-span-2 min-w-0 md:col-span-1">
@@ -1007,6 +1000,7 @@
           <ActivityCategoryChart
             flow="income"
             slices={incomeSlices}
+            total={incomeTotal}
             selectedCategory={selectedCategory?.flow === "income"
               ? selectedCategory.category
               : undefined}
@@ -1018,6 +1012,7 @@
           <ActivityCategoryChart
             flow="expense"
             slices={expenseSlices}
+            total={expenseTotal}
             selectedCategory={selectedCategory?.flow === "expense"
               ? selectedCategory.category
               : undefined}
@@ -1055,17 +1050,22 @@
                       style={`height:${Math.max(8, (point.income / maxCashFlow) * 100)}%`}
                     ></span><span
                       class="w-1/3 rounded-t-sm bg-coral"
-                      style={`height:${Math.max(8, (point.expense / maxCashFlow) * 100)}%`}
+                      style={`height:${point.expense < 0 ? 0 : Math.max(8, (point.expense / maxCashFlow) * 100)}%`}
                     ></span>
                   </div>
                   <span class="mt-2 w-full text-caption font-semibold"
                     >{Number(point.month.slice(5))} 月</span
                   ><span
                     class="mt-1 w-full truncate text-caption font-medium tabular-nums text-moss"
-                    >+{formatCompactTwd(point.income)}</span
+                    >{flowAmountSign("income", point.income)}{formatCompactTwd(
+                      Math.abs(point.income),
+                    )}</span
                   ><span
                     class="w-full truncate text-caption font-medium tabular-nums text-coral"
-                    >−{formatCompactTwd(point.expense)}</span
+                    >{flowAmountSign(
+                      "expense",
+                      point.expense,
+                    )}{formatCompactTwd(Math.abs(point.expense))}</span
                   >
                 </button>
               {/each}

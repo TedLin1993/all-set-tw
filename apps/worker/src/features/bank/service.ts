@@ -1,6 +1,7 @@
 import {
   listBankAccounts,
   listBankTransactions,
+  listBankTransactionsForRefundMatching,
   listBankTransactionsForTransferMatching,
   listBankTransactionsInRange,
   listCreditCardBills,
@@ -30,6 +31,11 @@ import {
   findAutomaticTransferTransactionIds,
   getAutomaticTransferDay,
 } from "./transfer-matching";
+import {
+  isRefundCandidate,
+  matchRefundsToPurchases,
+  refundOriginalDayRange,
+} from "./refund-matching";
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
 
@@ -110,10 +116,17 @@ async function presentBankTransactions(
   // outside the page need a further round trip.
   const pageOverrides = loadClassificationOverrides(db, transactions);
   // The counterpart can be on another page, so expand the set before classifying.
-  const transactionsForClassification = await loadTransferCandidates(
-    db,
-    transactions,
+  const [transferCandidates, refundPurchaseCandidates] = await Promise.all([
+    loadTransferCandidates(db, transactions),
+    loadRefundPurchaseCandidates(db, transactions),
+  ]);
+  const transactionsById = new Map(
+    transferCandidates.map((transaction) => [transaction.id, transaction]),
   );
+  for (const candidate of refundPurchaseCandidates)
+    if (!transactionsById.has(candidate.id))
+      transactionsById.set(candidate.id, candidate);
+  const transactionsForClassification = [...transactionsById.values()];
   const pageIds = new Set(transactions.map((transaction) => transaction.id));
   const [rulesResult, pageOverridesResult, candidateOverridesResult] =
     await Promise.all([
@@ -149,23 +162,56 @@ async function presentBankTransactions(
     classificationsReady = false;
   }
 
-  const eligibleTransactions = transactionsForClassification.filter(
-    (transaction) => {
-      const classification = classificationMap.get(transaction.id);
-      return (
-        // An explicit include preference or user classification wins.
-        transaction.calculationPreference !== 0 &&
-        classification?.source !== "override" &&
-        classification?.source !== "user_rule"
-      );
-    },
-  );
+  const eligibleTransactions = transferCandidates.filter((transaction) => {
+    const classification = classificationMap.get(transaction.id);
+    return (
+      // An explicit include preference or user classification wins.
+      transaction.calculationPreference !== 0 &&
+      classification?.source !== "override" &&
+      classification?.source !== "user_rule"
+    );
+  });
   const automaticTransferIds = classificationsReady
     ? findAutomaticTransferTransactionIds(eligibleTransactions)
     : new Set<string>();
   const automaticCreditOffsetIds = classificationsReady
     ? findAutomaticCreditOffsetTransactionIds(eligibleTransactions)
     : new Set<string>();
+  const refundPurchaseIds = classificationsReady
+    ? matchRefundsToPurchases(
+        transactions,
+        transactionsForClassification.filter(
+          (transaction) =>
+            !resolveCalculationExclusion({
+              ...transaction,
+              classificationExcludedFromCalculation: classificationMap.get(
+                transaction.id,
+              )?.excludedFromCalculation,
+            }),
+        ),
+      )
+    : new Map<string, string>();
+
+  // A refund takes its purchase's category. A rule or manual category still
+  // wins, and only counts as a refund when it agrees with the purchase.
+  const refundClassification = (
+    transactionId: string,
+  ): ClassificationResult | undefined => {
+    const purchaseId = refundPurchaseIds.get(transactionId);
+    const own = classificationMap.get(transactionId);
+    const purchase = purchaseId ? classificationMap.get(purchaseId) : undefined;
+    if (!own || !purchase) return own;
+    if (own.source === "fallback")
+      return {
+        categoryId: purchase.categoryId,
+        label: purchase.label,
+        source: "auto_refund",
+        refund: true,
+      };
+    return own.categoryId === purchase.categoryId
+      ? { ...own, refund: true }
+      : own;
+  };
 
   return transactions.map(
     ({
@@ -187,7 +233,7 @@ async function presentBankTransactions(
               source: "auto_transfer" as const,
               excludedFromCalculation: true,
             }
-          : classificationMap.get(transaction.id);
+          : refundClassification(transaction.id);
       return {
         ...normalizeBankTransactionDisplay(transaction),
         excludedFromCalculation: resolveCalculationExclusion({
@@ -253,6 +299,26 @@ function transferMatchKey(transaction: BankTransactionPageRow) {
   const currency = transaction.currency.trim().toUpperCase();
   if (!currency) return undefined;
   return `${day}\u0000${currency}\u0000${Math.abs(transaction.amount)}`;
+}
+
+/** Loads earlier card purchases that refunds on the page may return. */
+async function loadRefundPurchaseCandidates(
+  db: D1Database,
+  transactions: BankTransactionPageRow[],
+) {
+  const refunds = transactions.filter(isRefundCandidate);
+  const range = refundOriginalDayRange(refunds);
+  if (!range) return [];
+  try {
+    return await listBankTransactionsForRefundMatching(
+      db,
+      [...new Set(refunds.map((refund) => refund.accountId))],
+      range,
+    );
+  } catch (error) {
+    console.error("[refund] load refund candidates failed:", error);
+    return [];
+  }
 }
 
 export async function getCreditCardBillPage(

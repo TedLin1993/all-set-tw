@@ -38,8 +38,10 @@ INSERT INTO classification_categories
   ('tax',           '稅務',   13, 1, '2026-06-22T00:00:00.000Z', '2026-06-22T00:00:00.000Z'),
   ('software',      '軟體服務', 14, 1, '2026-09-06T00:00:00.000Z', '2026-09-06T00:00:00.000Z'),
   ('utilities',     '生活繳費', 15, 1, '2026-09-06T00:00:00.000Z', '2026-09-06T00:00:00.000Z'),
-  ('other-income',  '其他收入', 16, 1, '2026-09-06T00:00:00.000Z', '2026-09-06T00:00:00.000Z'),
-  ('other',         '未分類', 17, 1, '2026-06-22T00:00:00.000Z', '2026-09-06T00:00:00.000Z');
+  ('donation',      '捐款',   16, 1, '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z'),
+  ('other-income',  '其他收入', 17, 1, '2026-09-06T00:00:00.000Z', '2026-10-15T00:00:00.000Z'),
+  ('reward',        '回饋',   18, 1, '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z'),
+  ('other',         '未分類', 19, 1, '2026-06-22T00:00:00.000Z', '2026-10-15T00:00:00.000Z');
 
 INSERT INTO classification_rules
   (id, category_id, target_type, field, operator, pattern, priority, enabled, is_system, source, description, created_at, updated_at) VALUES
@@ -53,6 +55,15 @@ INSERT INTO classification_rules
   ('system:shared:insurance-keywords', 'insurance',  NULL,               'any_text', 'regex', '健保|勞保|保費|保險|insurance',                                                95, 1, 1, 'system', '保險相關關鍵字',   '2026-06-22T00:00:00.000Z', '2026-06-22T00:00:00.000Z'),
   ('system:bank:creditcard-payment',   'transfer',   'bank_transaction', 'any_text', 'regex', '信用卡.*繳|繳卡費|credit.?card.*(pay|bill|repay)',                            106, 1, 1, 'system', '信用卡繳費',       '2026-06-22T00:00:00.000Z', '2026-06-22T00:00:00.000Z'),
   ('demo:user:rent',                   'housing',    'bank_transaction', 'any_text', 'contains', '房租',                                                                      200, 1, 0, 'demo',   'Demo 自訂房租分類', '2026-06-24T09:00:00.000Z', '2026-06-24T09:00:00.000Z');
+
+INSERT INTO classification_rules
+  (id, category_id, target_type, field, operator, pattern, priority, enabled, is_system, source, description, created_at, updated_at, excluded_from_calculation) VALUES
+  ('system:bank:reward-keywords',       'reward',   'bank_transaction', 'description', 'regex', '消費折抵|紅利折抵|點數折抵|回饋|年費減免|\bcash\s?back\b', 109, 1, 1, 'system', '信用卡回饋、消費折抵與年費減免', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z', 0),
+  ('system:bank:card-payment-received', 'transfer', 'bank_transaction', 'description', 'regex', '自扣已入帳|繳款入帳|\bpayment\s+received\b', 107, 1, 1, 'system', '信用卡繳款入帳', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z', 1),
+  ('system:bank:e-wallet-transfer',     'transfer', 'bank_transaction', 'description', 'regex', '(?:一卡通|ipass|全支付|街口|悠遊付|icash\s?pay|line\s?pay\s?money).*(?:儲值|加值|提領)|(?:儲值|加值|提領).*(?:一卡通|ipass|全支付|街口|悠遊付|icash\s?pay|line\s?pay\s?money)', 107, 1, 1, 'system', '電子支付儲值、加值與提領', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z', 0),
+  ('system:bank:food-delivery',         'food',     'bank_transaction', 'description', 'regex', '\buber\s*\*?\s*eats\b', 101, 1, 1, 'system', 'Uber Eats 外送（優先於交通規則的 uber 關鍵字）', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z', 0),
+  ('system:bank:convenience-store',     'shopping', 'bank_transaction', 'description', 'regex', '超商|超市|7-?eleven|全家便利|familymart|萊爾富|hi-?life|ok\s?mart|美廉社|全聯|家樂福|carrefour|大潤發|愛買|好市多|costco|supermarket', 102, 1, 1, 'system', '超商、超市與量販店（不論購買品項）', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z', 0),
+  ('system:bank:donation-keywords',     'donation', 'bank_transaction', 'description', 'regex', '捐款|捐贈|政治獻金', 100, 1, 1, 'system', '捐款與政治獻金', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z', 0);
 
 INSERT OR IGNORE INTO classification_rules
   (id, category_id, target_type, field, operator, pattern, priority, enabled, is_system, source, description, created_at, updated_at)
