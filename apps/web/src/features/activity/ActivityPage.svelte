@@ -341,7 +341,9 @@
     { id: "tax", label: "稅務" },
     { id: "software", label: "軟體服務" },
     { id: "utilities", label: "生活繳費" },
+    { id: "donation", label: "捐款" },
     { id: "other-income", label: "其他收入" },
+    { id: "reward", label: "回饋" },
     { id: "other", label: "未分類" },
   ];
   const categoryOptions = $derived(
