@@ -80,7 +80,9 @@
       </div>
     {:else if slices.length === 0}
       <p class="py-8 text-center text-sm text-subtle">
-        此月份沒有{flow === "income" ? "收入" : "支出"}活動
+        {flow === "expense" && total !== 0
+          ? "此月份沒有淨支出分類，退費已自支出總額扣除"
+          : `此月份沒有${flow === "income" ? "收入" : "支出"}活動`}
       </p>
     {:else}
       <div

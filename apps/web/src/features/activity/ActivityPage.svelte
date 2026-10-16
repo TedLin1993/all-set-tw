@@ -1050,7 +1050,7 @@
                       style={`height:${Math.max(8, (point.income / maxCashFlow) * 100)}%`}
                     ></span><span
                       class="w-1/3 rounded-t-sm bg-coral"
-                      style={`height:${Math.max(8, (point.expense / maxCashFlow) * 100)}%`}
+                      style={`height:${point.expense < 0 ? 0 : Math.max(8, (point.expense / maxCashFlow) * 100)}%`}
                     ></span>
                   </div>
                   <span class="mt-2 w-full text-caption font-semibold"
