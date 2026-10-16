@@ -37,7 +37,10 @@ export function calculateMonthlyActivityTotals(
     (result, transaction) => {
       if (transaction.excludedFromCalculation) return result;
       const amount = transactionValueTwd(transaction, rates);
-      if (amount > 0) result.income += amount;
+      // A merchant refund reduces spending instead of counting as income.
+      if (amount > 0 && transaction.classification?.refund)
+        result.expense -= amount;
+      else if (amount > 0) result.income += amount;
       if (amount < 0) result.expense += Math.abs(amount);
       return result;
     },

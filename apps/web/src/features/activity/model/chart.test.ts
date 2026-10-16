@@ -4,6 +4,7 @@ import {
   activityCashAmountTwd,
   activityCashFlow,
   activityDisplayAmount,
+  activityFlowTotalTwd,
   buildActivityCategorySlices,
 } from "./chart";
 import type { ActivityItem } from "./types";
@@ -67,5 +68,27 @@ describe("activity category chart", () => {
         color: "#3e6f7c",
       },
     ]);
+  });
+
+  it("退費從同分類支出扣除；只有退費的分類不畫扇形但仍扣減總額", () => {
+    const items = [
+      item({ source: "card", amount: -1_000, category: "交通" }),
+      item({ source: "card", amount: 900, category: "交通", refund: true }),
+      item({ source: "card", amount: -500, category: "餐飲" }),
+      item({ source: "card", amount: 200, category: "購物", refund: true }),
+    ];
+
+    expect(activityCashFlow(items[1])).toBe("expense");
+    expect(buildActivityCategorySlices(items, "income", {})).toEqual([]);
+    expect(
+      buildActivityCategorySlices(items, "expense", {}).map(
+        ({ category, amount }) => [category, amount],
+      ),
+    ).toEqual([
+      ["餐飲", 500],
+      ["交通", 100],
+    ]);
+    expect(activityFlowTotalTwd(items, "expense", {})).toBe(400);
+    expect(activityFlowTotalTwd(items, "income", {})).toBe(0);
   });
 });

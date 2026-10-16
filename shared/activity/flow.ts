@@ -15,7 +15,8 @@ export function activityCashFlow(item: ActivityItem): ActivityFlow | null {
     return null;
   const amount = activityDisplayAmount(item);
   if (amount == null) return null;
-  if (amount > 0) return "income";
+  // A refund returns money spent in its category, so it reduces that expense.
+  if (amount > 0) return item.refund ? "expense" : "income";
   if (amount < 0) return "expense";
   return null;
 }
