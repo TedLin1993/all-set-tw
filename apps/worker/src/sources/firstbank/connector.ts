@@ -1299,6 +1299,7 @@ async function collectFirstbankPayloads(
     );
 
     const transactionHistoryHtml: string[] = [];
+    const transactionAccounts: Array<{ label: string; value: string }> = [];
     let queryFrame = depositFrame;
     let accountCount = 1;
     for (let accountIndex = 0; accountIndex < accountCount; accountIndex += 1) {
@@ -1321,6 +1322,7 @@ async function collectFirstbankPayloads(
         accountIndex,
       );
       transactionHistoryHtml.push(query.html);
+      transactionAccounts.push(query.account);
       accountCount = Math.min(
         query.accountCount,
         MAX_TRANSACTION_QUERY_ACCOUNTS,
@@ -1337,6 +1339,7 @@ async function collectFirstbankPayloads(
     return {
       depositOverviewHtml,
       transactionHistoryHtml,
+      transactionAccounts,
       hasCreditCard: captured.noCreditCard ? false : undefined,
       cardBill: captured.noCreditCard ? undefined : captured.cardBill,
       cardUnbilled: captured.noCreditCard ? undefined : captured.cardUnbilled,
@@ -1997,7 +2000,7 @@ async function submitTransactionQuery(
 ) {
   const deadline = Date.now() + ACTION_TIMEOUT_MS;
   let queryFrame = frame;
-  let accountCount = 0;
+  let selection: Awaited<ReturnType<typeof selectQueryAccount>>;
   for (;;) {
     queryFrame = await waitForLiveTransactionQueryFrame(
       page,
@@ -2015,8 +2018,8 @@ async function submitTransactionQuery(
       queryFrame = accountFrame;
       continue;
     }
-    accountCount = await selectQueryAccount(queryFrame, false, accountIndex);
-    if (!accountCount) {
+    selection = await selectQueryAccount(queryFrame, false, accountIndex);
+    if (!selection) {
       const replacement = await findLiveTransactionQueryFrame(page, queryFrame);
       if (replacement && replacement !== queryFrame) {
         queryFrame = replacement;
@@ -2046,7 +2049,8 @@ async function submitTransactionQuery(
   await clickTransactionSearch(queryFrame);
   return {
     html: await waitForTransactionHistory(page, transactionResponse),
-    accountCount,
+    accountCount: selection.accountCount,
+    account: selection.account,
   };
 }
 
@@ -2299,8 +2303,7 @@ async function waitForQueryAccountOptions(
   throw new FirstbankConnectionError("第一銀行交易明細查詢帳號無法選取。");
 }
 
-// Returns how many accounts the query page offers; 0 means no account could be
-// read or selected.
+// Keep the selected account alongside its result page, which may omit it.
 async function selectQueryAccount(
   frame: Frame,
   dryRun = false,
@@ -2308,54 +2311,54 @@ async function selectQueryAccount(
 ) {
   const selection = [!dryRun, accountIndex] as const;
   try {
-    return Number(
-      await withActionTimeout(
-        frame.evaluate(([shouldSelect, index]) => {
-          type QueryAccountSelect = {
-            options: ArrayLike<{
-              selected: boolean;
-              text: string;
-              value: string;
-            }>;
-            selectedIndex: number;
+    return await withActionTimeout(
+      frame.evaluate(([shouldSelect, index]) => {
+        type QueryAccountSelect = {
+          options: ArrayLike<{
+            selected: boolean;
+            text: string;
             value: string;
-            dispatchEvent: (event: Event) => boolean;
-          };
-          const isPlaceholder = (text: string, value: string) => {
-            const normalized = text.replace(/\s+/g, "");
-            return (
-              !value.trim() ||
-              value.trim() === "0" ||
-              /請選擇|選擇帳號|pleaseselect|selectaccount|^-+$/i.test(
-                normalized,
-              )
-            );
-          };
-          const select = document.querySelector(
-            'select[name="acnt"]',
-          ) as QueryAccountSelect | null;
-          if (!select) return 0;
-          const accounts = Array.from(select.options).filter(
-            (candidate) => !isPlaceholder(candidate.text, candidate.value),
+          }>;
+          selectedIndex: number;
+          value: string;
+          dispatchEvent: (event: Event) => boolean;
+        };
+        const isPlaceholder = (text: string, value: string) => {
+          const normalized = text.replace(/\s+/g, "");
+          return (
+            !value.trim() ||
+            value.trim() === "0" ||
+            /請選擇|選擇帳號|pleaseselect|selectaccount|^-+$/i.test(normalized)
           );
-          const option = accounts[index];
-          if (!option) return 0;
-          if (!shouldSelect) return accounts.length;
-          select.value = option.value;
-          option.selected = true;
-          select.dispatchEvent(new Event("input", { bubbles: true }));
-          select.dispatchEvent(new Event("change", { bubbles: true }));
-          const selected = select.options[select.selectedIndex];
-          return select.value === option.value &&
-            selected !== undefined &&
-            !isPlaceholder(selected.text, selected.value)
-            ? accounts.length
-            : 0;
-        }, selection),
-      ),
+        };
+        const select = document.querySelector(
+          'select[name="acnt"]',
+        ) as QueryAccountSelect | null;
+        if (!select) return undefined;
+        const accounts = Array.from(select.options).filter(
+          (candidate) => !isPlaceholder(candidate.text, candidate.value),
+        );
+        const option = accounts[index];
+        if (!option) return undefined;
+        const result = {
+          accountCount: accounts.length,
+          account: { label: option.text, value: option.value },
+        };
+        if (!shouldSelect) return result;
+        select.value = option.value;
+        option.selected = true;
+        select.dispatchEvent(new Event("input", { bubbles: true }));
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        const selected = select.options[select.selectedIndex];
+        return select.value === option.value &&
+          selected !== undefined &&
+          !isPlaceholder(selected.text, selected.value)
+          ? result
+          : undefined;
+      }, selection),
     );
   } catch {
-    return 0;
+    return undefined;
   }
 }
 

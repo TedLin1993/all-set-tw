@@ -39,6 +39,8 @@ export type FirstbankPayloads = {
   depositOverviewHtml?: string;
   /** 每個存款帳戶各查一次交易明細；舊版只查第一個帳戶時為單一字串。 */
   transactionHistoryHtml?: string | string[];
+  /** 與各明細頁同順序的查詢帳號；只在擷取與解析之間傳遞，不持久化。 */
+  transactionAccounts?: Array<{ label: string; value: string }>;
   cardBill?: unknown;
   cardUnbilled?: unknown;
   recentPayments?: unknown;
@@ -190,7 +192,13 @@ export function parseFirstbankData(
       : payloads.transactionHistoryHtml
         ? [payloads.transactionHistoryHtml]
         : []
-  ).flatMap((html) => parseTransactionHistoryHtml(html, deposits.accounts));
+  ).flatMap((html, index) =>
+    parseTransactionHistoryHtml(
+      html,
+      deposits.accounts,
+      payloads.transactionAccounts?.[index],
+    ),
+  );
   const cards =
     payloads.hasCreditCard === false
       ? { bankAccounts: [], snapshots: [], transactions: [], bills: [] }
@@ -425,6 +433,7 @@ function accountTypeFor(value: unknown): BankAccount["accountType"] {
 function parseTransactionHistoryHtml(
   html: unknown,
   accounts: DepositAccount[],
+  selectedAccount?: { label: string; value: string },
 ): FirstbankData["bankTransactions"] {
   if (typeof html !== "string") {
     throw new FirstbankProtocolError("第一銀行交易明細格式已變更。");
@@ -432,7 +441,10 @@ function parseTransactionHistoryHtml(
   if (!html.trim()) return [];
   const rows = extractHtmlRows(html);
   const pageText = stripTags(html);
-  const accountToken = findPageAccountIdentity(pageText);
+  const accountToken =
+    extractAccountIdentity(selectedAccount?.label ?? "")?.token ??
+    extractAccountIdentity(selectedAccount?.value ?? "")?.token ??
+    findPageAccountIdentity(pageText);
   const headers = rows
     .map((row, index) => {
       const header = parseTransactionHeader(row.cells);
