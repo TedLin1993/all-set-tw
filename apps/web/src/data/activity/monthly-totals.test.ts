@@ -115,4 +115,34 @@ describe("calculateMonthlyActivityTotals", () => {
       ),
     ).toEqual({ income: 0, expense: 1_200 });
   });
+
+  it("退費扣減支出，不計入收入", () => {
+    const refund = transaction({
+      id: "refund",
+      accountId: "card-1",
+      amount: 900,
+      classification: {
+        categoryId: "transport",
+        label: "交通",
+        source: "system_rule",
+        refund: true,
+      },
+    });
+
+    expect(
+      calculateMonthlyActivityTotals(
+        {
+          accounts: [],
+          transactions: [
+            transaction({ id: "ticket", accountId: "card-1", amount: -1_000 }),
+            refund,
+            transaction({ id: "salary", amount: 10_000 }),
+          ],
+        },
+        [],
+        [],
+        {},
+      ),
+    ).toEqual({ income: 10_000, expense: 100 });
+  });
 });

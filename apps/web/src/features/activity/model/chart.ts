@@ -58,6 +58,32 @@ export function activityCashAmountTwd(
   return activityAmountTwd(item, rates) ?? 0;
 }
 
+/**
+ * Contribution to one flow's total in TWD. Refunds sit on the expense side as
+ * negative amounts, so they reduce their category instead of adding income.
+ */
+export function activityFlowAmountTwd(
+  item: ActivityItem,
+  flow: ActivityFlow,
+  rates: Record<string, number>,
+) {
+  if (activityCashFlow(item) !== flow) return 0;
+  const amount = activityCashAmountTwd(item, rates);
+  return flow === "expense" ? -amount : amount;
+}
+
+/** Net flow total; a refund from an earlier month still reduces this month. */
+export function activityFlowTotalTwd(
+  items: ActivityItem[],
+  flow: ActivityFlow,
+  rates: Record<string, number>,
+) {
+  return items.reduce(
+    (sum, item) => sum + activityFlowAmountTwd(item, flow, rates),
+    0,
+  );
+}
+
 export function buildActivityCategorySlices(
   items: ActivityItem[],
   flow: ActivityFlow,
@@ -67,11 +93,17 @@ export function buildActivityCategorySlices(
 
   for (const item of items) {
     if (activityCashFlow(item) !== flow) continue;
-    const amount = Math.abs(activityCashAmountTwd(item, rates));
-    grouped.set(item.category, (grouped.get(item.category) ?? 0) + amount);
+    grouped.set(
+      item.category,
+      (grouped.get(item.category) ?? 0) +
+        activityFlowAmountTwd(item, flow, rates),
+    );
   }
 
-  const sorted = [...grouped.entries()].sort((a, b) => b[1] - a[1]);
+  // A category whose refunds exceed its spending has no slice to draw.
+  const sorted = [...grouped.entries()]
+    .filter(([, amount]) => amount > 0)
+    .sort((a, b) => b[1] - a[1]);
   const total = sorted.reduce((sum, [, amount]) => sum + amount, 0);
 
   return sorted.map(([category, amount], index) => ({

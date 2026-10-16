@@ -24,6 +24,7 @@ export interface ActivityTransaction extends MatchingTransaction {
     categoryId: string;
     source: ActivityItem["classificationSource"];
     ruleId?: string;
+    refund?: boolean;
   };
 }
 export interface ActivityInvoice extends MatchingInvoice {
@@ -105,6 +106,7 @@ export function buildActivityItems(
         classificationPattern: t.counterparty ?? t.description ?? undefined,
         classificationSource: t.classification?.source ?? "fallback",
         classificationRuleId: t.classification?.ruleId,
+        refund: t.classification?.refund,
         transactionId: t.id,
         invoiceId: matchedInvoice?.id,
         invoiceAmount: matchedInvoice?.amount,
