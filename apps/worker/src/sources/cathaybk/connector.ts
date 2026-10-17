@@ -52,6 +52,7 @@ const LOAN_OVERVIEW_URL =
 const API_DEPOSIT_TX = "B_ACCT_Q_TransferDetail";
 const API_FOREIGN_DEPOSIT_OVERVIEW = "R_ACCT_Q_OverView";
 const API_CARD_STATUS = "C_COM_Q_CardStatus";
+const API_CARD_LATEST_BILL = "C_CardInfo_Q_LatestBill";
 const OTP_SESSION_TTL_MS = 2 * 60 * 1000;
 const TRUSTED_DEVICE_NAME = "ALL SET 同步";
 const OTP_SUBMIT_LABEL_PATTERN = /驗證|確認|確定|送出|登入/;
@@ -1490,6 +1491,52 @@ async function readCathayQueryResponse(
   }
 }
 
+async function readCathayQueryResponses(
+  page: Page,
+  requiredApis: string[],
+  optionalApis: string[],
+  action: () => Promise<void>,
+  timeout = 30000,
+  optionalTimeout = 8000,
+) {
+  const apis = [...requiredApis, ...optionalApis];
+  const queries = new Map<string, HTTPRequest>();
+  const onRequest = (request: HTTPRequest) => {
+    if (request.method() !== "POST") return;
+    const api = apis.find((candidate) => request.url().includes(candidate));
+    if (api && !queries.has(api)) queries.set(api, request);
+  };
+  const controller = new AbortController();
+  page.on("request", onRequest);
+  try {
+    const responses = new Map<
+      string,
+      Awaited<ReturnType<Page["waitForResponse"]>> | undefined
+    >();
+    const waits = apis.map(async (api) => {
+      try {
+        const response = await page.waitForResponse(
+          (candidate) => candidate.request() === queries.get(api),
+          {
+            timeout: optionalApis.includes(api) ? optionalTimeout : timeout,
+            signal: controller.signal,
+          },
+        );
+        responses.set(api, response);
+      } catch (error) {
+        if (!optionalApis.includes(api)) throw error;
+        responses.set(api, undefined);
+      }
+    });
+    await Promise.all([action(), ...waits]);
+    assertCathayNotLoggedOut(page);
+    return responses;
+  } finally {
+    controller.abort();
+    page.off("request", onRequest);
+  }
+}
+
 async function readCathayDepositQuery(
   page: Page,
   accountNumber: string,
@@ -1733,6 +1780,228 @@ interface MonthDetail {
   sections: BillDetailSection[];
 }
 
+function asCathayRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function cathayApiContent(value: unknown): Record<string, unknown> | undefined {
+  const record = asCathayRecord(value);
+  if (!record) return undefined;
+  if (!("content" in record)) return record;
+  if (record.success !== true || record.returnCode !== "0000") return undefined;
+  return asCathayRecord(record.content);
+}
+
+function cathayNonNegativeAmount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function normalizeCathayBillDate(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const source = value.trim();
+  const match =
+    /^(\d{4})(?:[-/](\d{1,2})[-/](\d{1,2})|(\d{2})(\d{2}))(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.exec(
+      source,
+    );
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2] ?? match[4]);
+  const day = Number(match[3] ?? match[5]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return undefined;
+  }
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+export function parseCathayCurrentBills(
+  recentBillInfoValue: unknown,
+  billInfoValue: unknown,
+  latestBillValue: unknown,
+  sourceId: string,
+) {
+  const recentBillInfo = cathayApiContent(recentBillInfoValue);
+  const billInfo = cathayApiContent(billInfoValue);
+  const latestBill = cathayApiContent(latestBillValue);
+  const currencyRows = Array.isArray(billInfo?.currencyBillInfoList)
+    ? billInfo.currencyBillInfoList
+        .map(asCathayRecord)
+        .filter((row): row is Record<string, unknown> => row !== undefined)
+    : [];
+  const dueDate = normalizeCathayBillDate(latestBill?.dueDate);
+  const twdBillDetail = asCathayRecord(latestBill?.twdBillDetail);
+  const twdPayStatus = twdBillDetail?.payBillStatus;
+  const summaries: Array<{
+    currency: string;
+    summary: Record<string, unknown>;
+  }> = [];
+
+  const twdSummary = asCathayRecord(recentBillInfo?.twBillInfo);
+  if (twdSummary) summaries.push({ currency: "TWD", summary: twdSummary });
+
+  const foreignSummary = asCathayRecord(recentBillInfo?.foreignBillInfo);
+  const foreignCurrency = foreignSummary?.currency;
+  if (
+    foreignSummary &&
+    typeof foreignCurrency === "string" &&
+    /^[A-Z]{3}$/.test(foreignCurrency) &&
+    foreignCurrency !== "TWD" &&
+    currencyRows.some(
+      (row) =>
+        row.currency === foreignCurrency &&
+        row.currencyDataType === foreignCurrency,
+    )
+  ) {
+    summaries.push({ currency: foreignCurrency, summary: foreignSummary });
+  }
+
+  const bankAccounts: Scraped["bankAccounts"] = [];
+  const creditCardBills: Scraped["creditCardBills"] = [];
+  for (const { currency, summary } of summaries) {
+    const matchingRows = currencyRows.filter(
+      (row) => row.currency === currency && row.currencyDataType === currency,
+    );
+    const currentInfo = matchingRows.length === 1 ? matchingRows[0] : undefined;
+    const closingDate = normalizeCathayBillDate(recentBillInfo?.recentBillDate);
+    if (!closingDate) continue;
+    const billingPeriod = closingDate.slice(0, 7);
+
+    const unpaidAmount = cathayNonNegativeAmount(summary.unPaidAmount);
+    const paidAmount = cathayNonNegativeAmount(summary.paidAmount);
+    const statementAmount =
+      unpaidAmount !== undefined && paidAmount !== undefined
+        ? unpaidAmount + paidAmount
+        : undefined;
+    const minimumPayment = cathayNonNegativeAmount(
+      currentInfo?.currentMinPaymentAmount,
+    );
+    const accountId = currency === "TWD" ? sourceId : `${sourceId}:${currency}`;
+    const isPaid =
+      currency === "TWD" && twdPayStatus === "Payed"
+        ? unpaidAmount !== undefined && unpaidAmount > 0
+          ? undefined
+          : true
+        : unpaidAmount !== undefined && unpaidAmount > 0
+          ? false
+          : undefined;
+
+    if (currency !== "TWD") {
+      bankAccounts.push({
+        sourceId: accountId,
+        institutionName: "國泰世華銀行",
+        accountName: `國泰信用卡外幣帳單（${currency}）`,
+        accountType: "credit",
+        currency,
+        raw: { parentSourceId: sourceId, currency, purpose: "currency_bill" },
+      });
+    }
+
+    creditCardBills.push({
+      accountId,
+      sourceId: `${accountId}:bill:${billingPeriod}`,
+      billingPeriod,
+      statementAmount:
+        statementAmount !== undefined && Number.isFinite(statementAmount)
+          ? statementAmount
+          : undefined,
+      minimumPayment,
+      paidAmount,
+      isPaid,
+      paymentDueDate: dueDate,
+      statementClosingDate: closingDate,
+      currency,
+      raw: {
+        source: "C_BILL_Q_RecentBillInfo",
+        currency,
+        recentBillDate: closingDate,
+        unPaidAmount: unpaidAmount,
+        paidAmount,
+        minimumPayment,
+        paymentDueDate: dueDate,
+        payBillStatus: currency === "TWD" ? twdPayStatus : undefined,
+      },
+    });
+  }
+
+  return { bankAccounts, creditCardBills };
+}
+
+export function parseCathayHistoryBills(
+  bills: HistoryBillItem[],
+  sourceId: string,
+  recentBillDate?: string | null,
+): Scraped["creditCardBills"] {
+  const currentPeriodAnchor = normalizeCathayBillDate(recentBillDate);
+  const datedBills = bills.flatMap((bill) => {
+    const statementClosingDate = normalizeCathayBillDate(bill.billDate);
+    if (!statementClosingDate) return [];
+    const statementAmount =
+      typeof bill.twdAmount === "number" && Number.isFinite(bill.twdAmount)
+        ? bill.twdAmount
+        : undefined;
+    if (
+      currentPeriodAnchor &&
+      statementClosingDate > currentPeriodAnchor &&
+      statementAmount === undefined
+    ) {
+      return [];
+    }
+    return [{ bill, statementClosingDate, statementAmount }];
+  });
+  return datedBills.map(({ bill, statementClosingDate, statementAmount }) => {
+    const billingPeriod = statementClosingDate.slice(0, 7);
+    return {
+      accountId: sourceId,
+      sourceId: `${sourceId}:bill:${billingPeriod}`,
+      billingPeriod,
+      statementAmount,
+      statementClosingDate,
+      currency: "TWD",
+      raw: bill,
+    };
+  });
+}
+
+export function mergeCathayCurrentBills(
+  historyBills: Scraped["creditCardBills"],
+  currentBills: Scraped["creditCardBills"],
+): Scraped["creditCardBills"] {
+  const merged = [...historyBills];
+  for (const currentBill of currentBills) {
+    const index = merged.findIndex(
+      (bill) =>
+        bill.accountId === currentBill.accountId &&
+        bill.billingPeriod === currentBill.billingPeriod &&
+        bill.currency === currentBill.currency,
+    );
+    if (index < 0) {
+      merged.push(currentBill);
+      continue;
+    }
+    merged[index] = {
+      ...merged[index],
+      ...currentBill,
+      statementAmount:
+        currentBill.statementAmount ?? merged[index].statementAmount,
+      minimumPayment: currentBill.minimumPayment,
+      paidAmount: currentBill.paidAmount,
+      isPaid: currentBill.isPaid,
+      paymentDueDate: currentBill.paymentDueDate,
+      statementClosingDate: currentBill.statementClosingDate,
+      raw: currentBill.raw,
+    };
+  }
+  return merged;
+}
+
 /** Parses the Cathay credit card overview (C0101) page text. */
 export function parseCathayCardOverview(text: string) {
   const parseAmt = (s: string | undefined) =>
@@ -1774,11 +2043,11 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
   const bankTransactions: Scraped["bankTransactions"] = [];
   const creditCardBills: Scraped["creditCardBills"] = [];
   const asOfAt = new Date().toISOString();
-
   // ── C0101: card overview (DOM) ─────────────────────────────────────────
-  const statusResponse = await readCathayQueryResponse(
+  const overviewResponses = await readCathayQueryResponses(
     page,
-    API_CARD_STATUS,
+    [API_CARD_STATUS],
+    [API_CARD_LATEST_BILL],
     async () => {
       await page.goto(CREDIT_CARD_OVERVIEW_URL, {
         waitUntil: "networkidle2",
@@ -1787,9 +2056,16 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
     },
     60000,
   );
+  const statusResponse = overviewResponses.get(API_CARD_STATUS)!;
+  const latestBillResponse = overviewResponses.get(API_CARD_LATEST_BILL);
   console.log("[cathaybk] credit card overview opened");
   if (statusResponse.status() !== 200) {
     throw new Error("國泰世華信用卡狀態查詢失敗，未更新資料。");
+  }
+  let latestBillContent: Record<string, unknown> | undefined;
+  if (latestBillResponse?.status() === 200) {
+    const latestBillPayload = await latestBillResponse.json().catch(() => null);
+    latestBillContent = cathayApiContent(latestBillPayload);
   }
   const cardStatus = parseCathayCardStatus(
     await statusResponse.json().catch(() => {
@@ -1941,6 +2217,81 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
     }
 
     // 1. Get list of available historical months (bank provides up to 12)
+    function successfulContent(value: unknown): Record<string, unknown> | null {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return null;
+      }
+      const envelope = value as Record<string, unknown>;
+      return envelope.success === true &&
+        envelope.returnCode === "0000" &&
+        envelope.content &&
+        typeof envelope.content === "object" &&
+        !Array.isArray(envelope.content)
+        ? (envelope.content as Record<string, unknown>)
+        : null;
+    }
+    function safeSummary(value: unknown) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return null;
+      }
+      const summary = value as Record<string, unknown>;
+      return {
+        unPaidAmount:
+          typeof summary.unPaidAmount === "number" &&
+          Number.isFinite(summary.unPaidAmount)
+            ? summary.unPaidAmount
+            : null,
+        paidAmount:
+          typeof summary.paidAmount === "number" &&
+          Number.isFinite(summary.paidAmount)
+            ? summary.paidAmount
+            : null,
+        currency:
+          typeof summary.currency === "string" ? summary.currency : null,
+      };
+    }
+    const recentBillResponse = successfulContent(
+      await xhrPost("C_BILL_Q_RecentBillInfo"),
+    );
+    const recentBillInfo = recentBillResponse
+      ? {
+          recentBillDate:
+            typeof recentBillResponse.recentBillDate === "string"
+              ? recentBillResponse.recentBillDate
+              : null,
+          twBillInfo: safeSummary(recentBillResponse.twBillInfo),
+          foreignBillInfo: safeSummary(recentBillResponse.foreignBillInfo),
+        }
+      : null;
+    const billInfoResponse = successfulContent(
+      await xhrPost("C_BILL_Q_BillInfo"),
+    );
+    const currencyBillInfoList = Array.isArray(
+      billInfoResponse?.currencyBillInfoList,
+    )
+      ? billInfoResponse.currencyBillInfoList.flatMap((value) => {
+          if (!value || typeof value !== "object" || Array.isArray(value)) {
+            return [];
+          }
+          const row = value as Record<string, unknown>;
+          return [
+            {
+              currency: typeof row.currency === "string" ? row.currency : null,
+              currencyDataType:
+                typeof row.currencyDataType === "string"
+                  ? row.currencyDataType
+                  : null,
+              currentMinPaymentAmount:
+                typeof row.currentMinPaymentAmount === "number" &&
+                Number.isFinite(row.currentMinPaymentAmount)
+                  ? row.currentMinPaymentAmount
+                  : null,
+            },
+          ];
+        })
+      : [];
+    const billInfo = { currencyBillInfoList };
+
     const historyResp = (await xhrPost("C_BILL_Q_HistoryBillList")) as {
       content?: { historyBillInfoList?: unknown[] };
     } | null;
@@ -1973,8 +2324,10 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
       });
     }
 
-    return { allBills: targetBills, monthDetails };
+    return { recentBillInfo, billInfo, allBills: targetBills, monthDetails };
   }, BANK_SYNC_MONTHS)) as {
+    recentBillInfo: unknown;
+    billInfo: unknown;
     allBills: HistoryBillItem[];
     monthDetails: MonthDetail[];
   } | null;
@@ -1993,25 +2346,24 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
     `[cathaybk] fetched ${apiResult.allBills.length} historical bills`,
   );
 
-  // Build creditCardBills from history list
-  const latestBillDate = apiResult.allBills[0]?.billDate;
-  for (const bill of apiResult.allBills) {
-    const period = bill.billDate.slice(0, 7); // "YYYY-MM"
-    const isLatest = bill.billDate === latestBillDate;
-    creditCardBills.push({
-      accountId: sourceId,
-      sourceId: `${sourceId}:bill:${period}`,
-      billingPeriod: period,
-      statementAmount: bill.twdAmount ?? undefined,
-      statementClosingDate: bill.billDate.slice(0, 10),
-      paymentDueDate: isLatest
-        ? (cardOverview.paymentDueDate ?? undefined)
-        : undefined,
-      isPaid: isLatest ? cardOverview.noPaymentNeeded : true,
-      currency: "TWD",
-      raw: bill,
-    });
-  }
+  const recentBillDate = asCathayRecord(
+    apiResult.recentBillInfo,
+  )?.recentBillDate;
+  const historyBills = parseCathayHistoryBills(
+    apiResult.allBills,
+    sourceId,
+    typeof recentBillDate === "string" ? recentBillDate : null,
+  );
+  const currentBills = parseCathayCurrentBills(
+    apiResult.recentBillInfo,
+    apiResult.billInfo,
+    latestBillContent,
+    sourceId,
+  );
+  bankAccounts.push(...currentBills.bankAccounts);
+  creditCardBills.push(
+    ...mergeCathayCurrentBills(historyBills, currentBills.creditCardBills),
+  );
 
   console.log(`[cathaybk] credit card bills: ${creditCardBills.length}`);
 
