@@ -38,6 +38,10 @@ import {
   FubonOtpRequiredError,
 } from "../../sources/fubon/connector";
 import {
+  FeibBrowserCapacityError,
+  FeibConnectionError,
+} from "../../sources/feib/connector";
+import {
   KgibankBrowserCapacityError,
   KgibankConnectionError,
 } from "../../sources/kgibank/connector";
@@ -191,6 +195,10 @@ export function classifySyncError(error: unknown): ClassifiedSyncError {
     return busy("FUBON_BROWSER_BUSY", error.retryAfterSeconds, error.message);
   if (error instanceof FubonConnectionError)
     return fail(502, "FUBON_CONNECTION_FAILED");
+  if (error instanceof FeibBrowserCapacityError)
+    return busy("FEIB_BROWSER_BUSY", error.retryAfterSeconds, error.message);
+  if (error instanceof FeibConnectionError)
+    return fail(502, "FEIB_CONNECTION_FAILED");
   return fail(500, "SYNC_FAILED");
 }
 

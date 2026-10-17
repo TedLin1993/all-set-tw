@@ -10,6 +10,8 @@ const INVALIDATED_CAPTCHA_SESSION_CODES = new Set<ApiRequestErrorCode>([
   "MEGABANK_CONNECTION_FAILED",
   "FUBON_BROWSER_BUSY",
   "FUBON_CONNECTION_FAILED",
+  "FEIB_BROWSER_BUSY",
+  "FEIB_CONNECTION_FAILED",
 ]);
 
 /** 伺服器判定自動辨識驗證碼失敗，應改走人工驗證碼流程。 */

@@ -1,0 +1,143 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>FEIB</title>
+</head>
+<body onunload="">
+        <div class="wrapper">
+            <div class="header-wrapper">
+                <div class="header-container">
+                    <div class="right">
+                        <div class="right-left">
+                            <p>親愛的測試用戶貴賓，您好，上次登入時間為 2026-10-01 09:00:00</p>
+                        </div>
+                        <div class="right-right">
+                            <a href="/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Logout&state=logout">登 出</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="anchorlist" class="navigation">
+                <ul>
+                    <li class="j"><a href="#"><span></span>存款/繳費稅</a>
+                        <ul>
+                            <li id="2-1-1"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Login&state=loginAFT&lgstatus=saving&menu_id=2-1-1'; openLoading('goAhref')">我的存款</a></li>
+                            <li id="2-1-3"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.SavAcctTxDtlInq&state=prompt&menu_id=2-1-3&default_acc_submit=1'; openLoading('goAhref')">存款交易明細查詢</a></li>
+                        </ul>
+                    </li>
+                    <li class="e"><a href="#"><span></span>信用卡</a>
+                        <ul>
+                            <li id="5-1-4"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMember&state=qCardAdj&menu_id=5-1-4'; openLoading('goAhref')">信用卡可用額度查詢</a></li>
+                            <li id="5-1-1"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMember&state=eStatementQry&menu_id=5-1-1'; openLoading('goAhref')">帳單明細查詢</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+			<div class="main-wrapper">
+				<div class="main-container">
+<div class="page">
+  <form name="deposit" method="post" action="/netbank/servlet/TrxDispatcher" id="deposit">
+    <INPUT type="HIDDEN" name="trx" value="com.lb.wibc.trx.Login">
+    <INPUT type="HIDDEN" name="state" value="chgPassword">
+    <input type="hidden" name="acctype" value="undefined">
+    <input type="hidden" name="acctno" value="undefined">
+    <input type="hidden" name="ccycd" value="undefined">
+    <input type="hidden" name="ckFinAcctcd" value="">
+    <input type="hidden" name="default_from_account" value="">
+    <INPUT type="HIDDEN" name="menu_id" value="">
+    <div class="breadcrumb">
+    </div>
+    <h1 class="page-title">
+        <span class="a"></span>存款總覽
+    </h1>
+    <div class="content">
+        <div class="std-table">
+            <div class="title">
+                <h2>活期性存款</h2>
+            </div>
+            <div class="table-container">
+                <div class="scroll-box">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>所屬分行</th>
+                                <th>帳戶類別</th>
+                                <th>帳號</th>
+                                <th>幣別</th>
+                                <th class="width-c">帳戶餘額</th>
+                                <th>我要查詢/申請</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>測試分行</td>
+                                <td>活期儲蓄存款</td>
+                                <td>09990000001111</td>
+                                <td>新臺幣</td>
+                                <td class="tar">NTD$12,345.67元</td>
+                                <td>
+                                    <select name="selFun10" onchange="javascript:selFun1(this.value, '09990000001111','00','004','0');">
+                                        <option value="">---請選擇---</option>
+		                                        <option value="detail">交易明細</option>
+		                                        <option value="balance">存款餘額</option>
+		                                        <option value="ttrans">立即轉帳</option>
+                                    </select>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>範例分行</td>
+                                <td>活期儲蓄存款</td>
+                                <td>09990000002222</td>
+                                <td>新臺幣</td>
+                                <td class="tar">NTD$100.00元</td>
+                                <td>
+                                    <select name="selFun11" onchange="javascript:selFun1(this.value, '09990000002222','00','004','0');">
+                                        <option value="">---請選擇---</option>
+		                                        <option value="detail">交易明細</option>
+		                                        <option value="balance">存款餘額</option>
+		                                        <option value="ttrans">立即轉帳</option>
+                                    </select>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="std-table">
+            <div class="title">
+                <h2>定期性存款</h2>
+            </div>
+            <div class="table-container">
+                <div class="scroll-box">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>往來單位</th>
+                                <th>帳戶類別</th>
+                                <th>帳號</th>
+                                <th>幣別</th>
+                                <th class="width-c">帳戶餘額</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+  </form>
+</div>
+				</div>
+			</div>
+                <div class="footer">
+                    <p>遠東商業銀行 版權所有 © 2014  Far Eastern International Bank. All rights reserved.</p>
+                </div>
+            </div>
+        <input type="hidden" name="trx" value="" />
+        <input type="hidden" name="state" value="" />
+    </body>
+</html>

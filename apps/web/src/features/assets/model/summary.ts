@@ -17,6 +17,7 @@ const CONNECTOR_BANK_CODES: Record<string, string> = {
   megabank: "017",
   rakuten: "826",
   fubon: "012",
+  feib: "805",
 };
 
 export interface InstitutionAssetGroup {

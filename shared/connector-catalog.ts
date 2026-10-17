@@ -494,6 +494,32 @@ export const connectorCatalog = {
       "otp",
     ],
   },
+  feib: {
+    id: "feib",
+    title: "遠東商銀",
+    description: "臺幣活存帳戶、餘額與交易明細；信用卡帳單與消費",
+    connectionMode: "browser_captcha_session",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: [],
+    credentialFields: [
+      { key: "userId", label: "身分證字號", type: "text" },
+      { key: "account", label: "使用者代號", type: "text" },
+      { key: "password", label: "密碼", type: "password" },
+    ],
+    secretStateFields: ["browserSessionId", "captcha"],
+    resetOnCredentialChangeFields: [
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captchaDigitCount",
+      "captcha",
+    ],
+  },
 } as const satisfies Record<string, ConnectorCatalogEntry>;
 
 export type ConnectorId = keyof typeof connectorCatalog;

@@ -47,6 +47,11 @@ import {
   type FubonSyncOverrides,
 } from "../../sources/fubon/sync";
 import {
+  prepareFeibCaptchaSession,
+  syncFeib,
+  type FeibSyncOverrides,
+} from "../../sources/feib/sync";
+import {
   syncCathaybk,
   type CathaySyncOverrides,
 } from "../../sources/cathaybk/sync";
@@ -151,6 +156,11 @@ export const connectorRuntimeRegistry: Record<
     run: (env, trigger, _scope, overrides) =>
       syncFubon(env, trigger, overrides as FubonSyncOverrides),
     prepareChallenge: prepareFubonCaptchaSession,
+  },
+  feib: {
+    run: (env, trigger, _scope, overrides) =>
+      syncFeib(env, trigger, overrides as FeibSyncOverrides),
+    prepareChallenge: prepareFeibCaptchaSession,
   },
 };
 

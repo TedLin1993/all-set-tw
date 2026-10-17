@@ -12,6 +12,7 @@ const FIRSTBANK_BANK_CODE = "007";
 const MEGABANK_BANK_CODE = "017";
 const TAISHIN_BANK_CODE = "812";
 const FUBON_BANK_CODE = "012";
+const FEIB_BANK_CODE = "805";
 const CONNECTOR_BANK_CODES: ReadonlyMap<string, string> = new Map([
   ["esun", ESUN_BANK_CODE],
   ["cathaybk", CATHAYBK_BANK_CODE],
@@ -25,6 +26,7 @@ const CONNECTOR_BANK_CODES: ReadonlyMap<string, string> = new Map([
   ["megabank", MEGABANK_BANK_CODE],
   ["rakuten", RAKUTEN_BANK_CODE],
   ["fubon", FUBON_BANK_CODE],
+  ["feib", FEIB_BANK_CODE],
 ]);
 const TAIWAN_BANK_NAMES: Record<string, string> = {
   "004": "台灣銀行",
@@ -126,6 +128,11 @@ export function deriveBankMatchKey(
     const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
     return { bankCode: FUBON_BANK_CODE, last4: last4 || null };
   }
+  if (connectorId === "feib" && sourceId.startsWith("bank:feib:")) {
+    // sourceId 為 bank:feib:<末四碼>:<帳號雜湊>:<幣別>，不含完整帳號。
+    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
+    return { bankCode: FEIB_BANK_CODE, last4: last4 || null };
+  }
   if (connectorId === "rakuten" && sourceId.startsWith("bank:rakuten:")) {
     const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
     return { bankCode: RAKUTEN_BANK_CODE, last4: last4 || null };
@@ -201,6 +208,8 @@ function parseBankAccountSource(sourceId: string): {
   if (megabank) return { bankCode: MEGABANK_BANK_CODE, account: megabank[1] };
   const fubon = sourceId.match(/^bank:fubon:([^:]+)/);
   if (fubon) return { bankCode: FUBON_BANK_CODE, account: fubon[1] };
+  const feib = sourceId.match(/^bank:feib:([^:]+)/);
+  if (feib) return { bankCode: FEIB_BANK_CODE, account: feib[1] };
   const rakuten = sourceId.match(/^bank:rakuten:([^:]+)/);
   if (rakuten) return { bankCode: RAKUTEN_BANK_CODE, account: rakuten[1] };
   return {};

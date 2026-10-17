@@ -1,0 +1,114 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>FEIB</title>
+</head>
+<body onunload="">
+        <div class="wrapper">
+            <div class="header-wrapper">
+                <div class="header-container">
+                    <div class="right">
+                        <div class="right-left">
+                            <p>親愛的測試用戶貴賓，您好，上次登入時間為 2026-10-01 09:00:00</p>
+                        </div>
+                        <div class="right-right">
+                            <a href="/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Logout&state=logout">登 出</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="anchorlist" class="navigation">
+                <ul>
+                    <li class="j"><a href="#"><span></span>存款/繳費稅</a>
+                        <ul>
+                            <li id="2-1-1"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Login&state=loginAFT&lgstatus=saving&menu_id=2-1-1'; openLoading('goAhref')">我的存款</a></li>
+                            <li id="2-1-3"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.SavAcctTxDtlInq&state=prompt&menu_id=2-1-3&default_acc_submit=1'; openLoading('goAhref')">存款交易明細查詢</a></li>
+                        </ul>
+                    </li>
+                    <li class="e"><a href="#"><span></span>信用卡</a>
+                        <ul>
+                            <li id="5-1-4"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMember&state=qCardAdj&menu_id=5-1-4'; openLoading('goAhref')">信用卡可用額度查詢</a></li>
+                            <li id="5-1-1"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMember&state=eStatementQry&menu_id=5-1-1'; openLoading('goAhref')">帳單明細查詢</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+			<div class="main-wrapper">
+				<div class="main-container">
+<div class="page">
+	<form name="inqForm2" method="post" action="/netbank/servlet/TrxDispatcher" id="inqForm2">
+		<INPUT type="HIDDEN" name="trx" value="com.lb.wibc.trx.ProjectQuery">
+		<INPUT type="HIDDEN" name="state" value="prompt">
+	</form>
+  <form name="inqForm" method="post" action="/netbank/servlet/TrxDispatcher" id="inqForm">
+	<INPUT type="HIDDEN" name="trx" value="com.lb.wibc.trx.SavAcctTxDtlInq">
+	<INPUT type="HIDDEN" name="state" value="submit">
+	<INPUT type="HIDDEN" name="check" value="false">
+	<INPUT type="HIDDEN" name="DLfilename" value="SavingsDetail.htm">
+	<INPUT type="HIDDEN" name="dl" value="stream">
+	<input type="hidden" name="updateData" id="updateData" value="" />
+    <div class="breadcrumb">
+    </div>
+    <h1 class="page-title">
+        <span class="b"></span>存款交易明細查詢
+    </h1>
+    <div class="content">
+        <div class="std-table white">
+            <table class="red-arrow">
+                <tr>
+                    <th>存款帳號</th>
+                    <td class="hide">:</td>
+                    <td>
+		                <select name="acct" id="acct">
+										<option value="09990000001111"
+											selected 
+										>
+										測試分行/活期儲蓄存款/09990000001111</option>
+										<option value="09990000002222"
+										>
+										範例分行/活期儲蓄存款/09990000002222</option>
+                        </select>
+                        <select name="ccycd" id="ccycd">
+                            <option selected value="">------</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th>查詢區間</th>
+                    <td class="hide">:</td>
+                    <td>
+                        <label>起日</label>
+                        <input class="m datepicker" type="text" name="sdate" id="sdate" value="2026/08/17" />
+                        <label>迄日</label>
+                        <input class="m datepicker" type="text" name="edate" id="edate" value="2026/10/17" />
+                        <p>
+                            <span>*</span>可查詢三年交易明細，查詢區間最多為二個月
+                        </p>
+                    </td>
+                </tr>
+            </table>
+            <div class="action tar">
+                <a id="queryBtn" href="#" onClick="checkData('A');return false;">查詢</a>
+                <a id="downloadBtn" href="#" onClick="showDownload();return false;">下載明細</a>
+            </div>
+        </div>
+<div class="note">
+    <h4>小叮嚀</h4>
+    <ul>
+	     <li>本服務提供您記錄資金用途，並依據支出、存入之交易，呈現不同選項，選擇完後，請按下確認用途，即可完成記錄。 </li>
+    </ul>
+</div>
+    </div>
+  </form>
+</div>
+				</div>
+			</div>
+                <div class="footer">
+                    <p>遠東商業銀行 版權所有 © 2014  Far Eastern International Bank. All rights reserved.</p>
+                </div>
+            </div>
+        <input type="hidden" name="trx" value="" />
+        <input type="hidden" name="state" value="" />
+    </body>
+</html>
