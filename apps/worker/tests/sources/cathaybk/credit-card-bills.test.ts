@@ -247,6 +247,61 @@ describe("國泰世華信用卡帳單解析", () => {
     expect(parsed[0].paymentDueDate).toBeUndefined();
   });
 
+  it.each([
+    { historyAmount: 0, summary: { unPaidAmount: 0 }, expectedAmount: 0 },
+    { historyAmount: -200, summary: { unPaidAmount: 0 }, expectedAmount: -200 },
+    {
+      historyAmount: -200,
+      summary: { unPaidAmount: -200, paidAmount: 0 },
+      expectedAmount: -200,
+    },
+    { historyAmount: 900, summary: { unPaidAmount: 400 }, expectedAmount: 900 },
+    {
+      historyAmount: 900,
+      summary: { unPaidAmount: 0, paidAmount: 0 },
+      expectedAmount: 0,
+    },
+    {
+      historyAmount: -200,
+      summary: { unPaidAmount: 400, paidAmount: 600 },
+      expectedAmount: 1000,
+    },
+  ])(
+    "當期摘要 $summary 與歷史 $historyAmount 合併後保留有效總額 $expectedAmount",
+    ({ historyAmount, summary, expectedAmount }) => {
+      const history = parseCathayHistoryBills(
+        [
+          {
+            billDate: "2026-09-20",
+            twdAmount: historyAmount,
+            usdAmount: null,
+            billStatus: "ignored-history-status",
+          },
+        ],
+        sourceId,
+        "2026-09-20",
+      );
+      const current = parseCathayCurrentBills(
+        api({ recentBillDate: "2026-09-20", twBillInfo: summary }),
+        null,
+        api({ dueDate: "2026-10-05" }),
+        sourceId,
+      );
+      const merged = mergeCathayCurrentBills(history, current.creditCardBills);
+
+      expect(merged).toHaveLength(1);
+      expect(merged[0]).toMatchObject({
+        accountId: sourceId,
+        billingPeriod: "2026-09",
+        statementAmount: expectedAmount,
+        paymentDueDate: "2026-10-05",
+        currency: "TWD",
+        raw: { source: "C_BILL_Q_RecentBillInfo" },
+      });
+      expect(history[0].statementAmount).toBe(historyAmount);
+    },
+  );
+
   it("當期狀態與期限只套用在 RecentBill 同期，舊歷史列不回填", () => {
     const history = parseCathayHistoryBills(
       [

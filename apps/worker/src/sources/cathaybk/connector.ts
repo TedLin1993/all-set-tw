@@ -1989,7 +1989,8 @@ export function mergeCathayCurrentBills(
     merged[index] = {
       ...merged[index],
       ...currentBill,
-      statementAmount: currentBill.statementAmount,
+      statementAmount:
+        currentBill.statementAmount ?? merged[index].statementAmount,
       minimumPayment: currentBill.minimumPayment,
       paidAmount: currentBill.paidAmount,
       isPaid: currentBill.isPaid,
