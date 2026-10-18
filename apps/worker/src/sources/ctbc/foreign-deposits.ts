@@ -1,3 +1,4 @@
+import { CtbcVerificationRequiredError } from "./errors";
 import forge from "node-forge";
 import { normalizeCtbcDate, parseCtbcAmount, type CtbcData } from "./protocol";
 import { BANK_SYNC_MONTHS } from "../sync-window";
@@ -54,7 +55,8 @@ export async function fetchCtbcForeignDeposits(
     let response: Json;
     try {
       response = await request(resource, data);
-    } catch {
+    } catch (error) {
+      if (error instanceof CtbcVerificationRequiredError) throw error;
       throw new CtbcForeignDepositError(
         resource === OVERVIEW
           ? "overview_query_failed"

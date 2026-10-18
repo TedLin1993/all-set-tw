@@ -1,3 +1,5 @@
+import { CtbcVerificationRequiredError } from "./errors";
+export { CtbcVerificationRequiredError } from "./errors";
 import { fetchCtbcForeignDeposits } from "./foreign-deposits";
 import type { SyncResult } from "../types";
 import { reportSyncProgress } from "../sync-progress";
@@ -56,13 +58,6 @@ export type CtbcFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
-
-export class CtbcVerificationRequiredError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "CtbcVerificationRequiredError";
-  }
-}
 
 export class CtbcTwoStageRequiredError extends CtbcVerificationRequiredError {
   constructor(readonly method: "app" | "email") {
@@ -279,7 +274,8 @@ export function createCtbcConnector(
           parsed.bankAccounts.push(...foreign.bankAccounts);
           parsed.bankBalanceSnapshots.push(...foreign.bankBalanceSnapshots);
           parsed.bankTransactions.push(...foreign.bankTransactions);
-        } catch {
+        } catch (error) {
+          if (error instanceof CtbcVerificationRequiredError) throw error;
           // An unknown failure is not a confirmed empty account. Omit all new
           // FX records; persistence upserts leave the previous FX data intact.
           // Never log provider errors, account identifiers or wire payloads.
