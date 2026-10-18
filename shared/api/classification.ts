@@ -45,3 +45,22 @@ export interface ClassificationCategoryResponse {
   sortOrder: number;
   isSystem: boolean;
 }
+
+/** `GET /api/classification/ai`：AI 自動分類的設定與進度。 */
+export interface AiClassificationStatusResponse {
+  enabled: boolean;
+  /** 有進行中的近期掃描或過往紀錄回補。 */
+  scanning: boolean;
+  /** 每日呼叫上限或 Workers AI 免費額度用完時，暫停到此時間。 */
+  pausedUntil: string | null;
+  backfill: {
+    status: "idle" | "running" | "completed";
+    classifiedCount: number;
+    undeterminedCount: number;
+    startedAt: string | null;
+    completedAt: string | null;
+  };
+  /** 目前保存的 AI 結果中已分類與無法判斷的交易數。 */
+  classifiedCount: number;
+  undeterminedCount: number;
+}

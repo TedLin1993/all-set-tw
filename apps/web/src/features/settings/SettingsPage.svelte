@@ -17,6 +17,7 @@
   import { formatDateTime } from "@/shared/format/financial";
   import AboutPanel from "./components/AboutPanel.svelte";
   import ClassificationRulesPanel from "./components/ClassificationRulesPanel.svelte";
+  import AiClassificationPanel from "./components/AiClassificationPanel.svelte";
   import DefaultSchedulePanel from "./components/DefaultSchedulePanel.svelte";
   import ExchangeRatesPanel from "./components/ExchangeRatesPanel.svelte";
   import MobileMore from "./components/MobileMore.svelte";
@@ -43,7 +44,7 @@
     { view: "data-sources" as const, label: "資料來源" },
     { view: "sync-notifications" as const, label: "同步與通知" },
     { view: "exchange-rates" as const, label: "匯率" },
-    { view: "classification-rules" as const, label: "分類規則" },
+    { view: "classification-rules" as const, label: "分類" },
     { view: "about" as const, label: "關於" },
   ];
   const jobs = createQuery(syncJobsQuery(() => api));
@@ -411,9 +412,10 @@
     <div class="grid min-w-0 gap-4">
       <div class="hidden items-center justify-between gap-4 md:flex">
         <div>
-          <h2 class="text-2xl font-bold tracking-tight">分類規則</h2>
+          <h2 class="text-2xl font-bold tracking-tight">分類</h2>
           <p class="mt-1 text-sm text-muted-foreground">
-            管理自訂分類，也會自動處理帳戶互轉、信用卡年費減免與發票配對。
+            管理自訂規則與 AI
+            自動分類，也會自動處理帳戶互轉、信用卡年費減免與發票配對。
           </p>
         </div>
       </div>
@@ -435,7 +437,10 @@
       <div
         class="hidden gap-4 md:grid lg:grid-cols-[minmax(0,690px)_minmax(0,1fr)]"
       >
-        <ClassificationRulesPanel {api} />
+        <div class="grid min-w-0 content-start gap-4">
+          <AiClassificationPanel {api} {demoMode} />
+          <ClassificationRulesPanel {api} />
+        </div>
         <aside
           class="min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs"
           aria-label="規則如何運作"
@@ -453,9 +458,14 @@
           <p class="mt-5 text-sm leading-relaxed text-muted-foreground">
             儲存規則後，交易資料重新載入時會依目前順序重新判定；已手動分類的交易仍以手動覆寫為準。
           </p>
+          <p class="mt-3 text-sm leading-relaxed text-muted-foreground">
+            規則都不符合時，若已啟用 AI 自動分類，會交由 AI
+            判斷；手動分類與規則仍優先。
+          </p>
         </aside>
       </div>
-      <div class="w-full min-w-0 md:hidden">
+      <div class="grid w-full min-w-0 gap-4 md:hidden">
+        <AiClassificationPanel {api} {demoMode} />
         <ClassificationRulesPanel {api} />
       </div>
     </div>
@@ -682,7 +692,7 @@
           class="min-w-0 rounded-xl border border-border bg-card p-[15px] text-left shadow-xs transition hover:-translate-y-0.5 hover:border-ink/20 hover:shadow-sm"
           onclick={() => navigate("classification-rules")}
         >
-          <h2 class="text-base font-bold">分類規則</h2>
+          <h2 class="text-base font-bold">分類</h2>
           <p class="mt-1 text-sm text-muted-foreground">{rulesSummary}</p>
           <span class="mt-3 block text-sm font-semibold text-steel"
             >開啟設定 →</span

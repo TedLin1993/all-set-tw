@@ -19,10 +19,15 @@ import {
   enqueueScheduledSync,
 } from "./features/sync/scheduling/queue";
 import { accessMiddleware } from "./middleware/access";
+import { safelyKickAiClassification } from "./features/classification/ai-service";
 import { connectorContextMiddleware } from "./middleware/connector-context";
 import type { Env, SyncQueueMessage } from "./platform/env";
 import { honoFactory } from "./platform/hono";
-import { apiErrorResponse, demoReadOnlyMiddleware } from "./platform/http";
+import {
+  apiErrorResponse,
+  demoReadOnlyMiddleware,
+  isDemoMode,
+} from "./platform/http";
 
 export { MegabankEgress } from "./platform/megabank-egress-object";
 export { FubonEgress } from "./platform/fubon-egress-object";
@@ -59,6 +64,8 @@ export default {
   fetch: app.fetch,
   async scheduled(_controller, env, ctx) {
     ctx.waitUntil(enqueueScheduledSync(env));
+    // Demo deployments never start background work.
+    if (!isDemoMode(env)) ctx.waitUntil(safelyKickAiClassification(env));
   },
   async queue(batch: MessageBatch<SyncQueueMessage>, env) {
     await consumeScheduledSyncQueue(batch, env);

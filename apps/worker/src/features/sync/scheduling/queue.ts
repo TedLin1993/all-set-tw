@@ -13,6 +13,11 @@ import {
 } from "../../../sources/tdcc/sync";
 import { isUserActionError, safeErrorMessage } from "../errors";
 import { recoverStalledSyncRuns } from "./recovery";
+import {
+  AI_CLASSIFICATION_CHAIN_DELAY_SECONDS,
+  enqueueAiClassification,
+  processAiClassification,
+} from "../../classification/ai-service";
 
 const queueController = {
   cron: "queue:scheduled-sync",
@@ -107,6 +112,10 @@ export async function consumeScheduledSyncQueue(
     }
     if (message.body.type === "run-manual-sync") {
       await consumeManualSyncMessage(message, env);
+      continue;
+    }
+    if (message.body.type === "run-ai-classification") {
+      await consumeAiClassificationMessage(message, env);
       continue;
     }
     if (message.body.type !== "run-next-scheduled-sync") {
@@ -293,4 +302,25 @@ async function consumeEinvoiceChunkMessage(
 
 function retryDelaySeconds(attempts: number) {
   return Math.min(15 * 2 ** Math.max(0, attempts - 1), 5 * 60);
+}
+
+// The scan keeps its position in D1, so a failed message is dropped and the
+// next Cron tick resumes the scan once it has been idle for 5 minutes.
+async function consumeAiClassificationMessage(
+  message: Message<SyncQueueMessage>,
+  env: Env,
+) {
+  try {
+    const result = await processAiClassification(env);
+    if (result.status === "continue")
+      await enqueueAiClassification(env, AI_CLASSIFICATION_CHAIN_DELAY_SECONDS);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "ai_classification_queue_message_failed",
+        error: safeErrorMessage(error),
+      }),
+    );
+  }
+  message.ack();
 }

@@ -26,6 +26,7 @@ import {
   listEnabledClassificationRules,
   type ClassificationRuleMatchRow,
 } from "../classification/repository";
+import { listAiClassifications } from "../classification/ai-repository";
 import {
   findAutomaticCreditOffsetTransactionIds,
   findAutomaticTransferTransactionIds,
@@ -128,17 +129,27 @@ async function presentBankTransactions(
       transactionsById.set(candidate.id, candidate);
   const transactionsForClassification = [...transactionsById.values()];
   const pageIds = new Set(transactions.map((transaction) => transaction.id));
-  const [rulesResult, pageOverridesResult, candidateOverridesResult] =
-    await Promise.all([
-      rules,
-      pageOverrides,
-      loadClassificationOverrides(
-        db,
-        transactionsForClassification.filter(
-          (transaction) => !pageIds.has(transaction.id),
-        ),
+  const [
+    rulesResult,
+    pageOverridesResult,
+    candidateOverridesResult,
+    aiClassificationsResult,
+  ] = await Promise.all([
+    rules,
+    pageOverrides,
+    loadClassificationOverrides(
+      db,
+      transactionsForClassification.filter(
+        (transaction) => !pageIds.has(transaction.id),
       ),
-    ]);
+    ),
+    settle(
+      listAiClassifications(
+        db,
+        transactionsForClassification.map((transaction) => transaction.id),
+      ),
+    ),
+  ]);
   let classificationMap: Map<string, ClassificationResult>;
   let classificationsReady = true;
   try {
@@ -160,6 +171,24 @@ async function presentBankTransactions(
     console.error("[classify] resolveClassifications failed:", error);
     classificationMap = new Map();
     classificationsReady = false;
+  }
+  // AI results only fill in what overrides and rules left unclassified.
+  if (classificationsReady && aiClassificationsResult.ok) {
+    for (const row of aiClassificationsResult.value) {
+      if (!row.categoryId || !row.label) continue;
+      if (classificationMap.get(row.transactionId)?.source !== "fallback")
+        continue;
+      classificationMap.set(row.transactionId, {
+        categoryId: row.categoryId,
+        label: row.label,
+        source: "ai",
+      });
+    }
+  } else if (!aiClassificationsResult.ok) {
+    console.error(
+      "[classify] load AI classifications failed:",
+      aiClassificationsResult.error,
+    );
   }
 
   const eligibleTransactions = transferCandidates.filter((transaction) => {
@@ -192,8 +221,9 @@ async function presentBankTransactions(
       )
     : new Map<string, string>();
 
-  // A refund takes its purchase's category. A rule or manual category still
-  // wins, and only counts as a refund when it agrees with the purchase.
+  // A refund takes its purchase's category, also over an AI guess. A rule or
+  // manual category still wins, and only counts as a refund when it agrees
+  // with the purchase.
   const refundClassification = (
     transactionId: string,
   ): ClassificationResult | undefined => {
@@ -201,7 +231,7 @@ async function presentBankTransactions(
     const own = classificationMap.get(transactionId);
     const purchase = purchaseId ? classificationMap.get(purchaseId) : undefined;
     if (!own || !purchase) return own;
-    if (own.source === "fallback")
+    if (own.source === "fallback" || own.source === "ai")
       return {
         categoryId: purchase.categoryId,
         label: purchase.label,

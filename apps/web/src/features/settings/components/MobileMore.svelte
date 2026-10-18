@@ -131,8 +131,8 @@
             class="flex size-10 items-center justify-center rounded-xl bg-steel/10 text-steel"
             ><Settings class="size-5" /></span
           ><span class="flex-1"
-            ><span class="block font-semibold">分類規則</span><span
-              class="block text-sm text-ink/45">自訂分類與自動配對</span
+            ><span class="block font-semibold">分類</span><span
+              class="block text-sm text-ink/45">自訂規則、AI 與自動配對</span
             ></span
           ><span class="text-sm font-semibold text-steel"
             >{customRuleCount} 條自訂　›</span

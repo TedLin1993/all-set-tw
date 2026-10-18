@@ -21,6 +21,7 @@ export interface ActivityItem {
     | "auto_transfer"
     | "auto_offset"
     | "auto_refund"
+    | "ai"
     | "fallback";
   classificationRuleId?: string;
   transactionId?: string;
