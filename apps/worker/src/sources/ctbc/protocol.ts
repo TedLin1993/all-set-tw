@@ -454,7 +454,9 @@ function parseRealtimeTransactions(payload: unknown) {
     const authorizedAt =
       normalizeTaipeiDateTime(value.txnDateTime) ?? transactionDate;
     const rawAmount = numberValue(value.txnAmt);
-    if (!transactionDate || rawAmount == null || rawAmount === 0) return [];
+    if (rawAmount === 0) return [];
+    if (!transactionDate || rawAmount == null)
+      throw new Error("中信即時授權日期或金額格式無法辨識。");
     const description = optionalString(value.merchName) || "中國信託信用卡消費";
     const transactionType = optionalString(value.txnType) ?? "";
     const refund =
@@ -685,12 +687,33 @@ function normalizeCardDate(value: unknown) {
   return normalizeDate(value);
 }
 
+// qu002/qu041 removeTrailingUnderscore: suffix markers are not display digits.
+function displayCardLast4(value: unknown) {
+  const text = stringValue(value).trim();
+  const marker = text.lastIndexOf("_");
+  return last4(marker < 0 ? text : text.slice(0, marker));
+}
+
+function cardMetadataSuffix(value: JsonRecord) {
+  const suffix = displayCardLast4(value.cardNoSuffixFour);
+  const masked = displayCardLast4(value.cardNo);
+  if (suffix && masked && suffix !== masked) return undefined;
+  return suffix ?? masked;
+}
+
+function transactionDisplaySuffix(value: JsonRecord) {
+  const candidates = [value.cardNoSuffixFour, value.cardNo, value.fullCardNo]
+    .map(displayCardLast4)
+    .filter((suffix): suffix is string => !!suffix);
+  return new Set(candidates).size === 1 ? candidates[0] : null;
+}
+
 function parseCardMetadata(payload: unknown) {
   return arrayAt(responseData(payload), "cardDataList").flatMap((value) => {
     if (!isRecord(value)) return [];
     return [
       {
-        cardLast4: last4(stringValue(value.cardNoSuffixFour || value.cardNo)),
+        cardLast4: cardMetadataSuffix(value),
         cardName: optionalString(value.cardName),
         positiveOrAttached: optionalString(value.positiveOrAttached),
       },
@@ -749,6 +772,7 @@ function sanitizeCreditCardGroup(group: CreditCardGroup) {
 
 function sanitizeCreditCardTransaction(value: JsonRecord) {
   return {
+    displayCardLast4: transactionDisplaySuffix(value),
     purchaseDt: normalizeCardDate(value.purchaseDt),
     postingDt: normalizeCardDate(value.postingDt),
     clearingDt: normalizeCardDate(value.clearingDt),
@@ -770,6 +794,7 @@ function sanitizeCreditCardTransaction(value: JsonRecord) {
 
 function sanitizeRealtimeTransaction(value: JsonRecord) {
   return {
+    displayCardLast4: transactionDisplaySuffix(value),
     authorizationHash: authorizationHash(value.authCode),
     txnCountry: optionalString(value.txnCountry),
     origCurCode: normalizeCurrency(value.origCurCode ?? value.origCurCo),
@@ -971,3 +996,5 @@ function dedupeBySourceId<T extends { sourceId: string }>(records: T[]) {
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
+
+export { numberValue as parseCtbcAmount, normalizeDate as normalizeCtbcDate };

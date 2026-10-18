@@ -20,7 +20,10 @@ const privateFields = {
   unknownField: privateValue,
 };
 
-function bankApi(loginResponses: Response[]) {
+function bankApi(
+  loginResponses: Response[],
+  foreignResponse?: (resource: string) => Response,
+) {
   const responses = [
     Response.json({ access_token: "private-oauth-token" }),
     Response.json({ statusCode: "0000" }),
@@ -31,7 +34,20 @@ function bankApi(loginResponses: Response[]) {
     }),
     ...loginResponses,
   ];
-  const fetcher: CtbcFetch = vi.fn(async () => {
+  const fetcher: CtbcFetch = vi.fn(async (_input, init) => {
+    const resource = JSON.parse(String(init?.body || "{}")).resource;
+    if (foreignResponse && resource?.startsWith("/twrbm-fx/"))
+      return foreignResponse(resource);
+    // Synthetic no-FX-account response, independent of login/logout fixtures.
+    if (String(init?.body).includes('"/twrbm-fx/qu001/010"'))
+      return Response.json({
+        code: "0000",
+        rsData: {
+          fxAcctSummaryResponse: {
+            demDepBalSummaryResponse: { rspCode: "9002", infoList: [] },
+          },
+        },
+      });
     const response = responses.shift();
     if (!response) throw new Error("Unexpected bank request");
     return response;
@@ -124,7 +140,7 @@ describe("中信登入診斷的憑證保護", () => {
     }
     expect(String(loginInit?.body)).not.toContain(credentials.account);
     expect(String(loginInit?.body)).not.toContain(credentials.password);
-    expect(calls).toHaveLength(7);
+    expect(calls).toHaveLength(8);
     expect(JSON.parse(String(calls.at(-1)?.[1]?.body)).resource).toBe(
       "/twrbm-general/ot002/010",
     );
@@ -331,6 +347,7 @@ describe("中信登入診斷的憑證保護", () => {
       "/twrbm-general/ot001/010",
       "/twrbm-deposit/qu001/010",
       "/twrbm-card/qu002/010",
+      "/twrbm-fx/qu001/010",
       "/twrbm-general/ot002/010",
     ]);
     expect(new Set(requests.map((request) => request.deviceIxd))).toEqual(
@@ -488,6 +505,7 @@ describe("中信登入診斷的憑證保護", () => {
         "/twrbm-general/ot001/010",
         "/twrbm-deposit/qu001/010",
         "/twrbm-card/qu002/010",
+        "/twrbm-fx/qu001/010",
         "/twrbm-general/ot002/010",
       ]);
       expect(requests[2].rqData).toEqual({
@@ -704,4 +722,100 @@ describe("中信登入診斷的憑證保護", () => {
       expectPrivateValuesAbsent(logged);
     },
   );
+});
+
+describe("外幣查詢的重新驗證與失敗隔離", () => {
+  const stages = [
+    "/twrbm-fx/qu001/010",
+    "/twrbm-fx/qu002/010",
+    "/twrbm-fx/qu002/011",
+  ];
+  const account = {
+    accountId: "987654321000",
+    curCode: "USD",
+    currentBal: "123.45",
+    avialBal: "123.45",
+  };
+
+  for (const verificationRequired of [true, false]) {
+    it.each(stages)(
+      `%s ${verificationRequired ? "要求驗證時回傳人工處理錯誤" : "一般失敗仍略過外幣"}，登出且不外洩資料`,
+      async (failedResource) => {
+        const warn = vi
+          .spyOn(console, "warn")
+          .mockImplementation(() => undefined);
+        const fetcher = bankApi(
+          [
+            loginResponse({ code: "0000", rsData: { isTwoStageLogin: false } }),
+            Response.json({ code: "0000", rsData: {} }),
+            Response.json({
+              code: "0000",
+              rsData: { cardDataList: [], billData: {} },
+            }),
+            Response.json({ code: "0000" }),
+          ],
+          (resource) => {
+            if (resource === failedResource) {
+              return Response.json({
+                code: verificationRequired ? "0000" : "8888",
+                message: privateValue,
+                rsData: {
+                  ...privateFields,
+                  ...(verificationRequired ? { needOTP: true } : {}),
+                },
+              });
+            }
+            return Response.json({
+              code: "0000",
+              rsData:
+                resource === stages[0]
+                  ? {
+                      fxAcctSummaryResponse: {
+                        demDepBalSummaryResponse: {
+                          rspCode: "0000",
+                          infoList: [account],
+                        },
+                      },
+                    }
+                  : { infoList: [account] },
+            });
+          },
+        );
+        const result = createCtbcConnector(fetcher).sync(credentials);
+        if (verificationRequired) {
+          await expect(result).rejects.toMatchObject({
+            name: "CtbcVerificationRequiredError",
+            message: "中國信託登入需要重新驗證，請先至官方 App 完成驗證。",
+          });
+          expect(warn).not.toHaveBeenCalled();
+        } else {
+          await expect(result).resolves.toMatchObject({
+            bankAccounts: [],
+            bankBalanceSnapshots: [],
+            bankTransactions: [],
+          });
+          expect(warn.mock.calls).toEqual([
+            [
+              "[ctbc] foreign_deposits_skipped: foreign deposit sync incomplete; previous foreign data retained",
+            ],
+          ]);
+        }
+        const resources = vi
+          .mocked(fetcher)
+          .mock.calls.slice(3)
+          .map(([, init]) => JSON.parse(String(init?.body)).resource);
+        expect(resources).toEqual([
+          "/twrbm-general/ot001/010",
+          "/twrbm-deposit/qu001/010",
+          "/twrbm-card/qu002/010",
+          ...stages.slice(0, stages.indexOf(failedResource) + 1),
+          "/twrbm-general/ot002/010",
+        ]);
+        const logged = warn.mock.calls.flat().join("\n");
+        expectPrivateValuesAbsent(logged);
+        expect(logged).not.toContain(account.accountId);
+        expect(logged).not.toContain(account.currentBal);
+      },
+    );
+  }
 });

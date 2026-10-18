@@ -45,6 +45,16 @@ function bankApi(
   let index = 0;
   const fetcher = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      // Synthetic no-FX-account response, independent of login/logout fixtures.
+      if (String(_init?.body).includes('"/twrbm-fx/qu001/010"'))
+        return Response.json({
+          code: "0000",
+          rsData: {
+            fxAcctSummaryResponse: {
+              demDepBalSummaryResponse: { rspCode: "9002", infoList: [] },
+            },
+          },
+        });
       await beforeRequest?.(index++);
       const response = responses.shift();
       if (!response) throw new Error("Unexpected bank request");
@@ -111,7 +121,7 @@ describe("中信裝置、互動驗證與憑證版本（隔離 D1）", () => {
   it("排程完成初始化、登入、查帳與登出後不留下驗證暫存", async () => {
     const fetcher = bankApi([...bootstrap({}), ...emptyAccounts()]);
     await syncCtbc(env, "scheduled");
-    expect(fetcher).toHaveBeenCalledTimes(7);
+    expect(fetcher).toHaveBeenCalledTimes(8);
     expect((await savedConfig()).config.pendingSession).toBeUndefined();
   });
 

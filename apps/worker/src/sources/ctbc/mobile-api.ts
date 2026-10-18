@@ -1,7 +1,11 @@
+import { CtbcVerificationRequiredError } from "./errors";
+export { CtbcVerificationRequiredError } from "./errors";
+import { fetchCtbcForeignDeposits } from "./foreign-deposits";
 import type { SyncResult } from "../types";
 import { reportSyncProgress } from "../sync-progress";
 
 import forge from "node-forge";
+import { fetchCtbcCardStatements, fetchCtbcPagedCardItems } from "./card-data";
 import {
   parseCtbcData,
   type CtbcConfig,
@@ -23,7 +27,6 @@ const CTBC_USER_AGENT =
 // MobileFirst client-credential value shipped in the public Android package.
 const CTBC_PUBLIC_CLIENT_TOKEN = "2ae74c0ad7a14739a2aab7340616d70e";
 const REQUEST_TIMEOUT_MS = 45_000;
-const MAX_PAGES = 20;
 const PASSWORD_CHANGE_MESSAGE =
   "中國信託要求變更密碼，自動同步已暫停。請至官方 App 完成變更，再更新這裡的密碼並手動同步。";
 
@@ -55,13 +58,6 @@ export type CtbcFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
-
-export class CtbcVerificationRequiredError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "CtbcVerificationRequiredError";
-  }
-}
 
 export class CtbcTwoStageRequiredError extends CtbcVerificationRequiredError {
   constructor(readonly method: "app" | "email") {
@@ -178,6 +174,41 @@ export function createCtbcConnector(
   fetcher: CtbcFetch = globalThis.fetch.bind(globalThis),
   options: CtbcConnectorOptions = {},
 ) {
+  // Keep login, interactive approval, resume and logout in one lifecycle.
+  async function withSession<T>(
+    config: CtbcConfig,
+    overrides: CtbcSyncOverrides,
+    read: (session: CtbcMobileSession) => Promise<T>,
+  ): Promise<T> {
+    const credentials = requireCtbcCredentials(config);
+    const session = new CtbcMobileSession(
+      fetcher,
+      config.deviceCode ?? crypto.randomUUID(),
+      config.deviceSeed ?? config.pendingSession?.seed,
+      options,
+    );
+    try {
+      if (overrides.verification === "restart") {
+        if (!options.allowInteractiveVerification)
+          throw new CtbcVerificationRequiredError("請手動重新開始中信驗證。");
+        await options.onPendingSession?.(undefined);
+      } else if (config.pendingSession) {
+        await session.resumeLogin(config.pendingSession, overrides);
+      } else if (overrides.verification || overrides.otp) {
+        throw new CtbcVerificationExpiredError();
+      }
+      if (!session.isLoggedIn) {
+        await session.bootstrap();
+        await session.login(credentials);
+      }
+      return await read(session);
+    } catch (error) {
+      throw classifyCtbcError(error);
+    } finally {
+      await session.logout();
+    }
+  }
+
   return {
     id: "ctbc" as const,
     name: "中國信託商業銀行",
@@ -187,27 +218,7 @@ export function createCtbcConnector(
       _cursor?: string,
       overrides: CtbcSyncOverrides = {},
     ): Promise<SyncResult<never>> {
-      const credentials = requireCtbcCredentials(config);
-      const session = new CtbcMobileSession(
-        fetcher,
-        config.deviceCode ?? crypto.randomUUID(),
-        config.deviceSeed ?? config.pendingSession?.seed,
-        options,
-      );
-      try {
-        if (overrides.verification === "restart") {
-          if (!options.allowInteractiveVerification)
-            throw new CtbcVerificationRequiredError("請手動重新開始中信驗證。");
-          await options.onPendingSession?.(undefined);
-        } else if (config.pendingSession) {
-          await session.resumeLogin(config.pendingSession, overrides);
-        } else if (overrides.verification || overrides.otp) {
-          throw new CtbcVerificationExpiredError();
-        }
-        if (!session.isLoggedIn) {
-          await session.bootstrap();
-          await session.login(credentials);
-        }
+      return withSession(config, overrides, async (session) => {
         reportSyncProgress("fetching");
 
         const depositOverview = await session.resource(
@@ -218,11 +229,16 @@ export function createCtbcConnector(
           session,
           depositOverview,
         );
-        const creditCards = await session.resource(
+        let creditCards = await session.resource(
           CREDIT_CARD_BILLS_RESOURCE,
           {},
         );
         const noCreditCard = hasNoCtbcCreditCard(creditCards);
+        if (!noCreditCard)
+          creditCards = await fetchCtbcCardStatements(
+            (resource, data) => session.resource(resource, data),
+            creditCards,
+          );
         // The summary call refreshes the same session data used by the official
         // App (available credit and billed/unbilled totals). Its raw response is
         // intentionally not persisted until those fields have a stable mapping.
@@ -246,17 +262,33 @@ export function createCtbcConnector(
           unbilled,
           realtime,
         };
-        const parsed = parseCtbcData(payloads, new Date());
+        const now = new Date();
+        const parsed = parseCtbcData(payloads, now);
+        try {
+          const foreign = await fetchCtbcForeignDeposits(
+            (resource, data) => session.resource(resource, data),
+            depositOverview,
+            now,
+          );
+          // Publish the FX block only after every account/month has succeeded.
+          parsed.bankAccounts.push(...foreign.bankAccounts);
+          parsed.bankBalanceSnapshots.push(...foreign.bankBalanceSnapshots);
+          parsed.bankTransactions.push(...foreign.bankTransactions);
+        } catch (error) {
+          if (error instanceof CtbcVerificationRequiredError) throw error;
+          // An unknown failure is not a confirmed empty account. Omit all new
+          // FX records; persistence upserts leave the previous FX data intact.
+          // Never log provider errors, account identifiers or wire payloads.
+          console.warn(
+            "[ctbc] foreign_deposits_skipped: foreign deposit sync incomplete; previous foreign data retained",
+          );
+        }
         return {
           records: [],
           ...parsed,
           cursor: JSON.stringify({ syncedAt: new Date().toISOString() }),
         };
-      } catch (error) {
-        throw classifyCtbcError(error);
-      } finally {
-        await session.logout();
-      }
+      });
     },
   };
 }
@@ -682,7 +714,8 @@ class CtbcMobileSession {
     const statusCode = stringValue(response.statusCode);
     const system = stringValue(response.sys || response.systemId);
     if (
-      resource === CREDIT_CARD_BILLS_RESOURCE &&
+      (resource === CREDIT_CARD_BILLS_RESOURCE ||
+        resource.startsWith("/twrbm-fx/")) &&
       isVerificationResponse(response)
     ) {
       throw new CtbcVerificationRequiredError(
@@ -901,21 +934,13 @@ async function fetchPagedCardItems(
   pageResource: string,
   rqData: JsonRecord,
 ) {
-  const initial = await session.resource(initialResource, rqData);
-  const data = responseData(initial);
-  const allItems = [...arrayValue(data.allItems)];
-  const pageCount = numberValue(data.pageCount) ?? 100;
-  const totalRows = numberValue(data.totalRow) ?? allItems.length;
-  const displayPaging =
-    data.displayPaging === true || data.displayPaging === "Y";
-  const totalPages = displayPaging
-    ? Math.min(MAX_PAGES, Math.max(1, Math.ceil(totalRows / pageCount)))
-    : 1;
-  for (let pageNum = 2; pageNum <= totalPages; pageNum += 1) {
-    const page = await session.resource(pageResource, { pageNum });
-    allItems.push(...arrayValue(responseData(page).allItems));
-  }
-  return { rsData: { ...data, allItems } };
+  return fetchCtbcPagedCardItems(
+    (resource, data) => session.resource(resource, data),
+    initialResource,
+    pageResource,
+    rqData,
+    initialResource === REALTIME_RESOURCE ? "realtime" : "unbilled",
+  );
 }
 
 function extractDepositAccounts(payload: JsonRecord) {
@@ -1104,14 +1129,14 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
 
-function last4(value: string) {
-  return value.match(/(\d{4})\D*$/)?.[1] ?? "unknown";
-}
-
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function last4(value: string) {
+  return value.match(/(\d{4})\D*$/)?.[1] ?? "unknown";
 }

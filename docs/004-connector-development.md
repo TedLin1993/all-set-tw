@@ -486,6 +486,11 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 
 ### 中國信託銀行
 
+外幣先沿用總覽的 `fxAcctSummaryResponse`，缺少時查 `/twrbm-fx/qu001/010`，再用 `/twrbm-fx/qu002/010`、`/011` 取得原幣餘額與近三個月交易。
+外幣帳戶 `sourceId` 為 `bank:ctbc:<末四碼或unknown>:<完整帳號SHA-256>:<幣別>`，`raw` 僅保存末四碼與幣別。
+明確無活存狀態 `9002`／`9004` 視為空清單；外幣查詢要求重新驗證時，原樣傳遞 `CtbcVerificationRequiredError` 並中止本次同步，讓使用者收到驗證提示。其他外幣失敗記固定警告並略過整個外幣區塊，保留舊資料，臺幣與信用卡仍可更新。
+信用卡補查帳期與完整分頁；缺日期／金額或分頁資料不完整時失敗。分卡只標示可唯一對照的卡名與末四碼，否則顯示「未辨識卡片」，帳單負債維持一份。
+
 連接器的 `appVer` 使用 `5.2.26`；2026-10-10 核對
 [Google Play 台灣版](https://play.google.com/store/apps/details?id=com.chinatrust.mobilebank&hl=zh_TW&gl=TW)
 與 [App Store 台灣版](https://apps.apple.com/tw/app/id417698185) 的公開最新版均為此版本。

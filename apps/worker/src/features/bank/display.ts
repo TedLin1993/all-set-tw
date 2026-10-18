@@ -147,13 +147,42 @@ export function deriveBankMatchKey(
 export function normalizeBankAccountDisplay<T extends BankDisplayRow>(
   row: T,
 ): T {
+  if (row.connectorId === "ctbc" && row.accountType === "credit")
+    return { ...row, accountName: "中國信託信用卡" };
   return row.accountType === "credit" ? row : normalizeDepositDisplay(row);
 }
 
-export function normalizeBankTransactionDisplay<T extends BankDisplayRow>(
-  row: T,
-): T {
-  return row.accountType === "credit" ? row : normalizeDepositDisplay(row);
+export function normalizeBankTransactionDisplay<
+  T extends BankDisplayRow & { cardLast4?: unknown; cardMetadata?: unknown },
+>(row: T) {
+  // Internal lookup metadata must never become part of the public API response.
+  const { cardLast4, cardMetadata, ...display } = row;
+  if (row.connectorId === "ctbc" && row.accountType === "credit") {
+    return { ...display, accountName: ctbcCardLabel(cardLast4, cardMetadata) };
+  }
+  return row.accountType === "credit"
+    ? display
+    : normalizeDepositDisplay(display);
+}
+
+function ctbcCardLabel(suffix: unknown, metadata: unknown): string {
+  const unknownCard = "未辨識卡片";
+  if (typeof suffix !== "string" || !/^\d{4}$/.test(suffix)) return unknownCard;
+  if (typeof metadata !== "string") return unknownCard;
+  try {
+    const cards: unknown = JSON.parse(metadata);
+    if (!Array.isArray(cards)) return unknownCard;
+    const matches = cards.filter(
+      (card) => card && typeof card === "object" && card.cardLast4 === suffix,
+    );
+    // Even identical duplicate suffixes cannot prove a unique physical card.
+    if (matches.length !== 1) return unknownCard;
+    const name: unknown = matches[0].cardName;
+    if (typeof name !== "string" || !name.trim()) return unknownCard;
+    return `${name.trim()} · ${suffix}`;
+  } catch {
+    return unknownCard;
+  }
 }
 
 function normalizeDepositDisplay<T extends BankDisplayRow>(row: T): T {
