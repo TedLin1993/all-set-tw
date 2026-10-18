@@ -1423,7 +1423,9 @@
                       ? "樂天"
                       : connectorId === "fubon"
                         ? "台北富邦"
-                        : "永豐"}
+                        : connectorId === "feib"
+                          ? "遠東商銀"
+                          : "永豐"}
       bind:captcha={bankCaptcha}
       captchaImage={bankCaptchaImage}
       digitCount={bankCaptchaDigitCount}
@@ -2042,6 +2044,8 @@
                         ? "樂天網銀驗證碼會先以 Workers AI 自動辨識，失敗時改由人工輸入；每次同步都重新登入，結束時登出，不保留 session。"
                         : connectorId === "fubon"
                           ? "台北富邦每次同步都會自動辨識 6 位數圖形驗證碼，失敗時可改用人工輸入；同步結束後自動登出。非信任裝置需雙重驗證時，只有手動同步會寄送簡訊／Email 驗證碼，排程同步會標記需要處理。"
-                          : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
+                          : connectorId === "feib"
+                            ? "遠東商銀每次同步都會自動辨識 6 位數圖形驗證碼，失敗時可改用人工輸入；同步結束後自動登出。年度密碼變更提醒只會選擇「下次登入再變更」。"
+                            : "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
   </p>
 </Card>

@@ -33,6 +33,11 @@ import {
   FubonVerificationRequiredError,
 } from "../../sources/fubon/connector";
 import {
+  FeibBrowserCapacityError,
+  FeibConnectionError,
+  FeibVerificationRequiredError,
+} from "../../sources/feib/connector";
+import {
   RakutenBrowserCapacityError,
   RakutenConnectionError,
   RakutenVerificationRequiredError,
@@ -162,6 +167,13 @@ const fubonSyncBodySchema = z
       .optional(),
   })
   .refine((value) => !(value.captcha && value.otp));
+
+const feibSyncBodySchema = z.object({
+  captcha: z
+    .string()
+    .regex(/^\d{6}$/)
+    .optional(),
+});
 
 export const syncRoutes = honoFactory.createApp();
 registerSyncRoutes(syncRoutes);
@@ -704,6 +716,50 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     async (c) => {
       const overrides = c.req.valid("json");
       return manualSyncResponse(c, "fubon", overrides);
+    },
+  );
+
+  api.post("/connectors/feib/captcha", async (c) => {
+    try {
+      return c.json(await prepareConnectorChallenge(c.env, "feib"));
+    } catch (error) {
+      if (error instanceof SyncAlreadyRunningError) {
+        return jsonError(
+          "SYNC_ALREADY_RUNNING",
+          "遠東商銀已有驗證或同步作業正在進行。",
+          409,
+        );
+      }
+      if (error instanceof BrowserRunCapacityError)
+        return browserRunBusyResponse(error);
+      if (error instanceof FeibBrowserCapacityError) {
+        const response = jsonError("FEIB_BROWSER_BUSY", error.message, 429);
+        response.headers.set("Retry-After", String(error.retryAfterSeconds));
+        return response;
+      }
+      if (
+        error instanceof NeedsUserActionError ||
+        error instanceof FeibVerificationRequiredError
+      ) {
+        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      }
+      if (error instanceof FeibConnectionError) {
+        return jsonError("FEIB_CONNECTION_FAILED", error.message, 502);
+      }
+      return jsonError("FEIB_CAPTCHA_FAILED", safeErrorMessage(error), 502);
+    }
+  });
+
+  api.post(
+    "/connectors/feib/sync",
+    zValidator(
+      "json",
+      feibSyncBodySchema,
+      validationHook("INVALID_REQUEST", "遠東商銀同步選項格式錯誤。"),
+    ),
+    async (c) => {
+      const overrides = c.req.valid("json");
+      return manualSyncResponse(c, "feib", overrides);
     },
   );
 }

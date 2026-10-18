@@ -12,3 +12,4 @@ docs/database-schema.md
 
 # 銀行網頁原始結構的去識別 fixture（含不合法的 </br> 等），保留原樣以忠實重現解析情境。
 apps/worker/tests/sources/fubon/fixtures/*.html
+apps/worker/tests/sources/feib/fixtures/*.html

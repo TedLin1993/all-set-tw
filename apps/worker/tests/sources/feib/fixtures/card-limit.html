@@ -1,0 +1,179 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>FEIB</title>
+</head>
+<body onunload="">
+        <div class="wrapper">
+            <div class="header-wrapper">
+                <div class="header-container">
+                    <div class="right">
+                        <div class="right-left">
+                            <p>親愛的測試用戶貴賓，您好，上次登入時間為 2026-10-01 09:00:00</p>
+                        </div>
+                        <div class="right-right">
+                            <a href="/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Logout&state=logout">登 出</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="anchorlist" class="navigation">
+                <ul>
+                    <li class="j"><a href="#"><span></span>存款/繳費稅</a>
+                        <ul>
+                            <li id="2-1-1"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Login&state=loginAFT&lgstatus=saving&menu_id=2-1-1'; openLoading('goAhref')">我的存款</a></li>
+                            <li id="2-1-3"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.SavAcctTxDtlInq&state=prompt&menu_id=2-1-3&default_acc_submit=1'; openLoading('goAhref')">存款交易明細查詢</a></li>
+                        </ul>
+                    </li>
+                    <li class="e"><a href="#"><span></span>信用卡</a>
+                        <ul>
+                            <li id="5-1-4"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMember&state=qCardAdj&menu_id=5-1-4'; openLoading('goAhref')">信用卡可用額度查詢</a></li>
+                            <li id="5-1-1"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMember&state=eStatementQry&menu_id=5-1-1'; openLoading('goAhref')">帳單明細查詢</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+			<div class="main-wrapper">
+				<div class="main-container">
+<div class="page">
+    <div class="breadcrumb"></div>
+    <h1 class="page-title">
+        <span class="b"></span>信用卡可用額度查詢
+    </h1>
+    <div class="content">
+        <div class="std-table">
+            <div class="title">
+                <div class="title-links">
+					<a class="action-btn" href="/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMemberApply&state=StatementDispatch&cmd=prompt&menu_id=5-4-1" id="GoApply">立即申請電子帳單GO</a>
+                </div>
+            </div>
+	            <div class="table-container">
+	                <div class="scroll-box">
+	                    <table>
+	                        <thead>
+	                            <tr>
+	                                <th>帳單結帳日</th>
+	                                <th class="width-c">本期應繳總額</th>
+	                                <th class="width-c">最低應繳金額</th>
+	                                <th class="width-c">本期累積已繳金額</th>
+	                                <th>本期繳款截止日</th>
+	                                <th>最近繳款日期</th>
+	                            </tr>
+	                        </thead>
+	                        <tbody>
+	                            <tr>
+	                                <td>2026/10/03</td>
+	                                <td class="tar">新臺幣 NTD$6,000元</td>
+	                                <td class="tar">新臺幣 NTD$1,200元</td>
+	                                <td class="tar">新臺幣 NTD$0元</td>
+	                                	<td>2026/10/20</td>
+	                                <td>2026/09/21</td>
+	                            </tr>
+	                        </tbody>
+	                    </table>
+	                </div>
+	                <div class="math-table math-table-scroll-box">
+	                    <table class="table-layout-nofixed">
+	                        <tbody>
+	                            <tr>
+	                            	<td>
+	                                    <div class="scroll-box">
+	                                        <table>
+	                                            <thead>
+	                                                <tr>
+	                                                    <th>您的信用卡額度</th>
+	                                                </tr>
+	                                            </thead>
+	                                            <tbody>
+	                                                <tr>
+	                                                    <td>
+	                                                    	新臺幣 NTD$100,000元
+	                                                    </td>
+	                                                </tr>
+	                                            </tbody>
+	                                        </table>
+	                                    </div>
+	                                </td>
+	                            	<td>
+	                                    <div class="scroll-box">
+	                                        <table>
+	                                            <thead>
+	                                                <tr>
+	                                                    <th>已使用額度</th>
+	                                                </tr>
+	                                            </thead>
+	                                            <tbody>
+	                                                <tr>
+	                                                    <td>
+	                                                    	新臺幣 NTD$7,500元
+	                                                    </td>
+	                                                </tr>
+	                                            </tbody>
+	                                        </table>
+	                                    </div>
+	                                </td>
+	                            	<td>
+	                                    <div class="scroll-box">
+	                                        <table>
+	                                            <thead>
+	                                                <tr>
+	                                                    <th>可使用額度</th>
+	                                                </tr>
+	                                            </thead>
+	                                            <tbody>
+	                                                <tr>
+	                                                    <td>
+	                                                    	新臺幣 NTD$92,500元
+	                                                    </td>
+	                                                </tr>
+	                                            </tbody>
+	                                        </table>
+	                                    </div>
+	                                </td>
+	                            </tr>
+	                            <tr>
+	                            	<td>
+	                                    <div class="scroll-box">
+	                                        <table>
+	                                            <thead>
+	                                                <tr>
+	                                                    <th><p>國內預借現金可用額度</p></th>
+	                                                </tr>
+	                                            </thead>
+	                                            <tbody>
+	                                                <tr>
+	                                                    <td>
+	                                                    	新臺幣 NTD$92,500元
+	                                                    </td>
+	                                                </tr>
+	                                            </tbody>
+	                                        </table>
+	                                    </div>
+	                                </td>
+		                        </tr>
+	                        </tbody>
+	                    </table>
+	                </div>
+	            </div>
+             <div class="remarks">
+                <h5>提醒您:</h5>
+                <ul>
+                    <li>本額度僅供線上參考，本行保留交易授權與否之權利，正確消費金額請依月結帳單為準</li>
+                    <li>臨時額度調高不可用預借現金等交易</li>
+                </ul>
+            </div>
+            <!-- <div><label id="lblMessage" style="color: Red">很抱歉，目前未持本行有效卡片！如需服務，請洽本行客服中心 註: 有效卡定義為卡片現狀為0且無特殊指示戶設定。</label></div> -->
+        </div>
+    </div>
+</div>
+				</div>
+			</div>
+                <div class="footer">
+                    <p>遠東商業銀行 版權所有 © 2014  Far Eastern International Bank. All rights reserved.</p>
+                </div>
+            </div>
+        <input type="hidden" name="trx" value="" />
+        <input type="hidden" name="state" value="" />
+    </body>
+</html>

@@ -1,0 +1,183 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>FEIB</title>
+</head>
+<body onunload="">
+        <div class="wrapper">
+            <div class="header-wrapper">
+                <div class="header-container">
+                    <div class="right">
+                        <div class="right-left">
+                            <p>親愛的測試用戶貴賓，您好，上次登入時間為 2026-10-01 09:00:00</p>
+                        </div>
+                        <div class="right-right">
+                            <a href="/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Logout&state=logout">登 出</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="anchorlist" class="navigation">
+                <ul>
+                    <li class="j"><a href="#"><span></span>存款/繳費稅</a>
+                        <ul>
+                            <li id="2-1-1"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Login&state=loginAFT&lgstatus=saving&menu_id=2-1-1'; openLoading('goAhref')">我的存款</a></li>
+                            <li id="2-1-3"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.SavAcctTxDtlInq&state=prompt&menu_id=2-1-3&default_acc_submit=1'; openLoading('goAhref')">存款交易明細查詢</a></li>
+                        </ul>
+                    </li>
+                    <li class="e"><a href="#"><span></span>信用卡</a>
+                        <ul>
+                            <li id="5-1-4"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMember&state=qCardAdj&menu_id=5-1-4'; openLoading('goAhref')">信用卡可用額度查詢</a></li>
+                            <li id="5-1-1"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMember&state=eStatementQry&menu_id=5-1-1'; openLoading('goAhref')">帳單明細查詢</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+			<div class="main-wrapper">
+				<div class="main-container">
+<form name="mainForm" method="post"	action="/netbank/servlet/TrxDispatcher">
+					<input type="HIDDEN" name="trx" value="com.lb.wibc.trx.CCMember">
+					<input type="HIDDEN" name="state" value="eStatementQry">
+					<input type="HIDDEN" name="active" value="0">
+					<input type="HIDDEN" name="menu_id" value="5-1-1">
+					<input type="hidden" name="token" value="">
+<div class="page">
+    <div class="breadcrumb"></div>
+    <h1 class="page-title">
+        <span class="b"></span>帳單明細查詢
+    </h1>
+    <div class="content" id="prnArea">
+        <div class="std-table white" id="showBtn2">
+            <table class="red-arrow">
+                <tr>
+                    <th>請選擇您欲查詢的帳單年月</th>
+                    <td class="hide">:</td>
+                    <td>
+                        <select name="yyyyMm" id="yyyyMm">
+                        <option value ='202609'>202610</option><option value ='202608' selected='selected'>202609</option><option value ='202607'>202608</option><option value ='202606'>202607</option><option value ='202605'>202606</option>
+                        </select>
+                    </td>
+                </tr>
+            </table>
+            <div class="action tar">
+                <a href="#" name="btnQuery" id="btnQuery" onClick="formSubmit('btnQuery');return false;">查詢</a>
+                <a href="#" name="btnPay" onClick="javascript:formSubmit('btnPay')">立刻繳款</a>
+            </div>
+        </div>
+        <div class="std-table">
+            <div class="title">
+                <h2>查詢結果</h2>
+            </div>
+            <div class="table-container">
+            <div class="scroll-box clean">
+                    <table class="table-border">
+                        <thead>
+                            <tr>
+                                <th>您的循環額度</th>
+                                <th>循環信用本金餘額</th>
+                                <th>結帳日</th>
+                                <th>繳款截止日</th>
+                                <th>指定之自動轉帳帳號</th>
+                                <th>繳款截止日扣款金額</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="tar">100,000</td>
+                                <td class="tar">0</td>
+                                <td>115/09/03</td>
+                                <td>115/09/22</td>
+                                <td>09990000002222</td>
+                                <td class="tar">4,000</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <table  class="table-border">
+                        <thead>
+                            <tr>
+                                <th>上期應繳總額</th>
+                                <th>已繳款/退款金額</th>
+                                <th>本期新增款項</th>
+                                <th>利息</th>
+                                <th>違約金</th>
+                                <th>本期應繳總額</th>
+                                <th>最低應繳總額</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="tar">3,000</td>
+                                <td class="tar">3,000</td>
+                                <td class="tar">4,000</td>
+                                <td class="tar">0</td>
+                                <td class="tar">0</td>
+                                <td class="tar">4,000
+                                                <input type="hidden" name="stmtAmt" value="4000" />
+                                </td>
+                                <td class="tar">1,000
+                                                <input type="hidden" name="minPayDueAmt" value="1000" />
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="title">
+                    <h3 class="dollar">消費明細</h3>
+                </div>
+                <div class="scroll-box clean">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>消費日</th>
+                                <th>入帳日</th>
+                                <th>消費明細</th>
+                                <th >臺幣金額</th>
+                                <th >外幣金額</th>
+                                <th>國家-幣別</th>
+                                <th >分期<br>未到期金額</th>
+                                <th >分期總費用<br>年百分率</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr height=26><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th>上期應繳總金額</th><th class=tar>3,000</th><th class=tar>&nbsp;</th><th class=tar></th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th>&nbsp;</th></tr><tr height=26><th align="center"><img src="/netbank/html/pages/images/_.gif">08/21</th><th align="center"><img src="/netbank/html/pages/images/_.gif">08/21</th><th>本行自動轉帳，謝謝您！</th><th class=tar>-3,000</th><th class=tar>&nbsp;</th><th class=tar></th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th>&nbsp;</th></tr><tr height=26><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th>上期結欠款項</th><th class=tar>0</th><th class=tar>&nbsp;</th><th class=tar></th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th>&nbsp;</th></tr><tr height=26><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th>本期帳務明細：</th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th class=tar></th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th>&nbsp;</th></tr><tr height=26><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th>卡號：４１１１２２＊＊＊＊＊＊５６７８</th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th class=tar></th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th>&nbsp;</th></tr><tr height=26><th align="center"><img src="/netbank/html/pages/images/_.gif">04/19</th><th align="center"><img src="/netbank/html/pages/images/_.gif">09/03</th><th>測試百貨分期第０５─０６期</th><th class=tar>1,500</th><th class=tar>&nbsp;</th><th class=tar></th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th>&nbsp;</th></tr><tr height=26><th align="center"><img src="/netbank/html/pages/images/_.gif">08/10</th><th align="center"><img src="/netbank/html/pages/images/_.gif">08/11</th><th>測試餐廳</th><th class=tar>2,500</th><th class=tar>&nbsp;</th><th class=tar></th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th>&nbsp;</th></tr><tr height=26><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th style="text-align:center">＊＊＊消費小計＊＊＊</th><th class=tar>4,000</th><th class=tar>&nbsp;</th><th class=tar></th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th>&nbsp;</th></tr><tr height=26><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th align="center"><img src="/netbank/html/pages/images/_.gif"></th><th>本期應繳總金額：</th><th class=tar>4,000</th><th class=tar>&nbsp;</th><th class=tar></th><th class=tar>&nbsp;</th><th class=tar>&nbsp;</th><th>&nbsp;</th></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="std-table">
+            <div class="title">
+                <h2>您的點數總覽</h2>
+            </div>
+            <div class="table-container">
+                <div class="scroll-box">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width:25%">點數項目</th>
+                                <th style="width:25%">本月新增</th>
+                                <th style="width:25%">本期結餘</th>
+                                <th style="width:25%" colspan="2">最近到期點數及期限</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr height="27"><th style="text-align:center">遠銀快樂購</th><th style="text-align:center">0</th><th style="text-align:center">100</th><th colspan="2" style="text-align:center">注意事項3</th></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</form>
+				</div>
+			</div>
+                <div class="footer">
+                    <p>遠東商業銀行 版權所有 © 2014  Far Eastern International Bank. All rights reserved.</p>
+                </div>
+            </div>
+        <input type="hidden" name="trx" value="" />
+        <input type="hidden" name="state" value="" />
+    </body>
+</html>
