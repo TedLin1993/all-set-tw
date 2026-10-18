@@ -42,7 +42,11 @@ import {
   connectorStateStatement,
   linkCanonicalBankAccountsStatement,
 } from "../../features/sync/connector-repository";
-import { recognizeNumericCaptcha } from "../../features/ocr/service";
+import {
+  recognizeNumericCaptcha,
+  ValidateNumberOcrError,
+} from "../../features/ocr/service";
+import { CaptchaUnreadableError } from "../captcha-retry";
 import {
   type SyncWriteRecord,
   persistStagedSyncWrite,
@@ -270,7 +274,11 @@ export async function syncMegabank(
                   5,
                 )
               ).number;
-            } catch {
+            } catch (error) {
+              // 辨識結果不符格式時尚未送出登入，可換新驗證碼重試；服務不可用則停止。
+              if (error instanceof ValidateNumberOcrError) {
+                throw new CaptchaUnreadableError();
+              }
               throw new MegabankVerificationRequiredError(
                 "兆豐銀行驗證碼無法自動辨識，請改用人工輸入。",
               );

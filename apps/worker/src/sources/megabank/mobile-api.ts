@@ -16,6 +16,10 @@ import {
   detailVersion,
 } from "./app-settings";
 import { BANK_SYNC_MONTHS } from "../sync-window";
+import {
+  CaptchaUnreadableError,
+  runAutoCaptchaAttempts,
+} from "../captcha-retry";
 
 const ROOT = "https://mobile.megabank.com.tw/ixtein";
 const REQUEST_TIMEOUT_MS = 45_000;
@@ -87,6 +91,13 @@ export class MegabankVerificationRequiredError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "MegabankVerificationRequiredError";
+  }
+}
+/** 銀行回覆圖形驗證碼錯誤（0113）；自動同步可換新驗證碼重試。 */
+export class MegabankCaptchaRejectedError extends MegabankVerificationRequiredError {
+  constructor(message = "兆豐銀行圖形驗證碼錯誤，請重新取得驗證碼。") {
+    super(message);
+    this.name = "MegabankCaptchaRejectedError";
   }
 }
 /**
@@ -238,78 +249,97 @@ export function createMegabankConnector(
       const pendingWasAuthenticated =
         pending?.session.isAuthenticated() ?? false;
       if (pendingWasAuthenticated) await pending?.session.logout();
-      let session: MegabankSession;
-      let captcha = config.captcha;
       if (pending?.active && !pendingWasAuthenticated) {
-        session = pending.session;
-        await options.onDevice?.(session.device(), "pending_session");
-      } else {
-        const challenge = await prepareMegabankCaptcha(
-          config,
-          fetcher,
-          options,
-        );
-        if (!recognizeCaptcha) {
+        await options.onDevice?.(pending.session.device(), "pending_session");
+        const captcha = config.captcha;
+        if (!captcha || !/^\d{5}$/.test(captcha)) {
           throw new MegabankVerificationRequiredError(
-            "兆豐銀行同步需要先完成圖形驗證。",
+            "請輸入兆豐銀行圖片中的五位數字驗證碼。",
           );
         }
-        captcha = await recognizeCaptcha(
-          challenge.imageBytes,
-          challenge.contentType,
-        );
-        session = MegabankSession.deserialize(
-          challenge.pendingSession,
-          fetcher,
-          options.onDiagnostic,
-        );
+        return loginAndFetch(pending.session, captcha);
       }
-      if (!captcha || !/^\d{5}$/.test(captcha)) {
+      if (!recognizeCaptcha) {
         throw new MegabankVerificationRequiredError(
-          "請輸入兆豐銀行圖片中的五位數字驗證碼。",
+          "兆豐銀行同步需要先完成圖形驗證。",
         );
       }
-      let keepSession = false;
-      try {
-        const gate = await session.login(credentials, captcha);
-        if (gate.requiresTwoFactor) {
-          throw new MegabankVerificationRequiredError(
-            "兆豐銀行要求雙重驗證，連接器尚未支援，請改用官方 App 查詢。",
+      return runAutoCaptchaAttempts(
+        async () => {
+          const challenge = await prepareMegabankCaptcha(
+            config,
+            fetcher,
+            options,
           );
-        }
+          const captcha = await recognizeCaptcha(
+            challenge.imageBytes,
+            challenge.contentType,
+          );
+          if (!/^\d{5}$/.test(captcha)) throw new CaptchaUnreadableError();
+          return loginAndFetch(
+            MegabankSession.deserialize(
+              challenge.pendingSession,
+              fetcher,
+              options.onDiagnostic,
+            ),
+            captcha,
+          );
+        },
+        {
+          connectorId: "megabank",
+          connectorName: "兆豐銀行",
+          isCaptchaRejected: (error) =>
+            error instanceof MegabankCaptchaRejectedError,
+          exhausted: (message) =>
+            new MegabankVerificationRequiredError(message),
+        },
+      );
+
+      async function loginAndFetch(session: MegabankSession, captcha: string) {
+        let keepSession = false;
         try {
-          return await fetchMegabankData(session);
-        } catch (error) {
-          // 異地旗標不一定限制查帳；只有實際權限不足且符合異地驗證條件時才要求簡訊。
-          if (
-            !(error instanceof MegabankProtocolError) ||
-            error.code !== "SYS014" ||
-            !gate.highIpFar
-          ) {
-            throw error;
+          const gate = await session.login(credentials, captcha);
+          if (gate.requiresTwoFactor) {
+            throw new MegabankVerificationRequiredError(
+              "兆豐銀行要求雙重驗證，連接器尚未支援，請改用官方 App 查詢。",
+            );
           }
-          options.onDiagnostic?.({
-            event: "megabank_sms_gate",
-            resource: error.resource ?? "unknown",
-            code: "SYS014",
-            action: options.allowOtpRequest ? "request_sms" : "manual_required",
-          });
-        }
-        if (!options.allowOtpRequest) {
-          throw new MegabankVerificationRequiredError(
-            "兆豐銀行查詢權限不足，且登入回報異地驗證；請改用手動同步完成簡訊驗證。",
+          try {
+            return await fetchMegabankData(session);
+          } catch (error) {
+            // 異地旗標不一定限制查帳；只有實際權限不足且符合異地驗證條件時才要求簡訊。
+            if (
+              !(error instanceof MegabankProtocolError) ||
+              error.code !== "SYS014" ||
+              !gate.highIpFar
+            ) {
+              throw error;
+            }
+            options.onDiagnostic?.({
+              event: "megabank_sms_gate",
+              resource: error.resource ?? "unknown",
+              code: "SYS014",
+              action: options.allowOtpRequest
+                ? "request_sms"
+                : "manual_required",
+            });
+          }
+          if (!options.allowOtpRequest) {
+            throw new MegabankVerificationRequiredError(
+              "兆豐銀行查詢權限不足，且登入回報異地驗證；請改用手動同步完成簡訊驗證。",
+            );
+          }
+          const checkCode = await session.requestVerifyCode("sms");
+          keepSession = true;
+          throw new MegabankOtpRequiredError(
+            `兆豐銀行已寄出簡訊驗證碼${checkCode ? `（簡訊檢核碼 ${checkCode}）` : ""}，請於三分鐘內輸入。`,
+            session.serialize(),
+            new Date(Date.now() + OTP_SESSION_TTL_MS).toISOString(),
+            session.device(),
           );
+        } finally {
+          if (!keepSession) await session.logout();
         }
-        const checkCode = await session.requestVerifyCode("sms");
-        keepSession = true;
-        throw new MegabankOtpRequiredError(
-          `兆豐銀行已寄出簡訊驗證碼${checkCode ? `（簡訊檢核碼 ${checkCode}）` : ""}，請於三分鐘內輸入。`,
-          session.serialize(),
-          new Date(Date.now() + OTP_SESSION_TTL_MS).toISOString(),
-          session.device(),
-        );
-      } finally {
-        if (!keepSession) await session.logout();
       }
     },
   };
@@ -738,9 +768,7 @@ class MegabankSession {
           : "unknown",
     });
     if (code === "0113") {
-      throw new MegabankVerificationRequiredError(
-        "兆豐銀行圖形驗證碼錯誤，請重新取得驗證碼。",
-      );
+      throw new MegabankCaptchaRejectedError();
     }
     if (code !== "0000") {
       throw new MegabankVerificationRequiredError(

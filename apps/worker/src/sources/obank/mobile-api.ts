@@ -8,6 +8,10 @@ import {
   type ObankPayloads,
 } from "./protocol";
 import { BANK_SYNC_MONTHS } from "../sync-window";
+import {
+  CaptchaUnreadableError,
+  runAutoCaptchaAttempts,
+} from "../captcha-retry";
 
 const OBANK_ORIGIN = "https://www.o-bank.com";
 const OBANK_API_ROOT = `${OBANK_ORIGIN}/ebank/ixtein`;
@@ -170,38 +174,61 @@ export function createObankConnector(
       options: ObankSyncOptions = {},
     ): Promise<SyncResult<never> & { timeDepositsComplete: true }> {
       const credentials = requireObankCredentials(config);
-      let session: ObankMobileFirstSession;
-      let captcha = config.captcha;
 
       try {
         if (hasPendingChallenge(config)) {
-          session = ObankMobileFirstSession.deserialize(
-            config.pendingSession!,
-            fetcher,
-          );
-        } else {
-          const prepared = await prepareObankCaptcha(config, fetcher);
-          if (!recognizeCaptcha) {
+          const captcha = config.captcha;
+          if (!captcha || !/^[A-Za-z0-9]{4}$/.test(captcha)) {
             throw new ObankVerificationRequiredError(
-              "王道銀行同步需要先完成圖形驗證。",
+              "請輸入王道銀行圖片中的四位英數驗證碼。",
             );
           }
-          captcha = await recognizeCaptcha(
-            prepared.imageBytes,
-            prepared.contentType,
-          );
-          session = ObankMobileFirstSession.deserialize(
-            prepared.pendingSession,
-            fetcher,
+          return await loginAndFetch(
+            ObankMobileFirstSession.deserialize(
+              config.pendingSession!,
+              fetcher,
+            ),
+            captcha,
           );
         }
-
-        if (!captcha || !/^[A-Za-z0-9]{4}$/.test(captcha)) {
+        if (!recognizeCaptcha) {
           throw new ObankVerificationRequiredError(
-            "請輸入王道銀行圖片中的四位英數驗證碼。",
+            "王道銀行同步需要先完成圖形驗證。",
           );
         }
+        return await runAutoCaptchaAttempts(
+          async () => {
+            const prepared = await prepareObankCaptcha(config, fetcher);
+            const captcha = await recognizeCaptcha(
+              prepared.imageBytes,
+              prepared.contentType,
+            );
+            if (!/^[A-Za-z0-9]{4}$/.test(captcha))
+              throw new CaptchaUnreadableError();
+            return loginAndFetch(
+              ObankMobileFirstSession.deserialize(
+                prepared.pendingSession,
+                fetcher,
+              ),
+              captcha,
+            );
+          },
+          {
+            connectorId: "obank",
+            connectorName: "王道銀行",
+            isCaptchaRejected: (error) =>
+              error instanceof ObankCaptchaRejectedError,
+            exhausted: (message) => new ObankVerificationRequiredError(message),
+          },
+        );
+      } catch (error) {
+        throw classifyObankError(error);
+      }
 
+      async function loginAndFetch(
+        session: ObankMobileFirstSession,
+        captcha: string,
+      ): Promise<SyncResult<never> & { timeDepositsComplete: true }> {
         await session.login(credentials, captcha, options);
         reportSyncProgress("fetching");
         const demandDeposits = await session.secureResource(
@@ -256,8 +283,6 @@ export function createObankConnector(
           timeDepositsComplete: true,
           cursor: JSON.stringify({ syncedAt: new Date().toISOString() }),
         };
-      } catch (error) {
-        throw classifyObankError(error);
       }
     },
   };

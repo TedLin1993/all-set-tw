@@ -5,6 +5,7 @@ import {
   MegabankOtpRequiredError,
   MegabankProtocolError,
   MegabankVerificationRequiredError,
+  prepareMegabankCaptcha,
   type MegabankDiagnostic,
 } from "../../../src/sources/megabank/mobile-api";
 
@@ -30,6 +31,7 @@ const cipherToken = {
 const DEPOSITS = "/fco/fco10001/home";
 const TRANSACTIONS = "/fao/fao01001/query";
 const REQUEST_OTP = "/fco/fco00001/getverifycode";
+const CAPTCHA = "/fco/fco00001/captcha";
 const LOGIN = "/fco/fco02003/login";
 const LOGOUT = "/fco/fco02011/logout";
 
@@ -39,9 +41,12 @@ function bankApi(
     secondFactorFlag?: string;
     loginExtras?: Record<string, unknown>;
     queryError?: { resource: string; code: string };
+    /** 依序回覆每次登入請求的銀行代碼；用完後回 0000。 */
+    loginCodes?: string[];
   } = {},
 ) {
   let verified = false;
+  const loginCodes = [...(options.loginCodes ?? [])];
   const requests: Array<{
     resource: string;
     rqData: Record<string, unknown>;
@@ -104,7 +109,9 @@ function bankApi(
       }
       const rsData = payloads[request.resource];
       if (!rsData) throw new Error(`Unexpected resource: ${request.resource}`);
-      return Response.json({ code: "0000", rsData });
+      const code =
+        request.resource === LOGIN ? (loginCodes.shift() ?? "0000") : "0000";
+      return Response.json({ code, rsData });
     },
   );
   return {
@@ -347,5 +354,85 @@ describe("兆豐查詢權限與簡訊驗證", () => {
     expect(new Set(api.requests.map((request) => request.deviceIxd))).toEqual(
       new Set([savedDevice!.deviceCode]),
     );
+  });
+});
+
+describe("兆豐自動辨識驗證碼重試", () => {
+  it.each([
+    {
+      case: "驗證碼錯誤後換新驗證碼重試並成功",
+      answers: [],
+      loginCodes: ["0113"],
+      error: undefined,
+      recognitions: 2,
+      logins: 2,
+    },
+    {
+      case: "登入送出三次仍是驗證碼錯誤時停止並要求人工驗證",
+      answers: [],
+      loginCodes: ["0113", "0113", "0113"],
+      error: "自動登入已送出 3 次",
+      recognitions: 3,
+      logins: 3,
+    },
+    {
+      case: "辨識格式不符的驗證碼不送出，也不扣登入額度",
+      answers: ["1234", "1234"],
+      loginCodes: ["0113", "0113"],
+      error: undefined,
+      recognitions: 5,
+      logins: 3,
+    },
+    {
+      case: "辨識六張都不符格式時停止，未送出任何登入",
+      answers: Array.from({ length: 6 }, () => "1234"),
+      loginCodes: [],
+      error: "辨識已達 6 次上限（登入已送出 0 次）",
+      recognitions: 6,
+      logins: 0,
+    },
+    {
+      case: "帳密或其他登入錯誤不重送",
+      answers: [],
+      loginCodes: ["9999"],
+      error: "登入未通過",
+      recognitions: 1,
+      logins: 1,
+    },
+  ])("$case", async ({ answers, loginCodes, error, recognitions, logins }) => {
+    const api = bankApi({ loginCodes });
+    const pendingAnswers: string[] = [...answers];
+    const recognize = vi.fn(async () => pendingAnswers.shift() ?? "12345");
+    const sync = createMegabankConnector(api.fetcher, recognize).sync(config);
+
+    if (error) await expect(sync).rejects.toThrow(error);
+    else expect((await sync).bankAccounts).toHaveLength(1);
+    const resources = api.resources();
+    expect(resources.filter((resource) => resource === LOGIN)).toHaveLength(
+      logins,
+    );
+    expect(resources.filter((resource) => resource === CAPTCHA)).toHaveLength(
+      recognitions,
+    );
+    expect(recognize).toHaveBeenCalledTimes(recognitions);
+  });
+
+  it("人工輸入的驗證碼錯誤時不自動重試", async () => {
+    const api = bankApi({ loginCodes: ["0113"] });
+    const recognize = vi.fn(async () => "12345");
+    const challenge = await prepareMegabankCaptcha(config, api.fetcher);
+
+    await expect(
+      createMegabankConnector(api.fetcher, recognize).sync({
+        ...config,
+        captcha: "54321",
+        pendingSession: challenge.pendingSession,
+        pendingSessionExpiresAt: challenge.pendingSessionExpiresAt,
+      }),
+    ).rejects.toThrow("圖形驗證碼錯誤");
+    expect(
+      api.resources().filter((resource) => resource === LOGIN),
+    ).toHaveLength(1);
+    expect(recognize).not.toHaveBeenCalled();
   });
 });

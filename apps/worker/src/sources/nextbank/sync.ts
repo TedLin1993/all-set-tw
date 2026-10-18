@@ -28,7 +28,14 @@ import {
   collectNextbankDepositPayloads,
 } from "./api";
 import { z } from "zod";
-import { recognizeAlphanumericCaptcha } from "../../features/ocr/service";
+import {
+  recognizeAlphanumericCaptcha,
+  ValidateNumberOcrError,
+} from "../../features/ocr/service";
+import {
+  CaptchaUnreadableError,
+  runAutoCaptchaAttempts,
+} from "../captcha-retry";
 import {
   type SyncWriteRecord,
   persistStagedSyncWrite,
@@ -156,7 +163,12 @@ export async function syncNextbank(
       .optional()
       .safeParse(overrides.captcha);
     if (!submitted.success) throw new NextbankApiError("captcha");
-    let answer = submitted.data;
+    const answer = submitted.data;
+    const credentials = {
+      identity: config.userId,
+      userId: config.account,
+      password: config.password,
+    };
     if (answer) {
       if (!config.captchaUuid || !config.captchaExpiresAt)
         throw new NextbankApiError("captcha");
@@ -164,32 +176,51 @@ export async function syncNextbank(
         uuid: config.captchaUuid,
         expiresAt: config.captchaExpiresAt,
       });
+      ({ accessToken: token } = await client.login({
+        ...credentials,
+        captchaResult: answer,
+      }));
     } else {
-      const challenge = await client.prepareCaptcha();
-      const bytes = Uint8Array.from(atob(challenge.imageBase64), (char) =>
-        char.charCodeAt(0),
+      token = await runAutoCaptchaAttempts(
+        async () => {
+          const challenge = await client.prepareCaptcha();
+          const bytes = Uint8Array.from(atob(challenge.imageBase64), (char) =>
+            char.charCodeAt(0),
+          );
+          let recognized: string;
+          try {
+            recognized = (
+              await recognizeAlphanumericCaptcha(
+                env.AI,
+                bytes.buffer,
+                "image/png",
+                5,
+              )
+            ).code;
+          } catch (error) {
+            // 辨識結果不符格式時尚未送出登入，可換新驗證碼重試；服務不可用則停止。
+            if (error instanceof ValidateNumberOcrError)
+              throw new CaptchaUnreadableError();
+            throw new NextbankCaptchaRequiredError(
+              "將來銀行驗證碼無法自動辨識，請改用人工輸入。",
+            );
+          }
+          return (
+            await client.login({
+              ...credentials,
+              captchaResult: recognized,
+            })
+          ).accessToken;
+        },
+        {
+          connectorId,
+          connectorName: "將來銀行",
+          isCaptchaRejected: (error) =>
+            error instanceof NextbankApiError && error.kind === "captcha",
+          exhausted: (message) => new NextbankCaptchaRequiredError(message),
+        },
       );
-      try {
-        answer = (
-          await recognizeAlphanumericCaptcha(
-            env.AI,
-            bytes.buffer,
-            "image/png",
-            5,
-          )
-        ).code;
-      } catch {
-        throw new NextbankCaptchaRequiredError(
-          "將來銀行驗證碼無法自動辨識，請改用人工輸入。",
-        );
-      }
     }
-    ({ accessToken: token } = await client.login({
-      identity: config.userId,
-      userId: config.account,
-      password: config.password,
-      captchaResult: answer,
-    }));
     reportSyncProgress("fetching");
     result = parseNextbankDeposits(
       await collectNextbankDepositPayloads(client, token),

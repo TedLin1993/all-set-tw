@@ -34,7 +34,11 @@ import {
   connectorStateStatement,
   linkCanonicalBankAccountsStatement,
 } from "../../features/sync/connector-repository";
-import { recognizeAlphanumericCaptcha } from "../../features/ocr/service";
+import {
+  recognizeAlphanumericCaptcha,
+  ValidateNumberOcrError,
+} from "../../features/ocr/service";
+import { CaptchaUnreadableError } from "../captcha-retry";
 import { prepareObankTimeDepositWrite } from "./time-deposits";
 import {
   type SyncWriteRecord,
@@ -149,7 +153,11 @@ export async function syncObank(
                   4,
                 )
               ).code;
-            } catch {
+            } catch (error) {
+              // 辨識結果不符格式時尚未送出登入，可換新驗證碼重試；服務不可用則停止。
+              if (error instanceof ValidateNumberOcrError) {
+                throw new CaptchaUnreadableError();
+              }
               throw new ObankVerificationRequiredError(
                 "王道銀行驗證碼無法自動辨識，請改用人工輸入。",
               );
