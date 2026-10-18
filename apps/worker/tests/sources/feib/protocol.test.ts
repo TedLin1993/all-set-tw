@@ -388,6 +388,36 @@ describe("遠東商銀信用卡", () => {
     expect(JSON.stringify(card)).not.toMatch(/411122/);
   });
 
+  it("帳單窗口位移時，同一期帳單的交易 ID（含分期）維持不變", () => {
+    const cardIds = (statementHtmls: string[]) =>
+      parseFeibData(
+        payloads({
+          card: {
+            hasCreditCard: true,
+            statusHtml: cardLimitHtml,
+            statementHtmls,
+          },
+        }),
+        NOW,
+      )
+        .bankTransactions.filter(
+          (txn) =>
+            txn.accountId === FEIB_CREDIT_ACCOUNT_ID &&
+            txn.sourceId.includes(":2026-10:"),
+        )
+        .map((txn) => txn.sourceId)
+        .sort();
+    const withPrevious = cardIds([octStatementHtml, sepStatementHtml]);
+    const octOnly = cardIds([octStatementHtml]);
+    expect(withPrevious).toHaveLength(8);
+    expect(withPrevious).toEqual(octOnly);
+    const installment = withPrevious.filter((id) =>
+      id.includes(":2026-04-19:"),
+    );
+    expect(installment).toHaveLength(1);
+    expect(installment[0]).toMatch(/:1$/);
+  });
+
   it("負債快照採已使用額度，本期未繳清時標記需繳款", () => {
     const data = parseFeibData(payloads(), NOW);
     const snapshot = data.bankBalanceSnapshots.find(

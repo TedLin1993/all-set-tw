@@ -1564,8 +1564,11 @@ function parseCreditCard(
       const amount = roundCurrency(-row.bankAmount);
       const card = row.cardLast4 ?? "account";
       const identity = `${card}:${row.transactionDate}:${amount}`;
-      const occurrence = (occurrences.get(identity) ?? 0) + 1;
-      occurrences.set(identity, occurrence);
+      // 序號只在同一期帳單內累計：分期各期的卡號、原始消費日與金額相同，
+      // 跨期累計會在帳單窗口位移時改變序號與 sourceId，造成重複入帳。
+      const occurrenceKey = `${bill.period}:${identity}`;
+      const occurrence = (occurrences.get(occurrenceKey) ?? 0) + 1;
+      occurrences.set(occurrenceKey, occurrence);
       allTransactions.push({
         accountId: FEIB_CREDIT_ACCOUNT_ID,
         sourceId: `feib:card:tx:v1:${bill.period}:${identity}:${occurrence}`,
