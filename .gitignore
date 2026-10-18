@@ -18,7 +18,6 @@ dist/
 
 # Private Cloudflare resource bindings
 wrangler.private.toml
-wrangler.ctbc-balance-test.json
 apps/worker/wrangler.local.toml
 
 *.local

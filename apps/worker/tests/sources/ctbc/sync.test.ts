@@ -45,13 +45,13 @@ function bankApi(
   let index = 0;
   const fetcher = vi.fn(
     async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      // Synthetic no-FX-account response for these persistence/login cases.
+      // Synthetic no-FX-account response, independent of login/logout fixtures.
       if (String(_init?.body).includes('"/twrbm-fx/qu001/010"'))
         return Response.json({
           code: "0000",
           rsData: {
             fxAcctSummaryResponse: {
-              demDepBalSummaryResponse: { rspCode: "0000", infoList: [] },
+              demDepBalSummaryResponse: { rspCode: "9002", infoList: [] },
             },
           },
         });

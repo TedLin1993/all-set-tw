@@ -2,8 +2,6 @@
 
 本文件補充 README 的部署流程，說明 Cloudflare Access、Secrets、自動更新、本機開發與既有 D1 部署。Cloudflare Dashboard 的名稱與位置可能調整；若畫面不同，請以官方文件為準。
 
-中信外幣活存餘額與信用卡明細的獨立測試使用[專用測試部署確認稿](ctbc-balance-test-deployment.md)，包含獨立 Worker、D1、Queue、Access 與限制查詢範圍的入口；不得直接沿用本文一般部署指令操作該測試站。測試部署仍須使用者確認後才執行。
-
 ## 部署前準備
 
 - [Cloudflare 帳號](https://dash.cloudflare.com/sign-up)
@@ -235,6 +233,8 @@ npm run dev
 範例設定中的 D1 與 Workers AI 使用 remote binding，會連到 Cloudflare 資源。請使用獨立的開發 D1，不要直接操作正式資料。
 
 兆豐對外請求使用 `MegabankEgress` Durable Object。根目錄 `wrangler.toml` 與 `apps/worker/wrangler.local.toml.example` 都有這個 binding 與 SQLite migration；已存在的私人 `wrangler.local.toml` 要自行補上相同設定，否則本機同步缺少 binding。部署時 Wrangler 會建立物件，不需要額外 Secret。Workers 免費方案可使用 SQLite Durable Objects。
+
+台北富邦網銀拒絕 Browser Run 的對外連線，網銀請求改由 `FubonEgress` Durable Object 代發（migration tag `v2`）。設定方式與 `MegabankEgress` 相同：根目錄 `wrangler.toml` 與 `apps/worker/wrangler.local.toml.example` 已包含 binding 與 SQLite migration，既有私人 `wrangler.local.toml` 需自行補上 `FUBON_EGRESS` binding 與 `v2` migration。
 
 本機 `apps/worker/.dev.vars.example` 保留手動金鑰設定；請填入開發用隨機金鑰。若需解密正式資料，正式部署也必須在最初自行提供並保存相同金鑰；公開部署範例的 `auto` 只會由部署 script 初始化。
 

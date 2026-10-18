@@ -1,11 +1,6 @@
 import forge from "node-forge";
 import { normalizeCtbcDate, parseCtbcAmount, type CtbcData } from "./protocol";
 import { BANK_SYNC_MONTHS } from "../sync-window";
-import {
-  inspectCtbcDepositStructure,
-  type CtbcDepositStructure,
-} from "./deposit-structure";
-
 type Json = Record<string, unknown>;
 type Request = (resource: string, data: Json) => Promise<Json>;
 type Deposits = Pick<
@@ -35,7 +30,7 @@ type FailureReason =
   | "initialization_query_failed"
   | "transactions_query_failed";
 
-/** Only fixed reasons are exposed by the local inspector; never bank error text. */
+/** Fixed failures never contain provider error text or account values. */
 export class CtbcForeignDepositError extends Error {
   constructor(
     readonly reason: FailureReason,
@@ -53,35 +48,8 @@ export async function fetchCtbcForeignDeposits(
   request: Request,
   existingOverview: unknown,
   now = new Date(),
-  options: {
-    months?: number;
-    firstAccountOnly?: boolean;
-    currency?: string;
-    month?: string;
-    balancesOnly?: boolean;
-    onStructure?: (
-      stage: "overview" | "initialization" | "transactions",
-      payload: CtbcDepositStructure,
-    ) => void;
-  } = {},
 ): Promise<Deposits> {
-  const currency = options.currency?.trim().toUpperCase();
-  if (
-    currency !== undefined &&
-    (!/^[A-Z]{3}$/.test(currency) || ["TWD", "NTD", "NAN"].includes(currency))
-  )
-    throw invalid();
-  // Historical research remains one account/currency and exactly one month.
-  if (
-    options.month !== undefined &&
-    (options.months !== 1 || !options.firstAccountOnly || !currency)
-  )
-    throw invalid();
-  const ranges = options.balancesOnly
-    ? []
-    : options.month === undefined
-      ? monthRanges(options.months ?? BANK_SYNC_MONTHS, now)
-      : researchMonthRange(options.month, now);
+  const ranges = monthRanges(BANK_SYNC_MONTHS, now);
   const query = async (resource: string, data: Json) => {
     let response: Json;
     try {
@@ -115,28 +83,17 @@ export async function fetchCtbcForeignDeposits(
   const overview = Object.hasOwn(record(existing), "fxAcctSummaryResponse")
     ? existingOverview
     : await query(OVERVIEW, {});
-  options.onStructure?.("overview", inspectCtbcDepositStructure(overview));
   const accounts = parseAccounts(overview);
   const result: Deposits = {
     bankAccounts: [],
     bankBalanceSnapshots: [],
     bankTransactions: [],
   };
-  const matching =
-    currency === undefined
-      ? accounts
-      : accounts.filter((account) => account.currency === currency);
-  if (currency !== undefined && matching.length === 0) throw invalid();
-  const selected = options.firstAccountOnly ? matching.slice(0, 1) : matching;
-  for (const account of selected) {
+  for (const account of accounts) {
     const initial = await query(INIT, {
       accountId: account.accountId,
       curCode: account.currency,
     });
-    options.onStructure?.(
-      "initialization",
-      inspectCtbcDepositStructure(initial, "initialization"),
-    );
     const selections = record(initial.rsData).infoList;
     if (!Array.isArray(selections)) throw invalid();
     const matches = selections.filter((value) => {
@@ -183,10 +140,6 @@ export async function fetchCtbcForeignDeposits(
         type: "custom",
         isFromEnterPrise: false,
       });
-      options.onStructure?.(
-        "transactions",
-        inspectCtbcDepositStructure(response, "transactions"),
-      );
       const data = record(response.rsData);
       if (!Array.isArray(data.detailList)) throw invalid();
       // The official custom-date flow consumes the complete detailList, with
@@ -320,28 +273,6 @@ function record(value: unknown): Json {
 }
 function hash(value: string) {
   return forge.md.sha256.create().update(value, "utf8").digest().toHex();
-}
-function researchMonthRange(month: string, now: Date) {
-  const currentMonth = new Date(now.getTime() + 8 * 3600_000)
-    .toISOString()
-    .slice(0, 7);
-  if (
-    !/^\d{4}-(0[1-9]|1[0-2])$/.test(month) ||
-    month < "2000-01" ||
-    month > currentMonth
-  )
-    throw invalid();
-  if (month === currentMonth) return monthRanges(1, now);
-  const [year, index] = month.split("-").map(Number);
-  return [
-    {
-      startDate: month.replace("-", "") + "01",
-      endDate: new Date(Date.UTC(year, index, 0))
-        .toISOString()
-        .slice(0, 10)
-        .replaceAll("-", ""),
-    },
-  ];
 }
 function monthRanges(count: number, now: Date) {
   if (!Number.isInteger(count) || count < 1 || count > 6) throw invalid();

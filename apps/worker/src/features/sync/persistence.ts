@@ -562,8 +562,17 @@ function promotionStatement(
             AND date(invoices.invoice_date, '+8 hours') = excluded.invoice_date
           THEN invoices.invoice_date ELSE excluded.invoice_date END`;
       if (entityType === "credit_card_bill") {
-        if (column === "paid_amount")
-          return "paid_amount = COALESCE(excluded.paid_amount, credit_card_bills.paid_amount)";
+        // Partial bill responses must not erase previously confirmed fields.
+        if (
+          [
+            "statement_amount",
+            "minimum_payment",
+            "paid_amount",
+            "payment_due_date",
+            "statement_closing_date",
+          ].includes(column)
+        )
+          return `${column} = COALESCE(excluded.${column}, credit_card_bills.${column})`;
         if (column === "is_paid")
           return `is_paid = CASE
             WHEN credit_card_bills.is_paid = 1 OR excluded.is_paid = 1 THEN 1

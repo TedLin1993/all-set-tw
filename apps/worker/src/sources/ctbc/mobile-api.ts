@@ -1,8 +1,4 @@
-import { inspectCtbcDepositStructure } from "./deposit-structure";
-import {
-  CtbcForeignDepositError,
-  fetchCtbcForeignDeposits,
-} from "./foreign-deposits";
+import { fetchCtbcForeignDeposits } from "./foreign-deposits";
 import type { SyncResult } from "../types";
 import { reportSyncProgress } from "../sync-progress";
 
@@ -10,7 +6,6 @@ import forge from "node-forge";
 import { fetchCtbcCardStatements, fetchCtbcPagedCardItems } from "./card-data";
 import {
   parseCtbcData,
-  inspectCtbcCardMetadata,
   type CtbcConfig,
   type CtbcPayloads,
   type CtbcPendingSession,
@@ -93,8 +88,6 @@ export type CtbcSyncOverrides = {
 };
 
 type CtbcConnectorOptions = {
-  foreignBalancesOnly?: boolean;
-  includeCreditCardsInBalanceTest?: boolean;
   allowInteractiveVerification?: boolean;
   onDeviceSeed?: (seed: string) => Promise<void>;
   onPendingSession?: (session: CtbcPendingSession | undefined) => Promise<void>;
@@ -186,8 +179,7 @@ export function createCtbcConnector(
   fetcher: CtbcFetch = globalThis.fetch.bind(globalThis),
   options: CtbcConnectorOptions = {},
 ) {
-  // One lifecycle for normal sync and the local overview-only inspection.
-  // Approval, resume and logout semantics stay identical.
+  // Keep login, interactive approval, resume and logout in one lifecycle.
   async function withSession<T>(
     config: CtbcConfig,
     overrides: CtbcSyncOverrides,
@@ -226,191 +218,6 @@ export function createCtbcConnector(
     id: "ctbc" as const,
     name: "中國信託商業銀行",
 
-    /** Local-only inspection; no cursor, normalized financial data or D1 write. */
-    async inspectDepositOverview(
-      config: CtbcConfig,
-      overrides: CtbcSyncOverrides = {},
-    ) {
-      return withSession(config, overrides, async (session) =>
-        inspectCtbcDepositStructure(
-          await session.resource(DEPOSIT_OVERVIEW_RESOURCE, {}),
-        ),
-      );
-    },
-
-    /** Local-only card metadata inspection: a single overview, no detail feeds. */
-    async inspectCardMetadata(
-      config: CtbcConfig,
-      overrides: CtbcSyncOverrides = {},
-    ) {
-      return withSession(config, overrides, async (session) => {
-        const overview = await session.resource(CREDIT_CARD_BILLS_RESOURCE, {});
-        const data = responseData(overview);
-        return {
-          scope: "ctbc_card_metadata_overview_only",
-          structure: inspectCtbcDepositStructure(
-            { rsData: { cardDataList: data.cardDataList } },
-            "card_overview",
-          ),
-          checks: inspectCtbcCardMetadata(overview),
-          validation: "inspected_without_persistence",
-        };
-      });
-    },
-
-    /** Local research scope: one selected currency and one calendar month. */
-    async inspectForeignDeposits(
-      config: CtbcConfig,
-      overrides: CtbcSyncOverrides = {},
-      scope: { currency?: string; month?: string; balancesOnly?: boolean } = {},
-    ) {
-      return withSession(config, overrides, async (session) => {
-        const overview = await session.resource(DEPOSIT_OVERVIEW_RESOURCE, {});
-        const structures: Array<{
-          stage: string;
-          structure: ReturnType<typeof inspectCtbcDepositStructure>;
-        }> = [];
-        let validation = "parsed_without_persistence";
-        let coverage = "not_confirmed";
-        let failureReason: string | undefined;
-        try {
-          const result = await fetchCtbcForeignDeposits(
-            (resource, data) => session.resource(resource, data),
-            overview,
-            new Date(),
-            {
-              months: 1,
-              firstAccountOnly: !scope.balancesOnly,
-              balancesOnly: scope.balancesOnly,
-              currency: scope.currency,
-              month: scope.month,
-              onStructure: (stage, structure) => {
-                const entry = { stage, structure };
-                if (
-                  !structures.some(
-                    (existing) =>
-                      JSON.stringify(existing) === JSON.stringify(entry),
-                  )
-                )
-                  structures.push(entry);
-              },
-            },
-          );
-          coverage =
-            result.bankAccounts.length === 0
-              ? "no_foreign_accounts"
-              : "all_returned_accounts_validated";
-        } catch (error) {
-          validation = "not_confirmed";
-          failureReason =
-            error instanceof CtbcForeignDepositError
-              ? error.reason
-              : "query_or_format_unconfirmed";
-        }
-        return {
-          existingOverview: inspectCtbcDepositStructure(overview),
-          foreign: structures,
-          validation,
-          ...(failureReason ? { failureReason } : {}),
-          ...(scope.balancesOnly
-            ? { scope: "all_foreign_demand_balances_only", coverage }
-            : {}),
-        };
-      });
-    },
-
-    /** User-confirmed research: latest TWD statement, unbilled and authorizations. */
-    async inspectCreditCards(
-      config: CtbcConfig,
-      overrides: CtbcSyncOverrides = {},
-    ) {
-      return withSession(config, overrides, async (session) => {
-        const structures: Array<{
-          stage: string;
-          structure: ReturnType<typeof inspectCtbcDepositStructure>;
-        }> = [];
-        let stage = "card_overview";
-        const query = async (resource: string, data: JsonRecord) => {
-          stage =
-            resource === CREDIT_CARD_BILLS_RESOURCE
-              ? "card_overview"
-              : resource.startsWith("/twrbm-card/qu002/")
-                ? "card_statement"
-                : resource === UNBILLED_INIT_RESOURCE
-                  ? "card_unbilled_init"
-                  : "card_items";
-          const response = await session.resource(resource, data);
-          const entry = {
-            stage,
-            structure: inspectCtbcDepositStructure(
-              response,
-              stage as
-                | "card_overview"
-                | "card_statement"
-                | "card_unbilled_init"
-                | "card_items",
-            ),
-          };
-          if (
-            !structures.some(
-              (existing) => JSON.stringify(existing) === JSON.stringify(entry),
-            )
-          )
-            structures.push(entry);
-          return response;
-        };
-        try {
-          const overview = await query(CREDIT_CARD_BILLS_RESOURCE, {});
-          if (hasNoCtbcCreditCard(overview))
-            return {
-              scope: "ctbc_latest_twd_statement_unbilled_authorizations",
-              structures,
-              validation: "parsed_without_persistence",
-              coverage: "no_credit_cards",
-            };
-          const creditCards = await fetchCtbcCardStatements(query, overview, {
-            months: 1,
-            currency: "TWD",
-          });
-          await query(UNBILLED_INIT_RESOURCE, {});
-          const unbilled = await fetchCtbcPagedCardItems(
-            query,
-            UNBILLED_RESOURCE,
-            UNBILLED_PAGE_RESOURCE,
-            { curCode: "TWD" },
-            "unbilled",
-          );
-          const realtime = await fetchCtbcPagedCardItems(
-            query,
-            REALTIME_RESOURCE,
-            REALTIME_PAGE_RESOURCE,
-            {},
-            "realtime",
-          );
-          stage = "parsing";
-          parseCtbcData({
-            depositOverview: {},
-            depositTransactions: {},
-            creditCards,
-            unbilled,
-            realtime,
-          });
-          return {
-            scope: "ctbc_latest_twd_statement_unbilled_authorizations",
-            structures,
-            validation: "parsed_without_persistence",
-          };
-        } catch {
-          return {
-            scope: "ctbc_latest_twd_statement_unbilled_authorizations",
-            structures,
-            validation: "not_confirmed",
-            failureStage: stage,
-          };
-        }
-      });
-    },
-
     async sync(
       config: CtbcConfig,
       _cursor?: string,
@@ -423,25 +230,10 @@ export function createCtbcConnector(
           DEPOSIT_OVERVIEW_RESOURCE,
           {},
         );
-        if (
-          options.foreignBalancesOnly &&
-          !options.includeCreditCardsInBalanceTest
-        ) {
-          const foreign = await fetchCtbcForeignDeposits(
-            (resource, data) => session.resource(resource, data),
-            depositOverview,
-            new Date(),
-            { balancesOnly: true },
-          );
-          return {
-            records: [],
-            ...foreign,
-            cursor: JSON.stringify({ syncedAt: new Date().toISOString() }),
-          };
-        }
-        const depositTransactions = options.foreignBalancesOnly
-          ? {}
-          : await fetchDepositTransactions(session, depositOverview);
+        const depositTransactions = await fetchDepositTransactions(
+          session,
+          depositOverview,
+        );
         let creditCards = await session.resource(
           CREDIT_CARD_BILLS_RESOURCE,
           {},
@@ -451,21 +243,15 @@ export function createCtbcConnector(
           creditCards = await fetchCtbcCardStatements(
             (resource, data) => session.resource(resource, data),
             creditCards,
-            options.foreignBalancesOnly
-              ? { months: 1, currency: "TWD" }
-              : undefined,
           );
         // The summary call refreshes the same session data used by the official
         // App (available credit and billed/unbilled totals). Its raw response is
         // intentionally not persisted until those fields have a stable mapping.
-        if (!noCreditCard && !options.foreignBalancesOnly)
+        if (!noCreditCard)
           await session.resource(CREDIT_CARD_SUMMARY_RESOURCE, {});
         const unbilled = noCreditCard
           ? undefined
-          : await fetchUnbilledTransactions(
-              session,
-              options.foreignBalancesOnly ? "TWD" : undefined,
-            );
+          : await fetchUnbilledTransactions(session);
         const realtime = noCreditCard
           ? undefined
           : await fetchPagedCardItems(
@@ -475,7 +261,7 @@ export function createCtbcConnector(
               {},
             );
         const payloads: CtbcPayloads = {
-          depositOverview: options.foreignBalancesOnly ? {} : depositOverview,
+          depositOverview,
           depositTransactions,
           creditCards: noCreditCard ? undefined : creditCards,
           unbilled,
@@ -483,15 +269,24 @@ export function createCtbcConnector(
         };
         const now = new Date();
         const parsed = parseCtbcData(payloads, now);
-        const foreign = await fetchCtbcForeignDeposits(
-          (resource, data) => session.resource(resource, data),
-          depositOverview,
-          now,
-          options.foreignBalancesOnly ? { balancesOnly: true } : undefined,
-        );
-        parsed.bankAccounts.push(...foreign.bankAccounts);
-        parsed.bankBalanceSnapshots.push(...foreign.bankBalanceSnapshots);
-        parsed.bankTransactions.push(...foreign.bankTransactions);
+        try {
+          const foreign = await fetchCtbcForeignDeposits(
+            (resource, data) => session.resource(resource, data),
+            depositOverview,
+            now,
+          );
+          // Publish the FX block only after every account/month has succeeded.
+          parsed.bankAccounts.push(...foreign.bankAccounts);
+          parsed.bankBalanceSnapshots.push(...foreign.bankBalanceSnapshots);
+          parsed.bankTransactions.push(...foreign.bankTransactions);
+        } catch {
+          // An unknown failure is not a confirmed empty account. Omit all new
+          // FX records; persistence upserts leave the previous FX data intact.
+          // Never log provider errors, account identifiers or wire payloads.
+          console.warn(
+            "[ctbc] foreign_deposits_skipped: foreign deposit sync incomplete; previous foreign data retained",
+          );
+        }
         return {
           records: [],
           ...parsed,
@@ -1038,6 +833,12 @@ async function fetchDepositTransactions(
       console.warn(
         JSON.stringify({
           event: "ctbc_deposit_init_failed",
+          accountIndex: account.overviewIndex,
+          accountCount: accounts.length,
+          overviewFields: account.fields,
+          requestedLast4: last4(accountId),
+          requestedLength: accountId.length,
+          requestedMasked: /[*Ｘx#•]/.test(accountId),
         }),
       );
       throw error;
@@ -1054,9 +855,27 @@ async function fetchDepositTransactions(
           type: "custom",
         });
       } catch (error) {
+        const initData = responseData(initial);
+        const firstSelection = [
+          ...arrayValue(initData.accountSelections),
+          ...arrayValue(initData.accountInfoList),
+        ].find(isRecord);
         console.warn(
           JSON.stringify({
             event: "ctbc_deposit_query_failed",
+            initFields: Object.keys(initData).sort(),
+            selectionFields: firstSelection
+              ? Object.keys(firstSelection).sort()
+              : [],
+            requestedLast4: last4(accountId),
+            queryLast4: last4(queryAccountId),
+            requestedLength: accountId.length,
+            queryLength: queryAccountId.length,
+            queryChanged: queryAccountId !== accountId,
+            requestedMasked: /\D/.test(accountId),
+            queryMasked: /\D/.test(queryAccountId),
+            startDate: range.startDate,
+            endDate: range.endDate,
           }),
         );
         throw error;
@@ -1093,18 +912,11 @@ function selectTransactionAccountId(
   );
 }
 
-async function fetchUnbilledTransactions(
-  session: CtbcMobileSession,
-  selectedCurrency?: string,
-) {
+async function fetchUnbilledTransactions(session: CtbcMobileSession) {
   const initial = await session.resource(UNBILLED_INIT_RESOURCE, {});
   const currencies = extractCurrencyCodes(responseData(initial));
   const allItems: unknown[] = [];
-  for (const currency of selectedCurrency
-    ? [selectedCurrency]
-    : currencies.length
-      ? currencies
-      : ["TWD"]) {
+  for (const currency of currencies.length ? currencies : ["TWD"]) {
     const response = await fetchPagedCardItems(
       session,
       UNBILLED_RESOURCE,
@@ -1139,10 +951,12 @@ function extractDepositAccounts(payload: JsonRecord) {
   const rsData = responseData(payload);
   const twd = recordValue(rsData.twdAcctSummaryResponse);
   const demand = recordValue(twd.demDepBalSummaryResponse);
-  return arrayValue(demand.infoList).flatMap((value) => {
+  return arrayValue(demand.infoList).flatMap((value, overviewIndex) => {
     if (!isRecord(value)) return [];
     const accountId = stringValue(value.accountId).trim();
-    return accountId ? [{ accountId }] : [];
+    return accountId
+      ? [{ accountId, fields: Object.keys(value).sort(), overviewIndex }]
+      : [];
   });
 }
 
@@ -1325,4 +1139,8 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function last4(value: string) {
+  return value.match(/(\d{4})\D*$/)?.[1] ?? "unknown";
 }

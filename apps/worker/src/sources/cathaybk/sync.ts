@@ -43,6 +43,16 @@ import {
   rebuildBankDepositHistory,
   dateFromIso,
 } from "../../features/net-worth/service";
+import { reconcileCathayUnpaidCurrentBillStatements } from "./repository";
+
+function isCathayCurrentBill(raw: unknown): boolean {
+  return (
+    typeof raw === "object" &&
+    raw !== null &&
+    !Array.isArray(raw) &&
+    (raw as { source?: unknown }).source === "C_BILL_Q_RecentBillInfo"
+  );
+}
 
 export type CathaySyncOverrides = {
   otp?: string;
@@ -179,6 +189,9 @@ export async function syncCathaybk(
       creditCardBillRecord(connectorId, bill, now),
     ),
   ];
+  const currentUnpaidBillIds = creditCardBills
+    .filter((bill) => bill.isPaid === false && isCathayCurrentBill(bill.raw))
+    .map((bill) => creditCardBillRecord(connectorId, bill, now).recordKey);
   const finalizeStatements: D1PreparedStatement[] = [];
   let persistedCursor: string | undefined;
 
@@ -236,6 +249,10 @@ export async function syncCathaybk(
               ),
             ]
           : []),
+        ...reconcileCathayUnpaidCurrentBillStatements(
+          env.DB,
+          currentUnpaidBillIds,
+        ),
       ],
       finalizeStatements,
     });

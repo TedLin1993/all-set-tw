@@ -26,6 +26,13 @@ import {
   KgibankVerificationRequiredError,
 } from "../../sources/kgibank/connector";
 import {
+  FubonBrowserCapacityError,
+  FubonConnectionError,
+  FubonOtpInvalidError,
+  FubonOtpRequiredError,
+  FubonVerificationRequiredError,
+} from "../../sources/fubon/connector";
+import {
   RakutenBrowserCapacityError,
   RakutenConnectionError,
   RakutenVerificationRequiredError,
@@ -142,6 +149,19 @@ const megabankSyncBodySchema = z.object({
     .regex(/^\d{4,8}$/)
     .optional(),
 });
+
+const fubonSyncBodySchema = z
+  .object({
+    captcha: z
+      .string()
+      .regex(/^\d{6}$/)
+      .optional(),
+    otp: z
+      .string()
+      .regex(/^\d{6}$/)
+      .optional(),
+  })
+  .refine((value) => !(value.captcha && value.otp));
 
 export const syncRoutes = honoFactory.createApp();
 registerSyncRoutes(syncRoutes);
@@ -640,6 +660,50 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     async (c) => {
       const overrides = c.req.valid("json");
       return manualSyncResponse(c, "megabank", overrides);
+    },
+  );
+
+  api.post("/connectors/fubon/captcha", async (c) => {
+    try {
+      return c.json(await prepareConnectorChallenge(c.env, "fubon"));
+    } catch (error) {
+      if (error instanceof SyncAlreadyRunningError) {
+        return jsonError(
+          "SYNC_ALREADY_RUNNING",
+          "台北富邦銀行已有驗證或同步作業正在進行。",
+          409,
+        );
+      }
+      if (error instanceof BrowserRunCapacityError)
+        return browserRunBusyResponse(error);
+      if (error instanceof FubonBrowserCapacityError) {
+        const response = jsonError("FUBON_BROWSER_BUSY", error.message, 429);
+        response.headers.set("Retry-After", String(error.retryAfterSeconds));
+        return response;
+      }
+      if (
+        error instanceof NeedsUserActionError ||
+        error instanceof FubonVerificationRequiredError
+      ) {
+        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
+      }
+      if (error instanceof FubonConnectionError) {
+        return jsonError("FUBON_CONNECTION_FAILED", error.message, 502);
+      }
+      return jsonError("FUBON_CAPTCHA_FAILED", safeErrorMessage(error), 502);
+    }
+  });
+
+  api.post(
+    "/connectors/fubon/sync",
+    zValidator(
+      "json",
+      fubonSyncBodySchema,
+      validationHook("INVALID_REQUEST", "台北富邦銀行同步選項格式錯誤。"),
+    ),
+    async (c) => {
+      const overrides = c.req.valid("json");
+      return manualSyncResponse(c, "fubon", overrides);
     },
   );
 }

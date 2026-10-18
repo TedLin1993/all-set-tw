@@ -5,12 +5,17 @@
     ChartTooltip,
     type ChartConfig,
   } from "@/shared/ui/chart";
-  import { formatCompactTwd, formatCurrency } from "@/shared/format/financial";
+  import {
+    flowAmountSign,
+    formatCompactTwd,
+    formatCurrency,
+  } from "@/shared/format/financial";
   import type { ActivityCategorySlice, ActivityFlow } from "../model/chart";
 
   let {
     flow,
     slices,
+    total,
     selectedCategory,
     flowSelected,
     dataIncomplete = false,
@@ -19,6 +24,8 @@
   }: {
     flow: ActivityFlow;
     slices: ActivityCategorySlice[];
+    /** Net flow total; can be below the slices when refunds cover a category. */
+    total: number;
     selectedCategory?: string;
     flowSelected: boolean;
     dataIncomplete?: boolean;
@@ -28,7 +35,6 @@
 
   const title = $derived(flow === "income" ? "收入分類" : "支出分類");
   const flowLabel = $derived(flow === "income" ? "收入" : "支出");
-  const total = $derived(slices.reduce((sum, slice) => sum + slice.amount, 0));
   const chartConfig: ChartConfig = {
     default: { label: "金額", color: "#3e6f7c" },
   };
@@ -60,9 +66,9 @@
     <p
       class={`shrink-0 whitespace-nowrap text-right text-lg font-semibold tracking-tight tabular-nums ${flow === "income" ? "text-moss" : "text-coral"}`}
     >
-      {#if dataIncomplete}—{:else}{flow === "income"
-          ? "+"
-          : "−"}{formatCurrency(total)}{/if}
+      {#if dataIncomplete}—{:else}{flowAmountSign(flow, total)}{formatCurrency(
+          Math.abs(total),
+        )}{/if}
     </p>
   </div>
   <div class="pt-4">
@@ -74,7 +80,9 @@
       </div>
     {:else if slices.length === 0}
       <p class="py-8 text-center text-sm text-subtle">
-        此月份沒有{flow === "income" ? "收入" : "支出"}活動
+        {flow === "expense" && total !== 0
+          ? "此月份沒有淨支出分類，退費已自支出總額扣除"
+          : `此月份沒有${flow === "income" ? "收入" : "支出"}活動`}
       </p>
     {:else}
       <div
@@ -108,7 +116,9 @@
               {flowSelected ? "顯示全部" : `查看${flowLabel}`}
             </span>
             <span class="mt-0.5 text-sm font-medium tabular-nums"
-              >{formatCompactTwd(total)}</span
+              >{total < 0 ? flowAmountSign(flow, total) : ""}{formatCompactTwd(
+                Math.abs(total),
+              )}</span
             >
           </button>
         </div>

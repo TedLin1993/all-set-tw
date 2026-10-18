@@ -708,46 +708,6 @@ function transactionDisplaySuffix(value: JsonRecord) {
   return new Set(candidates).size === 1 ? candidates[0] : null;
 }
 
-/** Fixed, value-free diagnostics for the local overview-only inspection. */
-export function inspectCtbcCardMetadata(payload: unknown) {
-  const rows = arrayAt(responseData(payload), "cardDataList").filter(isRecord);
-  const parsed = parseCardMetadata(payload);
-  const suffixes = parsed.map((card) => card.cardLast4).filter(Boolean);
-  return {
-    cardsPresent: rows.length > 0,
-    nonemptySuffixUnparseable: rows.some(
-      (row) =>
-        !!stringValue(row.cardNoSuffixFour).trim() &&
-        !last4(stringValue(row.cardNoSuffixFour)),
-    ),
-    maskedNumberFallbackAvailable: rows.some(
-      (row) =>
-        !last4(stringValue(row.cardNoSuffixFour)) &&
-        !!last4(stringValue(row.cardNo)),
-    ),
-    conflictingSuffixes: rows.some((row) => {
-      const suffix = last4(stringValue(row.cardNoSuffixFour));
-      const masked = last4(stringValue(row.cardNo));
-      return !!suffix && !!masked && suffix !== masked;
-    }),
-    trailingDiscriminatorPresent: rows.some(
-      (row) =>
-        /_/.test(stringValue(row.cardNoSuffixFour)) ||
-        /_/.test(stringValue(row.cardNo)),
-    ),
-    discriminatorNormalizationRestoresPair: rows.some(
-      (row) =>
-        !last4(stringValue(row.cardNoSuffixFour)) &&
-        !!displayCardLast4(row.cardNoSuffixFour) &&
-        !!optionalString(row.cardName),
-    ),
-    parsedNamePairAvailable: parsed.some(
-      (card) => !!card.cardLast4 && !!card.cardName,
-    ),
-    duplicateParsedSuffixes: new Set(suffixes).size !== suffixes.length,
-  };
-}
-
 function parseCardMetadata(payload: unknown) {
   return arrayAt(responseData(payload), "cardDataList").flatMap((value) => {
     if (!isRecord(value)) return [];

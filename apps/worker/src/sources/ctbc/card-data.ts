@@ -89,10 +89,9 @@ function pagination(
 export async function fetchCtbcCardStatements(
   request: Request,
   overview: Json,
-  options: { months?: number; currency?: string } = {},
 ) {
   const data = record(overview.rsData);
-  const months = options.months ?? BANK_SYNC_MONTHS;
+  const months = BANK_SYNC_MONTHS;
   if (
     !Number.isInteger(months) ||
     months < 1 ||
@@ -104,7 +103,6 @@ export async function fetchCtbcCardStatements(
     throw invalid();
   const billData: Json = {};
   for (const [currency, values] of Object.entries(record(data.billData))) {
-    if (options.currency && currency !== options.currency) continue;
     if (!/^[A-Z]{3}$/.test(currency)) throw invalid();
     const periods = Object.entries(record(values)).filter(
       ([, group]) => record(group).summary !== null,

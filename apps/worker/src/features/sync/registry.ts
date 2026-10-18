@@ -42,6 +42,11 @@ import {
   type MegabankSyncOverrides,
 } from "../../sources/megabank/sync";
 import {
+  prepareFubonCaptchaSession,
+  syncFubon,
+  type FubonSyncOverrides,
+} from "../../sources/fubon/sync";
+import {
   syncCathaybk,
   type CathaySyncOverrides,
 } from "../../sources/cathaybk/sync";
@@ -142,6 +147,11 @@ export const connectorRuntimeRegistry: Record<
       syncMegabank(env, trigger, overrides as MegabankSyncOverrides),
     prepareChallenge: prepareMegabankCaptchaSession,
   },
+  fubon: {
+    run: (env, trigger, _scope, overrides) =>
+      syncFubon(env, trigger, overrides as FubonSyncOverrides),
+    prepareChallenge: prepareFubonCaptchaSession,
+  },
 };
 
 export function runConnectorSync(
@@ -151,12 +161,6 @@ export function runConnectorSync(
   scope: SyncScope = SYNC_SCOPE_ALL,
   overrides: Record<string, unknown> = {},
 ) {
-  if (
-    env.CTBC_FOREIGN_BALANCE_TEST === "1" &&
-    (connectorId !== "ctbc" || trigger !== "manual")
-  ) {
-    throw new Error("測試站只允許手動同步中國信託外幣餘額與指定範圍信用卡。");
-  }
   const supportedScopes: readonly string[] =
     connectorCatalog[connectorId].scopes;
   if (!supportedScopes.includes(scope)) {

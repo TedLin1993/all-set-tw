@@ -34,9 +34,17 @@ migrations_dir = "apps/worker/migrations"
 name = "MEGABANK_EGRESS"
 class_name = "MegabankEgress"
 
+[[durable_objects.bindings]]
+name = "FUBON_EGRESS"
+class_name = "FubonEgress"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["MegabankEgress"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["FubonEgress"]
 
 [observability]
 enabled = true

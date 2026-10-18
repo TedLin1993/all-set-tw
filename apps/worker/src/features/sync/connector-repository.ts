@@ -152,6 +152,7 @@ const DIRECT_DEPOSIT_CONNECTOR_IDS = [
   "kgibank",
   "megabank",
   "rakuten",
+  "fubon",
 ] as const satisfies readonly ConnectorId[];
 
 export function linkCanonicalBankAccountsStatement(
