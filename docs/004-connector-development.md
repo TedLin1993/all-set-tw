@@ -155,6 +155,13 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
   connector 可直接以其 run item table 作為 staging source。資料 promotion 與 cursor
   必須放在同一 guarded D1 batch，secret state 需以設定版本 CAS 保護。
 
+信用卡帳單的缺欄保留是所有 connector 的共用 persistence 行為：`statement_amount`、
+`minimum_payment`、`paid_amount`、`payment_due_date`、`statement_closing_date` 均以
+`COALESCE(excluded.x, credit_card_bills.x)` 更新；新值為 NULL（含 mapper 正規化後的缺值）
+時保留既有值，明確提供的 0、負金額及新日期仍可更新。`is_paid` 共用「一旦已繳，維持已繳」
+規則，未知狀態不清除已知狀態；銀行明確回報的已繳狀態修正由該來源的 repository 與
+`sync.ts` 組合於 `afterPromoteStatements` 處理，不在共用 persistence 中以 connector ID 分支。
+
 ## 信用卡交易階段與共用配對
 
 交易沿用 `pending`（待入帳）與 `posted`（已入帳）兩個狀態，來源負責依銀行資料判定。
@@ -340,6 +347,8 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 外幣活存欄位與空帳戶／失敗旗標語意依 2026-10-06 取得的官方 `FDepInqContext-_BabElsu.js`、`index-Df9J0qxz.js` 與主程式核對。新增三個核心案例，以合成資料驗證同帳號多幣別及小數餘額、成功無帳戶與失敗不誤判；依本文件的敏感資料規則，擴充多幣別案例確認兩種 `raw` 僅保存末四碼與白名單欄位。尚未取得有外幣帳戶的真實回應，也尚未完成登入後的無外幣分支與完整同步驗證。
 
 OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒頁並停在 `/MyBank/Quicklinks/Home`，擋住信任裝置設定。同步會點選「暫不變更」略過提醒，不變更使用者的密碼；該頁也視為 OTP 驗證成功。信任裝置是否完成，除頁面上的成功訊息外，也以 `CUB.eBank.DeviceId` cookie 輔助確認；該 cookie 可能是 HttpOnly，須由瀏覽器端（CDP）讀取，`document.cookie` 看不到。兩者都偵測不到時記錄不含個資的 `cathaybk_trusted_device_not_detected` 並回報未完成。
+
+國泰當期與歷史帳單於單次同步內按帳戶、期別及幣別合併，當期資料優先；若當期應繳總額無法解析，則保留同一期歷史總額（包含 0 及負值），當期明確提供的 0 仍優先。不同幣別使用不同帳戶 ID。跨次同步仍以既有 `(connector_id, account_id, billing_period)` 原位更新，不另建歷史副本。`HistoryBillList` 僅在提供有限數值的 `twdAmount` 時更新應繳總額（包含 0 及負值）；缺漏或無效金額依共用缺欄保留規則處理，source、raw 與更新時間仍反映最新來源。國泰本次明確回報為未繳的當期帳單，由 `sync.ts` 以 `creditCardBillRecord(...).recordKey` 取得 ID，交給來源 `repository.ts` 的 `reconcileCathayUnpaidCurrentBillStatements`，在 `afterPromoteStatements` 僅將指定 ID、`connector_id = 'cathaybk'` 且 `is_paid = 1` 的帳單修正為 0，亦可修復舊版誤判已繳資料；歷史帳單與未知狀態不觸發此修正。這不變更使用者繳款 override，也不加入查詢失敗時的 fail-soft。
 
 ### 永豐銀行
 

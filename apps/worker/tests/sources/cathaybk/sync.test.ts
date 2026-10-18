@@ -5,6 +5,7 @@ import type { Env } from "../../../src/platform/env";
 import {
   bankAccountRecord,
   bankBalanceSnapshotRecord,
+  creditCardBillRecord,
 } from "../../../src/features/sync/record-mapper";
 import { persistStagedSyncWrite } from "../../../src/features/sync/persistence";
 
@@ -45,7 +46,10 @@ function account(
   };
 }
 
-function connectorResult(loanOverviewComplete: boolean) {
+function connectorResult(
+  loanOverviewComplete: boolean,
+  creditCardBills: ReturnType<typeof bill>[] = [],
+) {
   return {
     records: [],
     loanOverviewComplete,
@@ -72,7 +76,36 @@ function connectorResult(loanOverviewComplete: boolean) {
       },
     ],
     bankTransactions: [],
-    creditCardBills: [],
+    creditCardBills,
+  };
+}
+
+function bill(
+  billingPeriod: string,
+  overrides: Partial<{
+    isPaid: boolean;
+    raw: unknown;
+    statementAmount: number;
+    minimumPayment: number;
+    paidAmount: number;
+    sourceId: string;
+    omitAmounts: boolean;
+  }> = {},
+) {
+  return {
+    accountId: "card:1",
+    sourceId: overrides.sourceId ?? `seed:${billingPeriod}`,
+    billingPeriod,
+    ...(overrides.omitAmounts
+      ? {}
+      : {
+          statementAmount: overrides.statementAmount ?? 100,
+          minimumPayment: overrides.minimumPayment ?? 10,
+          paidAmount: overrides.paidAmount ?? 100,
+        }),
+    isPaid: overrides.isPaid,
+    currency: "TWD",
+    raw: overrides.raw,
   };
 }
 
@@ -88,9 +121,16 @@ async function seedPreviouslyKnownLoan() {
   });
 }
 
-async function runSync(loanOverviewComplete: boolean) {
+async function runSync(
+  loanOverviewComplete: boolean,
+  creditCardBills: ReturnType<typeof bill>[] = [],
+) {
   mocks.createCathaybkConnector.mockReturnValue({
-    sync: vi.fn().mockResolvedValue(connectorResult(loanOverviewComplete)),
+    sync: vi
+      .fn()
+      .mockResolvedValue(
+        connectorResult(loanOverviewComplete, creditCardBills),
+      ),
   });
   return syncCathaybk(env, "manual");
 }
@@ -187,6 +227,103 @@ describe("Cathay incomplete loan overview persistence", () => {
     expect(await bankAccountState(missingLoanSourceId)).toMatchObject({
       accountType: "loan",
       inactiveAt: expect.any(String),
+    });
+  });
+});
+
+describe("Cathay current unpaid bill reconciliation", () => {
+  it("repairs only explicit current unpaid bills and preserves zero values", async () => {
+    const periods = ["2026-09", "2026-08", "2026-07", "2026-06", "2026-05"];
+    await persistStagedSyncWrite(env.DB, {
+      records: [
+        bankAccountRecord(
+          "cathaybk",
+          {
+            sourceId: "card:1",
+            institutionName: "國泰世華銀行",
+            accountName: "信用卡",
+            accountType: "credit",
+            currency: "TWD",
+            raw: {},
+          },
+          createdAt,
+        ),
+        ...periods.map((period) =>
+          creditCardBillRecord(
+            "cathaybk",
+            bill(period, { isPaid: true }),
+            createdAt,
+          ),
+        ),
+      ],
+    });
+
+    const firstBills = [
+      bill("2026-09", {
+        isPaid: false,
+        raw: { source: "C_BILL_Q_RecentBillInfo" },
+        statementAmount: 0,
+        minimumPayment: 0,
+        paidAmount: 0,
+        sourceId: "current-source",
+      }),
+      bill("2026-08", { raw: { source: "C_BILL_Q_RecentBillInfo" } }),
+      bill("2026-07", {
+        isPaid: true,
+        raw: { source: "C_BILL_Q_RecentBillInfo" },
+      }),
+      bill("2026-06", { isPaid: false, raw: { source: "history" } }),
+      bill("2026-05", { isPaid: false }),
+    ];
+    await runSync(false, firstBills);
+
+    const rows = await env.DB.prepare(
+      "SELECT id, billing_period, source_id, statement_amount, minimum_payment, paid_amount, is_paid FROM credit_card_bills ORDER BY billing_period DESC",
+    ).all<{
+      id: string;
+      billing_period: string;
+      source_id: string;
+      statement_amount: number | null;
+      minimum_payment: number | null;
+      paid_amount: number | null;
+      is_paid: number | null;
+    }>();
+    expect(rows.results).toEqual([
+      {
+        id: "cathaybk:card:1:2026-09",
+        billing_period: "2026-09",
+        source_id: "current-source",
+        statement_amount: 0,
+        minimum_payment: 0,
+        paid_amount: 0,
+        is_paid: 0,
+      },
+      expect.objectContaining({ billing_period: "2026-08", is_paid: 1 }),
+      expect.objectContaining({ billing_period: "2026-07", is_paid: 1 }),
+      expect.objectContaining({ billing_period: "2026-06", is_paid: 1 }),
+      expect.objectContaining({ billing_period: "2026-05", is_paid: 1 }),
+    ]);
+
+    await runSync(false, [
+      bill("2026-09", {
+        sourceId: "current-source-again",
+        raw: { source: "C_BILL_Q_RecentBillInfo" },
+        omitAmounts: true,
+      }),
+    ]);
+
+    expect(
+      await env.DB.prepare(
+        "SELECT source_id, statement_amount, minimum_payment, paid_amount, is_paid FROM credit_card_bills WHERE id = ?",
+      )
+        .bind("cathaybk:card:1:2026-09")
+        .first(),
+    ).toEqual({
+      source_id: "current-source-again",
+      statement_amount: 0,
+      minimum_payment: 0,
+      paid_amount: 0,
+      is_paid: 0,
     });
   });
 });

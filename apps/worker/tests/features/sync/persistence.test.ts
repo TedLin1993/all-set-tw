@@ -16,6 +16,7 @@ import {
   bankAccountRecord,
   bankBalanceSnapshotRecord,
   bankTransactionRecord,
+  creditCardBillRecord,
 } from "../../../src/features/sync/record-mapper";
 import { prepareTaishinAuthorizationWrite } from "../../../src/sources/taishin/authorizations";
 import { prepareEsunAuthorizationWrite } from "../../../src/sources/esun/authorizations";
@@ -25,6 +26,10 @@ import { prepareCardAuthorizationWrite } from "../../../src/features/sync/card-a
 import { parseFirstbankData } from "../../../src/sources/firstbank/protocol";
 import { parseHncbData } from "../../../src/sources/hncb/protocol";
 import { parseMegabankData } from "../../../src/sources/megabank/protocol";
+import {
+  parseCathayCurrentBills,
+  parseCathayHistoryBills,
+} from "../../../src/sources/cathaybk/connector";
 import {
   parseTaishinCreditCardData,
   type TaishinCreditCardData,
@@ -1568,41 +1573,262 @@ describe("同步資料完整性（隔離 D1）", () => {
     });
   });
 
-  it("後續資料缺少繳款欄位時保留已確認的繳款資料", async () => {
-    const bill: SyncWriteRecord = {
-      entityType: "credit_card_bill",
-      recordKey: "sinopac:bill",
-      payload: {
-        id: "sinopac:bill",
-        connector_id: "sinopac",
-        account_id: account.recordKey,
-        source_id: "bill",
-        billing_period: "2026-09",
+  it.each(["sinopac", "cathaybk", "esun", "skbank"])(
+    "%s 後續帳單缺欄保留已知資料，零值可更新且已繳不回退",
+    async (connectorId) => {
+      const card: SyncWriteRecord = {
+        ...account,
+        recordKey: `${connectorId}:card`,
+        payload: {
+          ...account.payload,
+          id: `${connectorId}:card`,
+          connector_id: connectorId,
+        },
+      };
+      const bill: SyncWriteRecord = {
+        entityType: "credit_card_bill",
+        recordKey: `${connectorId}:bill`,
+        payload: {
+          id: `${connectorId}:bill`,
+          connector_id: connectorId,
+          account_id: card.recordKey,
+          source_id: "bill",
+          billing_period: "2026-09",
+          statement_amount: 1000,
+          minimum_payment: 75,
+          paid_amount: 1000,
+          payment_due_date: "2026-10-05",
+          statement_closing_date: "2026-09-20",
+          is_paid: 1,
+          currency: "TWD",
+          raw_payload: "{}",
+          created_at: now,
+          updated_at: now,
+        },
+      };
+      await persistStagedSyncWrite(db, { records: [card, bill] });
+      const retainedFields = {
         statement_amount: 1000,
+        minimum_payment: 75,
         paid_amount: 1000,
+        payment_due_date: "2026-10-05",
+        statement_closing_date: "2026-09-20",
         is_paid: 1,
-        currency: "TWD",
-        raw_payload: "{}",
-        created_at: now,
-        updated_at: now,
+      };
+      const selectBill = () =>
+        db
+          .prepare(
+            "SELECT statement_amount, minimum_payment, paid_amount, payment_due_date, statement_closing_date, is_paid FROM credit_card_bills WHERE id = ?",
+          )
+          .bind(bill.recordKey)
+          .first();
+      for (const missing of [null, undefined]) {
+        await persistStagedSyncWrite(db, {
+          records: [
+            {
+              ...bill,
+              payload: {
+                ...bill.payload,
+                statement_amount: missing,
+                minimum_payment: missing,
+                paid_amount: missing,
+                payment_due_date: missing,
+                statement_closing_date: missing,
+                is_paid: missing,
+              },
+            },
+          ],
+        });
+        expect(await selectBill()).toEqual(retainedFields);
+      }
+      await persistStagedSyncWrite(db, {
+        records: [
+          {
+            ...bill,
+            payload: {
+              ...bill.payload,
+              statement_amount: 0,
+              minimum_payment: 0,
+              paid_amount: 0,
+              payment_due_date: "2026-10-06",
+              statement_closing_date: "2026-09-21",
+              is_paid: 0,
+            },
+          },
+        ],
+      });
+      expect(await selectBill()).toEqual({
+        statement_amount: 0,
+        minimum_payment: 0,
+        paid_amount: 0,
+        payment_due_date: "2026-10-06",
+        statement_closing_date: "2026-09-21",
+        is_paid: 1,
+      });
+    },
+  );
+  it.each([
+    { unpaidAmount: 400, paidAmount: 600, status: "Unmapped", isPaid: 0 },
+    { unpaidAmount: 0, paidAmount: 1000, status: "Payed", isPaid: 1 },
+  ])(
+    "國泰當期 $isPaid 後由歷史同 key 原位更新並保留繳款欄位",
+    async ({ unpaidAmount, paidAmount, status, isPaid }) => {
+      const sourceId = "credit:cathaybk:main";
+      const current = parseCathayCurrentBills(
+        {
+          success: true,
+          returnCode: "0000",
+          content: {
+            recentBillDate: "2026-09-20",
+            twBillInfo: { unPaidAmount: unpaidAmount, paidAmount },
+          },
+        },
+        {
+          success: true,
+          returnCode: "0000",
+          content: {
+            currencyBillInfoList: [
+              {
+                currency: "TWD",
+                currencyDataType: "TWD",
+                currentMinPaymentAmount: 75,
+              },
+            ],
+          },
+        },
+        {
+          success: true,
+          returnCode: "0000",
+          content: {
+            dueDate: "2026-10-05",
+            twdBillDetail: { payBillStatus: status },
+          },
+        },
+        sourceId,
+      );
+      const history = parseCathayHistoryBills(
+        [
+          {
+            billDate: "2026-09-19",
+            twdAmount: 1234,
+            usdAmount: null,
+            billStatus: "",
+          },
+        ],
+        sourceId,
+        "2026-09-20",
+      ).map((bill) => ({ ...bill, sourceId: "history:2026-09:TWD" }));
+      const first = creditCardBillRecord(
+        "cathaybk",
+        current.creditCardBills[0],
+        "2026-09-01T00:00:00Z",
+      );
+      const cathayAccount = bankAccountRecord(
+        "cathaybk",
+        {
+          sourceId,
+          institutionName: "國泰世華銀行",
+          accountType: "credit",
+          currency: "TWD",
+        },
+        now,
+      );
+      await persistStagedSyncWrite(db, { records: [cathayAccount, first] });
+      const before = await db
+        .prepare("SELECT id, created_at FROM credit_card_bills")
+        .first<{ id: string; created_at: string }>();
+      await persistStagedSyncWrite(db, {
+        records: [
+          creditCardBillRecord("cathaybk", history[0], "2026-09-02T00:00:00Z"),
+        ],
+      });
+      expect(
+        await db
+          .prepare("SELECT COUNT(*) AS n FROM credit_card_bills")
+          .first("n"),
+      ).toBe(1);
+      expect(
+        await db
+          .prepare(
+            "SELECT id, source_id, statement_amount, minimum_payment, paid_amount, is_paid, payment_due_date, statement_closing_date, raw_payload, created_at, updated_at FROM credit_card_bills",
+          )
+          .first(),
+      ).toEqual({
+        id: before!.id,
+        source_id: history[0].sourceId,
+        statement_amount: 1234,
+        minimum_payment: 75,
+        paid_amount: paidAmount,
+        is_paid: isPaid,
+        payment_due_date: "2026-10-05",
+        statement_closing_date: "2026-09-19",
+        raw_payload: JSON.stringify(history[0].raw),
+        created_at: before!.created_at,
+        updated_at: "2026-09-02T00:00:00Z",
+      });
+    },
+  );
+  it.each([
+    [null, 1000],
+    [undefined, 1000],
+    [Number.NaN, 1000],
+    [Number.POSITIVE_INFINITY, 1000],
+    ["123", 1000],
+    [0, 0],
+    [-1, -1],
+  ])("國泰歷史帳單金額 %s 的保留與有效更新", async (amount, expectedAmount) => {
+    const sourceId = "credit:cathaybk:invalid-amount";
+    const current = parseCathayCurrentBills(
+      {
+        success: true,
+        returnCode: "0000",
+        content: {
+          recentBillDate: "2026-09-20",
+          twBillInfo: { unPaidAmount: 1, paidAmount: 999 },
+        },
       },
-    };
-    await persistStagedSyncWrite(db, { records: [account, bill] });
+      null,
+      null,
+      sourceId,
+    ).creditCardBills[0];
     await persistStagedSyncWrite(db, {
       records: [
+        bankAccountRecord(
+          "cathaybk",
+          {
+            sourceId,
+            institutionName: "國泰世華銀行",
+            accountType: "credit",
+            currency: "TWD",
+          },
+          now,
+        ),
+        creditCardBillRecord("cathaybk", current, now),
+      ],
+    });
+    const parsed = parseCathayHistoryBills(
+      [
         {
-          ...bill,
-          payload: { ...bill.payload, paid_amount: null, is_paid: null },
+          billDate: "2026-09-20",
+          twdAmount: amount as unknown as number,
+          usdAmount: null,
+          billStatus: "",
         },
+      ],
+      sourceId,
+      "2026-09-20",
+    )[0];
+    await persistStagedSyncWrite(db, {
+      records: [
+        creditCardBillRecord("cathaybk", parsed, "2026-09-02T00:00:00Z"),
       ],
     });
     expect(
       await db
-        .prepare("SELECT paid_amount, is_paid FROM credit_card_bills")
-        .first(),
-    ).toEqual({ paid_amount: 1000, is_paid: 1 });
+        .prepare("SELECT statement_amount FROM credit_card_bills")
+        .first("statement_amount"),
+    ).toBe(expectedAmount);
   });
-
   it("暫存後變更憑證時，舊同步不能寫入金融資料或覆蓋新憑證與 cursor", async () => {
     const records = [account, transaction("posted")];
     await stageSyncWriteRecords(db, "stale-run", records);
