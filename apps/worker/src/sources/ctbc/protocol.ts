@@ -7,6 +7,7 @@ import type {
 import forge from "node-forge";
 import { z } from "zod";
 import { BANK_SYNC_MONTHS } from "../sync-window";
+import { creditCardLiabilityBalance } from "../credit-card-liability";
 
 // Only the state needed to resume this login is retained, encrypted. A snapshot
 // expires within five minutes; bank response payloads and OTP are not retained.
@@ -148,7 +149,15 @@ export function parseCtbcData(
   );
   const cardAccounts = buildCreditCardAccounts(cardCurrencies, cardMetadata);
   bankAccounts.push(...cardAccounts);
-  bankBalanceSnapshots.push(...buildCreditCardSnapshots(selectedGroups, now));
+  bankBalanceSnapshots.push(
+    ...buildCreditCardSnapshots(
+      selectedGroups,
+      payloads.unbilled === undefined
+        ? undefined
+        : unbilledTotals(unbilledTransactions),
+      now,
+    ),
+  );
 
   const creditCardBills = selectedGroups.map((group) => ({
     accountId: creditCardSourceId(group.currency),
@@ -351,29 +360,73 @@ function buildCreditCardAccounts(
   }));
 }
 
-function buildCreditCardSnapshots(groups: CreditCardGroup[], now: Date) {
+/** 各幣別已入帳未結帳的消費淨額（正數為欠款），不含繳款；授權另計不納入。 */
+function unbilledTotals(transactions: CtbcCardTransactionCandidate[]) {
+  const totals = new Map<string, number>();
+  for (const transaction of transactions) {
+    if (
+      transaction.amount > 0 &&
+      /繳款|扣繳|自扣|payment/i.test(transaction.description ?? "")
+    )
+      continue;
+    totals.set(
+      transaction.currency,
+      (totals.get(transaction.currency) ?? 0) - transaction.amount,
+    );
+  }
+  return totals;
+}
+
+function buildCreditCardSnapshots(
+  groups: CreditCardGroup[],
+  unbilled: Map<string, number> | undefined,
+  now: Date,
+) {
   const newestByCurrency = new Map<string, CreditCardGroup>();
   for (const group of groups.sort(compareCreditCardGroups)) {
     if (!newestByCurrency.has(group.currency))
       newestByCurrency.set(group.currency, group);
   }
-  return Array.from(newestByCurrency.values()).map((group) => {
-    const remainingDue = remainingDueForGroup(group);
-    const sourceId = creditCardSourceId(group.currency);
-    return {
+  const snapshots: Array<Omit<BankBalanceSnapshot, "id" | "connectorId">> =
+    Array.from(newestByCurrency.values()).map((group) => {
+      const remainingDue = remainingDueForGroup(group);
+      const sourceId = creditCardSourceId(group.currency);
+      return {
+        accountId: sourceId,
+        sourceId: `${sourceId}:${now.toISOString()}`,
+        balance: creditCardLiabilityBalance(
+          remainingDue ?? 0,
+          unbilled?.get(group.currency) ?? 0,
+        ),
+        statementBalance: group.statementAmount,
+        availableBalance: undefined,
+        paymentDueDate: group.paymentDueDate,
+        statementClosingDate: group.statementClosingDate,
+        noPaymentNeeded: remainingDue == null ? undefined : remainingDue === 0,
+        currency: group.currency,
+        asOfAt: now.toISOString(),
+        raw: sanitizeCreditCardGroup(group),
+      };
+    });
+  // 尚無帳單的幣別只有未出帳消費，負債即未出帳總額。
+  for (const [currency, amount] of unbilled ?? []) {
+    if (newestByCurrency.has(currency)) continue;
+    const sourceId = creditCardSourceId(currency);
+    snapshots.push({
       accountId: sourceId,
       sourceId: `${sourceId}:${now.toISOString()}`,
-      balance: remainingDue == null ? 0 : -Math.abs(remainingDue),
-      statementBalance: group.statementAmount,
+      balance: creditCardLiabilityBalance(0, amount),
+      statementBalance: undefined,
       availableBalance: undefined,
-      paymentDueDate: group.paymentDueDate,
-      statementClosingDate: group.statementClosingDate,
-      noPaymentNeeded: remainingDue == null ? undefined : remainingDue === 0,
-      currency: group.currency,
+      paymentDueDate: undefined,
+      statementClosingDate: undefined,
+      noPaymentNeeded: undefined,
+      currency,
       asOfAt: now.toISOString(),
-      raw: sanitizeCreditCardGroup(group),
-    };
-  });
+      raw: { currency, unbilledAmount: amount },
+    });
+  }
+  return snapshots;
 }
 
 function parseCreditCardTransactions(groups: CreditCardGroup[]) {

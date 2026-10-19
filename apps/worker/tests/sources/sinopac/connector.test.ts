@@ -204,7 +204,7 @@ describe("sinopac App JSON parser", () => {
               CurrencyCode: "392",
               TXDATE: "2026/09/01",
               DEDATE: "2026/09/02",
-              AMT: "100",
+              AMT: "39,712.00",
               MEMO: "測試消費",
             },
           ],
@@ -227,6 +227,49 @@ describe("sinopac App JSON parser", () => {
       result.bankBalanceSnapshots.find((row) => row.currency === "TWD")
         ?.balance,
     ).toBe(0);
+  });
+
+  it("信用卡負債為帳單剩餘應繳加未出帳消費，不重扣已入帳的繳款", () => {
+    const parse = (subTotalAmt: string) =>
+      parseSinopacCardData({
+        summary: summaryPayload,
+        bills: billPayload,
+        accountingInfo: {
+          Result: {
+            BaseData: { STMTDATE: "2026/09/23", DUEDATE: "2026/10/08" },
+            BillAmounts: [
+              { CurrencyCode: "000", CURRBAL: "732", TotalPaymentAmt: "732" },
+            ],
+          },
+        },
+        latest: { Result: { Items: [] } },
+        outstanding: {
+          Result: {
+            Detail: [
+              ["2026/09/27", "857", " 測試商店 "],
+              ["2026/10/01", "-304", " 測試通路回饋 "],
+              ["2026/10/08", "-732", " 永豐自扣已入帳，謝謝！ "],
+            ].map(([date, amount, memo]) => ({
+              CurrencyCode: "000",
+              TXDATE: date,
+              DEDATE: date,
+              AMT: amount,
+              MEMO: memo,
+            })),
+            SubTotal: [{ CurrencyCode: "000", SubTotalAmt: subTotalAmt }],
+          },
+        },
+      }).bankBalanceSnapshots.find((row) => row.currency === "TWD");
+
+    // 帳單已繳清；小計含或不含繳款都只計入未出帳消費淨額 857 - 304。
+    for (const subTotal of ["-179", "553"]) {
+      expect(parse(subTotal)).toMatchObject({
+        balance: -553,
+        noPaymentNeeded: true,
+      });
+    }
+    // 小計與本次明細對不上時負債未知，不建立快照。
+    expect(parse("500")).toBeUndefined();
   });
 
   it("卡名或摘要含「回饋」不影響方向：已入帳依銀行正負號，授權只看摘要與授權結果", () => {

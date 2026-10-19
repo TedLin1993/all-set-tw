@@ -6,6 +6,7 @@ import type {
 } from "../financial-types";
 import { z } from "zod";
 import { BANK_SYNC_MONTHS } from "../sync-window";
+import { creditCardLiabilityBalance } from "../credit-card-liability";
 
 export const taishinConfigSchema = z.object({
   userId: z.string().min(1).optional(),
@@ -120,7 +121,9 @@ export function parseTaishinCreditCardData(
       ? Math.max(overview.statementAmount - (paidAmount ?? 0), 0)
       : undefined;
   const balance =
-    remainingDue == null ? undefined : -(remainingDue + unbilled.totalAmount);
+    remainingDue == null
+      ? undefined
+      : creditCardLiabilityBalance(remainingDue, unbilled.totalAmount);
   const asOfAt = now.toISOString();
 
   const bills = billEntries

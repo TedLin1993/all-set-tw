@@ -27,6 +27,7 @@ import {
 } from "./deposit-protocol";
 import { fetchSinopacLoans, type SinopacLoanSyncResult } from "./loan-protocol";
 import { isNoCreditCardMessage } from "../credit-card-status";
+import { creditCardLiabilityBalance } from "../credit-card-liability";
 import { type SinopacConfig } from "./protocol";
 import { SinopacVerificationRequiredError } from "./verification-error";
 
@@ -1076,25 +1077,42 @@ export function parseSinopacCardData(
     (statementAmount != null && statementAmount <= 0) ||
     summary.noPaymentNeeded ||
     (latestBillMatchesStatement && latestTwdBill?.isPaid === true);
+  // 未出帳總額只在新版帳務流程（accountinginfo）可取得；舊流程維持只算帳單。
+  const unbilledByCurrency =
+    payloads.accountingInfo !== undefined && payloads.outstanding !== undefined
+      ? sinoCardUnbilledTotals(payloads.outstanding)
+      : undefined;
+  const liabilityBalance = (currency: string, statementRemaining: number) => {
+    if (!unbilledByCurrency)
+      return creditCardLiabilityBalance(statementRemaining, 0);
+    const unbilled = unbilledByCurrency.has(currency)
+      ? unbilledByCurrency.get(currency)
+      : 0;
+    return unbilled === undefined
+      ? undefined
+      : creditCardLiabilityBalance(statementRemaining, unbilled);
+  };
   const bankBalanceSnapshots: Scraped["bankBalanceSnapshots"] = [];
+  const twdBalance = liabilityBalance(
+    "TWD",
+    statementAmount != null && statementAmount < 0
+      ? statementAmount
+      : noOutstandingStatement || statementAmount == null
+        ? 0
+        : statementAmount,
+  );
   if (
-    statementAmount != null ||
-    summary.availableCredit != null ||
-    summary.creditLimit != null ||
-    summary.noPaymentNeeded
+    twdBalance !== undefined &&
+    (statementAmount != null ||
+      summary.availableCredit != null ||
+      summary.creditLimit != null ||
+      summary.noPaymentNeeded)
   ) {
     const accountId = accountIdForCurrency("TWD");
     bankBalanceSnapshots.push({
       accountId,
       sourceId: `${accountId}:${now.toISOString().slice(0, 10)}`,
-      balance:
-        statementAmount != null && statementAmount < 0
-          ? -statementAmount
-          : noOutstandingStatement
-            ? 0
-            : statementAmount == null
-              ? 0
-              : -statementAmount,
+      balance: twdBalance,
       availableBalance: summary.availableCredit,
       statementBalance: statementAmount,
       paymentDueDate,
@@ -1108,6 +1126,7 @@ export function parseSinopacCardData(
         availableCredit: summary.availableCredit,
         statementAmount,
         minimumPayment,
+        unbilledAmount: unbilledByCurrency?.get("TWD") ?? 0,
       },
     });
   }
@@ -1121,11 +1140,16 @@ export function parseSinopacCardData(
     );
     // A negative remaining amount is a credit balance, not malformed debt.
     const remaining = bill.statementAmount - bill.paidAmount;
+    const balance = liabilityBalance(bill.currency, remaining);
+    if (balance === undefined) {
+      if (previousIndex >= 0) bankBalanceSnapshots.splice(previousIndex, 1);
+      continue;
+    }
     const snapshot = {
       ...(previousIndex >= 0 ? bankBalanceSnapshots[previousIndex] : {}),
       accountId,
       sourceId: `${accountId}:${now.toISOString().slice(0, 10)}`,
-      balance: remaining === 0 ? 0 : -remaining,
+      balance,
       statementBalance: bill.statementAmount,
       paymentDueDate: bill.paymentDueDate,
       statementClosingDate: bill.statementClosingDate,
@@ -1136,48 +1160,37 @@ export function parseSinopacCardData(
         provider: "sinopac.accountinginfo",
         statementAmount: bill.statementAmount,
         paidAmount: bill.paidAmount,
+        unbilledAmount: unbilledByCurrency?.get(bill.currency) ?? 0,
       },
     };
     if (previousIndex >= 0) bankBalanceSnapshots[previousIndex] = snapshot;
     else bankBalanceSnapshots.push(snapshot);
   }
 
-  // An unbilled currency has no current statement or due date. Use only the
-  // bank's current subtotal, never the locally retained transaction history.
-  if (
-    payloads.accountingInfo !== undefined &&
-    isRecord(payloads.outstanding) &&
-    isRecord(payloads.outstanding.Result)
-  ) {
-    const subtotals = payloads.outstanding.Result.SubTotal;
-    if (!Array.isArray(subtotals))
-      throw new Error("永豐未出帳小計格式不完整。");
-    for (const row of subtotals) {
-      if (!isRecord(row)) throw new Error("永豐未出帳小計格式不完整。");
-      const currency = normalizeCurrency(stringValue(row.CurrencyCode));
-      if (
-        currency === "TWD" ||
-        accounting.some((bill) => bill.currency === currency)
-      )
-        continue;
-      const amount = parseAmount(stringValue(row.SubTotalAmt));
-      if (amount == null) throw new Error("永豐未出帳小計金額格式不完整。");
-      const accountId = accountIdForCurrency(currency);
-      if (!bankAccounts.some((account) => account.sourceId === accountId))
-        continue;
-      bankBalanceSnapshots.push({
-        accountId,
-        sourceId: `${accountId}:${now.toISOString().slice(0, 10)}`,
-        balance: amount <= 0 ? 0 : -amount,
+  // A currency without a current statement has no due date; its liability is
+  // only this response's unbilled total, never the locally retained history.
+  for (const [currency, unbilled] of unbilledByCurrency ?? []) {
+    if (
+      currency === "TWD" ||
+      unbilled === undefined ||
+      accounting.some((bill) => bill.currency === currency)
+    )
+      continue;
+    const accountId = accountIdForCurrency(currency);
+    if (!bankAccounts.some((account) => account.sourceId === accountId))
+      continue;
+    bankBalanceSnapshots.push({
+      accountId,
+      sourceId: `${accountId}:${now.toISOString().slice(0, 10)}`,
+      balance: creditCardLiabilityBalance(0, unbilled),
+      currency,
+      asOfAt: now.toISOString(),
+      raw: {
+        provider: "sinopac.outstanding-subtotal",
         currency,
-        asOfAt: now.toISOString(),
-        raw: {
-          provider: "sinopac.outstanding-subtotal",
-          currency,
-          unbilledAmount: amount,
-        },
-      });
-    }
+        unbilledAmount: unbilled,
+      },
+    });
   }
 
   return {
@@ -1571,6 +1584,53 @@ function sinoCardResultRecords(payload: unknown, key: "Items" | "Detail") {
     throw new Error(`永豐信用卡 ${key} 交易格式不完整。`);
   }
   return payload.Result[key];
+}
+
+/**
+ * 各幣別的未出帳總額（銀行正負號：正數為欠款），不含繳款。
+ *
+ * 已請款明細包含本期繳款，小計是否扣掉繳款無法事先確認；只有小計等於本次明細
+ * 全部加總或扣除繳款後的加總時才採用，否則該幣別為 undefined（負債未知）。
+ */
+function sinoCardUnbilledTotals(payload: unknown) {
+  const rows = sinoCardResultRecords(payload, "Detail");
+  const subtotals = (payload as { Result: Record<string, unknown> }).Result
+    .SubTotal;
+  if (!Array.isArray(subtotals)) throw new Error("永豐未出帳小計格式不完整。");
+  const sums = new Map<string, { all: number; withoutPayments: number }>();
+  for (const record of rows) {
+    const amount =
+      parseAmount(stringValue(record.AMT)) ??
+      parseAmount(stringValue(record.TXAMT));
+    if (amount == null) throw new Error("永豐信用卡交易日期或金額格式不完整。");
+    const currency = normalizeCurrency(
+      stringValue(record.CurrencyCode) || stringValue(record.TXCUR),
+    );
+    const sum = sums.get(currency) ?? { all: 0, withoutPayments: 0 };
+    sum.all += amount;
+    if (!isSinoCardPayment(-amount, stringValue(record.MEMO)))
+      sum.withoutPayments += amount;
+    sums.set(currency, sum);
+  }
+  const sameAmount = (left: number, right: number) =>
+    Math.abs(left - right) < 0.005;
+  const totals = new Map<string, number | undefined>();
+  for (const row of subtotals) {
+    if (!isRecord(row)) throw new Error("永豐未出帳小計格式不完整。");
+    const currency = normalizeCurrency(stringValue(row.CurrencyCode));
+    const amount = parseAmount(stringValue(row.SubTotalAmt));
+    if (amount == null) throw new Error("永豐未出帳小計金額格式不完整。");
+    const sum = sums.get(currency) ?? { all: 0, withoutPayments: 0 };
+    totals.set(
+      currency,
+      sameAmount(amount, sum.all) || sameAmount(amount, sum.withoutPayments)
+        ? Math.round(sum.withoutPayments * 100) / 100
+        : undefined,
+    );
+  }
+  for (const currency of sums.keys())
+    if (!totals.has(currency)) totals.set(currency, undefined);
+  return totals;
 }
 
 function assignSinoCardSourceIds(candidates: SinoCardTransactionCandidate[]) {

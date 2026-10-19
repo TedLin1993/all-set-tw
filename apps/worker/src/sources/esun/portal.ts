@@ -372,6 +372,8 @@ export function readEsunCardBalances(snapshot: EsunSnapshot) {
       overview?.nextStatementBillingDate ?? bill?.billDate,
     ),
     outstanding: unpaidStatementBalance + unposted,
+    unpaidStatementBalance,
+    unposted,
     currency: statement?.currency || billTotal?.billTotalCurrency || "TWD",
     isPaid,
     billingPeriod:

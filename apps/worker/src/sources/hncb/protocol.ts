@@ -6,6 +6,7 @@ import type {
 } from "../financial-types";
 import { z } from "zod";
 import { BANK_SYNC_MONTHS } from "../sync-window";
+import { creditCardLiabilityBalance } from "../credit-card-liability";
 
 export const hncbConfigSchema = z.object({
   userId: z.string().min(1).optional(),
@@ -286,12 +287,13 @@ function parseCreditCards(
   const statementAmount = currentBill
     ? currentBill.statementAmount || absTransactionSum(currentBill.transactions)
     : 0;
+  // 華南帳單頁沒有已繳金額，以帳單應繳總額作為剩餘應繳。
   const liability = statementAmount + pendingSum;
   if (currentBill || pendingSum > 0 || liability > 0) {
     snapshots.push({
       accountId: mainAccountId,
       sourceId: `snapshot:hncb:credit:${primaryCardLast4}`,
-      balance: -Math.abs(liability),
+      balance: creditCardLiabilityBalance(statementAmount, pendingSum),
       statementBalance: currentBill ? statementAmount : undefined,
       statementClosingDate: currentBill?.statementClosingDate,
       paymentDueDate: currentBill?.paymentDueDate,

@@ -8,6 +8,7 @@ import forge from "node-forge";
 import { z } from "zod";
 import { isNoCreditCardMessage } from "../credit-card-status";
 import { BANK_SYNC_MONTHS } from "../sync-window";
+import { creditCardLiabilityBalance } from "../credit-card-liability";
 
 export const FUBON_BANK_CODE = "012";
 export const FUBON_CAPTCHA_DIGIT_COUNT = 6;
@@ -1690,7 +1691,10 @@ function parseCreditCards(
       ? {
           accountId: FUBON_CREDIT_ACCOUNT_ID,
           sourceId: `snapshot:fubon:credit:${snapshotDate}`,
-          balance: roundCurrency(-(status.remainingAmount + unbilled.total)),
+          balance: creditCardLiabilityBalance(
+            status.remainingAmount,
+            unbilled.total,
+          ),
           statementBalance: status.statementAmount,
           statementClosingDate: status.statementClosingDate,
           paymentDueDate: status.paymentDueDate,
