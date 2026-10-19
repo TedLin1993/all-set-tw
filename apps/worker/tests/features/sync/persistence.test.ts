@@ -1085,6 +1085,10 @@ describe("同步資料完整性（隔離 D1）", () => {
             amount: -252,
             currency: "TWD",
             description: name,
+            // Authorizations stored before card columns existed have no card.
+            ...(status === "posted"
+              ? { cardLast4: "1234", cardName: "合成卡" }
+              : {}),
             raw: { cardLast4: "1234", authorizationHash },
           },
           now,
@@ -1140,11 +1144,16 @@ describe("同步資料完整性（隔離 D1）", () => {
       expect(
         await db
           .prepare(
-            "SELECT description, status FROM bank_transactions WHERE id = ?",
+            "SELECT description, status, card_last4, card_name FROM bank_transactions WHERE id = ?",
           )
           .bind(target)
           .first(),
-      ).toEqual({ description: "posted1", status: "posted" });
+      ).toEqual({
+        description: "posted1",
+        status: "posted",
+        card_last4: "1234",
+        card_name: "合成卡",
+      });
       expect(
         await db
           .prepare(

@@ -245,6 +245,8 @@ export async function prepareCtbcAuthorizationWrite(
             postedDate: posted.posted_date,
             postedAmount: posted.amount,
             postedSourceId: posted.source_id,
+            postedCardLast4: posted.card_last4 ?? null,
+            postedCardName: posted.card_name ?? null,
           },
         ]
       : [];
@@ -267,6 +269,10 @@ export async function prepareCtbcAuthorizationWrite(
           counterparty = COALESCE(NULLIF(trim(json_extract(link.value, '$.postedName')), ''), counterparty),
           posted_date = COALESCE(json_extract(link.value, '$.postedDate'), posted_date),
           amount = COALESCE(json_extract(link.value, '$.postedAmount'), amount),
+          -- Matching requires equal suffixes when both exist; only fill gaps such
+          -- as authorizations stored before card columns existed.
+          card_last4 = COALESCE(card_last4, json_extract(link.value, '$.postedCardLast4')),
+          card_name = COALESCE(card_name, json_extract(link.value, '$.postedCardName')),
           raw_payload = json_set(raw_payload, '$.authorizationMatched', json('true'), '$.syncSourceId', json_extract(link.value, '$.postedSourceId')),
           matched_transaction_id = NULL
         FROM json_each(?) link
