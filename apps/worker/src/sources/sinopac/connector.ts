@@ -1034,14 +1034,11 @@ export function parseSinopacCardData(
     (currency) => {
       const sourceId = accountIdForCurrency(currency);
       const suffix = currency === "TWD" ? "" : `（${currency}）`;
-      const last4 =
-        currency === "TWD" && summary.cardLast4
-          ? ` 末四碼 ${summary.cardLast4}`
-          : "";
       return {
         sourceId,
         institutionName: "永豐銀行",
-        accountName: `永豐信用卡${suffix}${last4}`,
+        // Shared by every card; transactions carry the individual card.
+        accountName: `永豐信用卡${suffix}`,
         accountType: "credit",
         currency,
         creditLimit: currency === "TWD" ? summary.creditLimit : undefined,
@@ -1472,6 +1469,8 @@ function parseSinoCardTransactions(
         description,
         counterparty: description,
         status: "pending",
+        cardLast4,
+        cardName: cardLast4 ? sinopacCardName(record) : undefined,
         raw: sanitizeValue(record),
       },
     ];
@@ -1514,6 +1513,8 @@ function parseSinoCardTransactions(
         description,
         counterparty: description,
         status: "posted",
+        cardLast4,
+        cardName: cardLast4 ? sinopacCardName(record) : undefined,
         raw: sanitizeValue(record),
       },
     ];
@@ -1683,6 +1684,15 @@ function signedTransactionAmount(
 
 function last4FromValue(value: unknown) {
   return stringValue(value).match(/(\d{4})\D*$/)?.[1];
+}
+
+// Each transaction names its own card, so no cross-card lookup is needed.
+function sinopacCardName(record: Record<string, unknown>) {
+  return (
+    stringValue(record.CardName).trim() ||
+    stringValue(record.CARDNAME).trim() ||
+    undefined
+  );
 }
 
 function dateTimeWithTaipeiOffset(date: string, time: string) {

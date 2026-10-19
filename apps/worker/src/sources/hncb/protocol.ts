@@ -455,6 +455,7 @@ function parseSingleBillHtml(
       amount: parsedRow.amount,
       currency: "TWD",
       status,
+      cardLast4: currentCardLast4 === "main" ? undefined : currentCardLast4,
       raw: parsedRow,
     });
   }

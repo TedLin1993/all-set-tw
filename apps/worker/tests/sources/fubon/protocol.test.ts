@@ -257,6 +257,7 @@ describe("台北富邦信用卡", () => {
         sourceId: "fubon:card:tx:v1:9876:2026-09-30:-640:1",
         authorizedAt: "2026-09-30",
         amount: -640,
+        cardLast4: "9876",
         raw: expect.objectContaining({ cardLast4: "9876" }),
       }),
     ]);

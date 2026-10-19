@@ -1752,6 +1752,7 @@ function cardTransactions(
       currency: "TWD",
       description: maskFubonText(row.description) || "台北富邦信用卡",
       status,
+      cardLast4: row.cardLast4,
       raw: {
         cardLast4: row.cardLast4,
         bankPostedDate: row.postedDate,

@@ -277,6 +277,7 @@ export function parseMegabankData(
         currency,
         description,
         status: pending ? "pending" : "posted",
+        cardLast4: last4(cardNo) || undefined,
         raw: { cardLast4: last4(cardNo) },
       });
     }

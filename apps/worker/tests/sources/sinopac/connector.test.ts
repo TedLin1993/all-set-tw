@@ -339,6 +339,18 @@ describe("sinopac App JSON parser", () => {
       ]),
     );
     expect(result.bankTransactions).toHaveLength(4);
+    // Each transaction names its own card; the shared account does not.
+    expect(
+      new Set(
+        result.bankTransactions.map(
+          (row) => `${row.cardLast4}:${row.cardName}`,
+        ),
+      ),
+    ).toEqual(new Set(["1234:測試現金回饋信用卡", "5678:測試現金回饋信用卡"]));
+    expect(
+      result.bankAccounts.find((account) => account.currency === "TWD")
+        ?.accountName,
+    ).toBe("永豐信用卡");
   });
 
   it("繳款入帳被掛在不同張卡下時識別碼相同，退款仍依卡號區分", () => {
