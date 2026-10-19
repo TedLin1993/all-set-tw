@@ -178,6 +178,60 @@ describe("AI 自動分類（隔離 D1、假 Workers AI）", () => {
     expect(requests).toHaveLength(0);
   });
 
+  it("近期掃描進行中開始回補時，舊掃描不寫入結果也不覆寫回補進度", async () => {
+    const syncedAt = "2026-10-18T04:00:00.000Z";
+    await db
+      .prepare(
+        `INSERT INTO bank_transactions (id, connector_id, account_id, source_id, posted_date, amount, currency, description, counterparty, created_at, updated_at)
+         VALUES ('race-new', 'esun', 'card-1', 'race-new', '2026-10-18', -70, 'TWD', '範例小舖', '範例小舖', ?, ?)`,
+      )
+      .bind(syncedAt, syncedAt)
+      .run();
+    await kickAiClassification(env(), new Date(syncedAt));
+    let backfillStarted = false;
+    answer = async () => {
+      // The user starts a backfill while the recent scan waits on Workers AI.
+      if (!backfillStarted) {
+        backfillStarted = true;
+        await startAiClassificationBackfill(env(), now);
+      }
+      return clefAnswer({ food: 0.8, shopping: 0.2 });
+    };
+
+    expect(await processAiClassification(env(), now)).toEqual({
+      status: "done",
+    });
+    const settings = await db
+      .prepare(
+        "SELECT scan_mode, scan_month, backfill_status FROM ai_classification_settings",
+      )
+      .first();
+    expect(settings).toEqual({
+      scan_mode: "backfill",
+      scan_month: "2026-10",
+      backfill_status: "running",
+    });
+    expect(
+      await db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM ai_classifications WHERE transaction_id = 'race-new'",
+        )
+        .first("count"),
+    ).toBe(0);
+
+    expect(await runScan()).toBe("done");
+    expect((await getAiClassificationStatus(db)).backfill.status).toBe(
+      "completed",
+    );
+    expect(
+      await db
+        .prepare(
+          "SELECT category_id FROM ai_classifications WHERE transaction_id = 'race-new'",
+        )
+        .first("category_id"),
+    ).toBe("food");
+  });
+
   it("Workers AI 每日免費額度用完時暫停到 UTC 隔日，不寫入結果", async () => {
     await db.prepare("DELETE FROM ai_classifications").run();
     answer = () => {

@@ -113,6 +113,7 @@ export const aiClassificationSettings = sqliteTable(
       .default(sql`0`),
     enabledAt: text("enabled_at"),
     scanMode: text("scan_mode").$type<"recent" | "backfill" | null>(),
+    scanId: text("scan_id"),
     scanMonth: text("scan_month"),
     scanStopMonth: text("scan_stop_month"),
     scanWatermark: text("scan_watermark"),

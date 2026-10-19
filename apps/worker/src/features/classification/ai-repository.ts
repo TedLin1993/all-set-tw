@@ -32,6 +32,40 @@ export async function updateAiClassificationSettings(
     .where(eq(settings.id, "default"));
 }
 
+/**
+ * Writes scan progress only while `scanId` is still the active scan, so a scan
+ * replaced by a backfill, a clear or disabling cannot overwrite the newer state.
+ */
+export async function updateAiClassificationScan(
+  db: D1Database,
+  scanId: string,
+  patch: AiClassificationSettingsPatch,
+) {
+  const result = await createDrizzle(db)
+    .update(settings)
+    .set({ ...patch, updatedAt: new Date().toISOString() })
+    .where(and(eq(settings.id, "default"), eq(settings.scanId, scanId)))
+    .run();
+  return result.meta.changes > 0;
+}
+
+/** Counts calls even from a replaced scan, so the daily limit still holds. */
+export async function addAiClassificationQuotaUse(
+  db: D1Database,
+  day: string,
+  calls: number,
+) {
+  await db
+    .prepare(
+      `UPDATE ai_classification_settings
+       SET quota_used = CASE WHEN quota_day = ? THEN quota_used + ? ELSE ? END,
+           quota_day = ?
+       WHERE id = 'default'`,
+    )
+    .bind(day, calls, calls, day)
+    .run();
+}
+
 export async function listAiClassifications(
   db: D1Database,
   transactionIds: string[],
@@ -52,8 +86,13 @@ export async function listAiClassifications(
     .all();
 }
 
+/**
+ * Saves an answer only while `scanId` is still the active scan; returns false
+ * when the scan was replaced or results were cleared in the meantime.
+ */
 export async function upsertAiClassification(
   db: D1Database,
+  scanId: string,
   input: {
     transactionId: string;
     categoryId: string | null;
@@ -63,19 +102,34 @@ export async function upsertAiClassification(
   },
 ) {
   const now = new Date().toISOString();
-  await createDrizzle(db)
-    .insert(aiClassifications)
-    .values({ ...input, createdAt: now, updatedAt: now })
-    .onConflictDoUpdate({
-      target: aiClassifications.transactionId,
-      set: {
-        categoryId: input.categoryId,
-        probability: input.probability,
-        inputHash: input.inputHash,
-        model: input.model,
-        updatedAt: now,
-      },
-    });
+  const result = await db
+    .prepare(
+      `INSERT INTO ai_classifications
+         (transaction_id, category_id, probability, input_hash, model, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM ai_classification_settings
+         WHERE id = 'default' AND scan_id = ?
+       )
+       ON CONFLICT (transaction_id) DO UPDATE SET
+         category_id = excluded.category_id,
+         probability = excluded.probability,
+         input_hash = excluded.input_hash,
+         model = excluded.model,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(
+      input.transactionId,
+      input.categoryId,
+      input.probability,
+      input.inputHash,
+      input.model,
+      now,
+      now,
+      scanId,
+    )
+    .run();
+  return result.meta.changes > 0;
 }
 
 export async function deleteAllAiClassifications(db: D1Database) {

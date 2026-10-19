@@ -22,6 +22,7 @@ import {
   type AiClassificationInput,
 } from "./ai-classifier";
 import {
+  addAiClassificationQuotaUse,
   countAiClassifications,
   deleteAllAiClassifications,
   findEarliestBankTransactionMonth,
@@ -30,6 +31,7 @@ import {
   listBankTransactionIdsCreatedSince,
   readAiClassificationWatermark,
   updateAiClassificationSettings,
+  updateAiClassificationScan,
   upsertAiClassification,
   type AiClassificationSettingsRow,
 } from "./ai-repository";
@@ -121,6 +123,7 @@ export async function setAiClassificationEnabled(
     await updateAiClassificationSettings(env.DB, {
       enabled: 0,
       scanMode: null,
+      scanId: null,
       pausedUntil: null,
       backfillStatus:
         row.backfillStatus === "running" ? "idle" : row.backfillStatus,
@@ -139,6 +142,7 @@ export async function startAiClassificationBackfill(
   if (!earliest) {
     await updateAiClassificationSettings(env.DB, {
       scanMode: null,
+      scanId: null,
       backfillStatus: "completed",
       backfillClassifiedCount: 0,
       backfillUndeterminedCount: 0,
@@ -149,6 +153,8 @@ export async function startAiClassificationBackfill(
   }
   await updateAiClassificationSettings(env.DB, {
     scanMode: "backfill",
+    // Replaces any running scan; its later writes no longer match.
+    scanId: crypto.randomUUID(),
     scanMonth: taipeiMonth(now),
     // A timestamped first transaction may fall on the previous Taipei month.
     scanStopMonth: shiftMonth(earliest, -1),
@@ -164,9 +170,10 @@ export async function startAiClassificationBackfill(
 }
 
 export async function clearAiClassificationResults(db: D1Database) {
-  await deleteAllAiClassifications(db);
+  // Stop the running scan first, so it cannot write results after the delete.
   await updateAiClassificationSettings(db, {
     scanMode: null,
+    scanId: null,
     scannedWatermark: null,
     pausedUntil: null,
     backfillStatus: "idle",
@@ -175,6 +182,7 @@ export async function clearAiClassificationResults(db: D1Database) {
     backfillStartedAt: null,
     backfillCompletedAt: null,
   });
+  await deleteAllAiClassifications(db);
   return getAiClassificationStatus(db);
 }
 
@@ -204,6 +212,7 @@ export async function kickAiClassification(env: Env, now = new Date()) {
   const month = taipeiMonth(now);
   await updateAiClassificationSettings(env.DB, {
     scanMode: "recent",
+    scanId: crypto.randomUUID(),
     scanMonth: month,
     scanStopMonth: shiftMonth(month, -(RECENT_SCAN_MONTHS - 1)),
     scanWatermark: watermark,
@@ -233,10 +242,13 @@ type MonthResult = {
   complete: boolean;
   quotaExceeded: boolean;
   transientFailure: boolean;
+  /** The scan was replaced or its results cleared while it ran. */
+  stale: boolean;
 };
 
 async function classifyMonth(
   env: Env,
+  scanId: string,
   month: string,
   callLimit: number,
   categories: AiCategory[],
@@ -250,17 +262,18 @@ async function classifyMonth(
     complete: true,
     quotaExceeded: false,
     transientFailure: false,
+    stale: false,
   };
   const range = { from: `${month}-01`, to: `${shiftMonth(month, 1)}-01` };
   const bank = await getBankRange(env.DB, range);
   const transactions = deduplicateBankTransactions(bank.transactions);
-  // Only what every deterministic step left unclassified, or an earlier AI
-  // answer whose input (for example a late invoice) may have changed.
+  // Only what every deterministic step left unclassified. An AI answer is
+  // never revisited until the user clears the results; an undetermined one
+  // is retried when its input (for example a late invoice) changes.
   const candidates = transactions.filter(
     (transaction) =>
       transaction.status === "posted" &&
-      (transaction.classification?.source === "fallback" ||
-        transaction.classification?.source === "ai"),
+      transaction.classification?.source === "fallback",
   );
   if (candidates.length === 0) return result;
 
@@ -295,8 +308,8 @@ async function classifyMonth(
     hash: string;
   }> = [];
   for (const transaction of candidates) {
-    // A record from before enabling is only classified once the user ran a
-    // backfill over it; after that its stored answer may be refreshed.
+    // A record from before enabling is only sent once the user ran a
+    // backfill over it; after that an undetermined answer may be retried.
     if (
       createdSince &&
       !createdSince.has(transaction.id) &&
@@ -363,13 +376,18 @@ async function classifyMonth(
       );
       answer = { categoryId: null, probability: 0 };
     }
-    await upsertAiClassification(env.DB, {
+    const saved = await upsertAiClassification(env.DB, scanId, {
       transactionId: id,
       categoryId: answer.categoryId,
       probability: answer.probability,
       inputHash: hash,
       model: AI_CLASSIFICATION_MODEL,
     });
+    if (!saved) {
+      result.stale = true;
+      result.complete = false;
+      break;
+    }
     if (answer.categoryId) result.classified += 1;
     else result.undetermined += 1;
   }
@@ -389,6 +407,7 @@ export async function processAiClassification(
   if (
     row.enabled !== 1 ||
     !row.scanMode ||
+    !row.scanId ||
     !row.scanMonth ||
     !row.scanStopMonth
   )
@@ -405,6 +424,7 @@ export async function processAiClassification(
   let pausedUntil: string | null = null;
   let finished = false;
   let retryLater = false;
+  let stale = false;
   let invocationCalls = 0;
 
   for (let scanned = 0; scanned < MONTHS_PER_INVOCATION; scanned++) {
@@ -420,6 +440,7 @@ export async function processAiClassification(
     if (callLimit <= 0) break;
     const monthResult = await classifyMonth(
       env,
+      row.scanId,
       month,
       callLimit,
       categories,
@@ -429,6 +450,10 @@ export async function processAiClassification(
     quotaUsed += monthResult.calls;
     classified += monthResult.classified;
     undetermined += monthResult.undetermined;
+    if (monthResult.stale) {
+      stale = true;
+      break;
+    }
     if (monthResult.quotaExceeded) {
       pausedUntil = nextUtcMidnight(now);
       break;
@@ -447,10 +472,12 @@ export async function processAiClassification(
     month = previous;
   }
 
+  if (invocationCalls > 0)
+    await addAiClassificationQuotaUse(env.DB, today, invocationCalls);
+  // A replaced scan stops here; the newer scan owns the progress fields.
+  if (stale) return { status: "done" };
   const completedAt = now.toISOString();
-  await updateAiClassificationSettings(env.DB, {
-    quotaDay: today,
-    quotaUsed,
+  const current = await updateAiClassificationScan(env.DB, row.scanId, {
     pausedUntil,
     scanMonth: month,
     ...(row.scanMode === "backfill"
@@ -463,6 +490,7 @@ export async function processAiClassification(
     ...(finished
       ? {
           scanMode: null,
+          scanId: null,
           ...(row.scanMode === "backfill"
             ? {
                 backfillStatus: "completed" as const,
@@ -472,7 +500,7 @@ export async function processAiClassification(
         }
       : {}),
   });
-  if (finished) return { status: "done" };
+  if (!current || finished) return { status: "done" };
   if (pausedUntil || retryLater) return { status: "paused" };
   return { status: "continue" };
 }

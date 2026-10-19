@@ -5,6 +5,7 @@ CREATE TABLE ai_classification_settings (
   enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
   enabled_at TEXT,
   scan_mode TEXT CHECK (scan_mode IS NULL OR scan_mode IN ('recent', 'backfill')),
+  scan_id TEXT,
   scan_month TEXT,
   scan_stop_month TEXT,
   scan_watermark TEXT,

@@ -17,7 +17,7 @@
 
 | Table | 用途 | Columns | Foreign keys | Indexes |
 | --- | --- | ---: | ---: | ---: |
-| [`ai_classification_settings`](#ai_classification_settings) | AI 自動分類的單列設定、掃描進度與每日呼叫用量。 | 17 | 0 | 0 |
+| [`ai_classification_settings`](#ai_classification_settings) | AI 自動分類的單列設定、掃描進度與每日呼叫用量。 | 18 | 0 | 0 |
 | [`ai_classifications`](#ai_classifications) | AI 對單筆銀行交易的分類判斷結果。 | 7 | 1 | 1 |
 | [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 19 | 1 | 1 |
 | [`bank_balance_snapshots`](#bank_balance_snapshots) | 帳戶在特定時間點的餘額快照，供資產總值與歷史圖表計算。 | 19 | 1 | 2 |
@@ -65,19 +65,20 @@
 | 2 | `enabled` | 是否於同步後自動分類規則無法判斷的交易；0 表示停用，預設停用。 | INTEGER | NO | 0 | — | — |
 | 3 | `enabled_at` | 最近一次啟用的時間；近期掃描只處理此時間之後寫入的交易，啟用前的紀錄由使用者回補時處理。 | TEXT | YES | — | — | — |
 | 4 | `scan_mode` | 進行中的掃描類型：recent 為同步後的近期掃描，backfill 為使用者啟動的過往紀錄回補；NULL 表示沒有進行中的掃描。 | TEXT | YES | — | — | — |
-| 5 | `scan_month` | 掃描目前處理的月份（YYYY-MM），由新到舊逐月處理。 | TEXT | YES | — | — | — |
-| 6 | `scan_stop_month` | 掃描處理到的最舊月份（YYYY-MM，含）。 | TEXT | YES | — | — | — |
-| 7 | `scan_watermark` | 近期掃描開始時擷取的交易與發票資料浮水印。 | TEXT | YES | — | — | — |
-| 8 | `scanned_watermark` | 最近一次完成掃描時的資料浮水印；與目前浮水印不同時，Cron 會啟動近期掃描。 | TEXT | YES | — | — | — |
-| 9 | `backfill_status` | 過往紀錄回補狀態：idle、running 或 completed。 | TEXT | NO | 'idle' | — | — |
-| 10 | `backfill_classified_count` | 本次回補由 AI 分類的交易數。 | INTEGER | NO | 0 | — | — |
-| 11 | `backfill_undetermined_count` | 本次回補 AI 無法判斷的交易數。 | INTEGER | NO | 0 | — | — |
-| 12 | `backfill_started_at` | 本次回補開始的時間。 | TEXT | YES | — | — | — |
-| 13 | `backfill_completed_at` | 本次回補完成的時間。 | TEXT | YES | — | — | — |
-| 14 | `quota_day` | quota_used 計算的 UTC 日期（YYYY-MM-DD），與 Workers AI 每日免費額度的重置日一致。 | TEXT | YES | — | — | — |
-| 15 | `quota_used` | quota_day 當日已發出的 AI 分類呼叫次數。 | INTEGER | NO | 0 | — | — |
-| 16 | `paused_until` | 因每日呼叫上限或 Workers AI 免費額度用完而暫停到的時間；NULL 表示未暫停。 | TEXT | YES | — | — | — |
-| 17 | `updated_at` | 設定或掃描進度最後更新的時間。 | TEXT | NO | — | — | — |
+| 5 | `scan_id` | 進行中掃描的識別碼；開始近期掃描或回補時產生，停用或清除結果時清空。掃描只在識別碼仍相符時寫入結果與進度。 | TEXT | YES | — | — | — |
+| 6 | `scan_month` | 掃描目前處理的月份（YYYY-MM），由新到舊逐月處理。 | TEXT | YES | — | — | — |
+| 7 | `scan_stop_month` | 掃描處理到的最舊月份（YYYY-MM，含）。 | TEXT | YES | — | — | — |
+| 8 | `scan_watermark` | 近期掃描開始時擷取的交易與發票資料浮水印。 | TEXT | YES | — | — | — |
+| 9 | `scanned_watermark` | 最近一次完成掃描時的資料浮水印；與目前浮水印不同時，Cron 會啟動近期掃描。 | TEXT | YES | — | — | — |
+| 10 | `backfill_status` | 過往紀錄回補狀態：idle、running 或 completed。 | TEXT | NO | 'idle' | — | — |
+| 11 | `backfill_classified_count` | 本次回補由 AI 分類的交易數。 | INTEGER | NO | 0 | — | — |
+| 12 | `backfill_undetermined_count` | 本次回補 AI 無法判斷的交易數。 | INTEGER | NO | 0 | — | — |
+| 13 | `backfill_started_at` | 本次回補開始的時間。 | TEXT | YES | — | — | — |
+| 14 | `backfill_completed_at` | 本次回補完成的時間。 | TEXT | YES | — | — | — |
+| 15 | `quota_day` | quota_used 計算的 UTC 日期（YYYY-MM-DD），與 Workers AI 每日免費額度的重置日一致。 | TEXT | YES | — | — | — |
+| 16 | `quota_used` | quota_day 當日已發出的 AI 分類呼叫次數。 | INTEGER | NO | 0 | — | — |
+| 17 | `paused_until` | 因每日呼叫上限或 Workers AI 免費額度用完而暫停到的時間；NULL 表示未暫停。 | TEXT | YES | — | — | — |
+| 18 | `updated_at` | 設定或掃描進度最後更新的時間。 | TEXT | NO | — | — | — |
 
 #### Foreign keys
 
@@ -95,6 +96,7 @@ CREATE TABLE ai_classification_settings (
   enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
   enabled_at TEXT,
   scan_mode TEXT CHECK (scan_mode IS NULL OR scan_mode IN ('recent', 'backfill')),
+  scan_id TEXT,
   scan_month TEXT,
   scan_stop_month TEXT,
   scan_watermark TEXT,
