@@ -7,6 +7,7 @@ import type {
 import forge from "node-forge";
 import { z } from "zod";
 import { isNoCreditCardMessage } from "../credit-card-status";
+import { creditCardLiabilityBalance } from "../credit-card-liability";
 
 /** 第一銀行網路銀行瀏覽器工作階段設定；機密欄位由 Worker 加密保存。 */
 export const firstbankConfigSchema = z.object({
@@ -845,20 +846,20 @@ function parseCreditCards(
     );
     const statementAmount = currentBill?.statementAmount ?? 0;
     const paidAmount = currentBill?.paidAmount ?? 0;
-    const liability = Math.max(
-      statementAmount - paidAmount + pendingLiability,
-      0,
+    const balance = creditCardLiabilityBalance(
+      statementAmount - paidAmount,
+      pendingLiability,
     );
     if (!currentBill && pendingForCard.length === 0) continue;
     const accountId = cardAccountId(cardKey);
     snapshots.push({
       accountId,
       sourceId: `snapshot:firstbank:card:${stableHash(`${cardKey}:${asOfAt.slice(0, 10)}`)}`,
-      balance: -Math.abs(liability),
+      balance,
       statementBalance: currentBill?.statementAmount,
       paymentDueDate: currentBill?.paymentDueDate,
       statementClosingDate: currentBill?.statementClosingDate,
-      noPaymentNeeded: liability === 0,
+      noPaymentNeeded: balance >= 0,
       currency: metadata.currency,
       asOfAt,
       raw: {

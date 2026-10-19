@@ -22,6 +22,7 @@ import type {
   CreditCardBill,
 } from "../financial-types";
 import { BANK_SYNC_MONTHS } from "../sync-window";
+import { creditCardLiabilityBalance } from "../credit-card-liability";
 import { reportSyncProgress } from "../sync-progress";
 import { type EsunConfig } from "./protocol";
 
@@ -525,7 +526,10 @@ async function scrapeCreditCards(client: EsunHttpClient): Promise<Scraped> {
     {
       accountId: balanceAccountId,
       sourceId: `${balanceAccountId}:${asOfAt}`,
-      balance: -balances.outstanding,
+      balance: creditCardLiabilityBalance(
+        balances.unpaidStatementBalance,
+        balances.unposted,
+      ),
       statementBalance: balances.statementBalance,
       paymentDueDate: balances.paymentDueDate,
       statementClosingDate: balances.statementClosingDate,
