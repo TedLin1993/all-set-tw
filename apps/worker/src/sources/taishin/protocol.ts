@@ -102,6 +102,10 @@ export function parseTaishinCreditCardData(
         .filter((value) => value !== "unknown"),
     ),
   ).sort();
+  const cardNames = uniqueCardNames([
+    ...postedCandidates,
+    ...pendingCandidates,
+  ]);
 
   const statementAmount = optionalAbsoluteNumber(
     currentBill?.showCbalance ?? summaryTwd["OUT-STMT-BALANCE"],
@@ -179,6 +183,10 @@ export function parseTaishinCreditCardData(
     bankTransactions: transactions.map((transaction) => ({
       ...transaction,
       accountId: ACCOUNT_SOURCE_ID,
+      // Use one name per suffix so a card reads the same in every feed.
+      cardName: transaction.cardLast4
+        ? cardNames.get(transaction.cardLast4)
+        : undefined,
     })),
     creditCardBills: bills.map((bill) => ({
       ...bill,
@@ -265,6 +273,7 @@ function postedTransactions(value: JsonRecord): TransactionCandidate[] {
         description,
         counterparty: description,
         status: "posted",
+        cardName: taishinCardName(stringValue(group.order)),
         raw: {
           cardLast4: cardLast4 === "unknown" ? undefined : cardLast4,
           transactionDate,
@@ -359,6 +368,7 @@ function realtimeTransactions(payload: unknown): TransactionCandidate[] {
         description,
         counterparty: description,
         status: "pending",
+        cardName: taishinCardName(cardName),
         raw: {
           cardLast4: cardLast4 === "unknown" ? undefined : cardLast4,
           authorizedAt,
@@ -442,6 +452,7 @@ function unbilledData(payload: unknown): {
           description,
           counterparty: description,
           status: "posted",
+          cardName: taishinCardName(card.cardname),
           raw: {
             cardLast4: cardLast4 === "unknown" ? undefined : cardLast4,
             transactionDate,
@@ -567,11 +578,12 @@ function assignSourceId(
   const {
     matchKey: _matchKey,
     identityKey: _identityKey,
-    cardLast4: _cardLast4,
+    cardLast4,
     ...transaction
   } = candidate;
   return {
     ...transaction,
+    cardLast4: cardLast4 === "unknown" ? undefined : cardLast4,
     sourceId: taishinTransactionSourceId(identityKey, occurrence),
     raw: {
       ...(candidate.raw as JsonRecord),
@@ -695,6 +707,32 @@ function optionalAbsoluteNumber(value: unknown) {
 
 function last4(value: string) {
   return value.match(/(?:末四碼\s*[:：]?\s*|[*xX])(\d{4})\D*$/)?.[1];
+}
+
+// cardname is "<卡名> ****1234"; groups without a card number (e.g. 繳款) have no name.
+function taishinCardName(value: string) {
+  const text = taishinCardText(value);
+  if (!last4(text)) return undefined;
+  return (
+    text.replace(/\s*(?:末四碼\s*[:：]?\s*|[*xX]+)\d{4}\D*$/, "").trim() ||
+    undefined
+  );
+}
+
+// One suffix seen with different names cannot identify a single card.
+function uniqueCardNames(
+  candidates: Array<{ cardLast4: string; cardName?: string }>,
+) {
+  const names = new Map<string, Set<string>>();
+  for (const { cardLast4, cardName } of candidates) {
+    if (cardLast4 === "unknown" || !cardName) continue;
+    names.set(cardLast4, (names.get(cardLast4) ?? new Set()).add(cardName));
+  }
+  return new Map(
+    [...names].flatMap(([suffix, values]) =>
+      values.size === 1 ? [[suffix, [...values][0]!] as const] : [],
+    ),
+  );
 }
 
 function stringValue(value: unknown) {

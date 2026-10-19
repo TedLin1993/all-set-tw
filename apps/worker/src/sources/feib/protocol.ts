@@ -1578,6 +1578,7 @@ function parseCreditCard(
         currency: "TWD",
         description: maskFeibText(row.description) || "遠東商銀信用卡",
         status: "posted",
+        cardLast4: row.cardLast4,
         raw: {
           cardLast4: row.cardLast4,
           statementPeriod: bill.period,

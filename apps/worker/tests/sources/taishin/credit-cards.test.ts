@@ -70,6 +70,20 @@ describe("台新信用卡金融數字與資料完整性", () => {
       [-252, "TWD", "2026-10-06"],
       [12.5, "USD", "2026-10-06"],
     ]);
+    // Card names come from cardname and apply to every row of that card.
+    expect(
+      result.bankTransactions.map((row) => [
+        row.currency,
+        row.cardLast4,
+        row.cardName,
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["TWD", "1234", "測試信用卡"],
+        ["USD", "5678", "測試卡"],
+      ]),
+    );
+    expect(result.bankTransactions.every((row) => row.cardName)).toBe(true);
     const duplicates = structuredClone(unbilled);
     duplicates.value.unpostedTx["001TWD"].data[0].txlist.push([
       ...duplicates.value.unpostedTx["001TWD"].data[0].txlist[0],

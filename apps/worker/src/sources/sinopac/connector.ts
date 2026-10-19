@@ -1034,14 +1034,11 @@ export function parseSinopacCardData(
     (currency) => {
       const sourceId = accountIdForCurrency(currency);
       const suffix = currency === "TWD" ? "" : `（${currency}）`;
-      const last4 =
-        currency === "TWD" && summary.cardLast4
-          ? ` 末四碼 ${summary.cardLast4}`
-          : "";
       return {
         sourceId,
         institutionName: "永豐銀行",
-        accountName: `永豐信用卡${suffix}${last4}`,
+        // Shared by every card; transactions carry the individual card.
+        accountName: `永豐信用卡${suffix}`,
         accountType: "credit",
         currency,
         creditLimit: currency === "TWD" ? summary.creditLimit : undefined,
@@ -1472,6 +1469,7 @@ function parseSinoCardTransactions(
         description,
         counterparty: description,
         status: "pending",
+        ...sinopacCardIdentity(amount, description, cardLast4, record),
         raw: sanitizeValue(record),
       },
     ];
@@ -1514,6 +1512,7 @@ function parseSinoCardTransactions(
         description,
         counterparty: description,
         status: "posted",
+        ...sinopacCardIdentity(amount, description, cardLast4, record),
         raw: sanitizeValue(record),
       },
     ];
@@ -1683,6 +1682,24 @@ function signedTransactionAmount(
 
 function last4FromValue(value: unknown) {
   return stringValue(value).match(/(\d{4})\D*$/)?.[1];
+}
+
+// Each transaction names its own card. Bill payments may be filed under any
+// card (see sinoCardTransactionMatchKey), so they belong to no single card.
+function sinopacCardIdentity(
+  amount: number,
+  description: string,
+  cardLast4: string | undefined,
+  record: Record<string, unknown>,
+) {
+  if (!cardLast4 || isSinoCardPayment(amount, description)) return {};
+  return {
+    cardLast4,
+    cardName:
+      stringValue(record.CardName).trim() ||
+      stringValue(record.CARDNAME).trim() ||
+      undefined,
+  };
 }
 
 function dateTimeWithTaipeiOffset(date: string, time: string) {
