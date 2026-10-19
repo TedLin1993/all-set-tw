@@ -260,16 +260,6 @@
   </section>
 
   {#if group.cards.length > 0}
-    <div class={compact ? "py-3" : "px-5 py-3"}>
-      <a
-        href="#/activity"
-        class="text-sm font-medium text-steel underline underline-offset-4"
-        >查看信用卡交易與待入帳</a
-      >
-      <p class="mt-1 text-caption text-subtle">
-        在活動頁選「信用卡」與消費月份。已入帳但尚未結帳的消費顯示「已入帳」，即時授權顯示「待入帳」。
-      </p>
-    </div>
     <details
       class={compact
         ? "border-t border-ink/8 pt-1"
