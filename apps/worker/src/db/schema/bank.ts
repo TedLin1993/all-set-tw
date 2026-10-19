@@ -132,6 +132,8 @@ export const bankTransactions = sqliteTable(
       .default(sql`'posted'`),
     transferPeerId: text("transfer_peer_id"),
     matchedTransactionId: text("matched_transaction_id"),
+    cardLast4: text("card_last4"),
+    cardName: text("card_name"),
   },
   (table) => [
     primaryKey({ columns: [table.id] }),

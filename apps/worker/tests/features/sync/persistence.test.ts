@@ -236,6 +236,67 @@ describe("同步資料完整性（隔離 D1）", () => {
     ]);
   });
 
+  it("卡片欄位在重新同步時補上，bank API 只將卡片併入帳戶名稱", async () => {
+    const accountId = "credit:ctbc:TWD";
+    const account = bankAccountRecord(
+      "ctbc",
+      {
+        sourceId: accountId,
+        institutionName: "中國信託商業銀行",
+        accountName: "中國信託信用卡",
+        accountType: "credit",
+        currency: "TWD",
+      },
+      now,
+    );
+    const transaction = (
+      sourceId: string,
+      card: { cardLast4?: string; cardName?: string } = {},
+    ) =>
+      bankTransactionRecord(
+        "ctbc",
+        {
+          accountId,
+          sourceId,
+          postedDate: "2026-09-03",
+          amount: -100,
+          currency: "TWD",
+          description: sourceId,
+          status: "posted",
+          ...card,
+        },
+        now,
+      );
+
+    await persistStagedSyncWrite(db, {
+      records: [account, transaction("named"), transaction("suffix-only")],
+    });
+    await persistStagedSyncWrite(db, {
+      records: [
+        account,
+        transaction("named", { cardLast4: "1111", cardName: "合成甲卡" }),
+        transaction("suffix-only", { cardLast4: "3333" }),
+      ],
+    });
+
+    const page = await getBankPage(db, 20);
+    expect(
+      page.transactions.map(({ description, accountName }) => ({
+        description,
+        accountName,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        { description: "named", accountName: "合成甲卡 · 1111" },
+        { description: "suffix-only", accountName: "中國信託信用卡 · 3333" },
+      ]),
+    );
+    for (const row of page.transactions) {
+      expect(row).not.toHaveProperty("cardLast4");
+      expect(row).not.toHaveProperty("cardName");
+    }
+  });
+
   it("貸款資料缺值時保留既有非空類別、利率、開戶日與繳款欄位", async () => {
     const sourceId = "loan:sinopac:stable-test-id";
     const write = async (includeFields: boolean) => {
@@ -1024,6 +1085,10 @@ describe("同步資料完整性（隔離 D1）", () => {
             amount: -252,
             currency: "TWD",
             description: name,
+            // Authorizations stored before card columns existed have no card.
+            ...(status === "posted"
+              ? { cardLast4: "1234", cardName: "合成卡" }
+              : {}),
             raw: { cardLast4: "1234", authorizationHash },
           },
           now,
@@ -1079,11 +1144,16 @@ describe("同步資料完整性（隔離 D1）", () => {
       expect(
         await db
           .prepare(
-            "SELECT description, status FROM bank_transactions WHERE id = ?",
+            "SELECT description, status, card_last4, card_name FROM bank_transactions WHERE id = ?",
           )
           .bind(target)
           .first(),
-      ).toEqual({ description: "posted1", status: "posted" });
+      ).toEqual({
+        description: "posted1",
+        status: "posted",
+        card_last4: "1234",
+        card_name: "合成卡",
+      });
       expect(
         await db
           .prepare(

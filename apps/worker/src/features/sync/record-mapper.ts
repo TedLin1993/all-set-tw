@@ -163,6 +163,8 @@ export function bankTransactionRecord(
       description: transaction.description ?? null,
       counterparty: transaction.counterparty ?? null,
       status: transaction.status ?? "posted",
+      card_last4: transaction.cardLast4 ?? null,
+      card_name: transaction.cardName ?? null,
       transfer_peer_id: transaction.transferPeer
         ? stableId(
             connectorId,

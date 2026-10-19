@@ -175,11 +175,17 @@ export function parseCtbcData(
     currency: group.currency,
     raw: sanitizeCreditCardGroup(group),
   }));
+  const cardNames = uniqueCardNames(cardMetadata);
   bankTransactions.push(
     ...reconcileCreditCardLifecycle(
       [...parseCreditCardTransactions(selectedGroups), ...unbilledTransactions],
       realtimeTransactions,
-    ),
+    ).map((transaction) => ({
+      ...transaction,
+      cardName: transaction.cardLast4
+        ? cardNames.get(transaction.cardLast4)
+        : undefined,
+    })),
   );
 
   return {
@@ -345,9 +351,9 @@ function buildCreditCardAccounts(
   return currencies.map((currency) => ({
     sourceId: creditCardSourceId(currency),
     institutionName: "中國信託商業銀行",
-    accountName:
-      metadata[0]?.cardName ||
-      `${metadata[0]?.positiveOrAttached || ""}中國信託信用卡`.trim(),
+    // One account per currency holds every card's shared bill; individual
+    // cards are identified on transactions, not by the first card's name.
+    accountName: "中國信託信用卡",
     accountType: "credit" as const,
     currency,
     raw: {
@@ -479,6 +485,7 @@ function parseCreditCardTransactions(groups: CreditCardGroup[]) {
         description,
         counterparty: description,
         status: "posted",
+        cardLast4: transactionCardLast4(bill),
         raw: sanitizeCreditCardTransaction(bill),
         matchKey,
         identityKey,
@@ -534,6 +541,7 @@ function parseRealtimeTransactions(payload: unknown) {
         description,
         counterparty: description,
         status: "pending",
+        cardLast4: transactionCardLast4(value),
         raw: sanitizeRealtimeTransaction(value),
         matchKey,
         identityKey: [
@@ -592,6 +600,7 @@ function parseUnbilledTransactions(payload: unknown) {
         description,
         counterparty: description,
         status: "posted",
+        cardLast4: transactionCardLast4(value),
         raw: sanitizeCreditCardTransaction(value),
         matchKey,
         identityKey: [
@@ -754,11 +763,29 @@ function cardMetadataSuffix(value: JsonRecord) {
   return suffix ?? masked;
 }
 
-function transactionDisplaySuffix(value: JsonRecord) {
+// Conflicting card number fields leave the card unknown rather than guessed.
+function transactionCardLast4(value: JsonRecord) {
   const candidates = [value.cardNoSuffixFour, value.cardNo, value.fullCardNo]
     .map(displayCardLast4)
     .filter((suffix): suffix is string => !!suffix);
-  return new Set(candidates).size === 1 ? candidates[0] : null;
+  return new Set(candidates).size === 1 ? candidates[0] : undefined;
+}
+
+// Even identical duplicate suffixes cannot prove a unique physical card.
+function uniqueCardNames(
+  metadata: Array<{ cardLast4?: string; cardName?: string }>,
+) {
+  const counts = new Map<string, number>();
+  for (const card of metadata)
+    if (card.cardLast4)
+      counts.set(card.cardLast4, (counts.get(card.cardLast4) ?? 0) + 1);
+  return new Map(
+    metadata.flatMap((card) =>
+      card.cardLast4 && card.cardName && counts.get(card.cardLast4) === 1
+        ? [[card.cardLast4, card.cardName] as const]
+        : [],
+    ),
+  );
 }
 
 function parseCardMetadata(payload: unknown) {
@@ -825,7 +852,6 @@ function sanitizeCreditCardGroup(group: CreditCardGroup) {
 
 function sanitizeCreditCardTransaction(value: JsonRecord) {
   return {
-    displayCardLast4: transactionDisplaySuffix(value),
     purchaseDt: normalizeCardDate(value.purchaseDt),
     postingDt: normalizeCardDate(value.postingDt),
     clearingDt: normalizeCardDate(value.clearingDt),
@@ -847,7 +873,6 @@ function sanitizeCreditCardTransaction(value: JsonRecord) {
 
 function sanitizeRealtimeTransaction(value: JsonRecord) {
   return {
-    displayCardLast4: transactionDisplaySuffix(value),
     authorizationHash: authorizationHash(value.authCode),
     txnCountry: optionalString(value.txnCountry),
     origCurCode: normalizeCurrency(value.origCurCode ?? value.origCurCo),
