@@ -152,5 +152,9 @@ export interface BankTransaction {
   description?: string;
   counterparty?: string;
   status?: BankTransactionStatus;
+  /** Physical card in a shared credit account; display only, never identity. */
+  cardLast4?: string;
+  /** Set only when the connector can map cardLast4 to exactly one named card. */
+  cardName?: string;
   raw?: unknown;
 }

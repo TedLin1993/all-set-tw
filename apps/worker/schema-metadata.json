@@ -80,7 +80,9 @@
         "effective_date": "由 posted_date 優先、authorized_at 備援產生的查詢排序日期。",
         "status": "交易狀態，目前限制為 pending 或 posted。",
         "transfer_peer_id": "定存衍生活動所配對之活存交易的系統識別碼，供本金轉帳一對一配對；沒有明確配對時為 NULL。 以 NO ACTION FK 參照 bank_transactions.id，刪除被引用交易前須先移轉引用。",
-        "matched_transaction_id": "授權對應的已入帳交易 ID，一對一；僅隱藏 pending 且已配對的交易，同 ID 入帳可指向自身。 以 NO ACTION FK 參照 bank_transactions.id，允許自我引用，不自動清空或級聯刪除。"
+        "matched_transaction_id": "授權對應的已入帳交易 ID，一對一；僅隱藏 pending 且已配對的交易，同 ID 入帳可指向自身。 以 NO ACTION FK 參照 bank_transactions.id，允許自我引用，不自動清空或級聯刪除。",
+        "card_last4": "共用信用卡帳戶中實際刷卡的卡號末四碼，由 connector 正規化；只供顯示，不參與交易識別、配對或負債計算。無法確定時為 NULL。",
+        "card_name": "card_last4 能唯一對應到具名卡片時的卡名；末四碼重複、欄位矛盾或缺少卡名時為 NULL。"
       }
     },
     "classification_categories": {

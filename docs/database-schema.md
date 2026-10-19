@@ -11,7 +11,7 @@
 - Tables：34
 - Explicit indexes：47
 - Other objects：0
-- Migrations：59
+- Migrations：60
 
 ## Tables
 
@@ -22,7 +22,7 @@
 | [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 19 | 1 | 1 |
 | [`bank_balance_snapshots`](#bank_balance_snapshots) | 帳戶在特定時間點的餘額快照，供資產總值與歷史圖表計算。 | 19 | 1 | 2 |
 | [`bank_transaction_preferences`](#bank_transaction_preferences) | 使用者對銀行交易計算方式的個別偏好。 | 4 | 1 | 1 |
-| [`bank_transactions`](#bank_transactions) | 銀行帳戶、信用卡與其他存款型連接器同步回來的交易明細。 | 17 | 3 | 7 |
+| [`bank_transactions`](#bank_transactions) | 銀行帳戶、信用卡與其他存款型連接器同步回來的交易明細。 | 19 | 3 | 7 |
 | [`classification_categories`](#classification_categories) | 交易與發票使用的分類字典，包含系統預設分類與使用者分類。 | 6 | 0 | 1 |
 | [`classification_overrides`](#classification_overrides) | 使用者對單筆目標資料指定的分類覆寫。 | 6 | 1 | 1 |
 | [`classification_rules`](#classification_rules) | 以文字條件自動判斷交易或其他資料分類的規則。 | 14 | 1 | 2 |
@@ -355,6 +355,8 @@ CREATE TABLE "bank_transaction_preferences" (
 | 15 | `status` | 交易狀態，目前限制為 pending 或 posted。 | TEXT | NO | 'posted' | — | — |
 | 16 | `transfer_peer_id` | 定存衍生活動所配對之活存交易的系統識別碼，供本金轉帳一對一配對；沒有明確配對時為 NULL。 以 NO ACTION FK 參照 bank_transactions.id，刪除被引用交易前須先移轉引用。 | TEXT | YES | — | — | — |
 | 17 | `matched_transaction_id` | 授權對應的已入帳交易 ID，一對一；僅隱藏 pending 且已配對的交易，同 ID 入帳可指向自身。 以 NO ACTION FK 參照 bank_transactions.id，允許自我引用，不自動清空或級聯刪除。 | TEXT | YES | — | — | — |
+| 18 | `card_last4` | 共用信用卡帳戶中實際刷卡的卡號末四碼，由 connector 正規化；只供顯示，不參與交易識別、配對或負債計算。無法確定時為 NULL。 | TEXT | YES | — | — | — |
+| 19 | `card_name` | card_last4 能唯一對應到具名卡片時的卡名；末四碼重複、欄位矛盾或缺少卡名時為 NULL。 | TEXT | YES | — | — | — |
 
 #### Foreign keys
 
@@ -396,7 +398,7 @@ CREATE TABLE "bank_transactions" (
   effective_date TEXT AS (COALESCE(posted_date, authorized_at, '')),
   status TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('pending', 'posted')),
   transfer_peer_id TEXT REFERENCES "bank_transactions" (id),
-  matched_transaction_id TEXT REFERENCES "bank_transactions" (id),
+  matched_transaction_id TEXT REFERENCES "bank_transactions" (id), card_last4 TEXT, card_name TEXT,
   UNIQUE (connector_id, account_id, source_id)
 )
 ```
@@ -1869,6 +1871,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0059_reward_donation_categories.sql`](../apps/worker/migrations/0059_reward_donation_categories.sql)
 - [`0060_feib_sync_job.sql`](../apps/worker/migrations/0060_feib_sync_job.sql)
 - [`0061_ai_classification.sql`](../apps/worker/migrations/0061_ai_classification.sql)
+- [`0062_bank_transaction_card.sql`](../apps/worker/migrations/0062_bank_transaction_card.sql)
 
 ## 程式碼導覽
 
