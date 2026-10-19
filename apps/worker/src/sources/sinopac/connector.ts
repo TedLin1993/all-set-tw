@@ -1469,8 +1469,7 @@ function parseSinoCardTransactions(
         description,
         counterparty: description,
         status: "pending",
-        cardLast4,
-        cardName: cardLast4 ? sinopacCardName(record) : undefined,
+        ...sinopacCardIdentity(amount, description, cardLast4, record),
         raw: sanitizeValue(record),
       },
     ];
@@ -1513,8 +1512,7 @@ function parseSinoCardTransactions(
         description,
         counterparty: description,
         status: "posted",
-        cardLast4,
-        cardName: cardLast4 ? sinopacCardName(record) : undefined,
+        ...sinopacCardIdentity(amount, description, cardLast4, record),
         raw: sanitizeValue(record),
       },
     ];
@@ -1686,13 +1684,22 @@ function last4FromValue(value: unknown) {
   return stringValue(value).match(/(\d{4})\D*$/)?.[1];
 }
 
-// Each transaction names its own card, so no cross-card lookup is needed.
-function sinopacCardName(record: Record<string, unknown>) {
-  return (
-    stringValue(record.CardName).trim() ||
-    stringValue(record.CARDNAME).trim() ||
-    undefined
-  );
+// Each transaction names its own card. Bill payments may be filed under any
+// card (see sinoCardTransactionMatchKey), so they belong to no single card.
+function sinopacCardIdentity(
+  amount: number,
+  description: string,
+  cardLast4: string | undefined,
+  record: Record<string, unknown>,
+) {
+  if (!cardLast4 || isSinoCardPayment(amount, description)) return {};
+  return {
+    cardLast4,
+    cardName:
+      stringValue(record.CardName).trim() ||
+      stringValue(record.CARDNAME).trim() ||
+      undefined,
+  };
 }
 
 function dateTimeWithTaipeiOffset(date: string, time: string) {

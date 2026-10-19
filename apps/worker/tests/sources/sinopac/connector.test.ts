@@ -370,6 +370,7 @@ describe("sinopac App JSON parser", () => {
                 TXCODE: "",
                 MEMO: "測試自扣已入帳",
                 AMT: "-5,000",
+                CARDNAME: "測試卡",
               },
               {
                 CurrencyCode: "000",
@@ -379,19 +380,29 @@ describe("sinopac App JSON parser", () => {
                 TXCODE: "",
                 MEMO: "測試退款",
                 AMT: "-300",
+                CARDNAME: "測試卡",
               },
             ],
           },
         },
-      }).bankTransactions.map((row) => [row.description, row.sourceId]);
+      }).bankTransactions.map((row) => [
+        row.description,
+        row.sourceId,
+        row.cardLast4,
+        row.cardName,
+      ]);
 
     const [payment, refund] = parse("1111");
     expect(payment?.[1]).toMatch(
       /^sinopac:card:tx:v2:TWD:2026-09-24:5000:payment-[0-9a-f]{8}:1$/,
     );
+    // A bill payment belongs to no single card, even when filed under one.
+    expect(payment?.slice(2)).toEqual([undefined, undefined]);
     expect(refund).toEqual([
       "測試退款",
       "sinopac:card:tx:v2:TWD:2026-09-24:300:1111:1",
+      "1111",
+      "測試卡",
     ]);
     expect(parse("2222")[0]).toEqual(payment);
     expect(parse("2222")[1]?.[1]).toBe(
