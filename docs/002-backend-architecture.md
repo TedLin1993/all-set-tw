@@ -336,6 +336,8 @@ Drizzle repository 整合測試使用 `apps/worker/tests/helpers/d1.ts` 的 Mini
 `invoice_transaction_preferences` 的 `invoice_id`／`transaction_id` 使用 FK，
 刪除策略為 `NO ACTION`。合併資料須在同一 batch 先移轉或明確處理偏好，再刪除舊資料；
 不得以 CASCADE 或自動清空交易 ID 抹除 linked／separate 決策。
+`classification_overrides.target_id` 與 `ai_classifications.transaction_id` 以文字保存交易 ID，不設 FK；
+交易合併時分類覆寫由 `transaction-merge.ts` 移轉，AI 結果不移轉，新 ID 由下一次近期掃描重新判斷。
 玉山 lifecycle shadow、永豐及華南 legacy 比對共用 `transaction-merge.ts`：
 僅合併雙向唯一對應且發票配對、計算偏好、分類覆寫不衝突的交易。
 在同一 promotion batch 移轉偏好與交易引用後才刪除舊交易，保留決策及時間；
@@ -530,6 +532,35 @@ X-Next-Cursor: <opaque-cursor>
 
 標記為退費的交易計入支出側並扣減該分類支出，不計入收入；前端計算方式見 `docs/003-frontend-architecture.md` 的「活動金額顯示」。
 原消費可能不在當頁或當月，因此會另外查詢退費所在信用卡在 90 天內的扣款作為候選。
+
+## AI 自動分類
+
+使用者可在「設定 → 分類」啟用 AI 自動分類，預設停用。實作位於 `features/classification`：
+`ai-classifier.ts` 組成 Workers AI Clef（`@cf/cloudflare/clef-flash`）請求與解讀回答，
+`ai-service.ts` 負責設定、掃描與每日用量，`ai-repository.ts` 存取 `ai_classification_settings` 與 `ai_classifications`。
+
+- **套用順序**：分類覆寫 → 使用者規則 → 系統規則 → 年費沖銷與帳戶互轉 → AI → 未分類。
+  `bank/service.ts` 只以 AI 結果補上規則判斷為 `fallback` 的交易，來源為 `ai`；退費配對優先於 AI 結果。
+  停用後不再分類新的活動，已保存的結果繼續套用，直到使用者清除。
+- **判斷依據**：系統分類的定義維護於 `SYSTEM_CATEGORY_DESCRIPTIONS`，自訂分類以名稱作為選項；
+  支出不提供只用於收入的系統分類，入帳只提供收入、轉帳與投資類系統分類及自訂分類。
+  送出日期、帳戶類型、方向、金額、幣別、摘要、交易對象與配對發票的賣方及品項；最高機率低於 0.35 時保存為無法判斷（`category_id` 為 NULL）。
+  回答中只採用請求提供的選項。
+- **掃描**：只處理已入帳、目前為 `fallback` 且有文字可判斷的交易，依月份由新到舊讀取 `getBankRange`，與活動頁相同地去重並配對發票。
+  已由 AI 分類的交易不會重新判斷，使用者清除 AI 分類結果後再回補才會重新分類。
+  無法判斷的交易在送出內容的雜湊改變時（例如晚到的發票）才重試，未變更時不重複呼叫。
+  啟用時只記錄 `enabled_at` 並以當下資料浮水印為基準，不啟動掃描。
+  近期掃描涵蓋含當月的最近 3 個月：每次 Cron 比對交易、發票與發票配對的最新 `updated_at`，資料改變時啟動；
+  只處理 `created_at` 不早於 `enabled_at` 的交易，以及回補時判斷為無法判斷者，啟用前的其他紀錄不會自動送出。
+  過往紀錄回補只由使用者啟動，從當月處理到最早的交易月份，不受 `enabled_at` 限制。同一時間只有一個掃描。
+- **掃描識別碼**：每次開始近期掃描或回補都產生新的 `scan_id`，停用與清除結果會先清空它（清除時先清空再刪除結果）。
+  AI 結果與掃描進度只在 `scan_id` 仍相符時寫入；不符時該掃描立即停止，不覆寫較新的回補、清除或停用狀態。
+  每日呼叫次數以累加更新，不受掃描識別碼影響。
+- **Queue**：掃描以 `run-ai-classification` 訊息在 `SYNC_QUEUE` 執行，每次 invocation 最多 25 次 AI 呼叫、6 個月份，未完成時以 1 秒延遲串接。
+  進度保存在 D1；訊息失敗時直接 ack，由 Cron 恢復閒置超過 5 分鐘的掃描。
+- **用量**：每日最多 2,000 次呼叫（每次約 2.5 neurons，約佔 Workers AI 每日免費額度一半，保留給驗證碼辨識）。
+  達到上限或 Workers AI 回傳 `3036`（免費額度用完）時暫停到 UTC 隔日 00:00，由 Cron 繼續；暫時性錯誤留待 Cron 恢復；其他錯誤保存為無法判斷，避免重複重試。
+- Demo 模式不啟動掃描，訊息直接 ack。
 
 ## 讀取 API 效能
 
@@ -741,7 +772,7 @@ Browser session 取得與登入頁復原重開，皆由共用 browser adapter �
 
 Demo 模式（`DEMO_MODE`）不執行背景同步：Cron 不送出 scheduler 啟動訊息，Queue consumer
 不處理任何訊息，避免啟用 Demo 前殘留的訊息繼續以已儲存的憑證登入外部服務。scheduler 啟動訊息
-直接 ack；電子發票與集保分段訊息及背景手動同步訊息則以 1 小時延遲重新送出以保留 continuation，關閉 Demo 後會
+與 AI 自動分類訊息直接 ack；電子發票與集保分段訊息及背景手動同步訊息則以 1 小時延遲重新送出以保留 continuation，關閉 Demo 後會
 重新檢查進行中的 durable run；已超過整體期限者結案，需要重新啟動同步。若期間 session 過期或設定變更，仍可能需要重新驗證。
 
 電子發票不在單一 connector invocation 內擷取所有品項明細。它使用

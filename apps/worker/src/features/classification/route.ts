@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import {
   CLASSIFICATION_RULE_FIELDS,
   CLASSIFICATION_RULE_OPERATORS,
+  type AiClassificationStatusResponse,
   type ClassificationCategoryResponse,
   type ClassificationRuleResponse,
 } from "@taiwan-fin-hub/shared";
@@ -26,6 +27,13 @@ import {
   reorderClassificationRules,
   setClassificationOverride,
 } from "./service";
+import {
+  AiClassificationDisabledError,
+  clearAiClassificationResults,
+  getAiClassificationStatus,
+  setAiClassificationEnabled,
+  startAiClassificationBackfill,
+} from "./ai-service";
 
 const targetTypeSchema = z.enum(["bank_transaction"]);
 const overrideParamSchema = z.object({ targetType: targetTypeSchema });
@@ -60,6 +68,7 @@ const reorderRulesSchema = z.object({
     .max(9_000)
     .refine((ruleIds) => new Set(ruleIds).size === ruleIds.length),
 });
+const aiSettingsSchema = z.object({ enabled: z.boolean() });
 
 function extractOverrideTargetId(requestPath: string, targetType: string) {
   const prefix = `/classification/overrides/${targetType}/`;
@@ -71,6 +80,59 @@ export const classificationRoutes = honoFactory.createApp();
 registerClassificationRoutes(classificationRoutes);
 
 function registerClassificationRoutes(api: Hono<AppBindings>) {
+  api.get("/classification/ai", async (c) =>
+    c.json(
+      (await getAiClassificationStatus(
+        c.env.DB,
+      )) satisfies AiClassificationStatusResponse,
+    ),
+  );
+
+  api.put(
+    "/classification/ai",
+    zValidator(
+      "json",
+      aiSettingsSchema,
+      validationHook(
+        "INVALID_REQUEST",
+        "AI classification setting is invalid.",
+      ),
+    ),
+    async (c) =>
+      c.json(
+        (await setAiClassificationEnabled(
+          c.env,
+          c.req.valid("json").enabled,
+        )) satisfies AiClassificationStatusResponse,
+      ),
+  );
+
+  api.post("/classification/ai/backfill", async (c) => {
+    try {
+      return c.json(
+        (await startAiClassificationBackfill(
+          c.env,
+        )) satisfies AiClassificationStatusResponse,
+      );
+    } catch (error) {
+      if (error instanceof AiClassificationDisabledError)
+        return jsonError(
+          "AI_CLASSIFICATION_DISABLED",
+          "Enable AI classification before classifying past activity.",
+          409,
+        );
+      throw error;
+    }
+  });
+
+  api.delete("/classification/ai/results", async (c) =>
+    c.json(
+      (await clearAiClassificationResults(
+        c.env.DB,
+      )) satisfies AiClassificationStatusResponse,
+    ),
+  );
+
   api.get("/classification/categories", async (c) =>
     c.json(
       (await getClassificationCategories(

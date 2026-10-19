@@ -8,15 +8,17 @@
 
 ## 目錄
 
-- Tables：32
-- Explicit indexes：46
+- Tables：34
+- Explicit indexes：47
 - Other objects：0
-- Migrations：58
+- Migrations：59
 
 ## Tables
 
 | Table | 用途 | Columns | Foreign keys | Indexes |
 | --- | --- | ---: | ---: | ---: |
+| [`ai_classification_settings`](#ai_classification_settings) | AI 自動分類的單列設定、掃描進度與每日呼叫用量。 | 18 | 0 | 0 |
+| [`ai_classifications`](#ai_classifications) | AI 對單筆銀行交易的分類判斷結果。 | 7 | 1 | 1 |
 | [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 19 | 1 | 1 |
 | [`bank_balance_snapshots`](#bank_balance_snapshots) | 帳戶在特定時間點的餘額快照，供資產總值與歷史圖表計算。 | 19 | 1 | 2 |
 | [`bank_transaction_preferences`](#bank_transaction_preferences) | 使用者對銀行交易計算方式的個別偏好。 | 4 | 1 | 1 |
@@ -49,6 +51,111 @@
 | [`sync_write_staging`](#sync_write_staging) | 同步流程寫入正式資料表前的暫存資料。 | 5 | 0 | 1 |
 | [`tdcc_sync_run_items`](#tdcc_sync_run_items) | 集保持久化同步中，依帳戶、任務與分頁拆分的工作及取得結果。 | 18 | 1 | 2 |
 | [`tdcc_sync_runs`](#tdcc_sync_runs) | 集保 e 存摺跨 Queue invocation 執行的持久化同步記錄與接續狀態。 | 25 | 2 | 2 |
+
+### `ai_classification_settings`
+
+> 用途：AI 自動分類的單列設定、掃描進度與每日呼叫用量。
+> 注意：id 固定為 default。scan_mode 不為 NULL 時表示有進行中的掃描，由 Queue 逐月處理並由 Cron 恢復。
+
+#### Columns
+
+| 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
+| ---: | --- | --- | --- | :---: | --- | ---: | --- |
+| 1 | `id` | 固定為 default 的單列識別碼。 | TEXT | NO | — | 1 | — |
+| 2 | `enabled` | 是否於同步後自動分類規則無法判斷的交易；0 表示停用，預設停用。 | INTEGER | NO | 0 | — | — |
+| 3 | `enabled_at` | 最近一次啟用的時間；近期掃描只處理此時間之後寫入的交易，啟用前的紀錄由使用者回補時處理。 | TEXT | YES | — | — | — |
+| 4 | `scan_mode` | 進行中的掃描類型：recent 為同步後的近期掃描，backfill 為使用者啟動的過往紀錄回補；NULL 表示沒有進行中的掃描。 | TEXT | YES | — | — | — |
+| 5 | `scan_id` | 進行中掃描的識別碼；開始近期掃描或回補時產生，停用或清除結果時清空。掃描只在識別碼仍相符時寫入結果與進度。 | TEXT | YES | — | — | — |
+| 6 | `scan_month` | 掃描目前處理的月份（YYYY-MM），由新到舊逐月處理。 | TEXT | YES | — | — | — |
+| 7 | `scan_stop_month` | 掃描處理到的最舊月份（YYYY-MM，含）。 | TEXT | YES | — | — | — |
+| 8 | `scan_watermark` | 近期掃描開始時擷取的交易與發票資料浮水印。 | TEXT | YES | — | — | — |
+| 9 | `scanned_watermark` | 最近一次完成掃描時的資料浮水印；與目前浮水印不同時，Cron 會啟動近期掃描。 | TEXT | YES | — | — | — |
+| 10 | `backfill_status` | 過往紀錄回補狀態：idle、running 或 completed。 | TEXT | NO | 'idle' | — | — |
+| 11 | `backfill_classified_count` | 本次回補由 AI 分類的交易數。 | INTEGER | NO | 0 | — | — |
+| 12 | `backfill_undetermined_count` | 本次回補 AI 無法判斷的交易數。 | INTEGER | NO | 0 | — | — |
+| 13 | `backfill_started_at` | 本次回補開始的時間。 | TEXT | YES | — | — | — |
+| 14 | `backfill_completed_at` | 本次回補完成的時間。 | TEXT | YES | — | — | — |
+| 15 | `quota_day` | quota_used 計算的 UTC 日期（YYYY-MM-DD），與 Workers AI 每日免費額度的重置日一致。 | TEXT | YES | — | — | — |
+| 16 | `quota_used` | quota_day 當日已發出的 AI 分類呼叫次數。 | INTEGER | NO | 0 | — | — |
+| 17 | `paused_until` | 因每日呼叫上限或 Workers AI 免費額度用完而暫停到的時間；NULL 表示未暫停。 | TEXT | YES | — | — | — |
+| 18 | `updated_at` | 設定或掃描進度最後更新的時間。 | TEXT | NO | — | — | — |
+
+#### Foreign keys
+
+—
+
+#### Indexes
+
+—
+
+#### DDL
+
+```sql
+CREATE TABLE ai_classification_settings (
+  id TEXT NOT NULL PRIMARY KEY CHECK (id = 'default'),
+  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+  enabled_at TEXT,
+  scan_mode TEXT CHECK (scan_mode IS NULL OR scan_mode IN ('recent', 'backfill')),
+  scan_id TEXT,
+  scan_month TEXT,
+  scan_stop_month TEXT,
+  scan_watermark TEXT,
+  scanned_watermark TEXT,
+  backfill_status TEXT NOT NULL DEFAULT 'idle'
+    CHECK (backfill_status IN ('idle', 'running', 'completed')),
+  backfill_classified_count INTEGER NOT NULL DEFAULT 0,
+  backfill_undetermined_count INTEGER NOT NULL DEFAULT 0,
+  backfill_started_at TEXT,
+  backfill_completed_at TEXT,
+  quota_day TEXT,
+  quota_used INTEGER NOT NULL DEFAULT 0,
+  paused_until TEXT,
+  updated_at TEXT NOT NULL
+)
+```
+
+### `ai_classifications`
+
+> 用途：AI 對單筆銀行交易的分類判斷結果。
+> 注意：只套用於分類覆寫、規則、自動轉帳、沖銷與退費都無法判斷的交易。transaction_id 與 classification_overrides 相同，不設外鍵參照 bank_transactions。
+
+#### Columns
+
+| 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
+| ---: | --- | --- | --- | :---: | --- | ---: | --- |
+| 1 | `transaction_id` | 被分類的 bank_transactions 識別碼。 | TEXT | NO | — | 1 | — |
+| 2 | `category_id` | AI 判斷的 classification_categories 識別碼；最高機率低於門檻時為 NULL，表示無法判斷。 | TEXT | YES | — | — | — |
+| 3 | `probability` | AI 對最高機率分類回傳的機率。 | REAL | NO | — | — | — |
+| 4 | `input_hash` | 判斷時送出的交易摘要與配對發票內容的雜湊；內容改變時重新判斷。 | TEXT | NO | — | — | — |
+| 5 | `model` | 執行判斷的 Workers AI 模型。 | TEXT | NO | — | — | — |
+| 6 | `created_at` | 首次判斷的時間。 | TEXT | NO | — | — | — |
+| 7 | `updated_at` | 最近一次判斷的時間。 | TEXT | NO | — | — | — |
+
+#### Foreign keys
+
+| 欄位 | 參照表 | 參照欄位 | ON UPDATE | ON DELETE |
+| --- | --- | --- | --- | --- |
+| `category_id` | `classification_categories` | `id` | NO ACTION | NO ACTION |
+
+#### Indexes
+
+| Index | Unique | Partial | 欄位 | 定義 |
+| --- | :---: | :---: | --- | --- |
+| `idx_ai_classifications_category` | 否 | 否 | `category_id` | `CREATE INDEX idx_ai_classifications_category<br>  ON ai_classifications (category_id)` |
+
+#### DDL
+
+```sql
+CREATE TABLE ai_classifications (
+  transaction_id TEXT NOT NULL PRIMARY KEY,
+  category_id TEXT REFERENCES classification_categories (id),
+  probability REAL NOT NULL,
+  input_hash TEXT NOT NULL,
+  model TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)
+```
 
 ### `bank_accounts`
 
@@ -1761,6 +1868,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0058_fubon_sync_job.sql`](../apps/worker/migrations/0058_fubon_sync_job.sql)
 - [`0059_reward_donation_categories.sql`](../apps/worker/migrations/0059_reward_donation_categories.sql)
 - [`0060_feib_sync_job.sql`](../apps/worker/migrations/0060_feib_sync_job.sql)
+- [`0061_ai_classification.sql`](../apps/worker/migrations/0061_ai_classification.sql)
 
 ## 程式碼導覽
 

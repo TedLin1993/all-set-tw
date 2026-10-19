@@ -126,6 +126,43 @@
         "excluded_from_calculation": "符合規則的交易是否預設排除於計算，0 表示納入、1 表示排除。"
       }
     },
+    "ai_classification_settings": {
+      "description": "AI 自動分類的單列設定、掃描進度與每日呼叫用量。",
+      "notes": "id 固定為 default。scan_mode 不為 NULL 時表示有進行中的掃描，由 Queue 逐月處理並由 Cron 恢復。",
+      "columns": {
+        "id": "固定為 default 的單列識別碼。",
+        "enabled": "是否於同步後自動分類規則無法判斷的交易；0 表示停用，預設停用。",
+        "enabled_at": "最近一次啟用的時間；近期掃描只處理此時間之後寫入的交易，啟用前的紀錄由使用者回補時處理。",
+        "scan_mode": "進行中的掃描類型：recent 為同步後的近期掃描，backfill 為使用者啟動的過往紀錄回補；NULL 表示沒有進行中的掃描。",
+        "scan_id": "進行中掃描的識別碼；開始近期掃描或回補時產生，停用或清除結果時清空。掃描只在識別碼仍相符時寫入結果與進度。",
+        "scan_month": "掃描目前處理的月份（YYYY-MM），由新到舊逐月處理。",
+        "scan_stop_month": "掃描處理到的最舊月份（YYYY-MM，含）。",
+        "scan_watermark": "近期掃描開始時擷取的交易與發票資料浮水印。",
+        "scanned_watermark": "最近一次完成掃描時的資料浮水印；與目前浮水印不同時，Cron 會啟動近期掃描。",
+        "backfill_status": "過往紀錄回補狀態：idle、running 或 completed。",
+        "backfill_classified_count": "本次回補由 AI 分類的交易數。",
+        "backfill_undetermined_count": "本次回補 AI 無法判斷的交易數。",
+        "backfill_started_at": "本次回補開始的時間。",
+        "backfill_completed_at": "本次回補完成的時間。",
+        "quota_day": "quota_used 計算的 UTC 日期（YYYY-MM-DD），與 Workers AI 每日免費額度的重置日一致。",
+        "quota_used": "quota_day 當日已發出的 AI 分類呼叫次數。",
+        "paused_until": "因每日呼叫上限或 Workers AI 免費額度用完而暫停到的時間；NULL 表示未暫停。",
+        "updated_at": "設定或掃描進度最後更新的時間。"
+      }
+    },
+    "ai_classifications": {
+      "description": "AI 對單筆銀行交易的分類判斷結果。",
+      "notes": "只套用於分類覆寫、規則、自動轉帳、沖銷與退費都無法判斷的交易。transaction_id 與 classification_overrides 相同，不設外鍵參照 bank_transactions。",
+      "columns": {
+        "transaction_id": "被分類的 bank_transactions 識別碼。",
+        "category_id": "AI 判斷的 classification_categories 識別碼；最高機率低於門檻時為 NULL，表示無法判斷。",
+        "probability": "AI 對最高機率分類回傳的機率。",
+        "input_hash": "判斷時送出的交易摘要與配對發票內容的雜湊；內容改變時重新判斷。",
+        "model": "執行判斷的 Workers AI 模型。",
+        "created_at": "首次判斷的時間。",
+        "updated_at": "最近一次判斷的時間。"
+      }
+    },
     "connector_settings": {
       "description": "每個外部金融資料連接器的認證設定、公開設定與同步游標。",
       "notes": "encrypted_config 儲存敏感憑證；public_config 僅供非敏感的連接器設定使用。",

@@ -8,6 +8,7 @@ export type ClassificationResult = {
     | "auto_transfer"
     | "auto_offset"
     | "auto_refund"
+    | "ai"
     | "fallback";
   ruleId?: string;
   excludedFromCalculation?: boolean;

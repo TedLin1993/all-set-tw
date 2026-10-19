@@ -1572,6 +1572,11 @@
                 <div class="flex items-center justify-between gap-4 py-4">
                   <div>
                     <p class="font-semibold">分類</p>
+                    {#if detailItem.classificationSource === "ai"}<p
+                        class="mt-1 text-caption text-subtle"
+                      >
+                        由 AI 自動分類，可直接修改
+                      </p>{/if}
                     {#if !detailItem.transactionId}<p
                         class="mt-1 text-caption text-subtle"
                       >
