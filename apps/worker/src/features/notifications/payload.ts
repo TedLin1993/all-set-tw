@@ -148,6 +148,7 @@ export function isUrgentPaymentReminder(reminder: PaymentReminder) {
 /**
  * 預設排程摘要的推播內容；不需送出時回傳 null。
  * 繳款提醒附在同一則推播，不另外送出，且只寫機構與天數、不含金額。
+ * 同步狀態的通知被關閉、只因緊急繳款而送出時，不帶入該同步狀態的內容。
  */
 export function scheduledSummaryNotification(
   preferences: NotificationPreferences,
@@ -155,19 +156,32 @@ export function scheduledSummaryNotification(
   reminders: PaymentReminder[],
 ): PushNotificationPayload | null {
   const included = preferences.paymentDue ? reminders : [];
-  if (
-    !shouldNotify(preferences, summaryStatus(events)) &&
-    !included.some(isUrgentPaymentReminder)
-  )
-    return null;
-  return scheduledSyncSummaryPayload(events, included);
+  const status = summaryStatus(events);
+  if (shouldNotify(preferences, status))
+    return scheduledSyncSummaryPayload(events, included);
+  if (!included.some(isUrgentPaymentReminder)) return null;
+  if (status === "success")
+    return scheduledSyncSummaryPayload(events, included);
+  const payment = paymentReminderSummary(included)!;
+  return {
+    title: payment.label,
+    body: payment.detail,
+    url: "/#/overview",
+    tag: "sync-default-schedule-payment-due",
+  };
 }
 
 function paymentPhrase(reminder: PaymentReminder) {
   if (reminder.state === "collection_failed")
     return `${reminder.name}扣款未完成`;
   const day = describeDueDay(reminder);
-  return /^\d/.test(day) ? `${reminder.name} ${day}` : `${reminder.name}${day}`;
+  const phrase = /^\d/.test(day)
+    ? `${reminder.name} ${day}`
+    : `${reminder.name}${day}`;
+  // 與總覽一致：狀態未確定或已過期限時不直接判定未繳。
+  if (reminder.state === "due") return phrase;
+  if (reminder.kind === "loan") return `${phrase}（請確認餘額）`;
+  return `${phrase}（請確認是否已繳）`;
 }
 
 function paymentReminderSummary(reminders: PaymentReminder[]) {

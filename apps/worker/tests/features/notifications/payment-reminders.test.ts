@@ -243,4 +243,45 @@ describe("scheduledSummaryNotification", () => {
       )?.body,
     ).toBe("預設排程同步完成：失敗 1。");
   });
+
+  it("同步狀態通知關閉時，緊急繳款只送繳款內容，不帶出該同步狀態", () => {
+    const urgent = [reminder({ accountId: "a", daysUntilDue: 1 })];
+    for (const [status, key] of [
+      ["failed", "failed"],
+      ["needs_user_action", "needsUserAction"],
+    ] as const) {
+      const payload = scheduledSummaryNotification(
+        { ...preferences, [key]: false },
+        [{ connectorId: "fubon", status }],
+        urgent,
+      );
+      expect(payload).toEqual({
+        title: "1 筆繳款即將到期",
+        body: "國泰世華信用卡明天到期。",
+        url: "/#/overview",
+        tag: "sync-default-schedule-payment-due",
+      });
+    }
+  });
+
+  it("狀態未確定時，推播提示請確認，不寫成確定未繳", () => {
+    const payload = scheduledSummaryNotification(preferences, succeeded, [
+      reminder({
+        accountId: "a",
+        name: "台北富邦信用卡",
+        daysUntilDue: 1,
+        state: "confirm",
+      }),
+      reminder({
+        accountId: "b",
+        kind: "loan",
+        name: "國泰世華房貸",
+        daysUntilDue: 0,
+        state: "confirm",
+      }),
+    ]);
+    expect(payload?.body).toBe(
+      "台北富邦信用卡明天到期（請確認是否已繳）、國泰世華房貸今天扣款（請確認餘額）。",
+    );
+  });
 });
