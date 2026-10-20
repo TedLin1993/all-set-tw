@@ -112,12 +112,23 @@ describe("AI 自動分類（隔離 D1、假 Workers AI）", () => {
       )
       .bind(syncedAt, syncedAt)
       .run();
+    // Visible pending rows are classified before posting; a pending row
+    // already linked to its posted row stays hidden and is not sent.
+    await db
+      .prepare(
+        `INSERT INTO bank_transactions (id, connector_id, account_id, source_id, status, authorized_at, amount, currency, description, counterparty, matched_transaction_id, created_at, updated_at)
+         VALUES ('pending-donut', 'esun', 'card-1', 'pending-donut', 'pending', '2026-10-17T17:13:21+08:00', -60, 'TWD', '範例甜甜圈', '範例甜甜圈', NULL, ?, ?),
+                ('pending-linked', 'esun', 'card-1', 'pending-linked', 'pending', '2026-10-17T09:00:00+08:00', -90, 'TWD', 'LPEPI*None', 'LPEPI*None', 'new-bakery', ?, ?)`,
+      )
+      .bind(syncedAt, syncedAt, syncedAt, syncedAt)
+      .run();
     await kickAiClassification(env(), new Date(syncedAt));
     expect(await runScan()).toBe("done");
 
     // Older unclassified records in the same months wait for a backfill.
-    expect(requests.map((request) => request.state.交易摘要)).toEqual([
+    expect(requests.map((request) => request.state.交易摘要).sort()).toEqual([
       "範例烘焙坊",
+      "範例甜甜圈",
     ]);
     requests.length = 0;
   });
@@ -164,6 +175,7 @@ describe("AI 自動分類（隔離 D1、假 Workers AI）", () => {
       store: ["shopping", "system_rule"],
       manual: ["education", "override"],
       "new-bakery": ["food", "ai"],
+      "pending-donut": ["food", "ai"],
     });
     expect((await getAiClassificationStatus(db)).backfill).toMatchObject({
       status: "completed",
