@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     ChartNoAxesCombined,
+    ChevronDown,
     ChevronRight,
     CircleCheckBig,
     CreditCard,
@@ -15,7 +16,7 @@
     manualAssetsQuery,
     netWorthHistoryQuery,
   } from "@/data/assets/queries";
-  import { bankRangeQuery } from "@/data/bank/queries";
+  import { bankRangeQuery, creditCardBillsQuery } from "@/data/bank/queries";
   import { syncJobsQuery } from "@/data/connectors/queries";
   import type { ConnectorId } from "@/data/connectors/types";
   import { latestSyncReportQuery } from "@/data/sync-reports/queries";
@@ -32,15 +33,24 @@
   } from "@/data/invoices/queries";
   import { calculateMonthlyActivityTotals } from "@/data/activity/monthly-totals";
   import type { View } from "@/app/types";
+  import { recentMonthRange } from "@/shared/date-range";
   import {
     flowAmountSign,
     formatCompactTwd,
     formatCurrency,
+    formatDate,
+    formatDateTime,
     missingExchangeRateCurrencies,
     rateMap,
   } from "@/shared/format/financial";
   import NetWorthHistoryChart from "./components/NetWorthHistoryChart.svelte";
   import LatestSyncReportCard from "./components/LatestSyncReportCard.svelte";
+  import {
+    PAYMENT_REMINDER_DAYS,
+    collectPaymentReminders,
+    describeDueDay,
+  } from "@taiwan-fin-hub/shared";
+  import type { PaymentReminder } from "@taiwan-fin-hub/shared";
 
   type InsightTone = "coral" | "amber" | "moss" | "steel";
   type InsightIcon = "sync" | "card" | "cashflow";
@@ -51,8 +61,11 @@
     detail: string;
     tone: InsightTone;
     icon: InsightIcon;
-    view: View;
+    /** 未提供時只顯示、不可點擊。 */
+    view?: View;
     connectorId?: ConnectorId;
+    /** 多筆繳款提醒時，在原地展開列出每一筆。 */
+    reminders?: PaymentReminder[];
   }
 
   let {
@@ -78,6 +91,10 @@
   const jobs = createQuery(syncJobsQuery(() => api));
   const latestSyncReport = createQuery(latestSyncReportQuery(() => api));
   const history = createQuery(netWorthHistoryQuery(() => api));
+  // 本月到期的帳單通常屬於上一或上上期別。
+  const reminderBills = createQuery(
+    creditCardBillsQuery(() => api, recentMonthRange(3)),
+  );
 
   const bankData = $derived(
     $monthlyBank.data ?? { accounts: [], transactions: [] },
@@ -180,8 +197,114 @@
   );
   const sourceCount = $derived(configuredSyncJobs.length);
   const healthyCount = $derived(healthySyncJobs.length);
+  const paymentReminders = $derived(
+    $reminderBills.isPending
+      ? []
+      : collectPaymentReminders(bankData.accounts, $reminderBills.data ?? []),
+  );
+
+  function reminderAmount(reminder: PaymentReminder) {
+    return reminder.amount != null
+      ? formatCurrency(reminder.amount, reminder.currency)
+      : null;
+  }
+
+  function reminderText(reminder: PaymentReminder) {
+    const amount = reminderAmount(reminder);
+    const dueDate = reminder.dueDate
+      ? `期限 ${formatDate(reminder.dueDate)}`
+      : null;
+    const join = (...parts: (string | null)[]) =>
+      parts.filter(Boolean).join(" · ");
+    const headline = (suffix: string) =>
+      amount
+        ? `${reminder.name} ${amount}，${suffix}`
+        : `${reminder.name} ${suffix}`;
+    if (reminder.state === "collection_failed")
+      return {
+        title: `${reminder.name}扣款未完成`,
+        detail: join(
+          amount ? `本期應繳 ${amount}` : null,
+          "請確認扣款帳戶餘額",
+        ),
+      };
+    if (reminder.state === "overdue")
+      return {
+        title: headline("已過繳款期限"),
+        detail: join(dueDate, "請確認是否已繳款"),
+      };
+    if (reminder.state === "due")
+      return {
+        title: headline(describeDueDay(reminder)),
+        detail: join(dueDate, "帳單待繳"),
+      };
+    if (reminder.kind === "loan")
+      return {
+        title: headline(describeDueDay(reminder)),
+        detail: join(dueDate, "請確認扣款帳戶餘額充足"),
+      };
+    return {
+      title: `${reminder.name}繳款期限將至，請確認`,
+      detail: join(
+        amount,
+        describeDueDay(reminder),
+        reminder.asOfAt
+          ? `資料更新於 ${formatDateTime(reminder.asOfAt)}`
+          : "尚未取得更新時間",
+      ),
+    };
+  }
+
+  function reminderRowStatus(reminder: PaymentReminder) {
+    const day = describeDueDay(reminder);
+    const status =
+      reminder.state === "collection_failed"
+        ? "扣款未完成"
+        : reminder.state === "overdue"
+          ? "請確認是否已繳款"
+          : reminder.state === "due"
+            ? "待繳"
+            : reminder.kind === "loan"
+              ? "請確認扣款帳戶餘額"
+              : "請確認繳款狀態";
+    return day ? `${day} · ${status}` : status;
+  }
+
+  function paymentInsight(reminders: PaymentReminder[]): OverviewInsight {
+    const urgent = reminders.some((item) => item.state !== "confirm");
+    const base = {
+      id: "payment-due",
+      tone: urgent ? ("coral" as const) : ("amber" as const),
+      icon: "card" as const,
+    };
+    if (reminders.length === 1)
+      return { ...base, ...reminderText(reminders[0]!) };
+    const currencies = new Set(reminders.map((item) => item.currency));
+    const total =
+      currencies.size === 1 && reminders.every((item) => item.amount != null)
+        ? formatCurrency(
+            reminders.reduce((sum, item) => sum + item.amount!, 0),
+            reminders[0]!.currency,
+          )
+        : null;
+    const needsAttention = reminders.some(
+      (item) => item.state === "overdue" || item.state === "collection_failed",
+    );
+    return {
+      ...base,
+      title: `${needsAttention ? `${reminders.length} 筆應繳款需要留意` : `${PAYMENT_REMINDER_DAYS} 天內有 ${reminders.length} 筆應繳款`}${total ? `，合計 ${total}` : ""}`,
+      detail: needsAttention
+        ? reminderText(reminders[0]!).title
+        : `最近：${reminderText(reminders[0]!).title}`,
+      reminders,
+    };
+  }
+
   const insights = $derived.by(() => {
     const items: OverviewInsight[] = [];
+
+    if (paymentReminders.length > 0)
+      items.push(paymentInsight(paymentReminders));
 
     if (!syncJobsReady) {
       items.push({
@@ -317,6 +440,27 @@
   );
 </script>
 
+{#snippet insightBody(insight: OverviewInsight)}
+  {#if insight.icon === "sync"}
+    <RefreshCw
+      class={`size-4 shrink-0 ${insight.tone === "amber" ? "text-amber-600" : "text-steel"}`}
+    />
+  {:else if insight.icon === "card"}
+    <CreditCard
+      class={`size-4 shrink-0 ${insight.tone === "amber" ? "text-amber-600" : "text-coral"}`}
+    />
+  {:else}
+    <ChartNoAxesCombined
+      class={`size-4 shrink-0 ${insight.tone === "moss" ? "text-moss" : "text-coral"}`}
+    />
+  {/if}
+  <span class="min-w-0 flex-1 text-left"
+    ><span class="block text-caption font-medium">{insight.title}</span><span
+      class="mt-1 block text-xs text-subtle">{insight.detail}</span
+    ></span
+  >
+{/snippet}
+
 {#if loading}
   <EmptyState title="載入總覽中" body="正在讀取最新紀錄。" />
 {:else if failed}
@@ -447,48 +591,76 @@
       class="min-w-0 border-t border-ink/10 pt-5"
       aria-labelledby="overview-insights"
     >
-      <div class="flex flex-col gap-2 md:flex-row md:items-center md:gap-6">
+      <div class="flex flex-col gap-2 md:flex-row md:items-start md:gap-6">
         <h2
           id="overview-insights"
-          class="shrink-0 text-caption font-medium text-subtle"
+          class="shrink-0 text-caption font-medium text-subtle md:flex md:min-h-11 md:items-center md:py-1"
         >
           值得留意
         </h2>
         {#if insights.length === 0}
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption">
+          <div
+            class="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption md:min-h-11 md:py-1"
+          >
             <CircleCheckBig class="size-4 shrink-0 text-moss" />
             <p>目前沒有需要處理的事項</p>
             <p class="text-subtle">同步與本月收支狀態正常</p>
           </div>
         {:else}
-          <div class="grid min-w-0 flex-1 gap-x-8 gap-y-2 lg:grid-cols-2">
+          <div
+            class="grid min-w-0 flex-1 gap-x-8 gap-y-2 lg:grid-cols-2 lg:items-start"
+          >
             {#each insights as insight (insight.id)}
-              <button
-                class="group flex min-h-11 min-w-0 items-center gap-3 rounded-sm py-1 text-left transition hover:bg-ink/3"
-                onclick={() => navigate(insight.view, insight.connectorId)}
-              >
-                {#if insight.icon === "sync"}
-                  <RefreshCw
-                    class={`size-4 shrink-0 ${insight.tone === "amber" ? "text-amber-600" : "text-steel"}`}
-                  />
-                {:else if insight.icon === "card"}
-                  <CreditCard class="size-4 shrink-0 text-coral" />
-                {:else}
-                  <ChartNoAxesCombined
-                    class={`size-4 shrink-0 ${insight.tone === "moss" ? "text-moss" : "text-coral"}`}
-                  />
-                {/if}
-                <span class="min-w-0 flex-1"
-                  ><span class="block text-caption font-medium"
-                    >{insight.title}</span
-                  ><span class="mt-1 block text-xs text-subtle"
-                    >{insight.detail}</span
-                  ></span
+              {#if insight.reminders}
+                <details class="group min-w-0">
+                  <summary
+                    class="flex min-h-11 min-w-0 cursor-pointer list-none items-center gap-3 rounded-sm py-1 transition hover:bg-ink/3 marker:content-none"
+                  >
+                    {@render insightBody(insight)}
+                    <ChevronDown
+                      class="size-3.5 shrink-0 text-subtle transition group-open:rotate-180"
+                    />
+                  </summary>
+                  <ul class="mt-1 grid pl-7">
+                    {#each insight.reminders as reminder (reminder.accountId)}
+                      {@const urgent =
+                        reminder.state === "overdue" ||
+                        reminder.state === "collection_failed"}
+                      <li
+                        class="flex items-start justify-between gap-3 border-b border-ink/8 py-2 last:border-b-0"
+                      >
+                        <span class="min-w-0"
+                          ><span class="block truncate text-caption font-medium"
+                            >{reminder.name}</span
+                          ><span
+                            class={`mt-0.5 block text-xs ${urgent ? "text-coral" : "text-subtle"}`}
+                            >{reminderRowStatus(reminder)}</span
+                          ></span
+                        >
+                        <span
+                          class="shrink-0 text-caption font-medium tabular-nums"
+                          >{reminderAmount(reminder) ?? "金額未提供"}</span
+                        >
+                      </li>
+                    {/each}
+                  </ul>
+                </details>
+              {:else if insight.view}
+                {@const view = insight.view}
+                <button
+                  class="group flex min-h-11 min-w-0 items-center gap-3 rounded-sm py-1 text-left transition hover:bg-ink/3"
+                  onclick={() => navigate(view, insight.connectorId)}
                 >
-                <ChevronRight
-                  class="size-3.5 shrink-0 text-subtle transition group-hover:translate-x-0.5"
-                />
-              </button>
+                  {@render insightBody(insight)}
+                  <ChevronRight
+                    class="size-3.5 shrink-0 text-subtle transition group-hover:translate-x-0.5"
+                  />
+                </button>
+              {:else}
+                <div class="flex min-h-11 min-w-0 items-center gap-3 py-1">
+                  {@render insightBody(insight)}
+                </div>
+              {/if}
             {/each}
           </div>
         {/if}

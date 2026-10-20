@@ -37,6 +37,9 @@ export const notificationPreferences = sqliteTable(
     notifyNeedsUserAction: integer("notify_needs_user_action")
       .notNull()
       .default(sql`1`),
+    notifyPaymentDue: integer("notify_payment_due")
+      .notNull()
+      .default(sql`1`),
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [

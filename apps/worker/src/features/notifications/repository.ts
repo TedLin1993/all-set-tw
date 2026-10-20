@@ -22,6 +22,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   success: false,
   failed: true,
   needsUserAction: true,
+  paymentDue: true,
 };
 
 export async function listPushSubscriptions(db: D1Database) {
@@ -111,6 +112,7 @@ export async function getNotificationPreferences(db: D1Database) {
       success: notificationPreferences.notifySuccess,
       failed: notificationPreferences.notifyFailed,
       needsUserAction: notificationPreferences.notifyNeedsUserAction,
+      paymentDue: notificationPreferences.notifyPaymentDue,
     })
     .from(notificationPreferences)
     .where(eq(notificationPreferences.id, "default"))
@@ -121,6 +123,7 @@ export async function getNotificationPreferences(db: D1Database) {
     success: Boolean(row.success),
     failed: Boolean(row.failed),
     needsUserAction: Boolean(row.needsUserAction),
+    paymentDue: Boolean(row.paymentDue),
   } satisfies NotificationPreferences;
 }
 
@@ -136,6 +139,7 @@ export async function saveNotificationPreferences(
       notifySuccess: preferences.success ? 1 : 0,
       notifyFailed: preferences.failed ? 1 : 0,
       notifyNeedsUserAction: preferences.needsUserAction ? 1 : 0,
+      notifyPaymentDue: preferences.paymentDue ? 1 : 0,
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -144,6 +148,7 @@ export async function saveNotificationPreferences(
         notifySuccess: preferences.success ? 1 : 0,
         notifyFailed: preferences.failed ? 1 : 0,
         notifyNeedsUserAction: preferences.needsUserAction ? 1 : 0,
+        notifyPaymentDue: preferences.paymentDue ? 1 : 0,
         updatedAt: now,
       },
     });

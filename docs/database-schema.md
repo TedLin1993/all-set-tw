@@ -11,7 +11,7 @@
 - Tables：34
 - Explicit indexes：47
 - Other objects：0
-- Migrations：60
+- Migrations：61
 
 ## Tables
 
@@ -39,7 +39,7 @@
 | [`manual_assets`](#manual_assets) | 使用者手動登錄、無法由銀行或投資連接器同步的資產。 | 6 | 0 | 0 |
 | [`manual_sync_runs`](#manual_sync_runs) | 使用者按下同步後交由 Queue consumer 執行的背景手動同步，讓前端離開或重新整理不影響同步。 | 11 | 0 | 2 |
 | [`net_worth_history`](#net_worth_history) | 按日期保存的淨資產或資產類別歷史數值，用於圖表與歷史查詢。 | 6 | 0 | 2 |
-| [`notification_preferences`](#notification_preferences) | 此單一部署的同步推播偏好設定。 | 5 | 0 | 0 |
+| [`notification_preferences`](#notification_preferences) | 此單一部署的同步推播偏好設定。 | 6 | 0 | 0 |
 | [`push_subscriptions`](#push_subscriptions) | 瀏覽器 Web Push 裝置訂閱資料。 | 6 | 0 | 0 |
 | [`scheduled_sync_batch_results`](#scheduled_sync_batch_results) | 預設排程同步批次中各工作的完成結果。 | 9 | 1 | 0 |
 | [`scheduled_sync_batches`](#scheduled_sync_batches) | 各排程同步批次的狀態與同步前後資產、信用卡及貸款負債快照。 | 14 | 0 | 2 |
@@ -1227,7 +1227,7 @@ CREATE TABLE "net_worth_history" (
 ### `notification_preferences`
 
 > 用途：此單一部署的同步推播偏好設定。
-> 注意：id 固定為 default；成功通知預設關閉，失敗與需要使用者處理預設開啟。
+> 注意：id 固定為 default；成功通知預設關閉，失敗、需要使用者處理與繳款提醒預設開啟。
 
 #### Columns
 
@@ -1238,6 +1238,7 @@ CREATE TABLE "net_worth_history" (
 | 3 | `notify_failed` | 是否在排程同步失敗時顯示推播。 | INTEGER | NO | 1 | — | — |
 | 4 | `notify_needs_user_action` | 是否在同步需要 OTP、CAPTCHA 或重新登入時顯示推播。 | INTEGER | NO | 1 | — | — |
 | 5 | `updated_at` | 推播偏好最後更新的時間。 | TEXT | NO | — | — | — |
+| 6 | `notify_payment_due` | 是否在預設排程同步摘要附上近期繳款提醒；今天或明天到期、扣款未完成或已過期限時，即使成功通知關閉也會送出摘要。 | INTEGER | NO | 1 | — | — |
 
 #### Foreign keys
 
@@ -1256,7 +1257,7 @@ CREATE TABLE "notification_preferences" (
   notify_failed INTEGER NOT NULL DEFAULT 1,
   notify_needs_user_action INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL
-)
+, notify_payment_due INTEGER NOT NULL DEFAULT 1)
 ```
 
 ### `push_subscriptions`
@@ -1872,6 +1873,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0060_feib_sync_job.sql`](../apps/worker/migrations/0060_feib_sync_job.sql)
 - [`0061_ai_classification.sql`](../apps/worker/migrations/0061_ai_classification.sql)
 - [`0062_bank_transaction_card.sql`](../apps/worker/migrations/0062_bank_transaction_card.sql)
+- [`0063_payment_due_notification.sql`](../apps/worker/migrations/0063_payment_due_notification.sql)
 
 ## 程式碼導覽
 

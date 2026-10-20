@@ -13,6 +13,7 @@ export * from "./activity/list";
 export * from "./activity/flow";
 export * from "./activity/filter";
 export * from "./activity/items";
+export * from "./payment-reminders";
 export {
   deduplicateBankTransactions,
   matchInvoicesToTransactions,
