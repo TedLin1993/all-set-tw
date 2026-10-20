@@ -30,7 +30,8 @@ const TRANSACTION_DETAILS_PATH = "/api/v1/Account/FetchTransactionDetails";
 const FOREIGN_TRANSACTION_DETAILS_PATH =
   "/api/v1/Account/FetchForeignCurrencyTransactionDetails";
 const LOGOUT_PATH = "/api/v1/Authentication/Logout";
-const SKBANK_APP_VERSION = "5.8.5";
+const SKBANK_APP_VERSION = "5.8.8";
+const APP_VERSION_PATTERN = /^\d{1,3}(?:\.\d{1,3}){1,3}$/;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const TRANSACTION_PAGE_SIZE = 100;
@@ -249,6 +250,7 @@ export function createSkbankConnector(
 class SkbankMobileSession {
   private accessToken = "";
   private loggedIn = false;
+  private appVersion = SKBANK_APP_VERSION;
 
   constructor(
     private readonly fetcher: SkbankFetch,
@@ -257,6 +259,7 @@ class SkbankMobileSession {
 
   async getPublicKey() {
     const data = await this.get(APP_CONFIG_PATH, false);
+    this.adoptServerAppVersion(data.AppVersion);
     const publicKey = isRecord(data.PublicKey) ? data.PublicKey : {};
     const modulus = stringValue(publicKey.Module).trim();
     const exponent = stringValue(publicKey.Exponent).trim();
@@ -266,6 +269,18 @@ class SkbankMobileSession {
       );
     }
     return { modulus, exponent };
+  }
+
+  // 銀行強制更新 App 時會在 GetAppConfig 公告最新版本；沿用它可避免登入回傳 MB433。
+  private adoptServerAppVersion(value: unknown) {
+    if (!isRecord(value)) return;
+    const latest = stringValue(value.LatestNumber).trim();
+    if (
+      APP_VERSION_PATTERN.test(latest) &&
+      compareAppVersions(latest, this.appVersion) > 0
+    ) {
+      this.appVersion = latest;
+    }
   }
 
   async login(
@@ -443,7 +458,7 @@ class SkbankMobileSession {
     return {
       Accept: "application/json",
       "Content-Type": "application/json; charset=utf-8",
-      "App-Version": SKBANK_APP_VERSION,
+      "App-Version": this.appVersion,
       "Device-Info": "Android;15;Google-Pixel 8",
       "Device-Id": this.deviceId,
       Authorization: `bearer ${this.accessToken}`,
@@ -636,4 +651,14 @@ function formatDate(value: Date) {
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function compareAppVersions(left: string, right: string) {
+  const leftParts = left.split(".").map(Number);
+  const rightParts = right.split(".").map(Number);
+  for (let i = 0; i < Math.max(leftParts.length, rightParts.length); i += 1) {
+    const diff = (leftParts[i] ?? 0) - (rightParts[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
