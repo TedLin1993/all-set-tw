@@ -270,10 +270,11 @@ async function classifyMonth(
   // Only what every deterministic step left unclassified. An AI answer is
   // never revisited until the user clears the results; an undetermined one
   // is retried when its input (for example a late invoice) changes.
+  // Pending rows are included so they show a category before posting; one
+  // already linked to another row is hidden by getBankRange, and its posted
+  // row is classified on its own merchant name.
   const candidates = transactions.filter(
-    (transaction) =>
-      transaction.status === "posted" &&
-      transaction.classification?.source === "fallback",
+    (transaction) => transaction.classification?.source === "fallback",
   );
   if (candidates.length === 0) return result;
 
