@@ -114,7 +114,7 @@ npm run verify:web
 
 ## 總覽繳款提醒
 
-「值得留意」的繳款提醒由 `features/overview/model/payment-reminders.ts` 依帳戶快照與近三個月帳單產生，
+「值得留意」的繳款提醒由共用的 `collectPaymentReminders`（`shared/payment-reminders.ts`）依帳戶快照與近三個月帳單產生，
 排在同步狀態等提醒之前。以台北日期計算，信用卡與貸款在今天起 5 天內到期才列入；多筆時合併為一筆並顯示最優先的一筆，
 幣別相同且金額齊全時附合計，點擊後在原地展開各筆名稱、金額與狀態。繳款提醒只供查看，不導向其他頁面。
 
@@ -124,6 +124,8 @@ npm run verify:web
 - 明確待繳但已過期限時顯示「已過繳款期限」並請使用者確認，最多保留 7 天。
 - 貸款沒有已繳狀態，期限內只提示確認扣款帳戶餘額；`loanPaymentStatus = collection_incomplete` 時不論期限都優先顯示「扣款未完成」。
 - 目前尚未取得扣款帳戶，因此不判斷扣款帳戶餘額是否足夠。
+
+同一套規則也用於預設排程的推播摘要（見後端文件「同步結果通知」），判斷規則與推播文案的測試一併放在 Worker 的 `tests/features/notifications/`。
 
 ## 總覽同步明細
 

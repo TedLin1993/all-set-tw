@@ -49,8 +49,8 @@
     PAYMENT_REMINDER_DAYS,
     collectPaymentReminders,
     describeDueDay,
-  } from "./model/payment-reminders";
-  import type { PaymentReminder } from "./model/payment-reminders";
+  } from "@taiwan-fin-hub/shared";
+  import type { PaymentReminder } from "@taiwan-fin-hub/shared";
 
   type InsightTone = "coral" | "amber" | "moss" | "steel";
   type InsightIcon = "sync" | "card" | "cashflow";

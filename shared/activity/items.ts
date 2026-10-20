@@ -46,7 +46,8 @@ export interface ActivityTrade {
 }
 const formatNumber = (value: number) =>
   new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(value);
-function normalizeFinancialDate(value?: string) {
+/** 將民國年 `0YYY-MM-DD` 轉成西元日期；其他格式原樣回傳。 */
+export function normalizeFinancialDate(value?: string) {
   if (!value) return "";
   const roc = value.match(/^0(\d{3})-(\d{2})-(\d{2})(.*)$/);
   return roc ? `${Number(roc[1]) + 1911}-${roc[2]}-${roc[3]}${roc[4]}` : value;

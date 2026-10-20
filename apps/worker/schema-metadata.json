@@ -377,12 +377,13 @@
     },
     "notification_preferences": {
       "description": "此單一部署的同步推播偏好設定。",
-      "notes": "id 固定為 default；成功通知預設關閉，失敗與需要使用者處理預設開啟。",
+      "notes": "id 固定為 default；成功通知預設關閉，失敗、需要使用者處理與繳款提醒預設開啟。",
       "columns": {
         "id": "設定識別碼，固定為 default。",
         "notify_success": "是否在排程同步成功時顯示推播。",
         "notify_failed": "是否在排程同步失敗時顯示推播。",
         "notify_needs_user_action": "是否在同步需要 OTP、CAPTCHA 或重新登入時顯示推播。",
+        "notify_payment_due": "是否在預設排程同步摘要附上近期繳款提醒；今天或明天到期、扣款未完成或已過期限時，即使成功通知關閉也會送出摘要。",
         "updated_at": "推播偏好最後更新的時間。"
       }
     },

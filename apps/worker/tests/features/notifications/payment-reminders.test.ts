@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { BankAccountRow, CreditCardBillRow } from "@/data/bank/types";
-import { collectPaymentReminders } from "./payment-reminders";
+import {
+  collectPaymentReminders,
+  type BankAccountResponse as BankAccountRow,
+  type CreditCardBillResponse as CreditCardBillRow,
+  type PaymentReminder,
+} from "@taiwan-fin-hub/shared";
+import {
+  scheduledSummaryNotification,
+  type SyncNotificationEvent,
+} from "../../../src/features/notifications/payload";
 
 // 台北時間 2026-10-21 01:00；UTC 仍是 10-20。
 const now = new Date("2026-10-20T17:00:00Z");
@@ -144,5 +152,95 @@ describe("collectPaymentReminders", () => {
         state: "collection_failed",
       }),
     );
+  });
+});
+
+describe("scheduledSummaryNotification", () => {
+  const preferences = {
+    success: false,
+    failed: true,
+    needsUserAction: true,
+    paymentDue: true,
+  };
+  const succeeded: SyncNotificationEvent[] = [
+    { connectorId: "cathaybk", status: "success" },
+  ];
+  const reminder = (
+    input: Partial<PaymentReminder> & Pick<PaymentReminder, "accountId">,
+  ): PaymentReminder => ({
+    connectorId: "cathaybk",
+    kind: "card",
+    name: "國泰世華信用卡",
+    amount: 12_800,
+    currency: "TWD",
+    daysUntilDue: 3,
+    state: "due",
+    ...input,
+  });
+
+  it("繳款提醒附在同一則同步摘要，只寫機構與天數、不含金額", () => {
+    const payload = scheduledSummaryNotification(
+      { ...preferences, success: true },
+      succeeded,
+      [
+        reminder({ accountId: "a", daysUntilDue: 1 }),
+        reminder({ accountId: "b", name: "台北富邦信用卡", amount: 5_300 }),
+      ],
+    );
+
+    expect(payload).toEqual({
+      title: "同步完成，2 筆繳款即將到期",
+      body: "國泰世華信用卡明天到期、台北富邦信用卡 3 天後到期。",
+      url: "/#/overview",
+      tag: "sync-default-schedule-success",
+    });
+
+    const failed = scheduledSummaryNotification(
+      preferences,
+      [...succeeded, { connectorId: "fubon", status: "failed" }],
+      [reminder({ accountId: "a", state: "collection_failed" })],
+    );
+    expect(failed?.body).toBe(
+      "預設排程同步完成：成功 1、失敗 1。另有 1 筆繳款需要留意：國泰世華信用卡扣款未完成。",
+    );
+    for (const text of [payload!.body, failed!.body])
+      expect(text).not.toMatch(/NT\$|12,800|5,300|12800|5300/);
+  });
+
+  it("成功通知關閉時，只有緊急的繳款才讓同步摘要照常送出", () => {
+    expect(
+      scheduledSummaryNotification(preferences, succeeded, [
+        reminder({ accountId: "a", daysUntilDue: 2 }),
+      ]),
+    ).toBeNull();
+
+    for (const urgent of [
+      reminder({ accountId: "a", daysUntilDue: 1 }),
+      reminder({ accountId: "a", daysUntilDue: 0, state: "confirm" }),
+      reminder({ accountId: "a", daysUntilDue: -1, state: "overdue" }),
+      reminder({
+        accountId: "a",
+        kind: "loan",
+        daysUntilDue: undefined,
+        state: "collection_failed",
+      }),
+    ])
+      expect(
+        scheduledSummaryNotification(preferences, succeeded, [urgent]),
+      ).not.toBeNull();
+  });
+
+  it("關閉繳款提醒時維持原本的同步推播", () => {
+    const off = { ...preferences, paymentDue: false };
+    const urgent = [reminder({ accountId: "a", daysUntilDue: 0 })];
+
+    expect(scheduledSummaryNotification(off, succeeded, urgent)).toBeNull();
+    expect(
+      scheduledSummaryNotification(
+        off,
+        [{ connectorId: "fubon", status: "failed" }],
+        urgent,
+      )?.body,
+    ).toBe("預設排程同步完成：失敗 1。");
   });
 });

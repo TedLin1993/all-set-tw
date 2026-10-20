@@ -1,5 +1,8 @@
-import type { BankAccountRow, CreditCardBillRow } from "@/data/bank/types";
-import { normalizeFinancialDate } from "@/shared/format/financial";
+import { normalizeFinancialDate } from "./activity/items";
+import type {
+  BankAccountResponse as BankAccountRow,
+  CreditCardBillResponse as CreditCardBillRow,
+} from "./api/bank";
 
 /** 從今天起算，幾天內到期的應繳款會列入提醒（含今天）。 */
 export const PAYMENT_REMINDER_DAYS = 5;

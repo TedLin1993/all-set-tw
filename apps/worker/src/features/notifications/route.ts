@@ -31,6 +31,7 @@ const preferencesSchema = z.object({
   success: z.boolean(),
   failed: z.boolean(),
   needsUserAction: z.boolean(),
+  paymentDue: z.boolean().optional(),
 });
 
 export const notificationRoutes = honoFactory.createApp();
@@ -76,8 +77,12 @@ function registerNotificationRoutes(api: Hono<AppBindings>) {
       ),
     ),
     async (c) => {
-      const input = c.req.valid("json") as NotificationPreferences;
-      return c.json(await updateNotificationPreferences(c.env, input));
+      return c.json(
+        (await updateNotificationPreferences(
+          c.env,
+          c.req.valid("json"),
+        )) satisfies NotificationPreferences,
+      );
     },
   );
 
