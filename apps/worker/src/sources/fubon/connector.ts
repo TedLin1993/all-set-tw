@@ -2873,18 +2873,6 @@ function mapFubonError(error: unknown): Error {
   );
 }
 
-/** 同步結果為 info 等級，`message` 一行即可看出結果。 */
-function logFubonResult(result: ReturnType<typeof summarizeFubonResult>) {
-  console.info(
-    JSON.stringify({
-      level: "info",
-      event: "fubon_sync_result",
-      connectorId: "fubon",
-      ...result,
-    }),
-  );
-}
-
 function logFubonEvent(event: string, fields: Record<string, unknown>) {
   console.warn(JSON.stringify({ event, connectorId: "fubon", ...fields }));
 }

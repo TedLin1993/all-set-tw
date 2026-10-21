@@ -1,4 +1,4 @@
-import type { BankData, BankTransactionRow } from "@/data/bank/types";
+import type { BankData } from "@/data/bank/types";
 import type {
   InvoiceSummaryRow,
   InvoiceTransactionPreference,

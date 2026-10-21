@@ -1127,16 +1127,6 @@ function stringField(value: unknown): string {
     : "";
 }
 
-function stockAccountId(accountRecord: Record<string, unknown>) {
-  return [
-    stringField(accountRecord.brokerNo),
-    stringField(accountRecord.brokerAccount) ||
-      stringField(accountRecord.acctSerNo),
-  ]
-    .filter(Boolean)
-    .join(":");
-}
-
 function toInvestmentPosition(
   holding: TdccConfig["holdings"][number],
 ): Omit<InvestmentPosition, "id" | "connectorId"> {

@@ -1647,40 +1647,6 @@ async function findCardFunctions(frame: Frame) {
   }
 }
 
-async function clickText(frame: Frame, label: string) {
-  try {
-    return Boolean(
-      await withActionTimeout(
-        frame.evaluate((targetLabel) => {
-          const normalized = targetLabel.replace(/\s+/g, "").trim();
-          const elements = Array.from(
-            document.querySelectorAll<HTMLElement>(
-              "a,button,input,[role=button],li,span,div",
-            ),
-          );
-          const target = elements.find((element) => {
-            const text = (
-              element.textContent ||
-              (element as HTMLInputElement).value ||
-              ""
-            )
-              .replace(/\s+/g, "")
-              .trim();
-            return text === normalized;
-          });
-          const clickable = target?.closest<HTMLElement>(
-            "a,button,input,[role=button],li",
-          );
-          (clickable || target)?.click();
-          return Boolean(target);
-        }, label),
-      ),
-    );
-  } catch {
-    return false;
-  }
-}
-
 async function waitForCardResponse(
   captured: CapturedCardResponses,
   key: CardPayloadKey,
@@ -3185,17 +3151,6 @@ function isDetachedFrame(frame: Frame) {
 
 function liveFrames(page: Page) {
   return page.frames().filter((frame) => !isDetachedFrame(frame));
-}
-
-function pickLiveFrame(page: Page, preferred?: Frame) {
-  if (
-    preferred &&
-    !isDetachedFrame(preferred) &&
-    liveFrames(page).includes(preferred)
-  ) {
-    return preferred;
-  }
-  return liveFrames(page)[0];
 }
 
 function pickCardNavigationFrame(page: Page, preferred?: Frame) {

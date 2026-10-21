@@ -994,7 +994,7 @@ export function parseSinopacCardData(
   }
   const summary = parseSummary(payloads.summary);
   const accounting = parseSinoCardAccounting(payloads.accountingInfo);
-  const bills = parseBills(payloads.bills, now);
+  const bills = parseBills(payloads.bills);
   for (const bill of accounting) {
     const index = bills.findIndex((item) => item.sourceId === bill.sourceId);
     if (index >= 0) bills[index] = bill;
@@ -1314,7 +1314,7 @@ function parseSinoCardAccounting(payload: unknown) {
   });
 }
 
-function parseBills(payload: unknown, now: Date) {
+function parseBills(payload: unknown) {
   const out: Array<Omit<CreditCardBill, "id" | "connectorId" | "accountId">> =
     [];
 

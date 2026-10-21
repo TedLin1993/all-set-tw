@@ -3,7 +3,6 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import type { AppBindings } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
-import { jsonError } from "../../platform/http";
 import { validationHook } from "../../platform/validation";
 import {
   addManualAsset,

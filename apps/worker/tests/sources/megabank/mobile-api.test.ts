@@ -1,10 +1,4 @@
-import {
-  constants,
-  createCipheriv,
-  generateKeyPairSync,
-  privateDecrypt,
-  randomBytes,
-} from "node:crypto";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   createMegabankConnector,
@@ -14,11 +8,10 @@ import { credentials, payloads } from "./fixtures/payloads";
 
 const LOGOUT = "/fco/fco02011/logout";
 const GETVERIFYCODE = "/fco/fco00001/getverifycode";
-const CAPTCHA = "/fco/fco00001/captcha";
 const LOAN_HOME = "/fln/fln01001/home";
 
 // 建立一組合成 RSA 金鑰，模擬銀行 e2ee 回傳的 cipherToken。
-const { publicKey, privateKey } = generateKeyPairSync("rsa", {
+const { publicKey } = generateKeyPairSync("rsa", {
   modulusLength: 1024,
 });
 const jwk = publicKey.export({ format: "jwk" });

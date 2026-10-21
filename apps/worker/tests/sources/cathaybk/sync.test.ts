@@ -4,7 +4,6 @@ import { encryptJson } from "../../../src/platform/crypto";
 import type { Env } from "../../../src/platform/env";
 import {
   bankAccountRecord,
-  bankBalanceSnapshotRecord,
   creditCardBillRecord,
 } from "../../../src/features/sync/record-mapper";
 import { persistStagedSyncWrite } from "../../../src/features/sync/persistence";

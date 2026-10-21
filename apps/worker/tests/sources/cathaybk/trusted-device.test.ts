@@ -14,12 +14,6 @@ import {
   submitCathayOtp,
 } from "../../../src/sources/cathaybk/connector";
 
-const credentials = {
-  userId: "A123456789",
-  account: "test-user",
-  password: "test-password",
-};
-
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Cathay additional verification", () => {

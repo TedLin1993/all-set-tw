@@ -318,13 +318,6 @@ function sessionFromLoginData(
   return session;
 }
 
-function accessToken(session: EInvoiceV2Session) {
-  // ApiCrypto.getAcToken: sid[14..17] + sid[0..3] selects token[5..30].
-  if (session.sid.length !== 18 || session.token.length < 44) return "";
-  const indexes = [14, 15, 16, 17, 0, 1, 2, 3];
-  return `${session.sid}|${indexes.map((index) => session.token.charAt((session.sid.charCodeAt(index) % 26) + 5)).join("")}`;
-}
-
 export function createInvoiceJwt(
   request: Record<string, unknown>,
   session: Pick<
