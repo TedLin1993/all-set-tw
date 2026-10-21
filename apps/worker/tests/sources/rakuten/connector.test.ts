@@ -26,14 +26,6 @@ const credentials = {
   password: "testpass12",
 };
 
-const depositPageText = `
-臺幣存款
-活存
-
-活存總額 0081200000001234
-$52,345
-`;
-
 const loanPageText = `
 貸款總覽
 
@@ -428,27 +420,6 @@ function fakeBrowserBinding() {
   return {
     fetch: vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
   } as unknown as Fetcher & { fetch: ReturnType<typeof vi.fn> };
-}
-
-// 自動流程結束時 session 必須被關掉、不得保留：close() 一次，並且經 binding
-// 送出遠端 DELETE。closeBrowserSession（#231）會在 close 之後才對本機連線
-// disconnect()，所以不再斷言 disconnect 從未被呼叫，而是斷言它只能發生在 close 之後。
-function expectBrowserClosedNotPreserved(
-  browser: {
-    close: ReturnType<typeof vi.fn>;
-    disconnect: ReturnType<typeof vi.fn>;
-  },
-  binding: { fetch: ReturnType<typeof vi.fn> },
-  sessionId: string,
-) {
-  expect(browser.close).toHaveBeenCalledOnce();
-  expect(binding.fetch).toHaveBeenCalledWith(
-    `https://fake.host/v1/devtools/browser/${sessionId}`,
-    expect.objectContaining({ method: "DELETE" }),
-  );
-  for (const order of browser.disconnect.mock.invocationCallOrder) {
-    expect(order).toBeGreaterThan(browser.close.mock.invocationCallOrder[0]);
-  }
 }
 
 function browser(browserPage: ReturnType<typeof makePage>) {

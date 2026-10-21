@@ -28,8 +28,6 @@ import {
 import {
   FubonBrowserCapacityError,
   FubonConnectionError,
-  FubonOtpInvalidError,
-  FubonOtpRequiredError,
   FubonVerificationRequiredError,
 } from "../../sources/fubon/connector";
 import {
@@ -54,13 +52,7 @@ import {
   SyncAlreadyRunningError,
 } from "./errors";
 import { classifySyncError } from "./error-response";
-import {
-  SYNC_SCOPE_ALL,
-  TDCC_SCOPE_BANK,
-  TDCC_SCOPE_INVESTMENTS,
-  TDCC_SCOPE_TRADES,
-  type SyncOutcome,
-} from "./types";
+import { SYNC_SCOPE_ALL, type SyncOutcome } from "./types";
 import {
   cancelQueuedManualSync,
   startQueuedManualSync,

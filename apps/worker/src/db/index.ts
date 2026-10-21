@@ -7,7 +7,7 @@ export {
   LATEST_INVESTMENT_POSITION_SCOPES_SQL,
 } from "./investment-positions";
 
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createDrizzle } from "./client";
 import { connectorSettings } from "./schema/settings";
 import { sanitizeDatabaseError } from "./errors";
