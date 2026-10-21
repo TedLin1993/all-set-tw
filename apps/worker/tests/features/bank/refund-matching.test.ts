@@ -205,6 +205,10 @@ describe("退費分類（隔離 D1）", () => {
         ["bakery-refund", "2026-10-02", 60, "範例烘焙坊"],
         ["order", "2026-09-28", -400, "範例網購股份有限公司"],
         ["order-refund", "2026-10-01", 400, "範例網購股份有限公司"],
+        ["verify", "2026-10-12", -40, "GOOGLE PAYMENT CORP"],
+        ["verify-refund", "2026-10-12", 40, "GOOGLE PAYMENT CORP"],
+        ["snack", "2026-10-12", -100, "範例點心鋪"],
+        ["snack-refund", "2026-10-12", 30, "範例點心鋪"],
       ].map(([id, day, amount, description]) =>
         db
           .prepare(
@@ -252,5 +256,24 @@ describe("退費分類（隔離 D1）", () => {
       source: "override",
     });
     expect(byId.get("order-refund")?.classification?.refund).toBeUndefined();
+  });
+
+  it("同日同店全額退款兩筆都排除計算，部分退款仍扣減支出", async () => {
+    const { transactions } = await getBankRange(db, {
+      from: "2026-10-01",
+      to: "2026-11-01",
+    });
+    const byId = new Map(
+      transactions.map((transaction) => [transaction.id, transaction]),
+    );
+
+    expect(byId.get("verify")?.excludedFromCalculation).toBe(true);
+    expect(byId.get("verify-refund")?.excludedFromCalculation).toBe(true);
+    expect(byId.get("snack")?.excludedFromCalculation).toBe(false);
+    expect(byId.get("snack-refund")).toMatchObject({
+      excludedFromCalculation: false,
+      classification: { refund: true },
+    });
+    expect(byId.get("bakery-refund")?.excludedFromCalculation).toBe(false);
   });
 });

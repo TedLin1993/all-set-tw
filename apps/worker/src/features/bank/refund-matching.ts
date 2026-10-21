@@ -169,3 +169,55 @@ export function matchRefundsToPurchases(
   }
   return matches;
 }
+
+function financialTime(transaction: TransferMatchTransaction) {
+  return transaction.authorizedAt ?? transaction.postedDate ?? "";
+}
+
+/**
+ * Pairs each full refund one to one with a purchase on the same card, day and
+ * currency, from the same merchant and of the exact amount. Such a pair is
+ * usually a cancelled order or a card verification hold that nets to zero, so
+ * both sides leave the calculations.
+ *
+ * @returns ids of both sides of every pair
+ */
+export function findSameDayRefundOffsetTransactionIds(
+  transactions: TransferMatchTransaction[],
+): Set<string> {
+  const byTime = (
+    left: TransferMatchTransaction,
+    right: TransferMatchTransaction,
+  ) =>
+    financialTime(left).localeCompare(financialTime(right)) ||
+    left.id.localeCompare(right.id);
+  const purchases = transactions
+    .filter(
+      (transaction) =>
+        transaction.accountType === "credit" &&
+        Number.isFinite(transaction.amount) &&
+        transaction.amount < 0 &&
+        getAutomaticTransferDay(transaction) !== undefined,
+    )
+    .sort(byTime);
+  const ids = new Set<string>();
+
+  for (const refund of transactions.filter(isRefundCandidate).sort(byTime)) {
+    const day = getAutomaticTransferDay(refund);
+    const merchant = merchantKey(refund);
+    const currency = refund.currency.trim().toUpperCase();
+    const purchase = purchases.find(
+      (candidate) =>
+        !ids.has(candidate.id) &&
+        candidate.accountId === refund.accountId &&
+        candidate.currency.trim().toUpperCase() === currency &&
+        -candidate.amount === refund.amount &&
+        getAutomaticTransferDay(candidate) === day &&
+        isSameMerchant(merchant, merchantKey(candidate)),
+    );
+    if (!purchase) continue;
+    ids.add(purchase.id);
+    ids.add(refund.id);
+  }
+  return ids;
+}

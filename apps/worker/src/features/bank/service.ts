@@ -33,6 +33,7 @@ import {
   getAutomaticTransferDay,
 } from "./transfer-matching";
 import {
+  findSameDayRefundOffsetTransactionIds,
   isRefundCandidate,
   matchRefundsToPurchases,
   refundOriginalDayRange,
@@ -206,20 +207,32 @@ async function presentBankTransactions(
   const automaticCreditOffsetIds = classificationsReady
     ? findAutomaticCreditOffsetTransactionIds(eligibleTransactions)
     : new Set<string>();
+  const calculatedTransactions = transactionsForClassification.filter(
+    (transaction) =>
+      !resolveCalculationExclusion({
+        ...transaction,
+        classificationExcludedFromCalculation: classificationMap.get(
+          transaction.id,
+        )?.excludedFromCalculation,
+      }),
+  );
   const refundPurchaseIds = classificationsReady
-    ? matchRefundsToPurchases(
-        transactions,
-        transactionsForClassification.filter(
-          (transaction) =>
-            !resolveCalculationExclusion({
-              ...transaction,
-              classificationExcludedFromCalculation: classificationMap.get(
-                transaction.id,
-              )?.excludedFromCalculation,
-            }),
-        ),
-      )
+    ? matchRefundsToPurchases(transactions, calculatedTransactions)
     : new Map<string, string>();
+  // Month ranges hold both sides of a same-day pair, so no extra lookup is needed.
+  const sameDayRefundOffsetIds = classificationsReady
+    ? findSameDayRefundOffsetTransactionIds(
+        calculatedTransactions.filter((transaction) => {
+          const classification = classificationMap.get(transaction.id);
+          return (
+            // An explicit include preference or user classification wins.
+            transaction.calculationPreference !== 0 &&
+            classification?.source !== "override" &&
+            classification?.source !== "user_rule"
+          );
+        }),
+      )
+    : new Set<string>();
 
   // A refund takes its purchase's category, also over an AI guess. A rule or
   // manual category still wins, and only counts as a refund when it agrees
@@ -243,6 +256,13 @@ async function presentBankTransactions(
       : own;
   };
 
+  const refundOrOffsetClassification = (transactionId: string) => {
+    const classification = refundClassification(transactionId);
+    return classification && sameDayRefundOffsetIds.has(transactionId)
+      ? { ...classification, excludedFromCalculation: true }
+      : classification;
+  };
+
   return transactions.map(
     ({
       effectiveDate: _effectiveDate,
@@ -263,7 +283,7 @@ async function presentBankTransactions(
               source: "auto_transfer" as const,
               excludedFromCalculation: true,
             }
-          : refundClassification(transaction.id);
+          : refundOrOffsetClassification(transaction.id);
       return {
         ...normalizeBankTransactionDisplay(transaction),
         excludedFromCalculation: resolveCalculationExclusion({
