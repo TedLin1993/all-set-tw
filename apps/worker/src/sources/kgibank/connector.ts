@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import {
   BrowserRunCapacityError,
@@ -63,10 +64,17 @@ const FORWARDED_HEADERS = [
   "x-c-pagetype",
 ] as const;
 
-export class KgibankVerificationRequiredError extends Error {
+export class KgibankVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "KgibankVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
   }
 }
 
@@ -84,21 +92,39 @@ export class KgibankCaptchaRejectedError extends KgibankVerificationRequiredErro
   }
 }
 
-export class KgibankConnectionError extends Error {
+export class KgibankConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string, cause?: unknown) {
     super(message);
     this.name = "KgibankConnectionError";
     if (cause !== undefined) this.cause = cause;
   }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "KGIBANK_CONNECTION_FAILED" };
+  }
 }
 
-export class KgibankBrowserCapacityError extends Error {
+export class KgibankBrowserCapacityError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly retryAfterSeconds = 20,
   ) {
     super(message);
     this.name = "KgibankBrowserCapacityError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 429,
+      code: "KGIBANK_BROWSER_BUSY",
+      retryAfterSeconds: this.retryAfterSeconds,
+    };
   }
 }
 

@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import { reportSyncProgress } from "../sync-progress";
 import {
@@ -122,10 +123,17 @@ const MAX_TRANSACTION_QUERIES_PER_ACCOUNT = 12;
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-export class FubonVerificationRequiredError extends Error {
+export class FubonVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "FubonVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
   }
 }
 
@@ -156,6 +164,10 @@ export class FubonOtpRequiredError extends FubonVerificationRequiredError {
     super(message);
     this.name = "FubonOtpRequiredError";
   }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "FUBON_OTP_REQUIRED", needsUserAction: true };
+  }
 }
 
 /** OTP 錯誤但未達銀行錯誤上限，保留同一個 Browser session 讓使用者重輸。 */
@@ -168,13 +180,24 @@ export class FubonOtpInvalidError extends FubonVerificationRequiredError {
     super(message);
     this.name = "FubonOtpInvalidError";
   }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "FUBON_OTP_INVALID", needsUserAction: true };
+  }
 }
 
-export class FubonConnectionError extends Error {
+export class FubonConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string, cause?: unknown) {
     super(message);
     this.name = "FubonConnectionError";
     if (cause !== undefined) this.cause = cause;
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "FUBON_CONNECTION_FAILED" };
   }
 }
 
@@ -186,13 +209,24 @@ export class FubonSessionEndedError extends FubonConnectionError {
   }
 }
 
-export class FubonBrowserCapacityError extends Error {
+export class FubonBrowserCapacityError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly retryAfterSeconds = 20,
   ) {
     super(message);
     this.name = "FubonBrowserCapacityError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 429,
+      code: "FUBON_BROWSER_BUSY",
+      retryAfterSeconds: this.retryAfterSeconds,
+    };
   }
 }
 

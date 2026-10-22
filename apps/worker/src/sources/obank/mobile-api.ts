@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import { reportSyncProgress } from "../sync-progress";
 
@@ -93,17 +94,28 @@ export class ObankMultipleLoginError extends ObankVerificationRequiredError {
   }
 }
 
-export class ObankConnectionError extends Error {
+export class ObankConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "ObankConnectionError";
   }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "OBANK_CONNECTION_FAILED" };
+  }
 }
 
-export class ObankProtocolError extends Error {
+export class ObankProtocolError extends Error implements SourceSyncErrorSource {
   constructor(message: string) {
     super(message);
     this.name = "ObankProtocolError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "OBANK_CONNECTION_FAILED" };
   }
 }
 

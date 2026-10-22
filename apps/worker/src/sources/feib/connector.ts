@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import { reportSyncProgress } from "../sync-progress";
 import {
@@ -77,10 +78,17 @@ const POLL_MS = 300;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-export class FeibVerificationRequiredError extends Error {
+export class FeibVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "FeibVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
   }
 }
 
@@ -107,11 +115,18 @@ export class FeibAutoCaptchaFailedError extends FeibVerificationRequiredError {
   }
 }
 
-export class FeibConnectionError extends Error {
+export class FeibConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string, cause?: unknown) {
     super(message);
     this.name = "FeibConnectionError";
     if (cause !== undefined) this.cause = cause;
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "FEIB_CONNECTION_FAILED" };
   }
 }
 
@@ -123,13 +138,24 @@ export class FeibSessionEndedError extends FeibConnectionError {
   }
 }
 
-export class FeibBrowserCapacityError extends Error {
+export class FeibBrowserCapacityError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly retryAfterSeconds = 20,
   ) {
     super(message);
     this.name = "FeibBrowserCapacityError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 429,
+      code: "FEIB_BROWSER_BUSY",
+      retryAfterSeconds: this.retryAfterSeconds,
+    };
   }
 }
 

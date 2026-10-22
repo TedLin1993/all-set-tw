@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 /**
  * 樂天國際銀行 connector（Cloudflare Browser Rendering）。
@@ -101,10 +102,17 @@ const RAKUTEN_SYNC_STAGE_LABELS: Record<RakutenSyncStage, string> = {
   parse_payload: "解析帳務資料",
 };
 
-export class RakutenVerificationRequiredError extends Error {
+export class RakutenVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "RakutenVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
   }
 }
 
@@ -163,11 +171,18 @@ export class RakutenCaptchaRecognizerError extends Error {
   }
 }
 
-export class RakutenConnectionError extends Error {
+export class RakutenConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string, cause?: unknown) {
     super(message);
     this.name = "RakutenConnectionError";
     if (cause !== undefined) this.cause = cause;
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "RAKUTEN_CONNECTION_FAILED" };
   }
 }
 
@@ -197,13 +212,24 @@ class RakutenSyncDeadlineError extends RakutenConnectionError {
   }
 }
 
-export class RakutenBrowserCapacityError extends Error {
+export class RakutenBrowserCapacityError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly retryAfterSeconds = 20,
   ) {
     super(message);
     this.name = "RakutenBrowserCapacityError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 429,
+      code: "RAKUTEN_BROWSER_BUSY",
+      retryAfterSeconds: this.retryAfterSeconds,
+    };
   }
 }
 

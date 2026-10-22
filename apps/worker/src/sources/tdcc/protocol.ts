@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { Connector } from "../types";
 import type {
   BankAccount,
@@ -209,9 +210,19 @@ const SESSION_EXPIRED_CODES = new Set([
 // must drop it from config and have the user request a fresh one.
 const OTP_EXPIRED_CODES = new Set(["V0017"]);
 
-export class TdccOtpExpiredError extends Error {}
+export class TdccOtpExpiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
+  }
+}
 
-export class TdccConnectionError extends Error {
+export class TdccConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     public readonly code: string,
     message: string,
@@ -219,9 +230,16 @@ export class TdccConnectionError extends Error {
     super(`TDCC 登入或同步失敗（${code}）：${message}`);
     this.name = "TdccConnectionError";
   }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "TDCC_CONNECTION_FAILED" };
+  }
 }
 
-export class TdccVerificationRequiredError extends Error {
+export class TdccVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     public readonly channel: "email" | "sms",
     public readonly deliveryTriggered: boolean,
@@ -234,6 +252,17 @@ export class TdccVerificationRequiredError extends Error {
         : "TDCC 登入狀態已失效，請回到設定頁重新驗證。",
     );
     this.name = "TdccVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 400,
+      code:
+        this.channel === "sms"
+          ? "TDCC_SMS_OTP_REQUIRED"
+          : "TDCC_EMAIL_OTP_REQUIRED",
+      needsUserAction: true,
+    };
   }
 }
 

@@ -238,6 +238,7 @@ promotion 放在同一 D1 batch，沿用來源的 lock 與設定版本 guard。�
 4. 在同一來源目錄的 `sync.ts` 實作單次同步與 challenge use case，使用 `features/sync` 的共用 record mapping 與 staged persistence；需分段續跑的來源則沿用 durable sync 與 `run-repository.ts` 模式。來源專用的配對、存款生命週期與舊資料修復放在相鄰檔案。
    若來源提供直接存款帳戶，確認 `DIRECT_DEPOSIT_CONNECTOR_IDS` 是否需加入，以連結集保交割帳戶。
 5. 在 Worker runtime registry 註冊 sync／challenge handler。
+   前端需要依代碼接續流程或顯示專屬提示的錯誤，在 `shared/api/errors.ts` 宣告代碼，並讓錯誤類別實作 `sources/sync-error.ts` 的 `toSyncError()`；需要使用者回來處理的錯誤同時宣告 `needsUserAction: true`。不在 `features/sync/error-response.ts` 或 `features/sync/errors.ts` 新增來源判斷。
 6. 在前端補上必要的 challenge UI；一般帳密表單由 catalog 的 `credentialFields` 產生，不需另外新增欄位。
 7. 新增 sync job migration。
 8. 依上述核心風險完成必要驗證，並更新 `README.md` 支援資料來源表。

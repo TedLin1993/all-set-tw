@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import { reportSyncProgress } from "../sync-progress";
 
@@ -87,10 +88,17 @@ export type MegabankCaptchaChallenge = {
   device: MegabankDevice;
 };
 
-export class MegabankVerificationRequiredError extends Error {
+export class MegabankVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "MegabankVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
   }
 }
 /** 銀行回覆圖形驗證碼錯誤（0113）；自動同步可換新驗證碼重試。 */
@@ -115,6 +123,14 @@ export class MegabankOtpRequiredError extends MegabankVerificationRequiredError 
     super(message);
     this.name = "MegabankOtpRequiredError";
   }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 400,
+      code: "MEGABANK_SMS_OTP_REQUIRED",
+      needsUserAction: true,
+    };
+  }
 }
 export class MegabankOtpInvalidError extends MegabankVerificationRequiredError {
   constructor(
@@ -126,14 +142,28 @@ export class MegabankOtpInvalidError extends MegabankVerificationRequiredError {
     super(message);
     this.name = "MegabankOtpInvalidError";
   }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "MEGABANK_OTP_INVALID", needsUserAction: true };
+  }
 }
-export class MegabankConnectionError extends Error {
+export class MegabankConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message = "兆豐銀行服務暫時無法連線。") {
     super(message);
     this.name = "MegabankConnectionError";
   }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "MEGABANK_CONNECTION_FAILED" };
+  }
 }
-export class MegabankProtocolError extends Error {
+export class MegabankProtocolError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message = "兆豐銀行回應格式已變更。",
     readonly code?: string,
@@ -141,6 +171,10 @@ export class MegabankProtocolError extends Error {
   ) {
     super(message);
     this.name = "MegabankProtocolError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "MEGABANK_CONNECTION_FAILED" };
   }
 }
 

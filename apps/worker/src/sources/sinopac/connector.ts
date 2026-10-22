@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import {
   BrowserRunCapacityError,
@@ -96,13 +97,24 @@ export class SinopacCredentialRejectedError extends SinopacVerificationRequiredE
   }
 }
 
-export class SinopacBrowserCapacityError extends Error {
+export class SinopacBrowserCapacityError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly retryAfterSeconds = 20,
   ) {
     super(message);
     this.name = "SinopacBrowserCapacityError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 429,
+      code: "SINOPAC_BROWSER_BUSY",
+      retryAfterSeconds: this.retryAfterSeconds,
+    };
   }
 }
 

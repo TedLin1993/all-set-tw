@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import {
   BrowserRunCapacityError,
@@ -107,10 +108,17 @@ const TAISHIN_SYNC_STAGE_LABELS: Record<TaishinSyncStage, string> = {
   export_session: "保存登入 session",
 };
 
-export class TaishinVerificationRequiredError extends Error {
+export class TaishinVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "TaishinVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
   }
 }
 
@@ -135,7 +143,10 @@ class TaishinLoginOutcomeUnknownError extends TaishinVerificationRequiredError {
   }
 }
 
-export class TaishinConnectionError extends Error {
+export class TaishinConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly sessionCookies?: string,
@@ -145,6 +156,10 @@ export class TaishinConnectionError extends Error {
     super(message);
     this.name = "TaishinConnectionError";
     if (cause !== undefined) this.cause = cause;
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "TAISHIN_CONNECTION_FAILED" };
   }
 }
 
@@ -180,13 +195,24 @@ class TaishinTransientConnectionError extends TaishinConnectionError {
   }
 }
 
-export class TaishinBrowserCapacityError extends Error {
+export class TaishinBrowserCapacityError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly retryAfterSeconds = 20,
   ) {
     super(message);
     this.name = "TaishinBrowserCapacityError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 429,
+      code: "TAISHIN_BROWSER_BUSY",
+      retryAfterSeconds: this.retryAfterSeconds,
+    };
   }
 }
 
