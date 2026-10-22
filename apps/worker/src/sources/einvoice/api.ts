@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import forge from "node-forge";
 
 const BASE_URL = "https://invoiceapp.nat.gov.tw/UIAPAPP/api/";
@@ -33,12 +34,23 @@ export type LoginParams =
       PushToken?: string;
     };
 
-export class EInvoiceProtocolUnavailableError extends Error {
+export class EInvoiceProtocolUnavailableError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message = "財政部電子發票服務拒絕目前的 App 登入協定（代碼 6603）。這不是帳號密碼錯誤，也不是暫時忙碌；重複同步不會恢復，需改用新版協定或財政部正式 AppID API。",
   ) {
     super(message);
     this.name = "EInvoiceProtocolUnavailableError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 503,
+      code: "CONNECTOR_PROTOCOL_UNAVAILABLE",
+      needsUserAction: true,
+    };
   }
 }
 

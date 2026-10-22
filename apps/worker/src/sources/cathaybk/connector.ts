@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import {
   connectBrowserWithCancellation,
@@ -61,10 +62,17 @@ const TRUST_DEVICE_CONTEXT_PATTERN =
 const TRUST_DEVICE_CONFIRM_PATTERN =
   /確定加入|確認加入|完成設定|^確定$|^確認$|^完成$/;
 
-export class CathayVerificationRequiredError extends Error {
+export class CathayVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "CathayVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
   }
 }
 
@@ -77,6 +85,14 @@ export class CathayOtpChannelRequiredError extends CathayVerificationRequiredErr
     super(message);
     this.name = "CathayOtpChannelRequiredError";
   }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 400,
+      code: "CATHAY_OTP_CHANNEL_REQUIRED",
+      needsUserAction: true,
+    };
+  }
 }
 
 export class CathayOtpRequiredError extends CathayVerificationRequiredError {
@@ -87,6 +103,17 @@ export class CathayOtpRequiredError extends CathayVerificationRequiredError {
     super(message);
     this.name = "CathayOtpRequiredError";
   }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 400,
+      code:
+        this.channel === "sms"
+          ? "CATHAY_SMS_OTP_REQUIRED"
+          : "CATHAY_EMAIL_OTP_REQUIRED",
+      needsUserAction: true,
+    };
+  }
 }
 
 export class CathayOtpInvalidError extends CathayVerificationRequiredError {
@@ -96,12 +123,24 @@ export class CathayOtpInvalidError extends CathayVerificationRequiredError {
     super(message);
     this.name = "CathayOtpInvalidError";
   }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "CATHAY_OTP_INVALID", needsUserAction: true };
+  }
 }
 
 export class CathayOtpSessionExpiredError extends CathayVerificationRequiredError {
   constructor() {
     super("國泰世華驗證工作階段已逾時，請重新同步後再取得驗證碼。");
     this.name = "CathayOtpSessionExpiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 400,
+      code: "CATHAY_OTP_SESSION_EXPIRED",
+      needsUserAction: true,
+    };
   }
 }
 

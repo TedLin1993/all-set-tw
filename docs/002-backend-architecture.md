@@ -256,7 +256,7 @@ Middleware 應只處理跨功能的 request concern，不應承擔 feature 商�
 
 實體目錄集中不改變相依邊界：`sync.ts` 可依賴 connector、protocol、client、repository 與明確的共用 service；protocol／client 不得依賴 Hono、D1、Worker `Env`、adapter 或同步流程，也不得直接寫入資料庫。來源之間不引用彼此的內部實作。
 
-`sources` 根目錄只保留跨來源使用的能力：`browser.ts` 管 browser acquisition、capacity 錯誤、登入前頁面停滯復原與有期限的 session 清理，`types.ts` 定義後端 `Connector`／`SyncResult`，`financial-types.ts` 定義 connector 正規化後的金融資料（`BankAccount`、`BankTransaction`、`CreditCardBill`、`Invoice` 等），`sync-window.ts`、`credit-card-status.ts` 與 `captcha-retry.ts`（API 型來源的自動驗證碼重試）提供共同 policy／判斷。`config-registry.ts` 直接引用各來源的純 schema，供設定 feature 使用；同步 handler 仍由 `features/sync/registry.ts` 組裝。Worker 與測試直接引用來源檔案，不建立跨來源的實作匯出入口。
+`sources` 根目錄只保留跨來源使用的能力：`browser.ts` 管 browser acquisition、capacity 錯誤、登入前頁面停滯復原與有期限的 session 清理，`sync-error.ts` 定義來源錯誤宣告對外錯誤代碼的介面，`types.ts` 定義後端 `Connector`／`SyncResult`，`financial-types.ts` 定義 connector 正規化後的金融資料（`BankAccount`、`BankTransaction`、`CreditCardBill`、`Invoice` 等），`sync-window.ts`、`credit-card-status.ts` 與 `captcha-retry.ts`（API 型來源的自動驗證碼重試）提供共同 policy／判斷。`config-registry.ts` 直接引用各來源的純 schema，供設定 feature 使用；同步 handler 仍由 `features/sync/registry.ts` 組裝。Worker 與測試直接引用來源檔案，不建立跨來源的實作匯出入口。
 
 Browser 登入前復原最多三次嘗試，只包住頁面與驗證碼準備；OCR、送出登入與資料查詢留在來源 adapter，政策細節見 `docs/004-connector-development.md`。
 
@@ -466,6 +466,7 @@ API error 統一為：
 - 外部 connector 暫時無法使用。
 
 Service 應使用明確的 error class 表示，route 再映射成固定 HTTP status 與 error code。
+來源錯誤需要穩定代碼或使用者處理狀態時，由錯誤類別實作 `sources/sync-error.ts` 的 `SourceSyncErrorSource`，以 `toSyncError()` 宣告 HTTP status、代碼、`Retry-After` 秒數，以及同步結果是否為 `needs_user_action`；子類別未覆寫時沿用父類別的分類。未實作的錯誤代碼為 `SYNC_FAILED`，狀態由 `isUserActionError` 依錯誤訊息判斷。`classifySyncError` 與 `isUserActionError` 只直接處理同步流程本身的錯誤，不逐一引用來源錯誤。
 
 所有錯誤代碼集中宣告於 `shared/api/errors.ts`。`jsonError`、`validationHook` 只接受 `ApiErrorCode`；`classifySyncError`、`SyncFailureInput` 與手動同步 run 的結案只接受 `SyncErrorCode`，讀出 sync job 與 run 的 errorCode 時也標為同一型別。新增或改名代碼須先修改共用型別，前端依代碼接續流程的比對會在型別檢查時一併驗證。
 
@@ -640,6 +641,7 @@ sources/
 ├── browser.ts
 ├── types.ts
 ├── config-registry.ts
+├── sync-error.ts              # 來源錯誤的對外錯誤代碼介面
 ├── sync-window.ts
 ├── captcha-retry.ts
 ├── credit-card-status.ts
@@ -687,7 +689,7 @@ sources/
 | 檔案                                             | 責任                                                                                                                                       |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `route.ts`                                       | 手動同步 API 與 request validation；同步錯誤回應交由 `error-response.ts`。                                                                 |
-| `error-response.ts`                              | 將 connector-specific 錯誤分類為 HTTP status、錯誤代碼、脫敏訊息與 `Retry-After`；HTTP 回應與背景 run 結果共用同一份分類。                 |
+| `error-response.ts`                              | 將同步錯誤分類為 HTTP status、錯誤代碼、脫敏訊息與 `Retry-After`；來源錯誤讀取其 `toSyncError()`，HTTP 回應與背景 run 結果共用同一份分類。 |
 | `manual-sync.ts`                                 | 一般銀行手動同步的 lock、狀態更新與已結案排程報告修復協調；也負責背景手動同步的排入與 Queue 執行。                                         |
 | `manual-run-repository.ts`                       | `manual_sync_runs` 的建立／取得 active run 與條件式狀態轉換；轉為 running 前必須持有 canonical connector lock。                            |
 | `registry.ts`                                    | 從共用 catalog 驗證 scope，dispatch 單次同步與 challenge handler；電子發票與集保的 `run` 明確拒絕單次同步，入口必須使用各自的 Queue 流程。 |

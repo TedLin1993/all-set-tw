@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import {
   BrowserRunCapacityError,
@@ -216,7 +217,10 @@ class FirstbankAlreadyAuthenticatedError extends Error {
   }
 }
 
-export class FirstbankConnectionError extends Error {
+export class FirstbankConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly sessionCookies?: string,
@@ -227,15 +231,30 @@ export class FirstbankConnectionError extends Error {
     this.name = "FirstbankConnectionError";
     if (cause !== undefined) this.cause = cause;
   }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "FIRSTBANK_CONNECTION_FAILED" };
+  }
 }
 
-export class FirstbankBrowserCapacityError extends Error {
+export class FirstbankBrowserCapacityError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly retryAfterSeconds = 20,
   ) {
     super(message);
     this.name = "FirstbankBrowserCapacityError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 429,
+      code: "FIRSTBANK_BROWSER_BUSY",
+      retryAfterSeconds: this.retryAfterSeconds,
+    };
   }
 }
 

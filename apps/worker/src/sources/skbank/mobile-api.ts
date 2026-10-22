@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import { reportSyncProgress } from "../sync-progress";
 
@@ -72,10 +73,17 @@ export class SkbankVerificationRequiredError extends Error {
   }
 }
 
-export class SkbankConnectionError extends Error {
+export class SkbankConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message = "新光銀行資料同步暫時無法完成。") {
     super(message);
     this.name = "SkbankConnectionError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "SKBANK_CONNECTION_FAILED" };
   }
 }
 

@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import { CtbcVerificationRequiredError } from "./errors";
 export { CtbcVerificationRequiredError } from "./errors";
 import { fetchCtbcForeignDeposits } from "./foreign-deposits";
@@ -68,12 +69,31 @@ export class CtbcTwoStageRequiredError extends CtbcVerificationRequiredError {
     );
     this.name = "CtbcTwoStageRequiredError";
   }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 400,
+      code:
+        this.method === "app"
+          ? "CTBC_APP_APPROVAL_REQUIRED"
+          : "CTBC_EMAIL_OTP_REQUIRED",
+      needsUserAction: true,
+    };
+  }
 }
 
 export class CtbcVerificationExpiredError extends CtbcVerificationRequiredError {
   constructor() {
     super("中國信託登入驗證已過期或未獲核准，請重新開始驗證。");
     this.name = "CtbcVerificationExpiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 400,
+      code: "CTBC_VERIFICATION_EXPIRED",
+      needsUserAction: true,
+    };
   }
 }
 
@@ -88,10 +108,17 @@ type CtbcConnectorOptions = {
   onPendingSession?: (session: CtbcPendingSession | undefined) => Promise<void>;
 };
 
-export class CtbcConnectionError extends Error {
+export class CtbcConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "CtbcConnectionError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "CTBC_CONNECTION_FAILED" };
   }
 }
 

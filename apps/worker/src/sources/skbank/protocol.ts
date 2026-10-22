@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type {
   BankAccount,
   BankBalanceSnapshot,
@@ -60,10 +61,17 @@ type ParsedAccount = SkbankAccountQuery & {
   accountProperty?: string;
 };
 
-export class SkbankProtocolError extends Error {
+export class SkbankProtocolError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message = "新光銀行回應格式已變更，暫時無法同步。") {
     super(message);
     this.name = "SkbankProtocolError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "SKBANK_CONNECTION_FAILED" };
   }
 }
 

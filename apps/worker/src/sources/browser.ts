@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "./sync-error";
 import puppeteer, {
   type Browser,
   type Page,
@@ -46,7 +47,10 @@ const DAY_MS = 86_400_000;
 export type BrowserRunCapacityKind =
   "daily_quota" | "rate_limit" | "acquisition_rate_limit";
 
-export class BrowserRunCapacityError extends Error {
+export class BrowserRunCapacityError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     readonly kind: BrowserRunCapacityKind,
     readonly retryAfterSeconds: number,
@@ -59,6 +63,15 @@ export class BrowserRunCapacityError extends Error {
           : "Cloudflare 瀏覽器暫時達到使用上限，請稍後再試。",
     );
     this.name = "BrowserRunCapacityError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 429,
+      code: "BROWSER_BUSY",
+      retryAfterSeconds: this.retryAfterSeconds,
+      needsUserAction: false,
+    };
   }
 }
 

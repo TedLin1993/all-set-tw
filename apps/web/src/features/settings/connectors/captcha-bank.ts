@@ -30,8 +30,10 @@ export function captchaBankFailure(error: unknown) {
       error.code === "FIRSTBANK_CONNECTION_FAILED" && /格式已變更/.test(message)
     );
 
+  // 來源訊息多半已提示重新取得驗證碼，避免重複追加。
+  const needsHint = sessionInvalidated && !/重新取得驗證碼/.test(message);
   return {
-    message: sessionInvalidated ? `${message} 請重新取得驗證碼。` : message,
+    message: needsHint ? `${message} 請重新取得驗證碼。` : message,
     sessionInvalidated,
   };
 }

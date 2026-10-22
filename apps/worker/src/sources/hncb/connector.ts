@@ -1,3 +1,4 @@
+import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import {
   BrowserRunCapacityError,
@@ -46,10 +47,17 @@ const HNCB_LOGIN_READY_TIMEOUT_MS = 15_000;
 const HNCB_SYNC_TIMEOUT_MS = 120_000;
 const HNCB_CAPTCHA_PREPARATION_TIMEOUT_MS = 35_000;
 
-export class HncbVerificationRequiredError extends Error {
+export class HncbVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "HncbVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
   }
 }
 
@@ -67,7 +75,10 @@ export class HncbCaptchaRejectedError extends HncbVerificationRequiredError {
   }
 }
 
-export class HncbConnectionError extends Error {
+export class HncbConnectionError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly sessionCookies?: string,
@@ -77,6 +88,10 @@ export class HncbConnectionError extends Error {
     super(message);
     this.name = "HncbConnectionError";
     if (cause !== undefined) this.cause = cause;
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 502, code: "HNCB_CONNECTION_FAILED" };
   }
 }
 
@@ -94,13 +109,24 @@ class HncbActionTimeoutError extends Error {
   }
 }
 
-export class HncbBrowserCapacityError extends Error {
+export class HncbBrowserCapacityError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(
     message: string,
     readonly retryAfterSeconds = 20,
   ) {
     super(message);
     this.name = "HncbBrowserCapacityError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return {
+      status: 429,
+      code: "HNCB_BROWSER_BUSY",
+      retryAfterSeconds: this.retryAfterSeconds,
+    };
   }
 }
 

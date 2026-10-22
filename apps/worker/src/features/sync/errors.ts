@@ -1,25 +1,5 @@
 import type { ConnectorId } from "@taiwan-fin-hub/shared";
-import { BrowserRunCapacityError } from "../../sources/browser";
-import {
-  CathayOtpChannelRequiredError,
-  CathayOtpRequiredError,
-  CathayOtpSessionExpiredError,
-  CathayVerificationRequiredError,
-} from "../../sources/cathaybk/connector";
-import {
-  TdccOtpExpiredError,
-  TdccVerificationRequiredError,
-} from "../../sources/tdcc/protocol";
-import { EInvoiceProtocolUnavailableError } from "../../sources/einvoice/api";
-import { SinopacVerificationRequiredError } from "../../sources/sinopac/connector";
-import { TaishinVerificationRequiredError } from "../../sources/taishin/connector";
-import { HncbVerificationRequiredError } from "../../sources/hncb/connector";
-import { RakutenVerificationRequiredError } from "../../sources/rakuten/connector";
-import { KgibankVerificationRequiredError } from "../../sources/kgibank/connector";
-import { MegabankVerificationRequiredError } from "../../sources/megabank/mobile-api";
-import { CtbcVerificationRequiredError } from "../../sources/ctbc/mobile-api";
-import { FubonVerificationRequiredError } from "../../sources/fubon/connector";
-import { FeibVerificationRequiredError } from "../../sources/feib/connector";
+import { sourceSyncErrorOf } from "../../sources/sync-error";
 
 export class SyncAlreadyRunningError extends Error {
   constructor(readonly connectorId: ConnectorId) {
@@ -38,28 +18,11 @@ export class ManualCaptchaRequiredError extends NeedsUserActionError {}
 
 export class NextbankCaptchaRequiredError extends NeedsUserActionError {}
 
+/** 來源錯誤以 `toSyncError().needsUserAction` 自行宣告；未宣告時依錯誤訊息判斷。 */
 export function isUserActionError(error: unknown) {
-  if (error instanceof BrowserRunCapacityError) return false;
-  if (
-    error instanceof NeedsUserActionError ||
-    error instanceof CtbcVerificationRequiredError ||
-    error instanceof CathayOtpChannelRequiredError ||
-    error instanceof CathayOtpRequiredError ||
-    error instanceof CathayOtpSessionExpiredError ||
-    error instanceof CathayVerificationRequiredError ||
-    error instanceof TdccOtpExpiredError ||
-    error instanceof TdccVerificationRequiredError ||
-    error instanceof EInvoiceProtocolUnavailableError ||
-    error instanceof SinopacVerificationRequiredError ||
-    error instanceof TaishinVerificationRequiredError ||
-    error instanceof HncbVerificationRequiredError ||
-    error instanceof RakutenVerificationRequiredError ||
-    error instanceof KgibankVerificationRequiredError ||
-    error instanceof MegabankVerificationRequiredError ||
-    error instanceof FubonVerificationRequiredError ||
-    error instanceof FeibVerificationRequiredError
-  )
-    return true;
+  const declared = sourceSyncErrorOf(error)?.needsUserAction;
+  if (declared !== undefined) return declared;
+  if (error instanceof NeedsUserActionError) return true;
   const message = error instanceof Error ? error.message : String(error);
   return /OTP|verification|requires.*login|requires.*session|requires.*user action/i.test(
     message,
