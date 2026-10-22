@@ -258,6 +258,18 @@
               <p class="mt-1 text-caption text-subtle">
                 {cardPaymentLabel(card)}
               </p>
+              {#if card.recentCards?.length}
+                <!-- 來自近 90 天交易的卡號末四碼與卡名，只供參考，不是完整卡片清單。 -->
+                <p class="mt-1 text-caption text-subtle">
+                  近期使用的卡片：{card.recentCards
+                    .map((item) =>
+                      item.name
+                        ? `${item.name} · ${item.last4}`
+                        : `末四碼 ${item.last4}`,
+                    )
+                    .join("、")}
+                </p>
+              {/if}
               {#if api}
                 <PaymentAccountSelect {api} account={card} {accounts} />
               {/if}
