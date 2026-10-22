@@ -234,8 +234,8 @@
                       {group.institution}
                     </strong>
                     <small class="mt-1 block truncate text-caption text-subtle">
-                      {group.accounts.length} 帳戶 · {group.loans.length} 貸款 · {group
-                        .cards.length} 卡片{group.foreignCurrencies.length
+                      {group.accounts.length} 帳戶 · {group.loans.length} 貸款 · {group.cardAccountCount}
+                      信用卡帳戶{group.foreignCurrencies.length
                         ? ` · 含 ${group.foreignCurrencies.join("、")}`
                         : ""}
                     </small>
@@ -372,8 +372,8 @@
                     {group.institution}
                   </strong>
                   <small class="mt-1 block truncate text-caption text-subtle">
-                    {group.accounts.length} 帳戶 · {group.loans.length} 貸款 · {group
-                      .cards.length} 卡片{group.foreignCurrencies.length
+                    {group.accounts.length} 帳戶 · {group.loans.length} 貸款 · {group.cardAccountCount}
+                    信用卡帳戶{group.foreignCurrencies.length
                       ? ` · 含 ${group.foreignCurrencies.join("、")}`
                       : ""}
                   </small>

@@ -26,6 +26,8 @@ export interface InstitutionAssetGroup {
   accounts: BankAccountRow[];
   cards: BankAccountRow[];
   loans: BankAccountRow[];
+  /** 信用卡帳戶數；同一帳戶的不同幣別（例如台幣與日幣帳單）只算一個。 */
+  cardAccountCount: number;
   assetTotalTwd: number;
   debtTotalTwd: number;
   loanDebtTotalTwd: number;
@@ -56,6 +58,22 @@ function institutionKey(account: BankAccountRow) {
   const bankCode =
     account.bankCode ?? CONNECTOR_BANK_CODES[account.connectorId];
   return bankCode ? `bank:${bankCode}` : `connector:${account.connectorId}`;
+}
+
+/**
+ * 永豐、中信等來源以「帳戶＋幣別」建立信用卡資料，sourceId 以幣別結尾；
+ * 去掉幣別後相同的視為同一個信用卡帳戶。
+ */
+function cardAccountCount(cards: BankAccountRow[]) {
+  return new Set(
+    cards.map(
+      (card) =>
+        `${card.connectorId}:${card.sourceId.replace(
+          new RegExp(`:${card.currency}$`, "i"),
+          "",
+        )}`,
+    ),
+  ).size;
 }
 
 export function calculateAssetSummary({
@@ -169,6 +187,7 @@ export function calculateAssetSummary({
             Math.abs(toTwd(b.balance ?? 0, b.currency)) -
             Math.abs(toTwd(a.balance ?? 0, a.currency)),
         ),
+        cardAccountCount: cardAccountCount(cards),
         assetTotalTwd: accounts.reduce(
           (sum, account) => sum + toTwd(account.balance ?? 0, account.currency),
           0,

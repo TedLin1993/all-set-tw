@@ -240,7 +240,7 @@
         信用卡帳戶
       </h3>
       <span class="text-caption text-subtle">
-        {group.cards.length} 張卡片
+        {group.cardAccountCount} 個帳戶
       </span>
     </div>
     {#if group.cards.length === 0}
