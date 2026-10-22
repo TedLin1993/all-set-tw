@@ -9,7 +9,7 @@ Connector 採三層 registry：
 | 層級            | 位置                                                                      | 責任                                                                          |
 | --------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | 共用 catalog    | `shared/connector-catalog.ts` 的 `connectorCatalog`                       | ID、顯示名稱、連接模式、scope、資料能力、設定欄位分類、表單欄位標籤與顯示順序 |
-| Config registry | `apps/worker/src/sources/config-registry.ts` 的 `connectorConfigSchemas`  | Zod schema 與設定解析                                                         |
+| Config registry | `apps/worker/src/sources/config-registry.ts` 的 `connectorConfigSchemas`  | Zod schema、設定解析與設定頁 session 狀態判斷                                 |
 | Worker runtime  | `apps/worker/src/features/sync/registry.ts` 的 `connectorRuntimeRegistry` | 手動／排程同步與互動式 challenge handler                                      |
 
 `ConnectorId` 由 `connectorCatalog` 的 key 推得；catalog 每筆 `id` 必須與 key 相同。Config 與 Worker runtime registry 都必須以 `Record<ConnectorId, ...>` 宣告，新增 catalog 項目後，TypeScript 應立即指出尚未補齊的 config 或 runtime。
@@ -53,6 +53,7 @@ Connector 採三層 registry：
 - 同步回溯範圍是 connector 的 runtime policy，不得做成公開偏好：電子發票固定同步最近 2 期；銀行 connector 固定同步最近 3 個月或 3 期帳單。舊版 `periodsBack` 與 `lookbackMonths` 必須忽略並在後續設定儲存時移除。
 - 電子發票品項明細是固定同步 policy，不是公開偏好：不得新增 `fetchDetails` catalog field、前端 checkbox 或 sync request override。既有 `public_config.fetchDetails` 在 migration 與下一次設定儲存時必須移除。
 - 任一 credential 變更時，必須清除 catalog `resetOnCredentialChangeFields` 宣告的衍生狀態與既有 cursor。
+- 只在特定身分欄位變更時才重設的狀態（例如中信切換身分證字號或使用者代號時的虛擬裝置）在來源的 `protocol.ts` 宣告，並註冊於 `connectorIdentityResets`；`features/connectors` 不判斷個別來源。
 - Challenge 成功、失敗或逾時後都必須清除 CAPTCHA、OTP 與 Browser session reference。
 - Log、錯誤回應與 `raw` 不得包含帳密、完整帳號／卡號、cookie 或 token。
 
@@ -64,6 +65,7 @@ Connector 採三層 registry：
 2. `<ConnectorId>Config` inferred type。
 3. `parse<ConnectorId>Config`。
 4. `connectorConfigSchemas` registry entry。
+5. `connectorSessionDescriptors` registry entry：依解密後的設定回報 `sessionAvailable`、`verificationPending`、`verificationChannel` 與 `verificationExpiresAt`，不回傳任何 secret。不保存 session 的來源使用 `noSession`，只看 Browser session cookie 的來源使用 `browserCookieSession`；其他判斷放在來源 `protocol.ts` 的 `describe<ConnectorId>Session`。
 
 Schema 需要涵蓋同步期間會持久化的 secret state，否則 Zod parse 會將欄位移除。使用者可不填、但正式同步必要的 credential 可以在 schema 宣告 optional，再由 sync use case 回傳明確的 `NeedsUserActionError`。
 
@@ -233,7 +235,7 @@ promotion 放在同一 D1 batch，沿用來源的 lock 與設定版本 guard。�
 ## 新增流程
 
 1. 在 `connectorCatalog` 末尾加入 ID、mode、scope、capabilities、欄位分類，以及含標籤與輸入類型的 `credentialFields`。
-2. 在 `apps/worker/src/sources/<connectorId>` 建立 `protocol.ts`、必要的 client 與 parser，並在 `sources/config-registry.ts` 註冊 config schema。
+2. 在 `apps/worker/src/sources/<connectorId>` 建立 `protocol.ts`、必要的 client 與 parser，並在 `sources/config-registry.ts` 註冊 config schema 與 session 狀態判斷。
 3. 需要 binding 時，在同一來源目錄建立 `connector.ts` adapter。
 4. 在同一來源目錄的 `sync.ts` 實作單次同步與 challenge use case，使用 `features/sync` 的共用 record mapping 與 staged persistence；需分段續跑的來源則沿用 durable sync 與 `run-repository.ts` 模式。來源專用的配對、存款生命週期與舊資料修復放在相鄰檔案。
    若來源提供直接存款帳戶，確認 `DIRECT_DEPOSIT_CONNECTOR_IDS` 是否需加入，以連結集保交割帳戶。
