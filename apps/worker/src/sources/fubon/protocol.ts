@@ -896,8 +896,11 @@ export type FubonCardStatus =
       remainingAmount: number;
       /** 頁面列有自動扣繳帳號（不保存帳號本身）。 */
       autopay: boolean;
-      /** 自動扣繳帳戶的銀行代碼與末四碼；未設定時為 null。 */
-      autopayAccount: AutopayAccountHint | null;
+      /**
+       * 自動扣繳帳戶的銀行代碼與末四碼；明確未設定時為 null，
+       * 欄位缺少或內容無法判讀時為 undefined（保留既有資料）。
+       */
+      autopayAccount?: AutopayAccountHint | null;
     };
 
 function pageMessages(html: string): string[] {
@@ -963,12 +966,16 @@ function hasAutopayAccount(value: string | undefined) {
 /**
  * 「台北富邦012345****4321」：銀行名稱＋遮罩帳號。只取銀行代碼與末四碼，
  * 名稱無法辨識或末四碼被遮蔽時留空，由使用者手動指定扣款帳戶。
+ * 欄位缺少或非空白卻沒有帳號數字時回傳 undefined，不當成未設定而清除既有資料。
  */
 export function parseFubonAutopayAccount(
   value: string | undefined,
-): AutopayAccountHint | null {
-  if (!hasAutopayAccount(value)) return null;
-  const text = toHalfWidthDigits(value!).trim();
+): AutopayAccountHint | null | undefined {
+  if (value === undefined) return undefined;
+  if (isFubonBlankCell(value) || /未(?:約定|設定|申請)|無/.test(value))
+    return null;
+  const text = toHalfWidthDigits(value).trim();
+  if (!/\d/.test(text)) return undefined;
   const bankName = text.match(/^[^\d*＊]+/)?.[0];
   const bankCode = bankName ? bankCodeFromName(bankName) : undefined;
   const last4 = text.match(/(\d{4})$/)?.[1];

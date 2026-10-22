@@ -990,9 +990,10 @@ export type FeibStatement = {
   autopay: boolean;
   /**
    * 指定之自動轉帳帳號的末四碼，以及以相同算法得出的遠銀存款 sourceId（只含雜湊，
-   * 不保存完整帳號）；未設定時為 null。帳號屬他行時 sourceId 對不到任何帳戶。
+   * 不保存完整帳號）；欄位空白或沒有任何數字時為 null（未設定），欄位缺少或
+   * 數字不足以構成帳號時為 undefined（保留既有資料）。帳號屬他行時 sourceId 對不到任何帳戶。
    */
-  autopayAccount: AutopayAccountHint | null;
+  autopayAccount?: AutopayAccountHint | null;
   previousBalance?: number;
   paymentsAndRefunds?: number;
   newCharges?: number;
@@ -1041,7 +1042,8 @@ export function parseFeibStatement(html: string): FeibStatement {
   if (statementAmount === undefined) {
     throw new FeibProtocolError("遠東商銀帳單應繳總額格式不符。");
   }
-  const autopayAccount = digitsOnly(first.get("指定之自動轉帳帳號") ?? "");
+  const autopayText = first.get("指定之自動轉帳帳號");
+  const autopayAccount = normalizeFeibAccountNo(autopayText ?? "");
 
   const transactions: FeibCardTransaction[] = [];
   const rejected: string[] = [];
@@ -1129,7 +1131,9 @@ export function parseFeibStatement(html: string): FeibStatement {
             last4: autopayAccount.slice(-4),
             depositSourceId: feibDepositSourceId(autopayAccount, "TWD"),
           }
-        : null,
+        : autopayText !== undefined && autopayAccount.length === 0
+          ? null
+          : undefined,
     previousBalance: parseFeibAmount(second.get("上期應繳總額")),
     paymentsAndRefunds: parseFeibAmount(second.get("已繳款/退款金額")),
     newCharges: parseFeibAmount(second.get("本期新增款項")),
