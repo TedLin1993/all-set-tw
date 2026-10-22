@@ -64,10 +64,17 @@ export type ObankSyncOptions = {
   forceLogin?: boolean;
 };
 
-export class ObankVerificationRequiredError extends Error {
+export class ObankVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "ObankVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
   }
 }
 

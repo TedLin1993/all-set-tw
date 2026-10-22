@@ -1,4 +1,8 @@
-import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
+import {
+  connectorCatalog,
+  type ConnectorId,
+  type SyncErrorCode,
+} from "@taiwan-fin-hub/shared";
 import type { SyncTrigger } from "../../db";
 import type { Env } from "../../platform/env";
 import {
@@ -72,7 +76,13 @@ type ConnectorRuntimeDefinition = {
     scope: SyncScope,
     overrides: Record<string, unknown>,
   ) => Promise<SyncOutcome>;
-  prepareChallenge?: (env: Env) => Promise<unknown>;
+  challenge?: ConnectorChallengeDefinition;
+};
+
+type ConnectorChallengeDefinition = {
+  prepare: (env: Env) => Promise<unknown>;
+  /** 準備驗證碼失敗、且錯誤未宣告代碼時回傳的代碼。 */
+  failureCode: SyncErrorCode;
 };
 
 export const connectorRuntimeRegistry: Record<
@@ -110,57 +120,90 @@ export const connectorRuntimeRegistry: Record<
   sinopac: {
     run: (env, trigger, _scope, overrides) =>
       syncSinopac(env, trigger, overrides as SinopacSyncOverrides),
-    prepareChallenge: prepareSinopacCaptchaSession,
+    challenge: {
+      prepare: prepareSinopacCaptchaSession,
+      failureCode: "SINOPAC_CAPTCHA_FAILED",
+    },
   },
   taishin: {
     run: (env, trigger, _scope, overrides) =>
       syncTaishin(env, trigger, overrides as TaishinSyncOverrides),
-    prepareChallenge: prepareTaishinCaptchaSession,
+    challenge: {
+      prepare: prepareTaishinCaptchaSession,
+      failureCode: "TAISHIN_CONNECTION_FAILED",
+    },
   },
   hncb: {
     run: (env, trigger, _scope, overrides) =>
       syncHncb(env, trigger, overrides as HncbSyncOverrides),
-    prepareChallenge: prepareHncbCaptchaSession,
+    challenge: {
+      prepare: prepareHncbCaptchaSession,
+      failureCode: "HNCB_CAPTCHA_FAILED",
+    },
   },
   obank: {
     run: (env, trigger, _scope, overrides) =>
       syncObank(env, trigger, overrides as ObankSyncOverrides),
-    prepareChallenge: prepareObankCaptchaSession,
+    challenge: {
+      prepare: prepareObankCaptchaSession,
+      failureCode: "OBANK_CAPTCHA_FAILED",
+    },
   },
   nextbank: {
     run: (env, trigger, _scope, overrides) =>
       syncNextbank(env, trigger, overrides),
-    prepareChallenge: prepareNextbankCaptchaSession,
+    challenge: {
+      prepare: prepareNextbankCaptchaSession,
+      failureCode: "NEXTBANK_CAPTCHA_FAILED",
+    },
   },
   firstbank: {
     run: (env, trigger, _scope, overrides) =>
       syncFirstbank(env, trigger, overrides as FirstbankSyncOverrides),
-    prepareChallenge: prepareFirstbankCaptchaSession,
+    challenge: {
+      prepare: prepareFirstbankCaptchaSession,
+      failureCode: "FIRSTBANK_CAPTCHA_FAILED",
+    },
   },
   rakuten: {
     run: (env, trigger, _scope, overrides) =>
       syncRakuten(env, trigger, overrides as RakutenSyncOverrides),
-    prepareChallenge: prepareRakutenCaptchaSession,
+    challenge: {
+      prepare: prepareRakutenCaptchaSession,
+      failureCode: "RAKUTEN_CAPTCHA_FAILED",
+    },
   },
   kgibank: {
     run: (env, trigger, _scope, overrides) =>
       syncKgibank(env, trigger, overrides as KgibankSyncOverrides),
-    prepareChallenge: prepareKgibankCaptchaSession,
+    challenge: {
+      prepare: prepareKgibankCaptchaSession,
+      failureCode: "KGIBANK_CAPTCHA_FAILED",
+    },
   },
   megabank: {
     run: (env, trigger, _scope, overrides) =>
       syncMegabank(env, trigger, overrides as MegabankSyncOverrides),
-    prepareChallenge: prepareMegabankCaptchaSession,
+    challenge: {
+      prepare: prepareMegabankCaptchaSession,
+      failureCode: "MEGABANK_CAPTCHA_FAILED",
+    },
   },
   fubon: {
     run: (env, trigger, _scope, overrides) =>
       syncFubon(env, trigger, overrides as FubonSyncOverrides),
-    prepareChallenge: prepareFubonCaptchaSession,
+    challenge: {
+      prepare: prepareFubonCaptchaSession,
+      failureCode: "FUBON_CAPTCHA_FAILED",
+    },
   },
   feib: {
     run: (env, trigger, _scope, overrides) =>
       syncFeib(env, trigger, overrides as FeibSyncOverrides),
-    prepareChallenge: prepareFeibCaptchaSession,
+    challenge: {
+      prepare: prepareFeibCaptchaSession,
+      failureCode: "FEIB_CAPTCHA_FAILED",
+    },
   },
 };
 
@@ -184,12 +227,24 @@ export function runConnectorSync(
   );
 }
 
+/** 有互動驗證碼流程的來源；route 依此註冊 `/connectors/:id/captcha`。 */
+export const challengeConnectorIds = (
+  Object.keys(connectorRuntimeRegistry) as ConnectorId[]
+).filter((connectorId) => connectorRuntimeRegistry[connectorId].challenge);
+
 export function prepareConnectorChallenge(env: Env, connectorId: ConnectorId) {
-  const prepare = connectorRuntimeRegistry[connectorId].prepareChallenge;
-  if (!prepare) {
+  const challenge = connectorRuntimeRegistry[connectorId].challenge;
+  if (!challenge) {
     throw new Error(
       `${connectorId} does not support an interactive challenge.`,
     );
   }
-  return prepare(env);
+  return challenge.prepare(env);
+}
+
+export function challengeFailureCode(connectorId: ConnectorId): SyncErrorCode {
+  return (
+    connectorRuntimeRegistry[connectorId].challenge?.failureCode ??
+    "SYNC_FAILED"
+  );
 }

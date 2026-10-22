@@ -1,70 +1,30 @@
-import {
-  ObankConnectionError,
-  ObankProtocolError,
-} from "../../sources/obank/mobile-api";
-import {
-  MegabankConnectionError,
-  MegabankProtocolError,
-  MegabankVerificationRequiredError,
-} from "../../sources/megabank/mobile-api";
 import { zValidator } from "@hono/zod-validator";
 import { type Context, type Hono } from "hono";
 import { z } from "zod";
-import { BrowserRunCapacityError } from "../../sources/browser";
-import {
-  FirstbankBrowserCapacityError,
-  FirstbankConnectionError,
-  FirstbankVerificationRequiredError,
-} from "../../sources/firstbank/connector";
-import {
-  HncbBrowserCapacityError,
-  HncbConnectionError,
-  HncbVerificationRequiredError,
-} from "../../sources/hncb/connector";
-import {
-  KgibankBrowserCapacityError,
-  KgibankVerificationRequiredError,
-} from "../../sources/kgibank/connector";
-import {
-  FubonBrowserCapacityError,
-  FubonConnectionError,
-  FubonVerificationRequiredError,
-} from "../../sources/fubon/connector";
-import {
-  FeibBrowserCapacityError,
-  FeibConnectionError,
-  FeibVerificationRequiredError,
-} from "../../sources/feib/connector";
-import {
-  RakutenBrowserCapacityError,
-  RakutenConnectionError,
-  RakutenVerificationRequiredError,
-} from "../../sources/rakuten/connector";
-import { SinopacBrowserCapacityError } from "../../sources/sinopac/connector";
-import { TaishinBrowserCapacityError } from "../../sources/taishin/connector";
 import type { AppBindings } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
 import { jsonError } from "../../platform/http";
 import { validationHook } from "../../platform/validation";
-import {
-  NeedsUserActionError,
-  safeErrorMessage,
-  SyncAlreadyRunningError,
-} from "./errors";
-import { classifySyncError } from "./error-response";
+import { NeedsUserActionError, SyncAlreadyRunningError } from "./errors";
+import { classifySyncError, type ClassifiedSyncError } from "./error-response";
 import { SYNC_SCOPE_ALL, type SyncOutcome } from "./types";
 import {
   cancelQueuedManualSync,
   startQueuedManualSync,
   withManualSyncLock,
 } from "./manual-sync";
-import { prepareConnectorChallenge, runConnectorSync } from "./registry";
+import {
+  challengeConnectorIds,
+  challengeFailureCode,
+  prepareConnectorChallenge,
+  runConnectorSync,
+} from "./registry";
 import {
   cancelQueuedTdccSyncRun,
   startTdccSyncRun,
 } from "../../sources/tdcc/sync";
 import { enqueueManualSyncRun, enqueueTdccSyncChunk } from "./scheduling/queue";
-import type { ConnectorId } from "@taiwan-fin-hub/shared";
+import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
 import type { TdccRunScope } from "../../sources/tdcc/run-repository";
 
 const tdccSyncBodySchema = z.object({
@@ -171,6 +131,12 @@ export const syncRoutes = honoFactory.createApp();
 registerSyncRoutes(syncRoutes);
 
 function registerSyncRoutes(api: Hono<AppBindings>) {
+  for (const connectorId of challengeConnectorIds) {
+    api.post(`/connectors/${connectorId}/captcha`, (c) =>
+      challengeRouteResponse(c, connectorId),
+    );
+  }
+
   api.post("/connectors/einvoice/sync", async (c) => {
     try {
       const { cancelQueuedEinvoiceSyncRun, startEinvoiceSyncRun } =
@@ -292,31 +258,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     return manualSyncResponse(c, "skbank");
   });
 
-  api.post("/connectors/sinopac/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "sinopac"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "永豐已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof BrowserRunCapacityError)
-        return browserRunBusyResponse(error);
-      if (error instanceof SinopacBrowserCapacityError) {
-        const response = jsonError("SINOPAC_BROWSER_BUSY", error.message, 429);
-        response.headers.set("Retry-After", String(error.retryAfterSeconds));
-        return response;
-      }
-      if (error instanceof NeedsUserActionError) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      return jsonError("SINOPAC_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-    }
-  });
-
   api.post(
     "/connectors/sinopac/sync",
     zValidator(
@@ -329,35 +270,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return manualSyncResponse(c, "sinopac", overrides);
     },
   );
-
-  api.post("/connectors/taishin/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "taishin"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "台新已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof BrowserRunCapacityError)
-        return browserRunBusyResponse(error);
-      if (error instanceof TaishinBrowserCapacityError) {
-        const response = jsonError("TAISHIN_BROWSER_BUSY", error.message, 429);
-        response.headers.set("Retry-After", String(error.retryAfterSeconds));
-        return response;
-      }
-      if (error instanceof NeedsUserActionError) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      return jsonError(
-        "TAISHIN_CONNECTION_FAILED",
-        safeErrorMessage(error),
-        502,
-      );
-    }
-  });
 
   api.post(
     "/connectors/taishin/sync",
@@ -372,37 +284,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     },
   );
 
-  api.post("/connectors/hncb/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "hncb"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "華南銀行已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof BrowserRunCapacityError)
-        return browserRunBusyResponse(error);
-      if (error instanceof HncbBrowserCapacityError) {
-        const response = jsonError("HNCB_BROWSER_BUSY", error.message, 429);
-        response.headers.set("Retry-After", String(error.retryAfterSeconds));
-        return response;
-      }
-      if (error instanceof HncbConnectionError) {
-        return jsonError("HNCB_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-      }
-      if (
-        error instanceof NeedsUserActionError ||
-        error instanceof HncbVerificationRequiredError
-      ) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      return jsonError("HNCB_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-    }
-  });
-
   api.post(
     "/connectors/hncb/sync",
     zValidator(
@@ -415,41 +296,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return manualSyncResponse(c, "hncb", overrides);
     },
   );
-
-  api.post("/connectors/rakuten/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "rakuten"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "樂天國際銀行已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof BrowserRunCapacityError)
-        return browserRunBusyResponse(error);
-      if (error instanceof RakutenBrowserCapacityError) {
-        const response = jsonError("RAKUTEN_BROWSER_BUSY", error.message, 429);
-        response.headers.set("Retry-After", String(error.retryAfterSeconds));
-        return response;
-      }
-      if (error instanceof RakutenConnectionError) {
-        return jsonError(
-          "RAKUTEN_CAPTCHA_FAILED",
-          safeErrorMessage(error),
-          502,
-        );
-      }
-      if (
-        error instanceof NeedsUserActionError ||
-        error instanceof RakutenVerificationRequiredError
-      ) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      return jsonError("RAKUTEN_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-    }
-  });
 
   api.post(
     "/connectors/rakuten/sync",
@@ -464,34 +310,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     },
   );
 
-  api.post("/connectors/kgibank/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "kgibank"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "凱基銀行已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof BrowserRunCapacityError)
-        return browserRunBusyResponse(error);
-      if (error instanceof KgibankBrowserCapacityError) {
-        const response = jsonError("KGIBANK_BROWSER_BUSY", error.message, 429);
-        response.headers.set("Retry-After", String(error.retryAfterSeconds));
-        return response;
-      }
-      if (
-        error instanceof NeedsUserActionError ||
-        error instanceof KgibankVerificationRequiredError
-      ) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      return jsonError("KGIBANK_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-    }
-  });
-
   api.post(
     "/connectors/kgibank/sync",
     zValidator(
@@ -505,21 +323,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     },
   );
 
-  api.post("/connectors/nextbank/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "nextbank"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError)
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "將來銀行已有作業進行中。",
-          409,
-        );
-      if (error instanceof NeedsUserActionError)
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      return jsonError("NEXTBANK_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-    }
-  });
   api.post(
     "/connectors/nextbank/sync",
     zValidator(
@@ -538,30 +341,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     },
   );
 
-  api.post("/connectors/obank/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "obank"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "王道銀行已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof NeedsUserActionError) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      if (
-        error instanceof ObankConnectionError ||
-        error instanceof ObankProtocolError
-      ) {
-        return jsonError("OBANK_CONNECTION_FAILED", error.message, 502);
-      }
-      return jsonError("OBANK_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-    }
-  });
-
   api.post(
     "/connectors/obank/sync",
     zValidator(
@@ -574,45 +353,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return manualSyncResponse(c, "obank", overrides);
     },
   );
-
-  api.post("/connectors/firstbank/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "firstbank"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "第一銀行已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof BrowserRunCapacityError)
-        return browserRunBusyResponse(error);
-      if (error instanceof NeedsUserActionError) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      if (error instanceof FirstbankBrowserCapacityError) {
-        const response = jsonError(
-          "FIRSTBANK_BROWSER_BUSY",
-          error.message,
-          429,
-        );
-        response.headers.set("Retry-After", String(error.retryAfterSeconds));
-        return response;
-      }
-      if (error instanceof FirstbankConnectionError) {
-        return jsonError("FIRSTBANK_CONNECTION_FAILED", error.message, 502);
-      }
-      if (error instanceof FirstbankVerificationRequiredError) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      return jsonError(
-        "FIRSTBANK_CAPTCHA_FAILED",
-        safeErrorMessage(error),
-        502,
-      );
-    }
-  });
 
   api.post(
     "/connectors/firstbank/sync",
@@ -627,33 +367,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     },
   );
 
-  api.post("/connectors/megabank/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "megabank"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "兆豐銀行已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (
-        error instanceof NeedsUserActionError ||
-        error instanceof MegabankVerificationRequiredError
-      ) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      if (
-        error instanceof MegabankConnectionError ||
-        error instanceof MegabankProtocolError
-      ) {
-        return jsonError("MEGABANK_CONNECTION_FAILED", error.message, 502);
-      }
-      return jsonError("MEGABANK_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-    }
-  });
-
   api.post(
     "/connectors/megabank/sync",
     zValidator(
@@ -667,37 +380,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     },
   );
 
-  api.post("/connectors/fubon/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "fubon"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "台北富邦銀行已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof BrowserRunCapacityError)
-        return browserRunBusyResponse(error);
-      if (error instanceof FubonBrowserCapacityError) {
-        const response = jsonError("FUBON_BROWSER_BUSY", error.message, 429);
-        response.headers.set("Retry-After", String(error.retryAfterSeconds));
-        return response;
-      }
-      if (
-        error instanceof NeedsUserActionError ||
-        error instanceof FubonVerificationRequiredError
-      ) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      if (error instanceof FubonConnectionError) {
-        return jsonError("FUBON_CONNECTION_FAILED", error.message, 502);
-      }
-      return jsonError("FUBON_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-    }
-  });
-
   api.post(
     "/connectors/fubon/sync",
     zValidator(
@@ -710,37 +392,6 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return manualSyncResponse(c, "fubon", overrides);
     },
   );
-
-  api.post("/connectors/feib/captcha", async (c) => {
-    try {
-      return c.json(await prepareConnectorChallenge(c.env, "feib"));
-    } catch (error) {
-      if (error instanceof SyncAlreadyRunningError) {
-        return jsonError(
-          "SYNC_ALREADY_RUNNING",
-          "遠東商銀已有驗證或同步作業正在進行。",
-          409,
-        );
-      }
-      if (error instanceof BrowserRunCapacityError)
-        return browserRunBusyResponse(error);
-      if (error instanceof FeibBrowserCapacityError) {
-        const response = jsonError("FEIB_BROWSER_BUSY", error.message, 429);
-        response.headers.set("Retry-After", String(error.retryAfterSeconds));
-        return response;
-      }
-      if (
-        error instanceof NeedsUserActionError ||
-        error instanceof FeibVerificationRequiredError
-      ) {
-        return jsonError("USER_ACTION_REQUIRED", error.message, 400);
-      }
-      if (error instanceof FeibConnectionError) {
-        return jsonError("FEIB_CONNECTION_FAILED", error.message, 502);
-      }
-      return jsonError("FEIB_CAPTCHA_FAILED", safeErrorMessage(error), 502);
-    }
-  });
 
   api.post(
     "/connectors/feib/sync",
@@ -851,17 +502,48 @@ async function syncRouteResponse(
   try {
     return c.json(await result);
   } catch (error) {
-    const { status, code, message, retryAfterSeconds } =
-      classifySyncError(error);
-    const response = jsonError(code, message, status);
-    if (retryAfterSeconds !== undefined)
-      response.headers.set("Retry-After", String(retryAfterSeconds));
-    return response;
+    return classifiedErrorResponse(classifySyncError(error));
   }
 }
 
-function browserRunBusyResponse(error: BrowserRunCapacityError) {
-  const response = jsonError("BROWSER_BUSY", safeErrorMessage(error), 429);
-  response.headers.set("Retry-After", String(error.retryAfterSeconds));
+/**
+ * 準備驗證碼的錯誤沿用同步錯誤分類；錯誤未宣告代碼時，
+ * 回傳 registry 為該來源設定的驗證碼失敗代碼。
+ */
+async function challengeRouteResponse(
+  c: Context<AppBindings>,
+  connectorId: ConnectorId,
+) {
+  try {
+    return c.json(await prepareConnectorChallenge(c.env, connectorId));
+  } catch (error) {
+    if (error instanceof SyncAlreadyRunningError)
+      return jsonError(
+        "SYNC_ALREADY_RUNNING",
+        `${connectorCatalog[connectorId].title}已有驗證或同步作業正在進行。`,
+        409,
+      );
+    const classified = classifySyncError(error);
+    return classifiedErrorResponse(
+      classified.code === "SYNC_FAILED"
+        ? {
+            ...classified,
+            status: 502,
+            code: challengeFailureCode(connectorId),
+          }
+        : classified,
+    );
+  }
+}
+
+function classifiedErrorResponse({
+  status,
+  code,
+  message,
+  retryAfterSeconds,
+}: ClassifiedSyncError) {
+  const response = jsonError(code, message, status);
+  if (retryAfterSeconds !== undefined)
+    response.headers.set("Retry-After", String(retryAfterSeconds));
   return response;
 }

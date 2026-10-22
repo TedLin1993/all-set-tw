@@ -179,10 +179,17 @@ type BrowserResponse = {
   text(): Promise<string>;
 };
 
-export class FirstbankVerificationRequiredError extends Error {
+export class FirstbankVerificationRequiredError
+  extends Error
+  implements SourceSyncErrorSource
+{
   constructor(message: string) {
     super(message);
     this.name = "FirstbankVerificationRequiredError";
+  }
+
+  toSyncError(): SourceSyncError {
+    return { status: 400, code: "USER_ACTION_REQUIRED", needsUserAction: true };
   }
 }
 

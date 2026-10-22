@@ -34,6 +34,7 @@ import {
 import {
   FirstbankBrowserCapacityError,
   FirstbankConnectionError,
+  FirstbankVerificationRequiredError,
 } from "../../../src/sources/firstbank/connector";
 import {
   FubonBrowserCapacityError,
@@ -63,6 +64,7 @@ import {
 import {
   ObankConnectionError,
   ObankProtocolError,
+  ObankVerificationRequiredError,
 } from "../../../src/sources/obank/mobile-api";
 import {
   RakutenBrowserCapacityError,
@@ -518,6 +520,18 @@ const failureCases: Array<
   [
     "feib verification",
     new FeibVerificationRequiredError("x"),
+    "needs_user_action",
+    "USER_ACTION_REQUIRED",
+  ],
+  [
+    "firstbank verification",
+    new FirstbankVerificationRequiredError("x"),
+    "needs_user_action",
+    "USER_ACTION_REQUIRED",
+  ],
+  [
+    "obank verification",
+    new ObankVerificationRequiredError("x"),
     "needs_user_action",
     "USER_ACTION_REQUIRED",
   ],
