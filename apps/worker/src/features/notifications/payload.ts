@@ -136,10 +136,11 @@ export function shouldNotify(
   return preferences.failed;
 }
 
-/** 今天或明天到期、扣款未完成或已過期限：即使同步成功通知關閉，也照樣送出摘要。 */
+/** 今天或明天到期、扣款未完成、扣款帳戶餘額不足或已過期限：即使同步成功通知關閉，也照樣送出摘要。 */
 export function isUrgentPaymentReminder(reminder: PaymentReminder) {
   return (
     reminder.state === "collection_failed" ||
+    reminder.state === "insufficient_funds" ||
     reminder.state === "overdue" ||
     (reminder.daysUntilDue !== undefined && reminder.daysUntilDue <= 1)
   );
@@ -174,6 +175,9 @@ export function scheduledSummaryNotification(
 function paymentPhrase(reminder: PaymentReminder) {
   if (reminder.state === "collection_failed")
     return `${reminder.name}扣款未完成`;
+  // 推播只寫機構名稱，不帶帳號末碼與差額。
+  if (reminder.state === "insufficient_funds")
+    return `${reminder.paymentAccount?.institution ?? "扣款帳戶"}帳戶餘額可能不足以扣繳${reminder.name}`;
   const day = describeDueDay(reminder);
   const phrase = /^\d/.test(day)
     ? `${reminder.name} ${day}`
@@ -187,7 +191,10 @@ function paymentPhrase(reminder: PaymentReminder) {
 function paymentReminderSummary(reminders: PaymentReminder[]) {
   if (reminders.length === 0) return null;
   const needsAttention = reminders.some(
-    (item) => item.state === "overdue" || item.state === "collection_failed",
+    (item) =>
+      item.state === "overdue" ||
+      item.state === "collection_failed" ||
+      item.state === "insufficient_funds",
   );
   const listed = reminders.slice(0, 2).map(paymentPhrase).join("、");
   return {

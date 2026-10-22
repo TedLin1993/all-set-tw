@@ -8,10 +8,10 @@
 
 ## 目錄
 
-- Tables：34
+- Tables：35
 - Explicit indexes：47
 - Other objects：0
-- Migrations：61
+- Migrations：62
 
 ## Tables
 
@@ -19,7 +19,8 @@
 | --- | --- | ---: | ---: | ---: |
 | [`ai_classification_settings`](#ai_classification_settings) | AI 自動分類的單列設定、掃描進度與每日呼叫用量。 | 18 | 0 | 0 |
 | [`ai_classifications`](#ai_classifications) | AI 對單筆銀行交易的分類判斷結果。 | 7 | 1 | 1 |
-| [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 19 | 1 | 1 |
+| [`bank_account_payment_accounts`](#bank_account_payment_accounts) | 使用者手動指定的信用卡或貸款扣款帳戶，優先於銀行提供的自動扣繳帳戶。 | 4 | 0 | 0 |
+| [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 23 | 1 | 1 |
 | [`bank_balance_snapshots`](#bank_balance_snapshots) | 帳戶在特定時間點的餘額快照，供資產總值與歷史圖表計算。 | 19 | 1 | 2 |
 | [`bank_transaction_preferences`](#bank_transaction_preferences) | 使用者對銀行交易計算方式的個別偏好。 | 4 | 1 | 1 |
 | [`bank_transactions`](#bank_transactions) | 銀行帳戶、信用卡與其他存款型連接器同步回來的交易明細。 | 19 | 3 | 7 |
@@ -157,6 +158,39 @@ CREATE TABLE ai_classifications (
 )
 ```
 
+### `bank_account_payment_accounts`
+
+> 用途：使用者手動指定的信用卡或貸款扣款帳戶，優先於銀行提供的自動扣繳帳戶。
+> 注意：兩個帳戶 ID 都不設 FK：帳戶被移除、合併或不再符合條件時視為未設定，改用銀行資料；不以 CASCADE 刪除使用者設定。
+
+#### Columns
+
+| 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
+| ---: | --- | --- | --- | :---: | --- | ---: | --- |
+| 1 | `account_id` | 信用卡或貸款帳戶的 bank_accounts.id。 | TEXT | NO | — | 1 | — |
+| 2 | `payment_account_id` | 指定的扣款存款帳戶 bank_accounts.id；NULL 表示使用者明確選擇不指定。 | TEXT | YES | — | — | — |
+| 3 | `created_at` | 首次手動設定的時間。 | TEXT | NO | — | — | — |
+| 4 | `updated_at` | 手動設定最後更新的時間。 | TEXT | NO | — | — | — |
+
+#### Foreign keys
+
+—
+
+#### Indexes
+
+—
+
+#### DDL
+
+```sql
+CREATE TABLE bank_account_payment_accounts (
+  account_id TEXT NOT NULL PRIMARY KEY,
+  payment_account_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)
+```
+
 ### `bank_accounts`
 
 > 用途：各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。
@@ -185,6 +219,10 @@ CREATE TABLE ai_classifications (
 | 17 | `inactive_at` | 同步確認來源不再列出定存的觀測時間，不是銀行實際結清日；有效帳戶為 NULL。 | TEXT | YES | — | — | — |
 | 18 | `loan_interest_rate` | 貸款年利率百分比；銀行未提供或無法解析時為 NULL。 | REAL | YES | — | — | — |
 | 19 | `loan_category` | 貸款類別：housing（房屋貸款）、personal（信用貸款）或 other（其他貸款）。 | TEXT | YES | — | — | — |
+| 20 | `autopay_status` | 銀行頁面揭露的自動扣繳狀態：enabled（已設定）或 none（未設定）；來源未提供時為 NULL。 | TEXT | YES | — | — | — |
+| 21 | `autopay_bank_code` | 自動扣繳帳戶的金融機構代碼；銀行頁面未提供或無法辨識時為 NULL。 | TEXT | YES | — | — | — |
+| 22 | `autopay_account_last4` | 自動扣繳帳戶的帳號末四碼；不保存完整帳號。 | TEXT | YES | — | — | — |
+| 23 | `autopay_account_source_id` | 來源以完整帳號算出的自家存款帳戶 source_id，用於精準對應；只含雜湊，不含完整帳號。 | TEXT | YES | — | — | — |
 
 #### Foreign keys
 
@@ -222,7 +260,8 @@ CREATE TABLE "bank_accounts" (
 CHECK (
   loan_category IS NULL
   OR loan_category IN ('housing', 'personal', 'other')
-),
+), autopay_status TEXT
+  CHECK (autopay_status IS NULL OR autopay_status IN ('enabled', 'none')), autopay_bank_code TEXT, autopay_account_last4 TEXT, autopay_account_source_id TEXT,
   UNIQUE (connector_id, source_id)
 )
 ```
@@ -1874,6 +1913,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0061_ai_classification.sql`](../apps/worker/migrations/0061_ai_classification.sql)
 - [`0062_bank_transaction_card.sql`](../apps/worker/migrations/0062_bank_transaction_card.sql)
 - [`0063_payment_due_notification.sql`](../apps/worker/migrations/0063_payment_due_notification.sql)
+- [`0064_payment_accounts.sql`](../apps/worker/migrations/0064_payment_accounts.sql)
 
 ## 程式碼導覽
 

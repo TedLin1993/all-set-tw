@@ -1,11 +1,13 @@
 <script lang="ts">
   import type { BankAccountRow, CreditCardBillRow } from "@/data/bank/types";
+  import type { ApiClient } from "@/shared/api/client";
   import {
     formatBankAccountName,
     formatCurrency,
     formatDate,
   } from "@/shared/format/financial";
   import type { InstitutionAssetGroup } from "../model/summary";
+  import PaymentAccountSelect from "./PaymentAccountSelect.svelte";
 
   let {
     group,
@@ -13,12 +15,18 @@
     billsPending = false,
     billsError = false,
     compact = false,
+    api,
+    accounts = [],
   }: {
     group: InstitutionAssetGroup;
     bills: CreditCardBillRow[];
     billsPending?: boolean;
     billsError?: boolean;
     compact?: boolean;
+    /** 提供時可設定信用卡與貸款的扣款帳戶。 */
+    api?: ApiClient;
+    /** 所有帳戶，作為扣款帳戶的選項。 */
+    accounts?: BankAccountRow[];
   } = $props();
 
   const cardsById = $derived(
@@ -193,7 +201,7 @@
       <div class="mt-2 divide-y divide-border">
         {#each group.loans as loan (loan.id)}
           <div
-            class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3"
+            class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-3"
           >
             <div class="min-w-0">
               <p class="break-words text-sm font-semibold">
@@ -207,6 +215,9 @@
                   ? ` · 更新 ${formatDate(loan.asOfAt)}`
                   : " · 尚未取得更新時間"}
               </p>
+              {#if api}
+                <PaymentAccountSelect {api} account={loan} {accounts} />
+              {/if}
             </div>
             <p class="text-right text-sm font-medium tabular-nums text-coral">
               {loan.balance == null
@@ -229,7 +240,7 @@
         信用卡帳戶
       </h3>
       <span class="text-caption text-subtle">
-        {group.cards.length} 張卡片
+        {group.cardAccountCount} 個帳戶
       </span>
     </div>
     {#if group.cards.length === 0}
@@ -238,7 +249,7 @@
       <div class="mt-2 divide-y divide-border">
         {#each group.cards as card (card.id)}
           <div
-            class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3"
+            class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-3"
           >
             <div class="min-w-0">
               <p class="break-words text-sm font-semibold">
@@ -247,6 +258,21 @@
               <p class="mt-1 text-caption text-subtle">
                 {cardPaymentLabel(card)}
               </p>
+              {#if card.recentCards?.length}
+                <!-- 來自近 90 天交易的卡號末四碼與卡名，只供參考，不是完整卡片清單。 -->
+                <p class="mt-1 text-caption text-subtle">
+                  近期使用的卡片：{card.recentCards
+                    .map((item) =>
+                      item.name
+                        ? `${item.name} · ${item.last4}`
+                        : `末四碼 ${item.last4}`,
+                    )
+                    .join("、")}
+                </p>
+              {/if}
+              {#if api}
+                <PaymentAccountSelect {api} account={card} {accounts} />
+              {/if}
             </div>
             <p class="text-right text-sm font-medium tabular-nums text-coral">
               {card.balance == null

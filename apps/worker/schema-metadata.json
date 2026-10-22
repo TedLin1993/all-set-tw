@@ -22,7 +22,21 @@
         "maturity_date": "銀行提供的定存到期日；不作為自動結清的判定條件。",
         "inactive_at": "同步確認來源不再列出定存的觀測時間，不是銀行實際結清日；有效帳戶為 NULL。",
         "loan_category": "貸款類別：housing（房屋貸款）、personal（信用貸款）或 other（其他貸款）。",
-        "loan_interest_rate": "貸款年利率百分比；銀行未提供或無法解析時為 NULL。"
+        "loan_interest_rate": "貸款年利率百分比；銀行未提供或無法解析時為 NULL。",
+        "autopay_status": "銀行頁面揭露的自動扣繳狀態：enabled（已設定）或 none（未設定）；來源未提供時為 NULL。",
+        "autopay_bank_code": "自動扣繳帳戶的金融機構代碼；銀行頁面未提供或無法辨識時為 NULL。",
+        "autopay_account_last4": "自動扣繳帳戶的帳號末四碼；不保存完整帳號。",
+        "autopay_account_source_id": "來源以完整帳號算出的自家存款帳戶 source_id，用於精準對應；只含雜湊，不含完整帳號。"
+      }
+    },
+    "bank_account_payment_accounts": {
+      "description": "使用者手動指定的信用卡或貸款扣款帳戶，優先於銀行提供的自動扣繳帳戶。",
+      "notes": "兩個帳戶 ID 都不設 FK：帳戶被移除、合併或不再符合條件時視為未設定，改用銀行資料；不以 CASCADE 刪除使用者設定。",
+      "columns": {
+        "account_id": "信用卡或貸款帳戶的 bank_accounts.id。",
+        "payment_account_id": "指定的扣款存款帳戶 bank_accounts.id；NULL 表示使用者明確選擇不指定。",
+        "created_at": "首次手動設定的時間。",
+        "updated_at": "手動設定最後更新的時間。"
       }
     },
     "bank_balance_snapshots": {

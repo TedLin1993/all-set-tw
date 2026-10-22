@@ -48,7 +48,7 @@ function bill(
 
 describe("collectPaymentReminders", () => {
   it("已繳、溢繳與已繳足的帳單不提醒，待繳金額扣除已繳部分", () => {
-    const reminders = collectPaymentReminders(
+    const { reminders } = collectPaymentReminders(
       [
         card({ id: "paid" }),
         card({ id: "overpaid", balance: 300 }),
@@ -75,7 +75,7 @@ describe("collectPaymentReminders", () => {
   });
 
   it("繳款狀態未知或資料過舊時只提示請確認，不當成已繳", () => {
-    const reminders = collectPaymentReminders(
+    const { reminders } = collectPaymentReminders(
       [
         card({ id: "unknown" }),
         card({ id: "stale", asOfAt: "2026-10-17T00:00:00Z" }),
@@ -94,7 +94,7 @@ describe("collectPaymentReminders", () => {
   });
 
   it("以台北日期計算 5 天內到期，並只採用同一期限的帳單狀態", () => {
-    const reminders = collectPaymentReminders(
+    const { reminders } = collectPaymentReminders(
       [
         card({ id: "day-5", paymentDueDate: "2026-10-26" }),
         card({ id: "day-6", paymentDueDate: "2026-10-27" }),
@@ -123,7 +123,7 @@ describe("collectPaymentReminders", () => {
   });
 
   it("貸款扣款未完成時即使沒有期限也優先提醒", () => {
-    const reminders = collectPaymentReminders(
+    const { reminders } = collectPaymentReminders(
       [
         card({ id: "card" }),
         {
@@ -152,6 +152,101 @@ describe("collectPaymentReminders", () => {
         state: "collection_failed",
       }),
     );
+  });
+
+  describe("扣款帳戶", () => {
+    const deposit = (input: Partial<BankAccountRow> = {}): BankAccountRow => ({
+      id: "deposit",
+      connectorId: "taishin",
+      sourceId: "deposit",
+      institutionName: "台新銀行",
+      accountName: "末五碼 12345",
+      accountType: "savings",
+      currency: "TWD",
+      balance: 50_000,
+      availableBalance: 40_000,
+      asOfAt: freshAsOf,
+      ...input,
+    });
+    const paidFromDeposit = {
+      paymentAccountId: "deposit",
+      paymentAccountSource: "manual" as const,
+    };
+    const loan = (input: Partial<BankAccountRow> = {}): BankAccountRow => ({
+      id: "loan",
+      connectorId: "cathaybk",
+      sourceId: "loan",
+      institutionName: "國泰世華",
+      accountType: "loan",
+      loanCategory: "housing",
+      currency: "TWD",
+      balance: -3_000_000,
+      loanPaymentAmount: 25_000,
+      paymentDueDate: "2026-10-24",
+      loanPaymentStatus: "scheduled",
+      asOfAt: freshAsOf,
+      ...paidFromDeposit,
+      ...input,
+    });
+    const run = (payer: BankAccountRow, loanInput = {}) =>
+      collectPaymentReminders(
+        [card({ id: "card", ...paidFromDeposit }), loan(loanInput), payer],
+        [bill({ accountId: "card" })],
+        now,
+      );
+
+    it("同一扣款帳戶的款項加總後以可用餘額判斷：夠扣隱藏，不夠扣標示差額", () => {
+      // 信用卡 12,800 + 房貸 25,000 = 37,800。
+      const enough = run(deposit({ availableBalance: 40_000 }));
+      expect(enough.reminders).toEqual([]);
+      expect(enough.covered.map((item) => item.accountId)).toEqual([
+        "card",
+        "loan",
+      ]);
+
+      // 帳戶餘額 50,000 足夠，但可用餘額 37,000 不足，應以可用餘額判斷。
+      const short = run(deposit({ availableBalance: 37_000 }));
+      expect(short.covered).toEqual([]);
+      expect(
+        short.reminders.map(
+          ({ accountId, state, shortfall, paymentAccount }) => ({
+            accountId,
+            state,
+            shortfall,
+            paymentAccount: paymentAccount?.name,
+          }),
+        ),
+      ).toEqual([
+        {
+          accountId: "card",
+          state: "insufficient_funds",
+          shortfall: 800,
+          paymentAccount: "台新銀行 末五碼 12345",
+        },
+        {
+          accountId: "loan",
+          state: "insufficient_funds",
+          shortfall: 800,
+          paymentAccount: "台新銀行 末五碼 12345",
+        },
+      ]);
+    });
+
+    it("扣款帳戶資料過舊、金額未知或幣別不同時不判斷，維持原提醒", () => {
+      for (const result of [
+        run(deposit({ asOfAt: "2026-10-17T00:00:00Z" })),
+        run(deposit({ currency: "USD" })),
+        run(deposit(), { loanPaymentAmount: undefined }),
+      ]) {
+        expect(result.covered).toEqual([]);
+        expect(
+          result.reminders.map((item) => [item.accountId, item.state]),
+        ).toEqual([
+          ["card", "due"],
+          ["loan", "confirm"],
+        ]);
+      }
+    });
   });
 });
 
@@ -262,6 +357,28 @@ describe("scheduledSummaryNotification", () => {
         tag: "sync-default-schedule-payment-due",
       });
     }
+  });
+
+  it("扣款帳戶餘額不足時照樣推播，只寫機構名稱、不含帳號末碼與差額", () => {
+    const payload = scheduledSummaryNotification(preferences, succeeded, [
+      reminder({
+        accountId: "a",
+        state: "insufficient_funds",
+        paymentAccount: {
+          id: "deposit",
+          name: "台新銀行 末五碼 12345",
+          institution: "台新銀行",
+        },
+        shortfall: 800,
+      }),
+    ]);
+    expect(payload).toEqual({
+      title: "同步完成，1 筆繳款需要留意",
+      body: "台新銀行帳戶餘額可能不足以扣繳國泰世華信用卡。",
+      url: "/#/overview",
+      tag: "sync-default-schedule-success",
+    });
+    expect(payload!.body).not.toMatch(/12345|800|NT\$/);
   });
 
   it("狀態未確定時，推播提示請確認，不寫成確定未繳", () => {

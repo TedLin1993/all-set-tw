@@ -273,6 +273,29 @@ describe("遠東商銀信用卡", () => {
     expect(parseFeibStatementOptions(octStatementHtml)).toHaveLength(5);
   });
 
+  it("指定之自動轉帳帳號：空白才視為未設定，欄位缺少或數字不足時保留既有資料", () => {
+    const withAccount = (cell: string) =>
+      parseFeibStatement(
+        octStatementHtml.replace("<td>09990000002222</td>", cell),
+      ).autopayAccount;
+    expect(withAccount("<td></td>")).toBeNull();
+    expect(withAccount("<td>-</td>")).toBeNull();
+    expect(withAccount("<td>0999</td>")).toBeUndefined();
+    // 全形數字與半形相同處理。
+    expect(withAccount("<td>０９９９００００００２２２２</td>")).toEqual({
+      last4: "2222",
+      depositSourceId: feibDepositSourceId("09990000002222", "TWD"),
+    });
+    expect(
+      parseFeibStatement(
+        octStatementHtml.replace(
+          "<th>指定之自動轉帳帳號</th>",
+          "<th>備註</th>",
+        ),
+      ).autopayAccount,
+    ).toBeUndefined();
+  });
+
   it("帳單明細：民國日期、卡片列切換卡號、略過沒有消費日的摘要列", () => {
     const bill = parseFeibStatement(octStatementHtml);
     expect(bill).toMatchObject({
@@ -435,7 +458,13 @@ describe("遠東商銀信用卡", () => {
     expect(account).toMatchObject({
       accountType: "credit",
       creditLimit: 100000,
+      // 帳單「指定之自動轉帳帳號」以遠銀存款相同算法轉成 sourceId，不保存完整帳號。
+      autopayAccount: {
+        last4: "2222",
+        depositSourceId: feibDepositSourceId("09990000002222", "TWD"),
+      },
     });
+    expect(JSON.stringify(account)).not.toContain("09990000002222");
   });
 
   it("無卡時只回傳存款，不建立信用卡帳戶或零餘額", () => {

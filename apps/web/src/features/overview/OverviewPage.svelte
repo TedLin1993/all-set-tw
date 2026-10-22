@@ -66,6 +66,8 @@
     connectorId?: ConnectorId;
     /** 多筆繳款提醒時，在原地展開列出每一筆。 */
     reminders?: PaymentReminder[];
+    /** 扣款帳戶餘額足夠而隱藏的繳款筆數，展開時附註。 */
+    coveredCount?: number;
   }
 
   let {
@@ -197,11 +199,21 @@
   );
   const sourceCount = $derived(configuredSyncJobs.length);
   const healthyCount = $derived(healthySyncJobs.length);
-  const paymentReminders = $derived(
+  const paymentSummary = $derived(
     $reminderBills.isPending
-      ? []
+      ? { reminders: [], covered: [] }
       : collectPaymentReminders(bankData.accounts, $reminderBills.data ?? []),
   );
+  const paymentReminders = $derived(paymentSummary.reminders);
+  const coveredPayments = $derived(paymentSummary.covered.length);
+
+  function isUrgentReminder(reminder: PaymentReminder) {
+    return (
+      reminder.state === "overdue" ||
+      reminder.state === "collection_failed" ||
+      reminder.state === "insufficient_funds"
+    );
+  }
 
   function reminderAmount(reminder: PaymentReminder) {
     return reminder.amount != null
@@ -220,6 +232,14 @@
       amount
         ? `${reminder.name} ${amount}，${suffix}`
         : `${reminder.name} ${suffix}`;
+    if (reminder.state === "insufficient_funds")
+      return {
+        title: insufficientText(reminder),
+        detail: join(
+          amount ? `扣繳${reminder.name} ${amount}` : `扣繳${reminder.name}`,
+          describeDueDay(reminder),
+        ),
+      };
     if (reminder.state === "collection_failed")
       return {
         title: `${reminder.name}扣款未完成`,
@@ -255,30 +275,51 @@
     };
   }
 
+  function insufficientText(reminder: PaymentReminder) {
+    const shortfall =
+      reminder.shortfall != null
+        ? `，差 ${formatCurrency(reminder.shortfall, reminder.currency)}`
+        : "";
+    return `${reminder.paymentAccount?.name ?? "扣款帳戶"} 餘額可能不足${shortfall}`;
+  }
+
   function reminderRowStatus(reminder: PaymentReminder) {
     const day = describeDueDay(reminder);
     const status =
-      reminder.state === "collection_failed"
-        ? "扣款未完成"
-        : reminder.state === "overdue"
-          ? "請確認是否已繳款"
-          : reminder.state === "due"
-            ? "待繳"
-            : reminder.kind === "loan"
-              ? "請確認扣款帳戶餘額"
-              : "請確認繳款狀態";
+      reminder.state === "insufficient_funds"
+        ? `${reminder.paymentAccount?.institution ?? "扣款帳戶"}餘額可能不足`
+        : reminder.state === "collection_failed"
+          ? "扣款未完成"
+          : reminder.state === "overdue"
+            ? "請確認是否已繳款"
+            : reminder.state === "due"
+              ? "待繳"
+              : reminder.kind === "loan"
+                ? "請確認扣款帳戶餘額"
+                : "請確認繳款狀態";
     return day ? `${day} · ${status}` : status;
   }
 
-  function paymentInsight(reminders: PaymentReminder[]): OverviewInsight {
+  function paymentInsight(
+    reminders: PaymentReminder[],
+    coveredCount: number,
+  ): OverviewInsight {
     const urgent = reminders.some((item) => item.state !== "confirm");
     const base = {
       id: "payment-due",
       tone: urgent ? ("coral" as const) : ("amber" as const),
       icon: "card" as const,
     };
-    if (reminders.length === 1)
-      return { ...base, ...reminderText(reminders[0]!) };
+    const coveredNote =
+      coveredCount > 0 ? `另有 ${coveredCount} 筆扣款帳戶餘額足夠` : null;
+    if (reminders.length === 1) {
+      const text = reminderText(reminders[0]!);
+      return {
+        ...base,
+        title: text.title,
+        detail: coveredNote ? `${text.detail} · ${coveredNote}` : text.detail,
+      };
+    }
     const currencies = new Set(reminders.map((item) => item.currency));
     const total =
       currencies.size === 1 && reminders.every((item) => item.amount != null)
@@ -287,9 +328,7 @@
             reminders[0]!.currency,
           )
         : null;
-    const needsAttention = reminders.some(
-      (item) => item.state === "overdue" || item.state === "collection_failed",
-    );
+    const needsAttention = reminders.some(isUrgentReminder);
     return {
       ...base,
       title: `${needsAttention ? `${reminders.length} 筆應繳款需要留意` : `${PAYMENT_REMINDER_DAYS} 天內有 ${reminders.length} 筆應繳款`}${total ? `，合計 ${total}` : ""}`,
@@ -297,6 +336,7 @@
         ? reminderText(reminders[0]!).title
         : `最近：${reminderText(reminders[0]!).title}`,
       reminders,
+      coveredCount,
     };
   }
 
@@ -304,7 +344,7 @@
     const items: OverviewInsight[] = [];
 
     if (paymentReminders.length > 0)
-      items.push(paymentInsight(paymentReminders));
+      items.push(paymentInsight(paymentReminders, coveredPayments));
 
     if (!syncJobsReady) {
       items.push({
@@ -393,6 +433,15 @@
       });
     }
 
+    if (paymentReminders.length === 0 && coveredPayments > 0)
+      items.push({
+        id: "payment-covered",
+        title: `${PAYMENT_REMINDER_DAYS} 天內 ${coveredPayments} 筆扣款，帳戶餘額足夠`,
+        detail: "已依扣款帳戶目前的可用餘額確認",
+        tone: "moss",
+        icon: "card",
+      });
+
     return items.slice(0, 2);
   });
   const missingRates = $derived(
@@ -447,7 +496,7 @@
     />
   {:else if insight.icon === "card"}
     <CreditCard
-      class={`size-4 shrink-0 ${insight.tone === "amber" ? "text-amber-600" : "text-coral"}`}
+      class={`size-4 shrink-0 ${insight.tone === "amber" ? "text-amber-600" : insight.tone === "moss" ? "text-moss" : "text-coral"}`}
     />
   {:else}
     <ChartNoAxesCombined
@@ -623,9 +672,7 @@
                   </summary>
                   <ul class="mt-1 grid pl-7">
                     {#each insight.reminders as reminder (reminder.accountId)}
-                      {@const urgent =
-                        reminder.state === "overdue" ||
-                        reminder.state === "collection_failed"}
+                      {@const urgent = isUrgentReminder(reminder)}
                       <li
                         class="flex items-start justify-between gap-3 border-b border-ink/8 py-2 last:border-b-0"
                       >
@@ -643,6 +690,11 @@
                         >
                       </li>
                     {/each}
+                    {#if insight.coveredCount}
+                      <li class="py-2 text-xs text-subtle">
+                        另有 {insight.coveredCount} 筆扣款帳戶餘額足夠，未列出
+                      </li>
+                    {/if}
                   </ul>
                 </details>
               {:else if insight.view}

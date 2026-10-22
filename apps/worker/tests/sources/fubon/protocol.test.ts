@@ -9,6 +9,7 @@ import {
   isFubonTransactionPageTruncated,
   parseFubonBill,
   parseFubonCardStatus,
+  parseFubonAutopayAccount,
   parseFubonData,
   FubonSyncReport,
   summarizeFubonResult,
@@ -273,7 +274,24 @@ describe("台北富邦信用卡", () => {
     });
     expect(
       data.bankAccounts.find((account) => account.accountType === "credit"),
-    ).toMatchObject({ creditLimit: 150000 });
+    ).toMatchObject({
+      creditLimit: 150000,
+      // 繳款頁「台北富邦012345****4321」：只保存銀行代碼與末四碼。
+      autopayAccount: { bankCode: "012", last4: "4321" },
+    });
+  });
+
+  it("自動扣繳帳號：空白或未約定才視為未設定，欄位缺少或沒有帳號數字時保留既有資料", () => {
+    expect(parseFubonAutopayAccount("台北富邦012345****4321")).toEqual({
+      bankCode: "012",
+      last4: "4321",
+    });
+    expect(parseFubonAutopayAccount("")).toBeNull();
+    expect(parseFubonAutopayAccount("未約定")).toBeNull();
+    expect(parseFubonAutopayAccount("無")).toBeNull();
+    expect(parseFubonAutopayAccount(undefined)).toBeUndefined();
+    expect(parseFubonAutopayAccount("處理中")).toBeUndefined();
+    expect(parseFubonAutopayAccount("無法取得")).toBeUndefined();
   });
 
   it("自動扣繳當日「未繳款」但已繳金額已達應繳總額時視為已繳（款項處理中）", () => {
