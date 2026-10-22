@@ -972,7 +972,13 @@ export function parseFubonAutopayAccount(
   value: string | undefined,
 ): AutopayAccountHint | null | undefined {
   if (value === undefined) return undefined;
-  if (isFubonBlankCell(value) || /未(?:約定|設定|申請)|無/.test(value))
+  // 只認整格「無」或以未約定／未設定／未申請開頭；「無法取得」等文字不算未設定。
+  const plain = value.replace(/[\s\u00a0\u3000]/g, "");
+  if (
+    isFubonBlankCell(value) ||
+    plain === "無" ||
+    /^未(?:約定|設定|申請)/.test(plain)
+  )
     return null;
   const text = toHalfWidthDigits(value).trim();
   if (!/\d/.test(text)) return undefined;

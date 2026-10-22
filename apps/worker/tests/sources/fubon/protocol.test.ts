@@ -288,8 +288,10 @@ describe("台北富邦信用卡", () => {
     });
     expect(parseFubonAutopayAccount("")).toBeNull();
     expect(parseFubonAutopayAccount("未約定")).toBeNull();
+    expect(parseFubonAutopayAccount("無")).toBeNull();
     expect(parseFubonAutopayAccount(undefined)).toBeUndefined();
     expect(parseFubonAutopayAccount("處理中")).toBeUndefined();
+    expect(parseFubonAutopayAccount("無法取得")).toBeUndefined();
   });
 
   it("自動扣繳當日「未繳款」但已繳金額已達應繳總額時視為已繳（款項處理中）", () => {
