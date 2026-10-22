@@ -115,7 +115,20 @@ export interface BankAccount {
   maturityDate?: string;
   inactiveAt?: string;
   creditLimit?: number;
+  /**
+   * 銀行頁面揭露的自動扣繳帳戶（信用卡／貸款）。undefined 表示本次未取得，
+   * 保留既有資料；null 表示銀行明確顯示未設定自動扣繳。
+   */
+  autopayAccount?: AutopayAccountHint | null;
   raw?: unknown;
+}
+
+/** 只保存銀行代碼、末四碼與可對應的存款 sourceId；不得放入完整帳號。 */
+export interface AutopayAccountHint {
+  bankCode?: string;
+  last4?: string;
+  /** 來源能以完整帳號算出自家存款帳戶 sourceId 時填入，用於精準對應。 */
+  depositSourceId?: string;
 }
 
 export interface BankBalanceSnapshot {

@@ -320,6 +320,8 @@
               bills={$bills.data ?? []}
               billsPending={$bills.isPending}
               billsError={$bills.isError}
+              {api}
+              accounts={$bank.data ?? []}
             />
           {:else if activeItem?.kind === "investments"}
             <InvestmentWorkspace
@@ -416,6 +418,8 @@
                     bills={$bills.data ?? []}
                     billsPending={$bills.isPending}
                     billsError={$bills.isError}
+                    {api}
+                    accounts={$bank.data ?? []}
                     compact
                   />
                 </div>

@@ -124,6 +124,10 @@ const ENTITY_CONFIG: Record<SyncEntityType, EntityConfig> = {
       "inactive_at",
       "bank_code",
       "account_last4",
+      "autopay_status",
+      "autopay_bank_code",
+      "autopay_account_last4",
+      "autopay_account_source_id",
       "raw_payload",
       "created_at",
       "updated_at",
@@ -142,6 +146,10 @@ const ENTITY_CONFIG: Record<SyncEntityType, EntityConfig> = {
       "inactive_at",
       "bank_code",
       "account_last4",
+      "autopay_status",
+      "autopay_bank_code",
+      "autopay_account_last4",
+      "autopay_account_source_id",
       "raw_payload",
       "updated_at",
     ],
@@ -585,6 +593,11 @@ function promotionStatement(
       }
       if (entityType === "bank_account" && column === "currency")
         return "currency = COALESCE(NULLIF(excluded.currency, ''), bank_accounts.currency)";
+      if (entityType === "bank_account" && column.startsWith("autopay_"))
+        // 來源本次沒取得扣款帳戶時整組保留；有明確結果（含未設定）時整組覆寫，
+        // 避免新舊銀行代碼與末四碼混在一起。
+        return `${column} = CASE WHEN excluded.autopay_status IS NULL
+          THEN bank_accounts.${column} ELSE excluded.${column} END`;
       if (
         entityType === "bank_account" &&
         [

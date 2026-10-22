@@ -156,6 +156,7 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
   - 第一銀行、玉山以卡片帳戶區分，不需這兩個欄位；國泰、新光的交易資料沒有卡號，未填。
 - 支出與負債為負，退款與入帳為正。
 - `raw` 只能保留遮罩或白名單資料，主要功能不得依賴 raw shape。
+- 信用卡／貸款帳戶的 `autopayAccount` 回報銀行頁面揭露的自動扣繳帳戶：只能放銀行代碼、末四碼，以及能以完整帳號算出的自家存款 sourceId，不得放入完整帳號。頁面明確顯示未設定時填 `null`；該頁未取得或解析失敗時保持 `undefined`，讓既有資料保留。對應與手動覆寫規則見後端文件「信用卡與貸款扣款帳戶」。
 - 一般 connector 的資料必須經 `record-mapper.ts` 與 staged persistence；durable-run
   connector 可直接以其 run item table 作為 staging source。資料 promotion 與 cursor
   必須放在同一 guarded D1 batch，secret state 需以設定版本 CAS 保護。
@@ -799,6 +800,7 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 信用卡負債快照為 `-(本期帳單剩餘應繳金額 + 未出帳臺幣加總金額)`，帳單本身保留原應繳總額（可為負的溢繳）。
 - 繳款狀態（`raw.paymentState`，對應共用 `isPaid`）：與 `CCCQU002` 結帳日相同的帳單依繳款頁判定；較早期別以下一期帳單的「前期應繳總額」（須等於該期應繳總額）與「繳(退)金額」推得，對不上時為未知。`paid`（狀態明確已繳、剩餘應繳 ≤ 0 或已繳 ≥ 應繳總額）、`payment_processing`（狀態仍「未繳款」但已繳金額已達應繳總額；2026-10 實測自動扣繳當日如此，隔日即轉為「已繳款」、剩餘 0）、`no_payment_needed`（應繳 0）、`credit_balance`（應繳為負，溢繳）皆為 `isPaid: true`；`autopay_pending`（約定自動扣繳且未過截止日）、`unpaid`、`partial`、`below_minimum`（已繳未達最低應繳）、`overdue`（台灣日期已過繳款截止日仍有剩餘，或狀態文字含逾期）為 `false`；缺少金額時為未知。
 - 無卡：只有 `CCCQU002` 缺少繳款欄位且頁面提示符合 `isNoCreditCardMessage` 時才略過信用卡；未知頁面一律失敗。無卡文案目前僅以合成 fixture 驗證。
+- 自動扣繳帳戶：`CCCQU002` 的「自動扣繳帳號」（例如「台北富邦012345****4321」）以開頭的銀行名稱推得銀行代碼、取末四碼，寫入信用卡帳戶的 `autopayAccount`；名稱無法辨識時只留末四碼，不自動對應。欄位空白或「未約定」為 `null`；繳款頁未取得時為 `undefined`。
 - 部分失敗容錯：登入、雙重驗證、工作階段結束（被登出／逾時）、瀏覽器斷線與 Browser Run 額度仍使整次同步失敗；登入後任一資料項（存款總覽、單一帳戶的交易明細、繳款頁、單一帳單期別、未出帳頁）擷取或解析失敗只略過該項，其餘照常寫入。失敗後先確認仍在登入狀態；連續三項失敗即停止其餘項目（多半是網銀或代發異常）。單一資料列（總覽帳戶列、交易列、帳單／未出帳明細列）格式不符只略過該列。繳款頁或未出帳頁缺少時不建立信用卡負債快照（不把未知部分當成 0）。全部失敗且沒有任何帳戶時整次失敗。無論結果都嘗試官方登出。
 - 同步結束記錄 `fubon_sync_summary`：`phase`（`finished`／`aborted`）、`status`（`complete`／`partial`）、各類別（`twdDeposits` 台幣存款、`foreignDeposits` 外幣存款、`twdTransactions` 台幣交易明細〔以帳戶計〕、`cardStatus` 信用卡額度與繳款、`cardBills` 信用卡帳單〔以期別計〕、`cardTransactions` 信用卡明細〔以列計〕、`cardUnbilled` 信用卡未出帳）的 `ok`／`failed`／`rowsRejected`，以及最多 12 筆去識別化原因（類別、階段、錯誤類別、遮罩帳號卡號與網址參數後的訊息）。共用同步結果目前沒有 partial 狀態，因此與永豐相同只以 log 呈現（另有一行 `[sync] fubon/all: partial …` 摘要）。
 - 成功取得資料後另記一行 info 等級的 `fubon_sync_result`：`message` 為一行概況（例如 `fubon[sync] success - twdAccounts:1, foreignAccounts:2, cards:1, cardBills:3`，部分失敗時為 `partial` 並附 `failed:N`），另附結構化欄位 `status`、`twdAccounts`、`foreignAccounts`（`foreignCurrencies` 列出幣別）、`creditCards`、`depositTransactions`、`cardBills`、`cardTransactions`、`cardUnbilled`，以及 `succeeded`／`failed`（各資料項成功與失敗含略過資料列的合計），可一眼確認同步結果。
@@ -830,6 +832,7 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 存款帳戶 sourceId 為 `bank:feib:<末四碼>:<完整帳號 SHA-256 前 16 碼>:<幣別>`，銀行代碼 `805`，已加入直接存款來源。交易 sourceId 由帳號、幣別、交易日期、帳務日期、帶正負號金額、交易後餘額與摘要雜湊並加同一查詢期間內的序號；交易日期存為 `authorizedAt`（只有日期），帳務日期為 `postedDate`；備註中的帳號遮罩為末四碼。
 - 信用卡交易 sourceId 為 `feib:card:tx:v1:<帳單期別>:<卡號末四碼或 account>:<消費日>:<帶正負號金額>:<序號>`；含帳單期別以區分各期分期（原始消費日與金額相同），序號只在同一期帳單內累計，帳單窗口位移時 ID 不變。銀行臺幣金額正數為消費（存為負數），負數為繳款／退款／回饋（存為正數）。目前只有帳單明細（`posted`），未出帳消費尚未接入，因此不接共用授權配對。
 - 繳款狀態：與額度頁結帳日相同的帳單依「本期累積已繳金額」判定；較早期別以下一期的「上期應繳總額」（須等於該期應繳總額）與「已繳款/退款金額」推得，對不上時為未知。已設定自動轉帳且未過截止日為 `autopay_pending`（未繳）；過截止日仍未繳清為 `overdue`。
+- 自動扣繳帳戶：與額度頁結帳日相同的最新一期帳單「指定之自動轉帳帳號」，以存款帳戶相同算法（`feibDepositSourceId`）轉成 sourceId 並取末四碼，寫入信用卡帳戶的 `autopayAccount`，不保存完整帳號；帳號屬他行時 sourceId 對不到任何帳戶，需手動指定。欄位空白為 `null`；本期帳單未取得時為 `undefined`。
 - 信用卡負債快照採額度頁「已使用額度」的相反號；帳單保留原應繳總額。已使用額度是否含分期未到期金額尚待確認。
 - 部分失敗容錯與台北富邦相同：登入、工作階段結束與瀏覽器斷線使整次同步失敗；登入後單一頁面／期間／帳單失敗只略過該項，連續三項失敗即停止，結束時記錄 `feib_sync_summary` 與 `feib_sync_result`。Log 只記事件、分類、筆數與去除 query 的路徑，不記帳密、帳號、姓名、餘額或頁面文字。
 - 外幣活存交易、定存、貸款、未出帳消費尚未接入。

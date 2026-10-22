@@ -1,4 +1,5 @@
 import {
+  deletePaymentAccountOverride,
   listBankAccounts,
   listBankTransactions,
   listBankTransactionsForRefundMatching,
@@ -6,9 +7,15 @@ import {
   listBankTransactionsInRange,
   listCreditCardBills,
   listCreditCardBillsInRange,
+  listPaymentAccountSources,
+  savePaymentAccountOverride,
   type BankTransactionPageRow,
   type CreditCardBillPageCursor,
 } from "./repository";
+import {
+  assertPaymentAccount,
+  resolvePaymentAccounts,
+} from "./payment-accounts";
 import type { TransactionPageCursor } from "../investments/repository";
 import type { MonthDateRange } from "../../platform/month-range";
 import {
@@ -55,7 +62,42 @@ function loadClassificationRules(db: D1Database) {
 }
 
 export async function getBankAccounts(db: D1Database) {
-  return (await listBankAccounts(db)).map(normalizeBankAccountDisplay);
+  return presentBankAccounts(db, await listBankAccounts(db));
+}
+
+type BankAccountRows = Awaited<ReturnType<typeof listBankAccounts>>;
+
+/** 帳戶顯示名稱正規化，並附上信用卡／貸款的扣款帳戶。 */
+async function presentBankAccounts(db: D1Database, rows: BankAccountRows) {
+  const payment = resolvePaymentAccounts(
+    rows,
+    await listPaymentAccountSources(db),
+  );
+  return rows.map((row) => ({
+    ...normalizeBankAccountDisplay(row),
+    ...payment.get(row.id),
+  }));
+}
+
+/** 手動指定扣款帳戶；paymentAccountId 為 null 表示明確不指定。 */
+export async function setPaymentAccount(
+  db: D1Database,
+  accountId: string,
+  paymentAccountId: string | null,
+) {
+  assertPaymentAccount(await listBankAccounts(db), accountId, paymentAccountId);
+  await savePaymentAccountOverride(
+    db,
+    accountId,
+    paymentAccountId,
+    new Date().toISOString(),
+  );
+}
+
+/** 移除手動設定，改回使用銀行提供的自動扣繳帳戶。 */
+export async function clearPaymentAccount(db: D1Database, accountId: string) {
+  assertPaymentAccount(await listBankAccounts(db), accountId, null);
+  await deletePaymentAccountOverride(db, accountId);
 }
 
 export async function getBankPage(
@@ -73,7 +115,7 @@ export async function getBankPage(
   return {
     hasMore,
     last: page.at(-1),
-    accounts: accounts.map(normalizeBankAccountDisplay),
+    accounts: await presentBankAccounts(db, accounts),
     transactions: await presentBankTransactions(db, page, rules),
   };
 }
@@ -90,7 +132,7 @@ export async function getBankRange(
     listBankTransactionsInRange(db, range, days),
   ]);
   return {
-    accounts: accounts.map(normalizeBankAccountDisplay),
+    accounts: await presentBankAccounts(db, accounts),
     transactions: await presentBankTransactions(db, transactions, rules),
   };
 }

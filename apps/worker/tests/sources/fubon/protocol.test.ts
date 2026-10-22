@@ -273,7 +273,11 @@ describe("台北富邦信用卡", () => {
     });
     expect(
       data.bankAccounts.find((account) => account.accountType === "credit"),
-    ).toMatchObject({ creditLimit: 150000 });
+    ).toMatchObject({
+      creditLimit: 150000,
+      // 繳款頁「台北富邦012345****4321」：只保存銀行代碼與末四碼。
+      autopayAccount: { bankCode: "012", last4: "4321" },
+    });
   });
 
   it("自動扣繳當日「未繳款」但已繳金額已達應繳總額時視為已繳（款項處理中）", () => {

@@ -1,4 +1,5 @@
 import type { ConnectorId } from "@taiwan-fin-hub/shared";
+import { TAIWAN_BANK_NAMES } from "../../sources/taiwan-banks";
 
 const ESUN_BANK_CODE = "808";
 const CATHAYBK_BANK_CODE = "013";
@@ -28,41 +29,6 @@ const CONNECTOR_BANK_CODES: ReadonlyMap<string, string> = new Map([
   ["fubon", FUBON_BANK_CODE],
   ["feib", FEIB_BANK_CODE],
 ]);
-const TAIWAN_BANK_NAMES: Record<string, string> = {
-  "004": "台灣銀行",
-  "005": "土地銀行",
-  "006": "合作金庫銀行",
-  "007": "第一銀行",
-  "008": "華南銀行",
-  "009": "彰化銀行",
-  "011": "上海商銀",
-  "012": "台北富邦銀行",
-  "013": "國泰世華銀行",
-  "016": "高雄銀行",
-  "017": "兆豐銀行",
-  "048": "王道銀行",
-  "050": "台灣企銀",
-  "052": "渣打銀行",
-  "053": "台中銀行",
-  "054": "京城銀行",
-  "081": "匯豐銀行",
-  "103": "新光銀行",
-  "108": "陽信銀行",
-  "700": "中華郵政",
-  "803": "聯邦銀行",
-  "805": "遠東銀行",
-  "806": "元大銀行",
-  "807": "永豐銀行",
-  "808": "玉山銀行",
-  "809": "凱基銀行",
-  "810": "星展銀行",
-  "812": "台新銀行",
-  "816": "安泰銀行",
-  "822": "中國信託銀行",
-  "823": "將來銀行",
-  "824": "連線銀行",
-  "826": "樂天銀行",
-};
 
 type BankDisplayRow = {
   sourceId?: string;

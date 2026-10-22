@@ -16,9 +16,10 @@ const STALE_SNAPSHOT_MS = 48 * 60 * 60 * 1000;
  * - `confirm`：繳款狀態未知或資料過舊，只提示請確認。
  * - `overdue`：來源明確標示待繳，但已過期限（同步可能尚未反映當日繳款）。
  * - `collection_failed`：貸款來源明確標示扣款未完成。
+ * - `insufficient_funds`：扣款帳戶目前可用餘額不足以支付期限內所有要扣的款項。
  */
 export type PaymentReminderState =
-  "due" | "confirm" | "overdue" | "collection_failed";
+  "due" | "confirm" | "overdue" | "collection_failed" | "insufficient_funds";
 
 export interface PaymentReminder {
   accountId: string;
@@ -33,6 +34,23 @@ export interface PaymentReminder {
   daysUntilDue?: number;
   state: PaymentReminderState;
   asOfAt?: string;
+  /** 扣款帳戶；只有餘額不足時填入。 */
+  paymentAccount?: {
+    id: string;
+    /** 機構與帳號末碼，供畫面顯示。 */
+    name: string;
+    /** 只有機構名稱，供推播使用，避免鎖定畫面出現帳號末碼。 */
+    institution: string;
+  };
+  /** 扣款帳戶可用餘額與期限內應扣總額的差額；只有餘額不足時填入。 */
+  shortfall?: number;
+}
+
+export interface PaymentReminderSummary {
+  /** 需要顯示的提醒，依緊急程度排序。 */
+  reminders: PaymentReminder[];
+  /** 扣款帳戶可用餘額足夠而隱藏的提醒。 */
+  covered: PaymentReminder[];
 }
 
 export function taipeiDateKey(now: Date) {
@@ -151,20 +169,84 @@ function loanReminder(
 
 const STATE_PRIORITY: Record<PaymentReminderState, number> = {
   collection_failed: 0,
-  overdue: 1,
-  due: 2,
-  confirm: 3,
+  insufficient_funds: 1,
+  overdue: 2,
+  due: 3,
+  confirm: 4,
 };
+
+function roundCurrency(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function paymentAccountOf(account: BankAccountRow) {
+  const institution = account.institutionName ?? "扣款帳戶";
+  return {
+    id: account.id,
+    name: [institution, account.accountName].filter(Boolean).join(" "),
+    institution,
+  };
+}
+
+/**
+ * 依扣款帳戶可用餘額調整提醒：同一扣款帳戶的期限內款項（含已過期限與扣款未完成）
+ * 加總後比較。夠扣時隱藏待繳與待確認的提醒；不夠時改為餘額不足。任一金額未知、
+ * 幣別不同、餘額未知或資料過舊時不判斷，維持原提醒。
+ */
+function applyPaymentAccounts(
+  reminders: PaymentReminder[],
+  accounts: BankAccountRow[],
+  now: Date,
+) {
+  const byId = new Map(accounts.map((item) => [item.id, item]));
+  const groups = new Map<string, PaymentReminder[]>();
+  for (const reminder of reminders) {
+    const payerId = byId.get(reminder.accountId)?.paymentAccountId;
+    if (!payerId) continue;
+    groups.set(payerId, [...(groups.get(payerId) ?? []), reminder]);
+  }
+  const covered = new Set<PaymentReminder>();
+  for (const [payerId, group] of groups) {
+    const payer = byId.get(payerId);
+    const available = payer?.availableBalance ?? payer?.balance;
+    if (
+      !payer ||
+      available == null ||
+      isStale(payer.asOfAt, now) ||
+      group.some(
+        (item) => item.amount === undefined || item.currency !== payer.currency,
+      )
+    )
+      continue;
+    const required = group.reduce((sum, item) => sum + item.amount!, 0);
+    const adjustable = group.filter(
+      (item) => item.state === "due" || item.state === "confirm",
+    );
+    if (available >= required) {
+      for (const item of adjustable) covered.add(item);
+      continue;
+    }
+    for (const item of adjustable) {
+      item.state = "insufficient_funds";
+      item.paymentAccount = paymentAccountOf(payer);
+      item.shortfall = roundCurrency(required - available);
+    }
+  }
+  return {
+    reminders: reminders.filter((item) => !covered.has(item)),
+    covered: reminders.filter((item) => covered.has(item)),
+  };
+}
 
 /**
  * 依帳戶快照與帳單整理近期應繳款。缺少繳款狀態時不視為已繳，
- * 也不直接判定為待繳或逾期。
+ * 也不直接判定為待繳或逾期。設定扣款帳戶時再依可用餘額隱藏或升級提醒。
  */
 export function collectPaymentReminders(
   accounts: BankAccountRow[],
   bills: CreditCardBillRow[],
   now = new Date(),
-): PaymentReminder[] {
+): PaymentReminderSummary {
   const today = taipeiDateKey(now);
   const reminders: PaymentReminder[] = [];
   for (const account of accounts) {
@@ -176,11 +258,14 @@ export function collectPaymentReminders(
           : null;
     if (reminder) reminders.push(reminder);
   }
-  return reminders.sort(
-    (a, b) =>
-      STATE_PRIORITY[a.state] - STATE_PRIORITY[b.state] ||
-      (a.daysUntilDue ?? -Infinity) - (b.daysUntilDue ?? -Infinity),
-  );
+  const summary = applyPaymentAccounts(reminders, accounts, now);
+  const byPriority = (a: PaymentReminder, b: PaymentReminder) =>
+    STATE_PRIORITY[a.state] - STATE_PRIORITY[b.state] ||
+    (a.daysUntilDue ?? -Infinity) - (b.daysUntilDue ?? -Infinity);
+  return {
+    reminders: summary.reminders.sort(byPriority),
+    covered: summary.covered.sort(byPriority),
+  };
 }
 
 export function describeDueDay(reminder: PaymentReminder) {

@@ -435,7 +435,13 @@ describe("遠東商銀信用卡", () => {
     expect(account).toMatchObject({
       accountType: "credit",
       creditLimit: 100000,
+      // 帳單「指定之自動轉帳帳號」以遠銀存款相同算法轉成 sourceId，不保存完整帳號。
+      autopayAccount: {
+        last4: "2222",
+        depositSourceId: feibDepositSourceId("09990000002222", "TWD"),
+      },
     });
+    expect(JSON.stringify(account)).not.toContain("09990000002222");
   });
 
   it("無卡時只回傳存款，不建立信用卡帳戶或零餘額", () => {

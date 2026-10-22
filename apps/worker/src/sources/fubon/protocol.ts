@@ -1,4 +1,5 @@
 import type {
+  AutopayAccountHint,
   BankAccount,
   BankBalanceSnapshot,
   BankTransaction,
@@ -7,6 +8,7 @@ import type {
 import forge from "node-forge";
 import { z } from "zod";
 import { isNoCreditCardMessage } from "../credit-card-status";
+import { bankCodeFromName } from "../taiwan-banks";
 import { BANK_SYNC_MONTHS } from "../sync-window";
 import { creditCardLiabilityBalance } from "../credit-card-liability";
 
@@ -894,6 +896,8 @@ export type FubonCardStatus =
       remainingAmount: number;
       /** 頁面列有自動扣繳帳號（不保存帳號本身）。 */
       autopay: boolean;
+      /** 自動扣繳帳戶的銀行代碼與末四碼；未設定時為 null。 */
+      autopayAccount: AutopayAccountHint | null;
     };
 
 function pageMessages(html: string): string[] {
@@ -925,6 +929,7 @@ export function parseFubonCardStatus(html: string): FubonCardStatus {
     valueByPrefix(payment, "本期帳單剩餘應繳金額"),
   );
   const paymentStatus = valueByPrefix(payment, "繳款狀態") ?? "";
+  const autopayValue = valueByPrefix(payment, "自動扣繳帳號");
   if (
     statementAmount === undefined ||
     remainingAmount === undefined ||
@@ -944,7 +949,8 @@ export function parseFubonCardStatus(html: string): FubonCardStatus {
     lastPaymentDate: parseFubonDate(valueByPrefix(payment, "最近繳款日期")),
     paidAmount: parseFubonAmount(valueByPrefix(payment, "已繳金額")),
     remainingAmount,
-    autopay: hasAutopayAccount(valueByPrefix(payment, "自動扣繳帳號")),
+    autopay: hasAutopayAccount(autopayValue),
+    autopayAccount: parseFubonAutopayAccount(autopayValue),
   };
 }
 
@@ -952,6 +958,24 @@ function hasAutopayAccount(value: string | undefined) {
   if (value === undefined || isFubonBlankCell(value)) return false;
   if (/未(?:約定|設定|申請)|無/.test(value)) return false;
   return /\d/.test(value);
+}
+
+/**
+ * 「台北富邦012345****4321」：銀行名稱＋遮罩帳號。只取銀行代碼與末四碼，
+ * 名稱無法辨識或末四碼被遮蔽時留空，由使用者手動指定扣款帳戶。
+ */
+export function parseFubonAutopayAccount(
+  value: string | undefined,
+): AutopayAccountHint | null {
+  if (!hasAutopayAccount(value)) return null;
+  const text = toHalfWidthDigits(value!).trim();
+  const bankName = text.match(/^[^\d*＊]+/)?.[0];
+  const bankCode = bankName ? bankCodeFromName(bankName) : undefined;
+  const last4 = text.match(/(\d{4})$/)?.[1];
+  return {
+    ...(bankCode ? { bankCode } : {}),
+    ...(last4 ? { last4 } : {}),
+  };
 }
 
 /**
@@ -1721,6 +1745,8 @@ function parseCreditCards(
       accountType: "credit" as const,
       currency: "TWD",
       creditLimit: status?.creditLimit ?? bills[0]?.creditLimit,
+      // 繳款頁未取得時為 undefined，保留上次同步的扣款帳戶。
+      autopayAccount: status?.autopayAccount,
     },
     snapshot,
     transactions,

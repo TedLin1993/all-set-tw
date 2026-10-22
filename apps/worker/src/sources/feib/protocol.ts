@@ -1,4 +1,5 @@
 import type {
+  AutopayAccountHint,
   BankAccount,
   BankBalanceSnapshot,
   BankTransaction,
@@ -987,6 +988,11 @@ export type FeibStatement = {
   creditLimit?: number;
   revolvingBalance?: number;
   autopay: boolean;
+  /**
+   * 指定之自動轉帳帳號的末四碼，以及以相同算法得出的遠銀存款 sourceId（只含雜湊，
+   * 不保存完整帳號）；未設定時為 null。帳號屬他行時 sourceId 對不到任何帳戶。
+   */
+  autopayAccount: AutopayAccountHint | null;
   previousBalance?: number;
   paymentsAndRefunds?: number;
   newCharges?: number;
@@ -1117,6 +1123,13 @@ export function parseFeibStatement(html: string): FeibStatement {
     creditLimit: parseFeibAmount(first.get("您的循環額度")),
     revolvingBalance: parseFeibAmount(first.get("循環信用本金餘額")),
     autopay: autopayAccount.length >= 6,
+    autopayAccount:
+      autopayAccount.length >= 6
+        ? {
+            last4: autopayAccount.slice(-4),
+            depositSourceId: feibDepositSourceId(autopayAccount, "TWD"),
+          }
+        : null,
     previousBalance: parseFeibAmount(second.get("上期應繳總額")),
     paymentsAndRefunds: parseFeibAmount(second.get("已繳款/退款金額")),
     newCharges: parseFeibAmount(second.get("本期新增款項")),
@@ -1628,6 +1641,13 @@ function parseCreditCard(
       accountType: "credit" as const,
       currency: "TWD",
       creditLimit: status?.creditLimit ?? statements[0]?.creditLimit,
+      // 只採用與額度頁同一期的帳單；本期帳單未取得時保留上次同步的扣款帳戶。
+      autopayAccount:
+        statements[0] &&
+        (!status ||
+          statements[0].statementClosingDate === status.statementClosingDate)
+          ? statements[0].autopayAccount
+          : undefined,
     },
     snapshot,
     transactions,

@@ -225,7 +225,7 @@ async function safelyLoadPaymentReminders(
       getBankAccounts(db),
       getCreditCardBillsRange(db, { from: monthStart(-2), to: monthStart(1) }),
     ]);
-    return collectPaymentReminders(accounts, bills, now);
+    return collectPaymentReminders(accounts, bills, now).reminders;
   } catch (error) {
     const safeError = sanitizeDatabaseError(error);
     console.error(
