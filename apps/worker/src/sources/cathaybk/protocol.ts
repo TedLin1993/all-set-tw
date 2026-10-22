@@ -1,3 +1,4 @@
+import type { ConnectorSessionState } from "@taiwan-fin-hub/shared";
 import { z } from "zod";
 import type { BankAccount, BankBalanceSnapshot } from "../financial-types";
 
@@ -17,6 +18,60 @@ export type CathaybkConfig = z.infer<typeof cathaybkConfigSchema>;
 
 export function parseCathaybkConfig(config: unknown): CathaybkConfig {
   return cathaybkConfigSchema.parse(config);
+}
+
+function hasValidCathayTrustedDevice(value: unknown) {
+  if (typeof value !== "string") return false;
+  try {
+    const cookies = JSON.parse(value) as unknown;
+    return (
+      Array.isArray(cookies) &&
+      cookies.some((cookie) => {
+        if (!cookie || typeof cookie !== "object") return false;
+        const candidate = cookie as Record<string, unknown>;
+        const domain = String(candidate.domain ?? "")
+          .replace(/^\./, "")
+          .toLowerCase();
+        return (
+          candidate.name === "CUB.eBank.DeviceId" &&
+          typeof candidate.value === "string" &&
+          candidate.value.length > 0 &&
+          typeof candidate.expires === "number" &&
+          candidate.expires > Date.now() / 1000 &&
+          (domain === "cathaybk.com.tw" || domain.endsWith(".cathaybk.com.tw"))
+        );
+      })
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** 有效的信任裝置 cookie 代表免 OTP；保留中的 Browser session 代表待輸入 OTP。 */
+export function describeCathaybkSession(
+  stored: Record<string, unknown>,
+  credentialsComplete: boolean,
+): Partial<ConnectorSessionState> {
+  const verificationExpiresAt =
+    typeof stored.browserSessionExpiresAt === "string"
+      ? stored.browserSessionExpiresAt
+      : null;
+  const verificationPending =
+    credentialsComplete &&
+    typeof stored.browserSessionId === "string" &&
+    stored.browserSessionId.length > 0 &&
+    verificationExpiresAt !== null &&
+    new Date(verificationExpiresAt) > new Date();
+  return {
+    sessionAvailable: hasValidCathayTrustedDevice(stored.sessionCookies),
+    verificationExpiresAt,
+    verificationPending,
+    verificationChannel:
+      verificationPending &&
+      (stored.otpChannel === "email" || stored.otpChannel === "sms")
+        ? stored.otpChannel
+        : null,
+  };
 }
 
 const cardStatusResponseSchema = z.object({

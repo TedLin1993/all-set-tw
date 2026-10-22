@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
 import { createTestD1 } from "../../helpers/d1";
 import { getConnectorSettings } from "../../../src/db";
 import { decryptJson, encryptJson } from "../../../src/platform/crypto";
@@ -7,6 +8,7 @@ import {
   getConnectorSettingsView,
   updateConnectorSettings,
 } from "../../../src/features/connectors/service";
+import { saveConnectorSettings } from "../../../src/features/connectors/repository";
 
 const key = "synthetic-test-encryption-key";
 const credentials = {
@@ -201,5 +203,110 @@ describe("連線設定的憑證安全（隔離 D1）", () => {
       password: "new-password",
       account: "different-user",
     });
+  });
+  it("依各來源保存的 secret state 回報 session 與待驗證狀態", async () => {
+    const env = { DB: harness.binding, CONFIG_ENCRYPTION_KEY: key } as Env;
+    const future = new Date(Date.now() + 120_000).toISOString();
+    const past = new Date(Date.now() - 120_000).toISOString();
+    async function viewWith(
+      connectorId: ConnectorId,
+      secret: Record<string, unknown>,
+      withCredentials = true,
+    ) {
+      const creds = withCredentials
+        ? Object.fromEntries(
+            connectorCatalog[connectorId].credentialFields.map(({ key }) => [
+              key,
+              `synthetic-${key}`,
+            ]),
+          )
+        : {};
+      await saveConnectorSettings(env.DB, {
+        id: `view-${connectorId}`,
+        connectorId,
+        encryptedConfig: await encryptJson({ ...creds, ...secret }, key),
+        publicConfig: null,
+        now: new Date().toISOString(),
+      });
+      const view = await getConnectorSettingsView(env, connectorId);
+      return {
+        sessionAvailable: view.sessionAvailable,
+        verificationPending: view.verificationPending,
+        verificationChannel: view.verificationChannel,
+        verificationExpiresAt: view.verificationExpiresAt,
+      };
+    }
+    const none = {
+      sessionAvailable: false,
+      verificationPending: false,
+      verificationChannel: null,
+      verificationExpiresAt: null,
+    };
+    const deviceCookie = (expires: number) =>
+      JSON.stringify([
+        {
+          name: "CUB.eBank.DeviceId",
+          value: "synthetic-device",
+          expires,
+          domain: ".cathaybk.com.tw",
+        },
+      ]);
+
+    expect(await viewWith("tdcc", { session: { tokenId: "t" } })).toEqual({
+      ...none,
+      sessionAvailable: true,
+    });
+    expect(
+      await viewWith("tdcc", { session: { tokenId: "t" } }, false),
+    ).toEqual(none);
+    for (const connectorId of ["esun", "taishin", "firstbank", "hncb"] as const)
+      expect(await viewWith(connectorId, { sessionCookies: "c" })).toEqual({
+        ...none,
+        sessionAvailable: true,
+      });
+    expect(await viewWith("esun", { sessionCookies: "" })).toEqual(none);
+    expect(
+      await viewWith("sinopac", {
+        sessionCookies: "c",
+        protocol: "sinopac-mobile-app-json-v1",
+      }),
+    ).toEqual({ ...none, sessionAvailable: true });
+    expect(await viewWith("sinopac", { sessionCookies: "c" })).toEqual(none);
+    expect(await viewWith("megabank", { sessionCookies: "c" })).toEqual(none);
+    expect(
+      await viewWith("cathaybk", {
+        sessionCookies: deviceCookie(Date.now() / 1000 + 3_600),
+        browserSessionId: "b",
+        browserSessionExpiresAt: future,
+        otpChannel: "sms",
+      }),
+    ).toEqual({
+      sessionAvailable: true,
+      verificationPending: true,
+      verificationChannel: "sms",
+      verificationExpiresAt: future,
+    });
+    expect(
+      await viewWith("cathaybk", {
+        sessionCookies: deviceCookie(Date.now() / 1000 - 3_600),
+        browserSessionId: "b",
+        browserSessionExpiresAt: past,
+        otpChannel: "sms",
+      }),
+    ).toEqual({ ...none, verificationExpiresAt: past });
+    expect(
+      await viewWith("ctbc", {
+        pendingSession: {
+          clientNo: "c",
+          accessToken: "a",
+          xAuthToken: "x",
+          transactionToken: "t",
+          seed: "s",
+          loginRequest: {},
+          method: "app",
+          expiresAt: past,
+        },
+      }),
+    ).toEqual({ ...none, verificationExpiresAt: past });
   });
 });

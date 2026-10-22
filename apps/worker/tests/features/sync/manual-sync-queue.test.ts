@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({ runConnectorSync: vi.fn() }));
 vi.mock("../../../src/features/sync/registry", () => ({
   runConnectorSync: mocks.runConnectorSync,
   prepareConnectorChallenge: vi.fn(),
+  challengeConnectorIds: [],
+  challengeFailureCode: vi.fn(),
 }));
 
 import {

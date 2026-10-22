@@ -1,3 +1,4 @@
+import type { ConnectorSessionState } from "@taiwan-fin-hub/shared";
 import type {
   BankAccount,
   BankBalanceSnapshot,
@@ -39,6 +40,31 @@ export type CtbcConfig = z.infer<typeof ctbcConfigSchema>;
 export function parseCtbcConfig(config: unknown): CtbcConfig {
   return ctbcConfigSchema.parse(config);
 }
+
+/** 設定頁只回報待驗證的方式與期限，不揭露待驗證登入的內容。 */
+export function describeCtbcSession(
+  stored: Record<string, unknown>,
+  credentialsComplete: boolean,
+): Partial<ConnectorSessionState> {
+  const pending = ctbcPendingSessionSchema.safeParse(stored.pendingSession);
+  if (!pending.success) return {};
+  const verificationPending =
+    credentialsComplete && Date.parse(pending.data.expiresAt) > Date.now();
+  return {
+    verificationExpiresAt: pending.data.expiresAt,
+    verificationPending,
+    verificationChannel: verificationPending ? pending.data.method : null,
+  };
+}
+
+/**
+ * 換密碼只結束待驗證登入（catalog 的 resetOnCredentialChangeFields）；
+ * 切換身分證字號或使用者代號時，另外更換虛擬裝置。
+ */
+export const ctbcIdentityReset = {
+  fields: ["userId", "account"],
+  reset: ["deviceCode", "deviceSeed"],
+} as const;
 
 export type CtbcPayloads = {
   depositOverview: unknown;

@@ -1,3 +1,4 @@
+import type { ConnectorSessionState } from "@taiwan-fin-hub/shared";
 import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { Connector } from "../types";
 import type {
@@ -87,6 +88,23 @@ export const tdccConfigSchema = z.object({
 export type TdccConfig = z.infer<typeof tdccConfigSchema>;
 export function parseTdccConfig(config: unknown) {
   return tdccConfigSchema.parse(config);
+}
+
+/** 帳密完整且保存了登入 token 時，視為可直接同步。 */
+export function describeTdccSession(
+  stored: Record<string, unknown>,
+  credentialsComplete: boolean,
+): Partial<ConnectorSessionState> {
+  const session = stored.session;
+  return {
+    sessionAvailable:
+      credentialsComplete &&
+      Boolean(
+        session &&
+        typeof session === "object" &&
+        typeof (session as Record<string, unknown>).tokenId === "string",
+      ),
+  };
 }
 
 export type TdccHolding = TdccConfig["holdings"][number];
