@@ -215,7 +215,10 @@ test("資產清冊區分待繳與未知金額，並可新增手動資產", async
   const ledger = page
     .locator('section[aria-label="資產清冊"]')
     .filter({ visible: true });
-  await expect(ledger.getByText("薪轉戶", { exact: true })).toBeVisible();
+  // 扣款帳戶選單的選項也會列出帳戶名稱，只檢查帳戶列表本身。
+  await expect(
+    ledger.getByRole("paragraph").filter({ hasText: /^薪轉戶$/ }),
+  ).toBeVisible();
   await ledger.getByRole("button", { name: /^永豐銀行/ }).click();
   const jpyCard = ledger
     .getByText("永豐信用卡（JPY）", { exact: true })

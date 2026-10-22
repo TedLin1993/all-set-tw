@@ -279,7 +279,9 @@ test("銀行手動驗證失敗可重試，送出驗證碼後完成同步", async
   );
   recover = true;
   await page.getByRole("button", { name: "同步帳戶", exact: true }).click();
-  await expect(page.getByRole("img", { name: "將來圖形驗證碼" })).toBeVisible();
+  await expect(
+    page.getByRole("img", { name: "將來銀行圖形驗證碼" }),
+  ).toBeVisible();
   const submit = page.getByRole("button", { name: "驗證並同步", exact: true });
   await expect(submit).toBeDisabled();
   await page.getByRole("textbox", { name: /驗證碼/ }).fill("A1234");
@@ -287,9 +289,9 @@ test("銀行手動驗證失敗可重試，送出驗證碼後完成同步", async
   await expect(
     page.getByRole("status").filter({ hasText: "同步成功，帳戶資料已更新" }),
   ).toBeVisible();
-  await expect(page.getByRole("img", { name: "將來圖形驗證碼" })).toHaveCount(
-    0,
-  );
+  await expect(
+    page.getByRole("img", { name: "將來銀行圖形驗證碼" }),
+  ).toHaveCount(0);
   expect(verified).toBe(true);
   expect(syncCalls).toBe(2);
 });
@@ -404,3 +406,414 @@ for (const source of [
     expect(syncCalls).toBe(1);
   });
 }
+
+test("國泰選擇簡訊驗證，驗證碼錯誤可重輸並完成首次同步", async ({ page }) => {
+  const expiresAt = new Date(Date.now() + 240_000).toISOString();
+  const settings = {
+    configured: true,
+    credentialsComplete: true,
+    sessionAvailable: false,
+    verificationPending: false,
+    verificationChannel: null as "email" | "sms" | null,
+    verificationExpiresAt: null as string | null,
+  };
+  const job = {
+    id: "cathaybk:all",
+    connectorId: "cathaybk",
+    scope: "all",
+    configured: true,
+    enabled: true,
+    running: false,
+    scheduleMode: "inherit",
+    intervalMinutes: 60,
+    preferredTime: "06:00",
+    preferredWeekdays: [1],
+    lastStatus: null as string | null,
+    lastError: null as string | null,
+    lastErrorCode: null as string | null,
+    lastRunAt: null as string | null,
+    lastSuccessAt: null as string | null,
+    manualRun: null as Record<string, unknown> | null,
+  };
+  const requests: unknown[] = [];
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
+    if (path === "/api/connectors/cathaybk/sync") {
+      const body = request.postDataJSON() ?? {};
+      requests.push(body);
+      if (!body.otpChannel) {
+        // 一般同步在背景執行；結束時要求選擇驗證碼寄送方式。
+        settings.verificationExpiresAt = expiresAt;
+        job.lastStatus = "needs_user_action";
+        job.lastError = "請選擇驗證方式。";
+        job.lastErrorCode = "CATHAY_OTP_CHANNEL_REQUIRED";
+        job.lastRunAt = new Date().toISOString();
+        job.manualRun = {
+          id: "manual-run",
+          status: "needs_user_action",
+          errorCode: job.lastErrorCode,
+          lastError: job.lastError,
+          createdAt: job.lastRunAt,
+          completedAt: job.lastRunAt,
+        };
+        return route.fulfill({
+          status: 202,
+          json: {
+            success: true,
+            connectorId: "cathaybk",
+            scope: "all",
+            status: "queued",
+            runId: "manual-run",
+          },
+        });
+      }
+      if (!body.otp) {
+        settings.verificationPending = true;
+        settings.verificationChannel = body.otpChannel;
+        return route.fulfill({
+          status: 400,
+          json: {
+            success: false,
+            error: {
+              code: "CATHAY_SMS_OTP_REQUIRED",
+              message: "請輸入簡訊驗證碼。",
+            },
+          },
+        });
+      }
+      if (body.otp !== "310307")
+        return route.fulfill({
+          status: 400,
+          json: {
+            success: false,
+            error: {
+              code: "CATHAY_OTP_INVALID",
+              message: "國泰世華驗證碼錯誤或已逾時，請重新輸入或取得驗證碼。",
+            },
+          },
+        });
+      Object.assign(settings, {
+        sessionAvailable: true,
+        verificationPending: false,
+        verificationChannel: null,
+        verificationExpiresAt: null,
+      });
+      job.lastStatus = "success";
+      job.lastErrorCode = null;
+      job.lastSuccessAt = new Date().toISOString();
+      job.lastRunAt = job.lastSuccessAt;
+      return route.fulfill({
+        json: { success: true, records: 1, cursorUpdated: true },
+      });
+    }
+    const data =
+      path === "/api/runtime"
+        ? { demoMode: false }
+        : path === "/api/sync-jobs"
+          ? [job]
+          : path.endsWith("/settings")
+            ? settings
+            : path === "/api/sync-schedule"
+              ? {
+                  intervalMinutes: 60,
+                  preferredTime: "06:00",
+                  preferredWeekday: 1,
+                  preferredWeekdays: [1],
+                }
+              : path === "/api/notifications/config"
+                ? { enabled: false }
+                : path === "/api/bank"
+                  ? { accounts: [], transactions: [] }
+                  : [];
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#/data-sources");
+  await page
+    .getByRole("button", { name: "管理國泰世華銀行", exact: true })
+    .click();
+  const details = page.getByRole("region", { name: "連接器詳情" });
+  const syncButton = details.getByRole("button", { name: "同步", exact: true });
+  await syncButton.click();
+  await expect(
+    details.getByText("需要額外驗證", { exact: true }),
+  ).toBeVisible();
+  await expect(syncButton).toBeDisabled();
+  await details.getByRole("button", { name: "使用簡訊", exact: true }).click();
+  await expect(
+    details.getByText("簡訊驗證碼已寄出", { exact: true }),
+  ).toBeVisible();
+  const otp = details.getByRole("textbox", { name: "驗證碼後 6 位數字" });
+  const verify = details.getByRole("button", {
+    name: "驗證並完成首次同步",
+    exact: true,
+  });
+  await otp.fill("000000");
+  await verify.click();
+  await expect(
+    details.getByText("國泰世華驗證碼錯誤或已逾時，請重新輸入或取得驗證碼。", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(otp).toHaveValue("");
+  await otp.fill("310307");
+  await verify.click();
+  await expect(details.getByText("簡訊驗證碼已寄出")).toHaveCount(0);
+  await expect(details.getByText(/國泰世華驗證碼錯誤/)).toHaveCount(0);
+  await expect(syncButton).toBeEnabled();
+  expect(requests).toEqual([
+    {},
+    { otpChannel: "sms" },
+    { otp: "000000", otpChannel: "sms" },
+    { otp: "310307", otpChannel: "sms" },
+  ]);
+});
+
+test("兆豐簡訊 OTP 錯誤可原地重輸，驗證後完成同步", async ({ page }) => {
+  const job = {
+    id: "megabank:all",
+    connectorId: "megabank",
+    scope: "all",
+    configured: true,
+    enabled: true,
+    running: false,
+    scheduleMode: "inherit",
+    intervalMinutes: 60,
+    preferredTime: "06:00",
+    preferredWeekdays: [1],
+    lastStatus: null as string | null,
+    lastError: null as string | null,
+    lastErrorCode: null as string | null,
+    lastRunAt: null as string | null,
+    lastSuccessAt: null as string | null,
+    manualRun: null as Record<string, unknown> | null,
+  };
+  const requests: unknown[] = [];
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
+    if (path === "/api/connectors/megabank/sync") {
+      const body = request.postDataJSON() ?? {};
+      requests.push(body);
+      if (!body.otp) {
+        // 一般同步在背景執行；異地登入時要求簡訊 OTP。
+        job.lastStatus = "needs_user_action";
+        job.lastError = "兆豐銀行已寄出簡訊驗證碼，請於時限內輸入。";
+        job.lastErrorCode = "MEGABANK_SMS_OTP_REQUIRED";
+        job.lastRunAt = new Date().toISOString();
+        job.manualRun = {
+          id: "manual-run",
+          status: "needs_user_action",
+          errorCode: job.lastErrorCode,
+          lastError: job.lastError,
+          createdAt: job.lastRunAt,
+          completedAt: job.lastRunAt,
+        };
+        return route.fulfill({
+          status: 202,
+          json: {
+            success: true,
+            connectorId: "megabank",
+            scope: "all",
+            status: "queued",
+            runId: "manual-run",
+          },
+        });
+      }
+      if (body.otp !== "123456")
+        return route.fulfill({
+          status: 400,
+          json: {
+            success: false,
+            error: {
+              code: "MEGABANK_OTP_INVALID",
+              message: "兆豐簡訊驗證碼錯誤，請重新輸入。",
+            },
+          },
+        });
+      job.lastStatus = "success";
+      job.lastErrorCode = null;
+      job.lastSuccessAt = new Date().toISOString();
+      job.lastRunAt = job.lastSuccessAt;
+      return route.fulfill({
+        json: { success: true, records: 1, cursorUpdated: true },
+      });
+    }
+    const data =
+      path === "/api/runtime"
+        ? { demoMode: false }
+        : path === "/api/sync-jobs"
+          ? [job]
+          : path.endsWith("/settings")
+            ? {
+                configured: true,
+                credentialsComplete: true,
+                sessionAvailable: false,
+              }
+            : path === "/api/sync-schedule"
+              ? {
+                  intervalMinutes: 60,
+                  preferredTime: "06:00",
+                  preferredWeekday: 1,
+                  preferredWeekdays: [1],
+                }
+              : path === "/api/notifications/config"
+                ? { enabled: false }
+                : path === "/api/bank"
+                  ? { accounts: [], transactions: [] }
+                  : [];
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#/data-sources");
+  await page.getByRole("button", { name: "管理兆豐銀行", exact: true }).click();
+  const details = page.getByRole("region", { name: "連接器詳情" });
+  const syncButton = details.getByRole("button", {
+    name: "自動驗證並同步",
+    exact: true,
+  });
+  await syncButton.click();
+  await expect(
+    details.getByText("簡訊驗證碼已寄出", { exact: true }),
+  ).toBeVisible();
+  await expect(syncButton).toBeDisabled();
+  const otp = details.getByRole("textbox", { name: "簡訊驗證碼" });
+  const verify = details.getByRole("button", {
+    name: "驗證並同步",
+    exact: true,
+  });
+  await otp.fill("000000");
+  await verify.click();
+  await expect(
+    details.getByText("兆豐簡訊驗證碼錯誤，請重新輸入。").first(),
+  ).toBeVisible();
+  await expect(otp).toHaveValue("");
+  await otp.fill("123456");
+  await verify.click();
+  await expect(details.getByText("簡訊驗證碼已寄出")).toHaveCount(0);
+  await expect(syncButton).toBeEnabled();
+  expect(requests).toEqual([{}, { otp: "000000" }, { otp: "123456" }]);
+});
+
+test("集保依序完成 Email 與簡訊驗證並完成首次同步", async ({ page }) => {
+  const settings = {
+    configured: true,
+    credentialsComplete: true,
+    sessionAvailable: false,
+  };
+  const job = {
+    id: "tdcc:all",
+    connectorId: "tdcc",
+    scope: "all",
+    configured: true,
+    enabled: true,
+    running: false,
+    scheduleMode: "inherit",
+    intervalMinutes: 60,
+    preferredTime: "06:00",
+    preferredWeekdays: [1],
+    lastStatus: null as string | null,
+    lastError: null as string | null,
+    lastErrorCode: null as string | null,
+    lastRunAt: null as string | null,
+    lastSuccessAt: null as string | null,
+  };
+  const requests: unknown[] = [];
+  const queued = {
+    status: 202,
+    json: {
+      success: true,
+      connectorId: "tdcc",
+      scope: "all",
+      status: "queued",
+      runId: "tdcc-run",
+    },
+  };
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
+    if (path === "/api/connectors/tdcc/sync") {
+      const body = request.postDataJSON() ?? {};
+      requests.push(body);
+      job.lastRunAt = new Date().toISOString();
+      if (!body.otp) {
+        // 登入在背景執行；集保要求裝置驗證時寄出 Email 驗證碼。
+        job.lastStatus = "needs_user_action";
+        job.lastError = "TDCC 驗證碼已寄至電子信箱，請輸入驗證碼以完成連線。";
+        job.lastErrorCode = "TDCC_EMAIL_OTP_REQUIRED";
+        return route.fulfill(queued);
+      }
+      if (body.otpChannel === "email")
+        return route.fulfill({
+          status: 400,
+          json: {
+            success: false,
+            error: {
+              code: "TDCC_SMS_OTP_REQUIRED",
+              message: "TDCC 驗證碼已寄至手機簡訊，請輸入驗證碼以完成連線。",
+            },
+          },
+        });
+      settings.sessionAvailable = true;
+      job.lastStatus = "success";
+      job.lastErrorCode = null;
+      job.lastSuccessAt = job.lastRunAt;
+      return route.fulfill(queued);
+    }
+    const data =
+      path === "/api/runtime"
+        ? { demoMode: false }
+        : path === "/api/sync-jobs"
+          ? [job]
+          : path.endsWith("/settings")
+            ? settings
+            : path === "/api/sync-schedule"
+              ? {
+                  intervalMinutes: 60,
+                  preferredTime: "06:00",
+                  preferredWeekday: 1,
+                  preferredWeekdays: [1],
+                }
+              : path === "/api/notifications/config"
+                ? { enabled: false }
+                : path === "/api/bank"
+                  ? { accounts: [], transactions: [] }
+                  : [];
+    return route.fulfill({ json: data });
+  });
+  await page.goto("/#/data-sources");
+  await page
+    .getByRole("button", { name: "管理集保 e 存摺", exact: true })
+    .click();
+  const details = page.getByRole("region", { name: "連接器詳情" });
+  await details
+    .getByRole("button", { name: "連線並取得驗證碼", exact: true })
+    .click();
+  await expect(
+    details.getByText("Email 驗證碼已寄出", { exact: true }),
+  ).toBeVisible();
+  const otp = details.getByRole("textbox", { name: "一次性驗證碼" });
+  const verify = details.getByRole("button", {
+    name: "驗證並完成首次同步",
+    exact: true,
+  });
+  await otp.fill("111111");
+  await verify.click();
+  await expect(
+    details.getByText("簡訊驗證碼已寄出", { exact: true }),
+  ).toBeVisible();
+  await expect(otp).toHaveValue("");
+  await otp.fill("654321");
+  await verify.click();
+  await expect(details.getByText("簡訊驗證碼已寄出")).toHaveCount(0);
+  await expect(
+    details.getByRole("button", { name: "更新並重新連線", exact: true }),
+  ).toBeVisible();
+  expect(requests).toEqual([
+    {},
+    { otp: "111111", otpChannel: "email" },
+    { otp: "654321", otpChannel: "sms" },
+  ]);
+});
