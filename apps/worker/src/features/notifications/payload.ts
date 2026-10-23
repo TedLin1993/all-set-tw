@@ -37,6 +37,7 @@ const connectorLabels: Record<ConnectorId, string> = {
   rakuten: "樂天國際銀行",
   fubon: "台北富邦銀行",
   feib: "遠東商銀",
+  ubot: "聯邦 New New Bank",
 };
 
 export function syncNotificationPayload(

@@ -11,7 +11,7 @@
 - Tables：35
 - Explicit indexes：47
 - Other objects：0
-- Migrations：62
+- Migrations：63
 
 ## Tables
 
@@ -1914,6 +1914,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0062_bank_transaction_card.sql`](../apps/worker/migrations/0062_bank_transaction_card.sql)
 - [`0063_payment_due_notification.sql`](../apps/worker/migrations/0063_payment_due_notification.sql)
 - [`0064_payment_accounts.sql`](../apps/worker/migrations/0064_payment_accounts.sql)
+- [`0065_ubot_sync_job.sql`](../apps/worker/migrations/0065_ubot_sync_job.sql)
 
 ## 程式碼導覽
 

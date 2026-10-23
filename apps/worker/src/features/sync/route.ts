@@ -405,6 +405,10 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
       return manualSyncResponse(c, "feib", overrides);
     },
   );
+
+  api.post("/connectors/ubot/sync", async (c) => {
+    return manualSyncResponse(c, "ubot");
+  });
 }
 
 async function queuedTdccSyncResponse(

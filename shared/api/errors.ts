@@ -56,7 +56,8 @@ export type SyncErrorCode =
   | "NEXTBANK_CAPTCHA_FAILED"
   | "RAKUTEN_BROWSER_BUSY"
   | "RAKUTEN_CAPTCHA_FAILED"
-  | "RAKUTEN_CONNECTION_FAILED";
+  | "RAKUTEN_CONNECTION_FAILED"
+  | "UBOT_CONNECTION_FAILED";
 
 /** 與同步無關的一般 API 錯誤代碼。 */
 export type GeneralApiErrorCode =

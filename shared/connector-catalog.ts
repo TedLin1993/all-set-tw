@@ -520,6 +520,27 @@ export const connectorCatalog = {
       "captcha",
     ],
   },
+  ubot: {
+    id: "ubot",
+    title: "聯邦 New New Bank",
+    description: "臺外幣活存與定存、信用卡帳務與即時消費、信貸餘額／條件",
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+    ],
+    publicFields: [],
+    credentialFields: [
+      { key: "userId", label: "身分證字號", type: "text" },
+      { key: "account", label: "使用者代號", type: "text" },
+      { key: "password", label: "使用者密碼", type: "password" },
+    ],
+    secretStateFields: ["deviceUuid"],
+    resetOnCredentialChangeFields: ["deviceUuid"],
+  },
 } as const satisfies Record<string, ConnectorCatalogEntry>;
 
 export type ConnectorId = keyof typeof connectorCatalog;

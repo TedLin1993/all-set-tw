@@ -24,7 +24,7 @@ Connector 採三層 registry：
 
 | Mode                      | 適用情境                                                 | 現有範例                                             |
 | ------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
-| `api_credentials`         | 帳密登入外部 API，可自行更新 token                       | 電子發票、中信、新光                                 |
+| `api_credentials`         | 帳密登入外部 API，可自行更新 token                       | 電子發票、中信、新光、聯邦 New New Bank              |
 | `api_captcha_session`     | App API 登入含 CAPTCHA，challenge 僅短暫加密保存         | 王道、兆豐銀行                                       |
 | `api_device_otp`          | API 登入，首次裝置需要 OTP                               | 集保 e 存摺                                          |
 | `browser_per_sync`        | 每次同步都必須以 Browser 登入與擷取                      | 國泰世華                                             |
@@ -846,3 +846,12 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 ## 將來銀行
 
 使用網銀帳密，直接呼叫網銀內部 Web API 登入與查詢；圖形驗證碼支援 AI 自動辨識或人工輸入。自動辨識依共用自動驗證碼重試政策（最多辨識六張、送出三次登入），只有 `CAPTCHA_ERROR`／`CAPTCHA_EXPIRED` 會換新驗證碼重試；每個驗證碼只送出一次。單次登入、查詢後登出，不接管其他工作階段。主帳戶查詢最近三個月，活存口袋讀取所有分頁後依日期篩選；定存口袋同步餘額，基金與美股未接入。排程建立時停用，首次成功同步後自動啟用。設定 CAS 與原子寫入 guard 防止查詢期間變更帳密後仍寫入舊結果。
+
+## 聯邦 New New Bank
+
+使用聯邦數位銀行行動 App API（`https://newnewbank.ubot.com.tw/NNBank/svc/<API_NAME>`，`connectionMode: "api_credentials"`）直接登入與查詢，不依賴 Browser Rendering 或圖形驗證碼：
+
+- **登入與雙層加密**：先呼叫 `NNBCM000007` 取得 PKCS#1 RSA-2048 公鑰將密碼加密為 `miMa`，再呼叫 `NNBCM000011` 取得 `k1`（X.509 SPKI RSA-1024 公鑰）與 `k2`（Base64 AES-128 金鑰），將登入 payload（`sid` 為大寫身分證字號尾端補 `"A"`、`deviceUuid` 為 64 碼小寫 hex、`deviceModel: "google-husky"`、`deviceOSVer: "Android15"`）補上 PKCS#7 padding 後以 `AES-128-OFB` 加密為 `p1`、隨機 16 碼數字 `iv` 以 RSA 加密為 `p2`，送交 `NNBI010101`。
+- **唯讀工作階段與不干擾手機裝置綁定**：未綁定此虛擬 `deviceUuid` 時，`NNBI010101` 回傳 `RtnCode: "NS161"`（或 `"0000"`／`"NS164"`）並同時於 HTTP response header 核發有效 `ssid`。連接器將 `ssid` 帶入後續請求的 `Authorization` header 即可完成所有唯讀查詢，**絕不呼叫** `NNBS000004`、`NNBI020101`、`NNBI020102` 等裝置綁定端點，避免覆蓋使用者手機原有的快速登入與裝置綁定。遇到帳密錯誤（`NS169`）、鎖定（`NS168`）、欄位檢核失敗（`NM92`）或需於官方 App 更新基本資料／KYC（`NS090`、`MissingUserFlag === "2"`、`KycFlag === "Y"`）時立即停止並轉為 `NeedsUserActionError`，不自動重試。同步結束於 `finally` 呼叫 `NNBI010103` 登出。
+- **存款與定存**：`NNBN020101` 取得臺幣數位帳戶餘額與可用餘額、`NNBN010201` 查詢近三個月臺幣交易明細（若 `WarnCode === "MFOB"` 超過單次筆數上限則自動二分日期區間遞迴重查）、`NNBN030101` 取得臺幣定存存單；`NNBF010201`、`NNBF050201`、`NNBF020301` 取得外幣活存、交易明細與外幣定存（回傳 `NS102` 代表未開立外幣帳戶，自動略過）。存款帳戶 `sourceId` 為 `bank:ubot:<末四碼>:<完整帳號雜湊>:<幣別>`，銀行代碼 `803`，已加入直接存款來源。
+- **信用卡與個人貸款**：先以 `NNBC010105` 查詢信用卡清單（回傳 `ErCode_1: "NSCRD"` 且 `ErCode_2` 為 `0021`／`0023`／`F101`／`F102`／`F103` 時視為無正卡並略過後續卡務查詢）；持卡時查詢 `NNBC010101`（額度、本期應繳、已繳與未出帳總額 `UnsettleAmt`）、`NNBC010102`（未出帳已請款明細，略過 `TxCode` 為 `05`／`07` 的查證中小計列）、`NNBC080201` 與 `NNBC010104`（近三期帳單與已出帳明細）、`NNBC080101`（即時消費授權，以 `pending` 寫入並透過 `prepareCardAuthorizationWrite` 與已請款交易配對）及 `NNBC030101`（自動扣繳狀態）。個人貸款透過 `NNBL010401` 同步現欠本金、利率、繳款日與扣款帳號（無貸款回傳 `NSLOND` 時自動略過）。
