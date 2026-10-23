@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   collectPaymentReminders,
   type BankAccountResponse as BankAccountRow,
@@ -9,6 +9,14 @@ import {
   scheduledSummaryNotification,
   type SyncNotificationEvent,
 } from "../../../src/features/notifications/payload";
+import { safelyLoadPaymentReminders } from "../../../src/features/notifications/service";
+import { persistStagedSyncWrite } from "../../../src/features/sync/persistence";
+import {
+  bankAccountRecord,
+  bankBalanceSnapshotRecord,
+  creditCardBillRecord,
+} from "../../../src/features/sync/record-mapper";
+import { createTestD1 } from "../../helpers/d1";
 
 // 台北時間 2026-10-21 01:00；UTC 仍是 10-20。
 const now = new Date("2026-10-20T17:00:00Z");
@@ -247,6 +255,50 @@ describe("collectPaymentReminders", () => {
         ]);
       }
     });
+
+    it("外幣帳單由台幣帳戶扣款時，依匯率加換匯緩衝換算後判斷；沒有匯率時不判斷", () => {
+      const runJpy = (
+        availableBalance: number,
+        rates: Record<string, number> = { JPY: 0.21 },
+      ) =>
+        collectPaymentReminders(
+          [
+            card({
+              id: "jpy",
+              currency: "JPY",
+              balance: -30_000,
+              ...paidFromDeposit,
+            }),
+            deposit({ availableBalance }),
+          ],
+          [
+            bill({
+              accountId: "jpy",
+              currency: "JPY",
+              statementAmount: 30_000,
+            }),
+          ],
+          now,
+          rates,
+        );
+
+      // JP¥30,000 × 0.21 × 1.02 = NT$6,426。
+      expect(runJpy(7_000).covered.map((item) => item.accountId)).toEqual([
+        "jpy",
+      ]);
+      expect(runJpy(6_000).reminders).toEqual([
+        expect.objectContaining({
+          accountId: "jpy",
+          currency: "JPY",
+          state: "insufficient_funds",
+          shortfall: 426,
+          paymentAccount: expect.objectContaining({ currency: "TWD" }),
+        }),
+      ]);
+      const noRate = runJpy(7_000, {});
+      expect(noRate.covered).toEqual([]);
+      expect(noRate.reminders.map((item) => item.state)).toEqual(["due"]);
+    });
   });
 });
 
@@ -368,6 +420,7 @@ describe("scheduledSummaryNotification", () => {
           id: "deposit",
           name: "台新銀行 末五碼 12345",
           institution: "台新銀行",
+          currency: "TWD",
         },
         shortfall: 800,
       }),
@@ -400,5 +453,66 @@ describe("scheduledSummaryNotification", () => {
     expect(payload?.body).toBe(
       "台北富邦信用卡明天到期（請確認是否已繳）、國泰世華房貸今天扣款（請確認餘額）。",
     );
+  });
+});
+
+describe("推播讀取繳款提醒（隔離 D1）", () => {
+  let harness: Awaited<ReturnType<typeof createTestD1>>;
+  beforeAll(async () => {
+    harness = await createTestD1();
+  }, 60_000);
+  afterAll(async () => {
+    await harness?.mf.dispose();
+  });
+
+  it("匯率讀取失敗時照常產生提醒，不因匯率而讓推播少掉繳款提醒", async () => {
+    const db = harness.binding;
+    const accountId = "credit:cathaybk:TWD";
+    const card = bankAccountRecord(
+      "cathaybk",
+      {
+        sourceId: accountId,
+        institutionName: "國泰世華",
+        accountType: "credit",
+        currency: "TWD",
+      },
+      freshAsOf,
+    );
+    await persistStagedSyncWrite(db, {
+      records: [
+        card,
+        bankBalanceSnapshotRecord(
+          "cathaybk",
+          {
+            accountId,
+            sourceId: "snapshot",
+            balance: -12_800,
+            currency: "TWD",
+            asOfAt: freshAsOf,
+          },
+          freshAsOf,
+        ),
+        creditCardBillRecord(
+          "cathaybk",
+          {
+            accountId,
+            sourceId: "bill",
+            billingPeriod: "2026-09",
+            statementAmount: 12_800,
+            paidAmount: 0,
+            isPaid: false,
+            paymentDueDate: "2026-10-23",
+            currency: "TWD",
+          },
+          freshAsOf,
+        ),
+      ],
+    });
+    await db.prepare("DROP TABLE exchange_rates").run();
+
+    const reminders = await safelyLoadPaymentReminders(db, now);
+    expect(reminders.map((item) => [item.accountId, item.state])).toEqual([
+      [card.recordKey, "due"],
+    ]);
   });
 });

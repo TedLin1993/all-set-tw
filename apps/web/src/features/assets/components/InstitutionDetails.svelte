@@ -1,5 +1,9 @@
 <script lang="ts">
   import type { BankAccountRow, CreditCardBillRow } from "@/data/bank/types";
+  import {
+    groupCardAccounts,
+    groupDepositAccounts,
+  } from "@/data/bank/account-groups";
   import type { ApiClient } from "@/shared/api/client";
   import {
     formatBankAccountName,
@@ -32,6 +36,55 @@
   const cardsById = $derived(
     new Map(group.cards.map((card) => [card.id, card])),
   );
+  const depositGroups = $derived(groupDepositAccounts(group.accounts));
+  const cardGroups = $derived(groupCardAccounts(group.cards));
+
+  /** 多幣別信用卡帳戶去掉名稱結尾的幣別，例如「永豐信用卡（JPY）」。 */
+  function cardGroupName(members: BankAccountRow[]) {
+    const first = members[0]!;
+    const name = first.accountName ?? formatBankAccountName(first);
+    return members.length > 1
+      ? name.replace(new RegExp(`\\s*[（(]${first.currency}[)）]$`, "i"), "")
+      : name;
+  }
+
+  /** 合併各幣別的近期卡片，同一末四碼只列一次。 */
+  function cardGroupRecentCards(members: BankAccountRow[]) {
+    const cards = new Map<string, { last4: string; name: string | null }>();
+    for (const member of members)
+      for (const item of member.recentCards ?? [])
+        if (!cards.has(item.last4)) cards.set(item.last4, item);
+    return [...cards.values()]
+      .map((item) =>
+        item.name ? `${item.name} · ${item.last4}` : `末四碼 ${item.last4}`,
+      )
+      .join("、");
+  }
+
+  function cardAmount(card: BankAccountRow) {
+    return card.balance == null
+      ? "剩餘應繳金額未取得"
+      : formatCurrency(card.balance, card.currency);
+  }
+
+  /** 單一幣別顯示幣別；同一帳號的多幣別改標示帳戶類型，幣別逐列列在下方。 */
+  function depositGroupDetail(members: BankAccountRow[]) {
+    const currencies = members.map((account) => account.currency);
+    const label =
+      members.length === 1
+        ? currencies[0]
+        : currencies.includes("TWD")
+          ? "多幣別帳戶"
+          : "外幣帳戶";
+    const asOfAt = members
+      .map((account) => account.asOfAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1);
+    return asOfAt
+      ? `${label} · 更新 ${formatDate(asOfAt)}`
+      : `${label} · 尚未取得更新時間`;
+  }
   const institutionBills = $derived(
     bills
       .filter((bill) => cardsById.has(bill.accountId))
@@ -144,16 +197,19 @@
         銀行帳戶
       </h3>
       <span class="text-caption text-subtle">
-        {group.accounts.length} 個帳戶
+        {group.depositAccountCount} 個帳戶
       </span>
     </div>
     {#if group.accounts.length === 0}
       <p class="py-3 text-sm text-subtle">此機構沒有銀行帳戶。</p>
     {:else}
       <div class="mt-2 divide-y divide-border">
-        {#each group.accounts as account (account.id)}
+        {#each depositGroups as members (members[0]!.id)}
+          {@const account = members[0]!}
           <div
-            class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3"
+            class={members.length === 1
+              ? "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3"
+              : "py-3"}
           >
             <div class="min-w-0">
               <p class="break-words text-sm font-semibold">
@@ -170,14 +226,27 @@
                 </p>
               {/if}
               <p class="mt-1 text-caption text-subtle">
-                {account.currency}{account.asOfAt
-                  ? ` · 更新 ${formatDate(account.asOfAt)}`
-                  : " · 尚未取得更新時間"}
+                {depositGroupDetail(members)}
               </p>
             </div>
-            <p class="text-right text-sm font-medium tabular-nums text-steel">
-              {formatCurrency(account.balance ?? 0, account.currency)}
-            </p>
+            {#if members.length === 1}
+              <p class="text-right text-sm font-medium tabular-nums text-steel">
+                {formatCurrency(account.balance ?? 0, account.currency)}
+              </p>
+            {:else}
+              <dl class="mt-2 grid gap-1.5 border-l border-ink/10 pl-3">
+                {#each members as member (member.id)}
+                  <div class="flex items-baseline justify-between gap-3">
+                    <dt class="text-caption text-subtle">{member.currency}</dt>
+                    <dd
+                      class={`text-right text-sm font-medium tabular-nums ${member.balance ? "text-steel" : "text-subtle"}`}
+                    >
+                      {formatCurrency(member.balance ?? 0, member.currency)}
+                    </dd>
+                  </div>
+                {/each}
+              </dl>
+            {/if}
           </div>
         {/each}
       </div>
@@ -247,39 +316,69 @@
       <p class="py-3 text-sm text-subtle">此機構沒有信用卡。</p>
     {:else}
       <div class="mt-2 divide-y divide-border">
-        {#each group.cards as card (card.id)}
-          <div
-            class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-3"
-          >
-            <div class="min-w-0">
-              <p class="break-words text-sm font-semibold">
-                {card.accountName ?? formatBankAccountName(card)}
-              </p>
-              <p class="mt-1 text-caption text-subtle">
-                {cardPaymentLabel(card)}
-              </p>
-              {#if card.recentCards?.length}
-                <!-- 來自近 90 天交易的卡號末四碼與卡名，只供參考，不是完整卡片清單。 -->
+        {#each cardGroups as members (members[0]!.id)}
+          {@const card = members[0]!}
+          {@const recentCards = cardGroupRecentCards(members)}
+          {#if members.length === 1}
+            <div
+              class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-3"
+            >
+              <div class="min-w-0">
+                <p class="break-words text-sm font-semibold">
+                  {cardGroupName(members)}
+                </p>
                 <p class="mt-1 text-caption text-subtle">
-                  近期使用的卡片：{card.recentCards
-                    .map((item) =>
-                      item.name
-                        ? `${item.name} · ${item.last4}`
-                        : `末四碼 ${item.last4}`,
-                    )
-                    .join("、")}
+                  {cardPaymentLabel(card)}
+                </p>
+                {#if recentCards}
+                  <!-- 來自近 90 天交易的卡號末四碼與卡名，只供參考，不是完整卡片清單。 -->
+                  <p class="mt-1 text-caption text-subtle">
+                    近期使用的卡片：{recentCards}
+                  </p>
+                {/if}
+                {#if api}
+                  <PaymentAccountSelect {api} account={card} {accounts} />
+                {/if}
+              </div>
+              <p class="text-right text-sm font-medium tabular-nums text-coral">
+                {cardAmount(card)}
+              </p>
+            </div>
+          {:else}
+            <!-- 同一信用卡帳戶的各幣別帳單：卡片資訊共用，繳款狀態與扣款帳戶依幣別分列。 -->
+            <div class="py-3">
+              <p class="break-words text-sm font-semibold">
+                {cardGroupName(members)}
+              </p>
+              {#if recentCards}
+                <p class="mt-1 text-caption text-subtle">
+                  近期使用的卡片：{recentCards}
                 </p>
               {/if}
-              {#if api}
-                <PaymentAccountSelect {api} account={card} {accounts} />
-              {/if}
+              <div class="mt-2 grid gap-3 border-l border-ink/10 pl-3">
+                {#each members as member (member.id)}
+                  <div class="min-w-0">
+                    <div class="flex items-baseline justify-between gap-3">
+                      <span class="text-caption text-subtle"
+                        >{member.currency}</span
+                      >
+                      <span
+                        class="text-right text-sm font-medium tabular-nums text-coral"
+                      >
+                        {cardAmount(member)}
+                      </span>
+                    </div>
+                    <p class="mt-1 text-caption text-subtle">
+                      {cardPaymentLabel(member)}
+                    </p>
+                    {#if api}
+                      <PaymentAccountSelect {api} account={member} {accounts} />
+                    {/if}
+                  </div>
+                {/each}
+              </div>
             </div>
-            <p class="text-right text-sm font-medium tabular-nums text-coral">
-              {card.balance == null
-                ? "剩餘應繳金額未取得"
-                : formatCurrency(card.balance, card.currency)}
-            </p>
-          </div>
+          {/if}
         {/each}
       </div>
     {/if}

@@ -10,6 +10,11 @@ export const PAYMENT_REMINDER_DAYS = 5;
 const OVERDUE_REMINDER_DAYS = 7;
 /** 帳戶快照超過此時間未更新時，不直接判定為待繳，改提示請確認。 */
 const STALE_SNAPSHOT_MS = 48 * 60 * 60 * 1000;
+/**
+ * 外幣款項由台幣帳戶扣繳時，銀行以賣出匯率換匯，通常高於匯率表的參考匯率；
+ * 換算時加上此緩衝，避免低估應扣金額而誤判夠扣。
+ */
+const FX_DEBIT_BUFFER = 1.02;
 
 /**
  * - `due`：來源明確標示待繳，期限內。
@@ -41,8 +46,10 @@ export interface PaymentReminder {
     name: string;
     /** 只有機構名稱，供推播使用，避免鎖定畫面出現帳號末碼。 */
     institution: string;
+    /** 扣款帳戶幣別，即差額的幣別；外幣款項可由台幣帳戶扣繳。 */
+    currency: string;
   };
-  /** 扣款帳戶可用餘額與期限內應扣總額的差額；只有餘額不足時填入。 */
+  /** 扣款帳戶可用餘額與期限內應扣總額的差額（扣款帳戶幣別）；只有餘額不足時填入。 */
   shortfall?: number;
 }
 
@@ -185,18 +192,38 @@ function paymentAccountOf(account: BankAccountRow) {
     id: account.id,
     name: [institution, account.accountName].filter(Boolean).join(" "),
     institution,
+    currency: account.currency,
   };
 }
 
 /**
+ * 將款項換算成扣款帳戶幣別。只支援同幣別，或外幣款項由台幣帳戶扣繳
+ * （以匯率表換算並加上換匯緩衝）；金額或匯率未知時回傳 undefined。
+ */
+function amountInPayerCurrency(
+  reminder: PaymentReminder,
+  payerCurrency: string,
+  ratesToTwd: Readonly<Record<string, number>>,
+) {
+  if (reminder.amount === undefined) return undefined;
+  if (reminder.currency === payerCurrency) return reminder.amount;
+  const rate =
+    payerCurrency === "TWD" ? ratesToTwd[reminder.currency] : undefined;
+  return rate != null && Number.isFinite(rate) && rate > 0
+    ? reminder.amount * rate * FX_DEBIT_BUFFER
+    : undefined;
+}
+
+/**
  * 依扣款帳戶可用餘額調整提醒：同一扣款帳戶的期限內款項（含已過期限與扣款未完成）
- * 加總後比較。夠扣時隱藏待繳與待確認的提醒；不夠時改為餘額不足。任一金額未知、
- * 幣別不同、餘額未知或資料過舊時不判斷，維持原提醒。
+ * 換算成扣款帳戶幣別加總後比較。夠扣時隱藏待繳與待確認的提醒；不夠時改為餘額不足。
+ * 任一金額未知、無法換算、餘額未知或資料過舊時不判斷，維持原提醒。
  */
 function applyPaymentAccounts(
   reminders: PaymentReminder[],
   accounts: BankAccountRow[],
   now: Date,
+  ratesToTwd: Readonly<Record<string, number>>,
 ) {
   const byId = new Map(accounts.map((item) => [item.id, item]));
   const groups = new Map<string, PaymentReminder[]>();
@@ -209,16 +236,12 @@ function applyPaymentAccounts(
   for (const [payerId, group] of groups) {
     const payer = byId.get(payerId);
     const available = payer?.availableBalance ?? payer?.balance;
-    if (
-      !payer ||
-      available == null ||
-      isStale(payer.asOfAt, now) ||
-      group.some(
-        (item) => item.amount === undefined || item.currency !== payer.currency,
-      )
-    )
-      continue;
-    const required = group.reduce((sum, item) => sum + item.amount!, 0);
+    if (!payer || available == null || isStale(payer.asOfAt, now)) continue;
+    const amounts = group.map((item) =>
+      amountInPayerCurrency(item, payer.currency, ratesToTwd),
+    );
+    if (amounts.some((amount) => amount === undefined)) continue;
+    const required = amounts.reduce((sum, amount) => sum! + amount!, 0)!;
     const adjustable = group.filter(
       (item) => item.state === "due" || item.state === "confirm",
     );
@@ -241,11 +264,13 @@ function applyPaymentAccounts(
 /**
  * 依帳戶快照與帳單整理近期應繳款。缺少繳款狀態時不視為已繳，
  * 也不直接判定為待繳或逾期。設定扣款帳戶時再依可用餘額隱藏或升級提醒。
+ * `ratesToTwd` 為各幣別對台幣匯率，用於外幣款項由台幣帳戶扣繳時的換算。
  */
 export function collectPaymentReminders(
   accounts: BankAccountRow[],
   bills: CreditCardBillRow[],
   now = new Date(),
+  ratesToTwd: Readonly<Record<string, number>> = {},
 ): PaymentReminderSummary {
   const today = taipeiDateKey(now);
   const reminders: PaymentReminder[] = [];
@@ -258,7 +283,7 @@ export function collectPaymentReminders(
           : null;
     if (reminder) reminders.push(reminder);
   }
-  const summary = applyPaymentAccounts(reminders, accounts, now);
+  const summary = applyPaymentAccounts(reminders, accounts, now, ratesToTwd);
   const byPriority = (a: PaymentReminder, b: PaymentReminder) =>
     STATE_PRIORITY[a.state] - STATE_PRIORITY[b.state] ||
     (a.daysUntilDue ?? -Infinity) - (b.daysUntilDue ?? -Infinity);

@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import { CtbcVerificationRequiredError } from "./errors";
 import forge from "node-forge";
 import { normalizeCtbcDate, parseCtbcAmount, type CtbcData } from "./protocol";
@@ -119,7 +120,11 @@ export async function fetchCtbcForeignDeposits(
     result.bankAccounts.push({
       sourceId,
       institutionName: "中國信託商業銀行",
-      accountName: account.name || "中國信託外幣活存帳戶",
+      accountName: depositAccountName(
+        account.name,
+        last4,
+        account.name || "中國信託外幣活存帳戶",
+      ),
       accountType: "savings",
       currency: account.currency,
       raw: safeRaw,

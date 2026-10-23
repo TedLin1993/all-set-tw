@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import type { ConnectorSessionState } from "@taiwan-fin-hub/shared";
 import type {
   BankAccount,
@@ -135,7 +136,11 @@ export function parseCtbcData(
   const bankAccounts: CtbcData["bankAccounts"] = deposits.map((account) => ({
     sourceId: accountSourceIds.get(account.accountId)!,
     institutionName: "中國信託商業銀行",
-    accountName: account.accountNickName || "中國信託存款帳戶",
+    accountName: depositAccountName(
+      account.accountNickName,
+      last4(account.accountId),
+      account.accountNickName || "中國信託存款帳戶",
+    ),
     accountType: depositAccountType(account),
     currency: TWD,
     raw: sanitizeDepositAccount(account),

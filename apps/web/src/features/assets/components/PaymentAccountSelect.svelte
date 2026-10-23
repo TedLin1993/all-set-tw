@@ -27,12 +27,12 @@
   let saving = $state(false);
   let error = $state<string | null>(null);
 
-  // 與 Worker 驗證相同：同幣別的活存類帳戶才能扣款。
+  // 與 Worker 驗證相同：同幣別或台幣的活存類帳戶才能扣款（外幣帳單可由台幣帳戶扣繳）。
   const candidates = $derived(
     accounts.filter(
       (item) =>
         !NON_PAYMENT_TYPES.has(item.accountType ?? "") &&
-        item.currency === account.currency,
+        (item.currency === account.currency || item.currency === "TWD"),
     ),
   );
   const accountsById = $derived(
@@ -81,13 +81,17 @@
   const autoLabel = $derived.by(() => {
     const bank = account.bankAutopay;
     // 與 Worker 相同：銀行未提供時，同銀行唯一的同幣別帳戶即為推測的扣款帳戶。
-    if (!bank)
-      return sameBank.length === 1
-        ? `自動：${fullLabel(sameBank[0]!)}（推測）`
+    if (!bank) {
+      const inferable = sameBank.filter(
+        (item) => item.currency === account.currency,
+      );
+      return inferable.length === 1
+        ? `自動：${fullLabel(inferable[0]!)}`
         : "自動：無法判斷，請選擇";
+    }
     if (bank.status === "none") return "自動：銀行顯示未約定自動扣繳";
     const matched = bank.accountId ? accountsById.get(bank.accountId) : null;
-    if (matched) return `自動：${fullLabel(matched)}（銀行提供）`;
+    if (matched) return `銀行約定：${fullLabel(matched)}`;
     return bank.last4
       ? `自動：找不到末四碼 ${bank.last4} 的帳戶`
       : "自動：找不到銀行提供的帳戶";
@@ -132,7 +136,9 @@
           <option value={item.id}
             >{item.connectorId === account.connectorId
               ? accountLabel(item)
-              : fullLabel(item)}</option
+              : fullLabel(item)}{account.currency === "TWD"
+              ? ""
+              : `（${item.currency}）`}</option
           >
         {/each}
       </optgroup>

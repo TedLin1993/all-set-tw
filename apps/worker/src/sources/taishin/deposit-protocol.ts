@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import forge from "node-forge";
 import { z } from "zod";
 import type {
@@ -612,14 +613,17 @@ export async function fetchTaishinDeposits(
     name: string,
     balance: number,
     availableBalance?: number,
+    /** 銀行提供的帳戶種類（例如「綜合存款」），作為顯示名稱前綴。 */
+    typeName = name,
   ) => {
     const id = accountId(number, currency);
     if (result.bankAccounts.some((account) => account.sourceId === id))
       throw new TaishinDepositProtocolError("台新存款帳戶清單重複。");
+    const last4 = accountIdentity(number).slice(-4);
     result.bankAccounts.push({
       sourceId: id,
       institutionName: "台新銀行",
-      accountName: `末四碼 ${accountIdentity(number).slice(-4)}`,
+      accountName: depositAccountName(typeName, last4, `末四碼 ${last4}`),
       accountType: /支票|支存/.test(name) ? "checking" : "savings",
       currency,
     });
@@ -818,11 +822,14 @@ export async function fetchTaishinDeposits(
             "台新外幣即時餘額與查詢帳戶或幣別不符。",
           );
         const currency = normalizeTaishinCurrency(detail.CURRENCY_CODE)!;
+        // 群組的 ACCOUNT_NAME 可能是使用者自訂別名，只用即時餘額回應的帳戶種類命名。
         addAccount(
           group.ACCOUNT_NO,
           currency,
           group.ACCOUNT_NAME ?? "",
           amount(balances[0]!.BALANCE),
+          undefined,
+          balances[0]!.ACCT_TYPE_NAME ?? "",
         );
         const payload = await request(
           `${root}/web2/rb0802/getRB08020100ForeignTranDetail`,

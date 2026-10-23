@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import type {
   BankAccount,
   BankBalanceSnapshot,
@@ -286,11 +287,14 @@ function parseDepositOverviewHtml(
     bankAccounts: uniqueAccounts.map((account) => ({
       sourceId: account.sourceId,
       institutionName: "第一銀行",
-      accountName:
+      accountName: depositAccountName(
+        account.accountName,
+        account.accountLast4,
         account.accountName ||
-        (account.accountLast4
-          ? `第一銀行存款末四碼 ${account.accountLast4}`
-          : "第一銀行存款帳戶"),
+          (account.accountLast4
+            ? `第一銀行存款末四碼 ${account.accountLast4}`
+            : "第一銀行存款帳戶"),
+      ),
       accountType: account.accountType,
       currency: account.currency,
       raw: {

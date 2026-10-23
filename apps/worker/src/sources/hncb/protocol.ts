@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import type {
   BankAccount,
   BankBalanceSnapshot,
@@ -106,7 +107,11 @@ function parseDepositOverview(html: string, asOfAt: string) {
     accounts.push({
       sourceId,
       institutionName: "華南銀行",
-      accountName: `華南${parsed.accountTypeStr || "存款帳戶"}`,
+      accountName: depositAccountName(
+        parsed.accountTypeStr,
+        parsed.accountNo,
+        `華南${parsed.accountTypeStr || "存款帳戶"}`,
+      ),
       accountType: parsed.accountTypeStr.includes("定")
         ? "time_deposit"
         : parsed.accountTypeStr.includes("活")

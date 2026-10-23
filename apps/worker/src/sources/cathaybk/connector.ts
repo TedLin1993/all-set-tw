@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
 import {
@@ -1634,7 +1635,11 @@ async function scrapeDeposits(
     bankAccounts.push({
       sourceId,
       institutionName: "國泰世華銀行",
-      accountName: acct.accountTypeName || "國泰臺幣帳戶",
+      accountName: depositAccountName(
+        acct.accountTypeName,
+        acct.acctNo,
+        acct.accountTypeName || "國泰臺幣帳戶",
+      ),
       accountType: "savings",
       currency: acct.currency,
       raw: acct,

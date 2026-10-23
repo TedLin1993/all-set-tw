@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import type {
   BankAccount,
   BankBalanceSnapshot,
@@ -98,8 +99,11 @@ export function parseMegabankData(
     bankAccounts.push({
       sourceId,
       institutionName: "兆豐銀行",
-      accountName:
-        name.replace(/\d{6,}/g, "••••") || `兆豐存款末四碼 ${last4(accountNo)}`,
+      accountName: depositAccountName(
+        name.replace(/\d{6,}/g, "••••"),
+        last4(accountNo),
+        `兆豐存款末四碼 ${last4(accountNo)}`,
+      ),
       accountType: /定存|定期/.test(name) ? "time_deposit" : "savings",
       currency,
       raw: { last4: last4(accountNo) },

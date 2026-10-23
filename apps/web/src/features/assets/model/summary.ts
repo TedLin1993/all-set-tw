@@ -1,4 +1,8 @@
 import type { ExchangeRateRow, ManualAssetRow } from "@/data/assets/types";
+import {
+  cardAccountCount,
+  depositAccountCount,
+} from "@/data/bank/account-groups";
 import type { BankAccountRow, BankData } from "@/data/bank/types";
 import type { InvestmentRow } from "@/data/investments/types";
 import { missingExchangeRateCurrencies } from "@/shared/format/financial";
@@ -26,6 +30,8 @@ export interface InstitutionAssetGroup {
   accounts: BankAccountRow[];
   cards: BankAccountRow[];
   loans: BankAccountRow[];
+  /** 存款帳戶數；同一帳號的不同幣別只算一個，與銀行的帳戶數一致。 */
+  depositAccountCount: number;
   /** 信用卡帳戶數；同一帳戶的不同幣別（例如台幣與日幣帳單）只算一個。 */
   cardAccountCount: number;
   assetTotalTwd: number;
@@ -39,6 +45,7 @@ export interface InstitutionAssetGroup {
 
 export interface AssetSummary {
   deposits: BankAccountRow[];
+  depositAccountCount: number;
   cards: BankAccountRow[];
   loans: BankAccountRow[];
   bankTotal: number;
@@ -58,22 +65,6 @@ function institutionKey(account: BankAccountRow) {
   const bankCode =
     account.bankCode ?? CONNECTOR_BANK_CODES[account.connectorId];
   return bankCode ? `bank:${bankCode}` : `connector:${account.connectorId}`;
-}
-
-/**
- * 永豐、中信等來源以「帳戶＋幣別」建立信用卡資料，sourceId 以幣別結尾；
- * 去掉幣別後相同的視為同一個信用卡帳戶。
- */
-function cardAccountCount(cards: BankAccountRow[]) {
-  return new Set(
-    cards.map(
-      (card) =>
-        `${card.connectorId}:${card.sourceId.replace(
-          new RegExp(`:${card.currency}$`, "i"),
-          "",
-        )}`,
-    ),
-  ).size;
 }
 
 export function calculateAssetSummary({
@@ -187,6 +178,7 @@ export function calculateAssetSummary({
             Math.abs(toTwd(b.balance ?? 0, b.currency)) -
             Math.abs(toTwd(a.balance ?? 0, a.currency)),
         ),
+        depositAccountCount: depositAccountCount(accounts),
         cardAccountCount: cardAccountCount(cards),
         assetTotalTwd: accounts.reduce(
           (sum, account) => sum + toTwd(account.balance ?? 0, account.currency),
@@ -246,6 +238,7 @@ export function calculateAssetSummary({
 
   return {
     deposits,
+    depositAccountCount: depositAccountCount(deposits),
     cards,
     loans,
     bankTotal,

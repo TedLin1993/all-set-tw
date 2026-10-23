@@ -18,6 +18,11 @@ describe("永豐活存查詢", () => {
     );
     expect(result.bankAccounts).toHaveLength(2);
     expect(result.bankAccounts.map((a) => a.currency)).toEqual(["TWD", "USD"]);
+    // 帳戶名稱以銀行提供的帳戶種類加末四碼。
+    expect(result.bankAccounts.map((a) => a.accountName)).toEqual([
+      "活期儲蓄存款 末四碼 2345",
+      "外幣組合存款 末四碼 2345",
+    ]);
     expect(result.bankBalanceSnapshots.map((s) => s.balance)).toEqual([
       12000, 0,
     ]);

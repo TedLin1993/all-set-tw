@@ -56,7 +56,7 @@ function paymentAccountError(error: unknown) {
   if (error instanceof InvalidPaymentAccountError)
     return jsonError(
       "INVALID_PAYMENT_ACCOUNT",
-      "扣款帳戶須為同幣別的存款帳戶。",
+      "扣款帳戶須為同幣別或台幣的存款帳戶。",
       400,
     );
   throw error;

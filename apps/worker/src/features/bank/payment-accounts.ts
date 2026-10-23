@@ -21,14 +21,17 @@ const NON_PAYMENT_TYPES = new Set([
   "stored_value",
 ]);
 
-/** 扣款帳戶須是同幣別的活存類帳戶；信用卡、貸款、定存與儲值帳戶不能扣款。 */
+/**
+ * 扣款帳戶須是活存類帳戶，且與款項同幣別或為台幣帳戶（外幣帳單常由台幣帳戶
+ * 換匯自動扣繳）；信用卡、貸款、定存與儲值帳戶不能扣款。
+ */
 export function canPayFrom(
   payer: Pick<AccountRow, "accountType" | "currency">,
   target: Pick<AccountRow, "currency">,
 ) {
   return (
     !NON_PAYMENT_TYPES.has(payer.accountType ?? "") &&
-    payer.currency === target.currency
+    (payer.currency === target.currency || payer.currency === "TWD")
   );
 }
 
@@ -105,7 +108,11 @@ export function resolvePaymentAccounts(
     // 銀行明確顯示未設定或扣款帳戶對不到時不推測，避免誤用其他帳戶的餘額。
     const sameBank =
       source.autopayStatus === null
-        ? candidates.filter((item) => item.connectorId === target.connectorId)
+        ? candidates.filter(
+            (item) =>
+              item.connectorId === target.connectorId &&
+              item.currency === target.currency,
+          )
         : [];
     result.set(source.id, {
       paymentAccountId: sameBank.length === 1 ? sameBank[0]!.id : null,
@@ -129,6 +136,6 @@ export function assertPaymentAccount(
   const payer = accounts.find((item) => item.id === paymentAccountId);
   if (!payer || !canPayFrom(payer, target))
     throw new InvalidPaymentAccountError(
-      "Payment account must be an active deposit account in the same currency.",
+      "Payment account must be an active deposit account in the same currency or TWD.",
     );
 }

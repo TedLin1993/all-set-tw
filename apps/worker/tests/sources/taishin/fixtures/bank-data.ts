@@ -213,6 +213,7 @@ export async function depositRequest(
       data: [
         {
           ACCT_NO: FX_ACCOUNT,
+          ACCT_TYPE_NAME: "外幣綜合存款",
           CURRENCY_CODE: input.requestCcyCode,
           BALANCE: input.requestCcyCode === "USD" ? "125.25" : "0",
         },
