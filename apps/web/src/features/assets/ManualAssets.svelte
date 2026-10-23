@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { toStore } from "svelte/store";
   import {
     createMutation,
     createQuery,
@@ -39,8 +38,8 @@
     hideSummary?: boolean;
   } = $props();
   const qc = useQueryClient();
-  const assets = createQuery(manualAssetsQuery(() => api));
-  const rates = createQuery(exchangeRatesQuery(() => api));
+  const assets = createQuery(() => manualAssetsQuery(() => api));
+  const rates = createQuery(() => exchangeRatesQuery(() => api));
   let adding = $state(false);
   let editing = $state<ManualAssetRow | null>(null);
   let expandedAssetId = $state<string | null>(null);
@@ -75,19 +74,19 @@
   const currencies = ["TWD", "USD", "JPY", "EUR"] as const;
   const rateValues = $derived(
     Object.fromEntries(
-      ($rates.data ?? []).map((rate) => [rate.currency, rate.rateTwd]),
+      (rates.data ?? []).map((rate) => [rate.currency, rate.rateTwd]),
     ),
   );
   const toTwd = (value: number, currency: string) =>
     currency === "TWD" ? value : value * (rateValues[currency] ?? 0);
   const total = $derived(
-    ($assets.data ?? []).reduce(
+    (assets.data ?? []).reduce(
       (sum, asset) => sum + toTwd(asset.value ?? 0, asset.currency),
       0,
     ),
   );
 
-  const add = createMutation({
+  const add = createMutation(() => ({
     mutationFn: () =>
       api.post<{ id: string }>("/api/manual-assets", {
         ...form,
@@ -98,8 +97,8 @@
       qc.invalidateQueries({ queryKey: queryKeys.netWorthHistory });
       closeEditor();
     },
-  });
-  const update = createMutation({
+  }));
+  const update = createMutation(() => ({
     mutationFn: () =>
       api.put(`/api/manual-assets/${editing!.id}`, {
         name: form.name,
@@ -114,19 +113,19 @@
       qc.invalidateQueries({ queryKey: queryKeys.netWorthHistory });
       closeEditor();
     },
-  });
-  const remove = createMutation({
+  }));
+  const remove = createMutation(() => ({
     mutationFn: (id: string) => api.delete(`/api/manual-assets/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.manualAssets });
       qc.invalidateQueries({ queryKey: queryKeys.netWorthHistory });
       closeDeleteConfirmation();
     },
-  });
-  const history = createQuery(
-    toStore(() => manualAssetHistoryQuery(() => api, expandedAssetId)),
+  }));
+  const history = createQuery(() =>
+    manualAssetHistoryQuery(() => api, expandedAssetId),
   );
-  const addHistory = createMutation({
+  const addHistory = createMutation(() => ({
     mutationFn: ({
       assetId,
       value,
@@ -141,8 +140,8 @@
       historyValue = "";
       historyDate = todayStr();
     },
-  });
-  const editHistory = createMutation({
+  }));
+  const editHistory = createMutation(() => ({
     mutationFn: ({
       assetId,
       value,
@@ -157,15 +156,15 @@
       editingHistoryDate = null;
       editingHistoryValue = "";
     },
-  });
-  const deleteHistory = createMutation({
+  }));
+  const deleteHistory = createMutation(() => ({
     mutationFn: ({ assetId, date }: { assetId: string; date: string }) =>
       api.delete(`/api/manual-assets/${assetId}/history/${date}`),
     onSuccess: () => {
       invalidateHistory();
       closeDeleteConfirmation();
     },
-  });
+  }));
 
   function reset() {
     formError = "";
@@ -252,7 +251,7 @@
       return;
     }
     formError = "";
-    editing ? $update.mutate() : $add.mutate();
+    editing ? update.mutate() : add.mutate();
   }
   function invalidateHistory() {
     qc.invalidateQueries({ queryKey: queryKeys.manualAssets });
@@ -273,7 +272,7 @@
       expandedAssetId = null;
       return;
     }
-    const firstAsset = $assets.data?.[0];
+    const firstAsset = assets.data?.[0];
     if (firstAsset) toggleHistory(firstAsset.id);
   }
 
@@ -297,7 +296,7 @@
   });
 </script>
 
-{#if $assets.isPending}
+{#if assets.isPending}
   <EmptyState title="載入其他資產中" body="正在讀取估值紀錄。" />
 {:else}
   <div
@@ -324,7 +323,7 @@
             <Button
               class="hidden md:inline-flex"
               variant="secondary"
-              disabled={($assets.data ?? []).length === 0}
+              disabled={(assets.data ?? []).length === 0}
               onclick={toggleHistoryManagement}
             >
               {expandedAssetId ? "收起估值歷史" : "管理估值歷史"}
@@ -346,10 +345,10 @@
       {/if}
       <CardContent class="p-0">
         <div class="divide-y divide-ink/8">
-          {#if ($assets.data ?? []).length === 0}
+          {#if (assets.data ?? []).length === 0}
             <p class="p-8 text-center text-sm text-subtle">尚無其他資產。</p>
           {:else}
-            {#each $assets.data ?? [] as asset (asset.id)}
+            {#each assets.data ?? [] as asset (asset.id)}
               <div class={hideSummary ? "" : "px-5 py-4"}>
                 <div class="flex items-center gap-1">
                   <button
@@ -396,18 +395,18 @@
                     <div class="flex items-center justify-between">
                       <h3 class="text-sm font-semibold">估值歷史</h3>
                       <span class="text-caption text-subtle"
-                        >{($history.data ?? []).length} 筆</span
+                        >{(history.data ?? []).length} 筆</span
                       >
                     </div>
-                    {#if $history.isPending}<p class="mt-3 text-sm text-subtle">
+                    {#if history.isPending}<p class="mt-3 text-sm text-subtle">
                         載入歷史中…
-                      </p>{:else if ($history.data ?? []).length === 0}<p
+                      </p>{:else if (history.data ?? []).length === 0}<p
                         class="mt-3 text-sm text-subtle"
                       >
                         尚無歷史紀錄。
                       </p>{:else}
                       <div class="mt-2 divide-y divide-ink/8">
-                        {#each $history.data ?? [] as entry (entry.date)}
+                        {#each history.data ?? [] as entry (entry.date)}
                           <div
                             class="flex items-center justify-between gap-3 py-2 text-sm"
                           >
@@ -423,7 +422,7 @@
                                   size="sm"
                                   variant="ghost"
                                   onclick={() =>
-                                    $editHistory.mutate({
+                                    editHistory.mutate({
                                       assetId: asset.id,
                                       value: Number(editingHistoryValue),
                                       date: entry.date,
@@ -479,9 +478,9 @@
                         /></label
                       ><Button
                         size="sm"
-                        disabled={!historyValue || $addHistory.isPending}
+                        disabled={!historyValue || addHistory.isPending}
                         onclick={() =>
-                          $addHistory.mutate({
+                          addHistory.mutate({
                             assetId: asset.id,
                             value: Number(historyValue),
                             date: historyDate,
@@ -555,11 +554,9 @@
           <div class="mt-5 grid grid-cols-2 gap-3">
             <Button variant="secondary" onclick={closeEditor}>取消</Button
             ><Button
-              disabled={$add.isPending || $update.isPending}
+              disabled={add.isPending || update.isPending}
               onclick={submit}
-              >{$add.isPending || $update.isPending
-                ? "儲存中…"
-                : "儲存"}</Button
+              >{add.isPending || update.isPending ? "儲存中…" : "儲存"}</Button
             >
           </div>
         </div>
@@ -590,20 +587,20 @@
           <div class="mt-5 grid grid-cols-2 gap-3">
             <Button
               variant="secondary"
-              disabled={$remove.isPending || $deleteHistory.isPending}
+              disabled={remove.isPending || deleteHistory.isPending}
               onclick={closeDeleteConfirmation}>取消</Button
             ><Button
               class="bg-coral text-white hover:bg-coral/90"
-              disabled={$remove.isPending || $deleteHistory.isPending}
+              disabled={remove.isPending || deleteHistory.isPending}
               onclick={() => {
-                if (deletingAsset) $remove.mutate(deletingAsset.id);
+                if (deletingAsset) remove.mutate(deletingAsset.id);
                 else if (deletingHistory)
-                  $deleteHistory.mutate({
+                  deleteHistory.mutate({
                     assetId: deletingHistory.assetId,
                     date: deletingHistory.date,
                   });
               }}
-              >{$remove.isPending || $deleteHistory.isPending
+              >{remove.isPending || deleteHistory.isPending
                 ? "刪除中…"
                 : "確認刪除"}</Button
             >

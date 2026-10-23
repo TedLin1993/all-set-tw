@@ -47,10 +47,10 @@
     { view: "classification-rules" as const, label: "分類" },
     { view: "about" as const, label: "關於" },
   ];
-  const jobs = createQuery(syncJobsQuery(() => api));
-  const rules = createQuery(classificationRulesQuery(() => api));
-  const rates = createQuery(exchangeRatesQuery(() => api));
-  const notifications = createQuery(notificationConfigQuery(() => api));
+  const jobs = createQuery(() => syncJobsQuery(() => api));
+  const rules = createQuery(() => classificationRulesQuery(() => api));
+  const rates = createQuery(() => exchangeRatesQuery(() => api));
+  const notifications = createQuery(() => notificationConfigQuery(() => api));
   let selectedConnector = $state<ConnectorId | null | undefined>(undefined);
   const activeConnector = $derived(
     selectedConnector === undefined
@@ -58,9 +58,9 @@
       : selectedConnector,
   );
   const syncJobsState = $derived(
-    $jobs.isPending ? "loading" : $jobs.isError ? "error" : "ready",
+    jobs.isPending ? "loading" : jobs.isError ? "error" : "ready",
   );
-  const syncJobRows = $derived($jobs.data ?? []);
+  const syncJobRows = $derived(jobs.data ?? []);
   const needsActionJobs = $derived(getActionableSyncJobs(syncJobRows));
   const pendingSyncJobs = $derived(getPendingSyncJobs(syncJobRows));
   const configuredSources = $derived(getConfiguredSyncJobs(syncJobRows));
@@ -72,7 +72,7 @@
     sources.find((source) => source.id === actionJob?.connectorId),
   );
   const latestSuccessAt = $derived(
-    ($jobs.data ?? []).reduce<string | undefined>((latest, job) => {
+    (jobs.data ?? []).reduce<string | undefined>((latest, job) => {
       if (!job.lastSuccessAt) return latest;
       return !latest || job.lastSuccessAt > latest ? job.lastSuccessAt : latest;
     }, undefined),
@@ -91,32 +91,30 @@
     !inheritedJob ? "尚未設定" : formatSyncSchedule(inheritedJob),
   );
   const ratesSummary = $derived(
-    ($rates.data ?? [])
+    (rates.data ?? [])
       .map((rate) => `${rate.currency} ${rate.rateTwd.toFixed(2)}`)
       .join(" · ") || "尚未設定",
   );
   const notificationSummary = $derived(
-    $notifications.isPending
+    notifications.isPending
       ? "載入中…"
-      : $notifications.data?.enabled
+      : notifications.data?.enabled
         ? "已開啟"
         : "未啟用",
   );
   const notificationDescription = $derived(
-    $notifications.data?.enabled
-      ? "失敗與重新驗證時通知"
-      : "前往同步與通知開啟",
+    notifications.data?.enabled ? "失敗與重新驗證時通知" : "前往同步與通知開啟",
   );
   const customRuleCount = $derived(
-    ($rules.data ?? []).filter((rule) => !rule.isSystem).length,
+    (rules.data ?? []).filter((rule) => !rule.isSystem).length,
   );
   const rulesSummary = $derived(
-    $rules.isPending
+    rules.isPending
       ? "載入中…"
       : `${customRuleCount} 條自訂規則 · 含自動分類與配對`,
   );
   const enabledRuleCount = $derived(
-    ($rules.data ?? []).filter((rule) => !rule.isSystem && rule.enabled).length,
+    (rules.data ?? []).filter((rule) => !rule.isSystem && rule.enabled).length,
   );
   const recentJobs = $derived(getConfiguredSyncJobs(syncJobRows));
   const recentSuccessCount = $derived(
@@ -189,10 +187,10 @@
   {#if mobileView === "more"}
     <MobileMore
       {demoMode}
-      jobs={$jobs.data ?? []}
-      jobsLoading={$jobs.isPending}
-      jobsError={$jobs.isError}
-      rules={$rules.data ?? []}
+      jobs={jobs.data ?? []}
+      jobsLoading={jobs.isPending}
+      jobsError={jobs.isError}
+      rules={rules.data ?? []}
       {navigate}
       {api}
       {openConnector}
@@ -226,7 +224,7 @@
               id={source.id}
               title={source.title}
               description={source.description}
-              jobs={$jobs.data ?? []}
+              jobs={jobs.data ?? []}
               compact
               compactCard
               selected={activeConnector === source.id}
@@ -290,7 +288,7 @@
               id={source.id}
               title={source.title}
               description={source.description}
-              jobs={$jobs.data ?? []}
+              jobs={jobs.data ?? []}
               selected={activeConnector === source.id}
               onConfigure={() => selectConnector(source.id)}
             >
@@ -323,7 +321,7 @@
         <DefaultSchedulePanel
           {api}
           {demoMode}
-          jobs={$jobs.data ?? []}
+          jobs={jobs.data ?? []}
           variant="desktop"
         />
         <NotificationPanel {api} {demoMode} variant="desktop" />
@@ -357,7 +355,7 @@
       </section>
 
       <div class="grid min-w-0 gap-4 md:hidden">
-        <DefaultSchedulePanel {api} {demoMode} jobs={$jobs.data ?? []} />
+        <DefaultSchedulePanel {api} {demoMode} jobs={jobs.data ?? []} />
         <NotificationPanel {api} {demoMode} />
       </div>
     </div>
@@ -388,9 +386,9 @@
         </div>
         <div class="rounded-xl bg-muted p-4">
           <p class="text-sm font-semibold text-muted-foreground">支援幣別</p>
-          <p class="mt-2 text-lg font-bold">{$rates.data?.length ?? 0} 筆</p>
+          <p class="mt-2 text-lg font-bold">{rates.data?.length ?? 0} 筆</p>
           <p class="mt-1 text-sm font-semibold text-steel">
-            {($rates.data ?? []).map((rate) => rate.currency).join(" · ") ||
+            {(rates.data ?? []).map((rate) => rate.currency).join(" · ") ||
               "尚未取得"}
           </p>
         </div>
@@ -630,7 +628,7 @@
                 id={source.id}
                 title={source.title}
                 description={source.description}
-                jobs={$jobs.data ?? []}
+                jobs={jobs.data ?? []}
                 compact
                 selected={false}
                 onConfigure={() => openConnector(source.id)}

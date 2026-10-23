@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import {
     createMutation,
     createQuery,
@@ -33,7 +33,7 @@
   } = $props();
 
   const queryClient = useQueryClient();
-  const schedule = createQuery(syncScheduleQuery(() => api));
+  const schedule = createQuery(() => syncScheduleQuery(() => api));
   let intervalMinutes = $state(1440);
   let preferredTime = $state("06:00");
   let preferredWeekdays = $state([1]);
@@ -56,17 +56,19 @@
     jobs.filter((job) => job.scheduleMode === "inherit").length,
   );
 
-  onMount(() =>
-    schedule.subscribe((result) => {
-      if (!result.data || isDirty || $save.isPending) return;
-      savedSchedule = result.data;
-      intervalMinutes = result.data.intervalMinutes;
-      preferredTime = result.data.preferredTime;
-      preferredWeekdays = result.data.preferredWeekdays;
-    }),
-  );
+  $effect(() => {
+    const data = schedule.data;
+    if (!data) return;
+    untrack(() => {
+      if (isDirty || save.isPending) return;
+      savedSchedule = data;
+      intervalMinutes = data.intervalMinutes;
+      preferredTime = data.preferredTime;
+      preferredWeekdays = data.preferredWeekdays;
+    });
+  });
 
-  const save = createMutation({
+  const save = createMutation(() => ({
     scope: { id: "sync-schedule" },
     mutationFn: (input: ScheduleInput) =>
       api.put<SyncScheduleSettings>("/api/sync-schedule", input),
@@ -77,12 +79,12 @@
       queryClient.setQueryData(queryKeys.syncSchedule, data);
       queryClient.invalidateQueries({ queryKey: queryKeys.syncJobs });
     },
-  });
+  }));
   const saveFailed = $derived(
-    $save.isError && sameSchedule(draft, $save.variables),
+    save.isError && sameSchedule(draft, save.variables),
   );
   const saveQueued = $derived(
-    !demoMode && isDirty && !timePickerOpen && !$save.isPending && !saveFailed,
+    !demoMode && isDirty && !timePickerOpen && !save.isPending && !saveFailed,
   );
 
   function sameSchedule(left: ScheduleInput, right: ScheduleInput | undefined) {
@@ -102,7 +104,7 @@
   $effect(() => {
     if (!saveQueued) return;
     const input = draft;
-    const timer = setTimeout(() => $save.mutate(input), 500);
+    const timer = setTimeout(() => save.mutate(input), 500);
     return () => clearTimeout(timer);
   });
 
@@ -114,11 +116,10 @@
       demoMode ||
       !savedSchedule ||
       sameSchedule(input, savedSchedule) ||
-      (($save.isError || $save.isPending) &&
-        sameSchedule(input, $save.variables))
+      ((save.isError || save.isPending) && sameSchedule(input, save.variables))
     )
       return;
-    $save.mutate(input);
+    save.mutate(input);
   });
 </script>
 
@@ -162,7 +163,7 @@
       同步頻率
       <Select
         bind:value={intervalMinutes}
-        disabled={demoMode || !$schedule.data}
+        disabled={demoMode || !schedule.data}
       >
         {#each syncIntervalOptions as option (option.minutes)}
           <option value={option.minutes}>{option.label}</option>
@@ -172,7 +173,7 @@
     {#if intervalMinutes === 10080}
       <WeekdayPicker
         value={preferredWeekdays}
-        disabled={demoMode || !$schedule.data}
+        disabled={demoMode || !schedule.data}
         onchange={(days) => (preferredWeekdays = days)}
       />
     {/if}
@@ -182,7 +183,7 @@
         <TimePicker
           bind:value={preferredTime}
           bind:open={() => timePickerOpen, setTimePickerOpen}
-          disabled={demoMode || !$schedule.data}
+          disabled={demoMode || !schedule.data}
         />
       </label>
     {:else}
@@ -204,9 +205,9 @@
         aria-live="polite"
         class="mt-1 flex min-h-5 items-center gap-1.5 text-sm font-medium"
       >
-        {#if saveQueued || $save.isPending}
+        {#if saveQueued || save.isPending}
           <LoaderCircle class="size-4 animate-spin" />儲存中…
-        {:else if $save.isSuccess && !isDirty}
+        {:else if save.isSuccess && !isDirty}
           <Check class="size-4 text-moss" /><span class="text-moss">已儲存</span
           >
         {:else if timePickerOpen && isDirty}
@@ -225,7 +226,7 @@
         variant="outline"
         size="sm"
         disabled={demoMode}
-        onclick={() => $save.mutate(draft)}
+        onclick={() => save.mutate(draft)}
       >
         重試
       </Button>

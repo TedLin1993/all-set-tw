@@ -66,12 +66,14 @@
         "電子發票與同日、同金額的 TWD 銀行／信用卡支出會自動配對；一筆發票與交易只配對一次，已配對發票不會重複計入支出。手動連結或「解除並保持分開」優先。",
     },
   ] as const;
-  const rules = createQuery(classificationRulesQuery(() => api));
-  const categories = createQuery(classificationCategoriesQuery(() => api));
+  const rules = createQuery(() => classificationRulesQuery(() => api));
+  const categories = createQuery(() =>
+    classificationCategoriesQuery(() => api),
+  );
   const qc = useQueryClient();
   const categoryLabels = $derived(
     Object.fromEntries(
-      ($categories.data ?? []).map((category) => [category.id, category.label]),
+      (categories.data ?? []).map((category) => [category.id, category.label]),
     ),
   );
   let newRule = $state({
@@ -100,16 +102,16 @@
   }
 
   function editableRuleIndex(ruleId: string) {
-    return ($rules.data ?? [])
+    return (rules.data ?? [])
       .filter((rule) => !rule.isSystem)
       .findIndex((rule) => rule.id === ruleId);
   }
 
   const editableRuleCount = $derived(
-    ($rules.data ?? []).filter((rule) => !rule.isSystem).length,
+    (rules.data ?? []).filter((rule) => !rule.isSystem).length,
   );
 
-  const addCategory = createMutation({
+  const addCategory = createMutation(() => ({
     mutationFn: () =>
       api.post<ClassificationCategoryRow>("/api/classification/categories", {
         label: categoryName,
@@ -120,8 +122,8 @@
       categoryName = "";
       showCategoryForm = false;
     },
-  });
-  const add = createMutation({
+  }));
+  const add = createMutation(() => ({
     mutationFn: () =>
       api.post("/api/classification/rules", {
         ...newRule,
@@ -134,15 +136,15 @@
       newRule.pattern = "";
       newRule.excludedFromCalculation = false;
     },
-  });
-  const toggle = createMutation({
+  }));
+  const toggle = createMutation(() => ({
     mutationFn: (payload: { id: string; enabled: boolean }) =>
       api.put(`/api/classification/rules/${payload.id}`, {
         enabled: payload.enabled,
       }),
     onSuccess: invalidateRuleResults,
-  });
-  const update = createMutation({
+  }));
+  const update = createMutation(() => ({
     mutationFn: (rule: EditableRule) =>
       api.put(`/api/classification/rules/${rule.id}`, {
         categoryId: rule.categoryId,
@@ -154,19 +156,19 @@
       invalidateRuleResults();
       editingRule = undefined;
     },
-  });
-  const remove = createMutation({
+  }));
+  const remove = createMutation(() => ({
     mutationFn: (id: string) => api.delete(`/api/classification/rules/${id}`),
     onSuccess: invalidateRuleResults,
-  });
-  const reorder = createMutation({
+  }));
+  const reorder = createMutation(() => ({
     mutationFn: (ruleIds: string[]) =>
       api.put("/api/classification/rules/order", { ruleIds }),
     onSuccess: invalidateRuleResults,
-  });
+  }));
 
   function moveRule(ruleId: string, direction: -1 | 1) {
-    const editableRules = ($rules.data ?? []).filter((rule) => !rule.isSystem);
+    const editableRules = (rules.data ?? []).filter((rule) => !rule.isSystem);
     const currentIndex = editableRules.findIndex(({ id }) => id === ruleId);
     const nextIndex = currentIndex + direction;
     if (
@@ -183,7 +185,7 @@
     if (!currentId || !nextId) return;
     nextOrder[currentIndex] = nextId;
     nextOrder[nextIndex] = currentId;
-    $reorder.mutate(nextOrder);
+    reorder.mutate(nextOrder);
   }
 </script>
 
@@ -256,7 +258,7 @@
         class="mb-4 grid gap-3 rounded-lg border border-border bg-background p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end"
         onsubmit={(event) => {
           event.preventDefault();
-          if (categoryName.trim()) $addCategory.mutate();
+          if (categoryName.trim()) addCategory.mutate();
         }}
       >
         <label class="grid gap-1.5 text-sm font-medium">
@@ -270,9 +272,9 @@
         <Button
           type="submit"
           variant="primary"
-          disabled={!categoryName.trim() || $addCategory.isPending}
+          disabled={!categoryName.trim() || addCategory.isPending}
         >
-          {$addCategory.isPending ? "新增中…" : "儲存分類"}
+          {addCategory.isPending ? "新增中…" : "儲存分類"}
         </Button>
         <Button
           variant="ghost"
@@ -281,9 +283,9 @@
             categoryName = "";
           }}>取消</Button
         >
-        {#if $addCategory.isError}
+        {#if addCategory.isError}
           <p class="text-sm text-destructive sm:col-span-3" role="alert">
-            {messageFromError($addCategory.error)}
+            {messageFromError(addCategory.error)}
           </p>
         {/if}
       </form>
@@ -298,7 +300,7 @@
         <label class="grid gap-1.5 text-sm font-medium">
           分類
           <Select bind:value={newRule.categoryId}>
-            {#each $categories.data ?? [] as category (category.id)}
+            {#each categories.data ?? [] as category (category.id)}
               <option value={category.id}>{category.label}</option>
             {/each}
           </Select>
@@ -334,32 +336,32 @@
         <Button
           class="w-full sm:w-auto"
           variant="primary"
-          disabled={!newRule.pattern.trim() || $add.isPending}
-          onclick={() => $add.mutate()}
+          disabled={!newRule.pattern.trim() || add.isPending}
+          onclick={() => add.mutate()}
         >
-          {$add.isPending ? "新增中…" : "新增規則"}
+          {add.isPending ? "新增中…" : "新增規則"}
         </Button>
       </div>
     </div>
 
-    {#if $categories.isError || $rules.isError}
+    {#if categories.isError || rules.isError}
       <p class="py-3 text-sm text-destructive" role="alert">
         無法載入分類設定，請稍後再試。
       </p>
-    {:else if $rules.isPending}
+    {:else if rules.isPending}
       <p class="py-3 text-sm text-muted-foreground">載入分類規則中…</p>
-    {:else if ($rules.data?.length ?? 0) === 0}
+    {:else if (rules.data?.length ?? 0) === 0}
       <p class="py-3 text-sm text-muted-foreground">目前還沒有分類規則。</p>
     {:else}
       <div class="divide-y divide-border">
-        {#each $rules.data ?? [] as rule (rule.id)}
+        {#each rules.data ?? [] as rule (rule.id)}
           <div class="py-3.5 text-sm">
             {#if editingRule && editingRule.id === rule.id}
               <form
                 class="rounded-lg border border-border bg-muted/30 p-4"
                 onsubmit={(event) => {
                   event.preventDefault();
-                  if (editingRule?.pattern.trim()) $update.mutate(editingRule);
+                  if (editingRule?.pattern.trim()) update.mutate(editingRule);
                 }}
               >
                 <div
@@ -368,7 +370,7 @@
                   <label class="grid gap-1.5 font-medium">
                     分類
                     <Select bind:value={editingRule.categoryId}>
-                      {#each $categories.data ?? [] as category (category.id)}
+                      {#each categories.data ?? [] as category (category.id)}
                         <option value={category.id}>{category.label}</option>
                       {/each}
                     </Select>
@@ -405,16 +407,15 @@
                   <div class="flex justify-end gap-2">
                     <Button
                       variant="ghost"
-                      disabled={$update.isPending}
+                      disabled={update.isPending}
                       onclick={() => (editingRule = undefined)}>取消</Button
                     >
                     <Button
                       type="submit"
                       variant="primary"
-                      disabled={!editingRule.pattern.trim() ||
-                        $update.isPending}
+                      disabled={!editingRule.pattern.trim() || update.isPending}
                     >
-                      {$update.isPending ? "儲存中…" : "儲存變更"}
+                      {update.isPending ? "儲存中…" : "儲存變更"}
                     </Button>
                   </div>
                 </div>
@@ -427,7 +428,7 @@
                   checked={rule.enabled}
                   disabled={rule.isSystem}
                   onchange={(event: Event) =>
-                    $toggle.mutate({
+                    toggle.mutate({
                       id: rule.id,
                       enabled: (event.currentTarget as HTMLInputElement)
                         .checked,
@@ -463,7 +464,7 @@
                       variant="ghost"
                       aria-label={`將${categoryLabels[rule.categoryId] ?? rule.categoryId}規則上移`}
                       title="上移"
-                      disabled={$reorder.isPending || ruleIndex <= 0}
+                      disabled={reorder.isPending || ruleIndex <= 0}
                       onclick={() => moveRule(rule.id, -1)}
                     >
                       <ChevronUp />
@@ -473,7 +474,7 @@
                       variant="ghost"
                       aria-label={`將${categoryLabels[rule.categoryId] ?? rule.categoryId}規則下移`}
                       title="下移"
-                      disabled={$reorder.isPending ||
+                      disabled={reorder.isPending ||
                         ruleIndex >= editableRuleCount - 1}
                       onclick={() => moveRule(rule.id, 1)}
                     >
@@ -482,9 +483,9 @@
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={$update.isPending ||
-                        $remove.isPending ||
-                        $reorder.isPending}
+                      disabled={update.isPending ||
+                        remove.isPending ||
+                        reorder.isPending}
                       onclick={() => startEditing(rule)}
                     >
                       <Pencil class="size-4" />編輯
@@ -493,9 +494,9 @@
                       class="text-destructive hover:text-destructive"
                       size="sm"
                       variant="ghost"
-                      disabled={$remove.isPending &&
-                        $remove.variables === rule.id}
-                      onclick={() => $remove.mutate(rule.id)}>刪除</Button
+                      disabled={remove.isPending &&
+                        remove.variables === rule.id}
+                      onclick={() => remove.mutate(rule.id)}>刪除</Button
                     >
                   </div>
                 {/if}
@@ -506,14 +507,14 @@
       </div>
     {/if}
 
-    {#if $add.isError || $toggle.isError || $update.isError || $remove.isError || $reorder.isError}
+    {#if add.isError || toggle.isError || update.isError || remove.isError || reorder.isError}
       <p class="mt-3 text-sm text-destructive" role="alert">
         {messageFromError(
-          $add.error ??
-            $toggle.error ??
-            $update.error ??
-            $remove.error ??
-            $reorder.error,
+          add.error ??
+            toggle.error ??
+            update.error ??
+            remove.error ??
+            reorder.error,
         )}
       </p>
     {/if}

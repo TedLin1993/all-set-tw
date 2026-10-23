@@ -18,21 +18,21 @@
     rateMap,
   } from "@/shared/format/financial";
   let { api }: { api: ApiClient } = $props();
-  const investments = createQuery(investmentsQuery(() => api));
-  const trades = createQuery(investmentTransactionsQuery(() => api));
-  const rates = createQuery(exchangeRatesQuery(() => api));
+  const investments = createQuery(() => investmentsQuery(() => api));
+  const trades = createQuery(() => investmentTransactionsQuery(() => api));
+  const rates = createQuery(() => exchangeRatesQuery(() => api));
   let search = $state("");
   let tradeType = $state("all");
   const positions = $derived(
-    ($investments.data ?? []).filter((p) =>
+    (investments.data ?? []).filter((p) =>
       `${p.symbol ?? ""} ${p.name}`
         .toLowerCase()
         .includes(search.toLowerCase()),
     ),
   );
-  const rateValues = $derived(rateMap($rates.data));
+  const rateValues = $derived(rateMap(rates.data));
   const total = $derived(
-    ($investments.data ?? []).reduce((s, p) => {
+    (investments.data ?? []).reduce((s, p) => {
       const value = (p.marketValue ?? 0) + (p.cashBalance ?? 0);
       return (
         s +
@@ -41,7 +41,7 @@
     }, 0),
   );
   const filteredTrades = $derived(
-    ($trades.data ?? [])
+    (trades.data ?? [])
       .filter(
         (t) =>
           (tradeType === "all" || t.assetType === tradeType) &&
@@ -59,9 +59,9 @@
   }
 </script>
 
-{#if $investments.isPending}
+{#if investments.isPending}
   <EmptyState title="載入投資中" body="正在讀取投資持倉。" />
-{:else if $investments.isError || $rates.isError}
+{:else if investments.isError || rates.isError}
   <EmptyState
     alert
     title="無法載入投資"
@@ -86,7 +86,7 @@
         <div class="min-w-0">
           <p class="text-caption text-subtle">交易筆數</p>
           <p class="mt-2 text-lg font-medium tracking-tight tabular-nums">
-            {$trades.isError ? "—" : ($trades.data?.length ?? 0)}
+            {trades.isError ? "—" : (trades.data?.length ?? 0)}
           </p>
         </div>
       </div>
@@ -179,9 +179,9 @@
           <option value="fund">基金</option>
         </Select>
       </div>
-      {#if $trades.isPending}
+      {#if trades.isPending}
         <p class="py-8 text-center text-sm text-subtle">正在載入交易紀錄。</p>
-      {:else if $trades.isError}
+      {:else if trades.isError}
         <p class="py-8 text-center text-sm text-coral">
           交易紀錄暫時無法載入。
         </p>

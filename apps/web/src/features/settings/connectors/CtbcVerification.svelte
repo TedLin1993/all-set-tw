@@ -44,7 +44,7 @@
     return () => clearInterval(timer);
   });
 
-  const verify = createMutation({
+  const verify = createMutation(() => ({
     onMutate: () => {
       busy = true;
       error = "";
@@ -83,7 +83,7 @@
       qc.invalidateQueries({ queryKey: queryKeys.connectorSettings("ctbc") });
       qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
     },
-  });
+  }));
 </script>
 
 {#if expiresAt || expired || error}
@@ -107,7 +107,7 @@
           onsubmit={(event) => {
             event.preventDefault();
             if (!disabled && !busy && /^\d{4}$/.test(otp.trim()))
-              $verify.mutate({ otp: otp.trim() });
+              verify.mutate({ otp: otp.trim() });
           }}
         >
           <label class="grid gap-1 text-sm">
@@ -135,7 +135,7 @@
           <Button
             size="sm"
             disabled={disabled || busy}
-            onclick={() => $verify.mutate({ verification: "check" })}
+            onclick={() => verify.mutate({ verification: "check" })}
           >
             <Smartphone class="size-4" />我已確認，繼續同步
           </Button>
@@ -143,7 +143,7 @@
             size="sm"
             variant="outline"
             disabled={disabled || busy}
-            onclick={() => $verify.mutate({ verification: "email" })}
+            onclick={() => verify.mutate({ verification: "email" })}
           >
             <Mail class="size-4" />改用 Email 驗證
           </Button>
@@ -157,7 +157,7 @@
         class="mt-3"
         size="sm"
         disabled={disabled || busy}
-        onclick={() => $verify.mutate({ verification: "restart" })}
+        onclick={() => verify.mutate({ verification: "restart" })}
       >
         重新開始驗證
       </Button>
