@@ -374,10 +374,37 @@ describe("同步資料完整性（隔離 D1）", () => {
     };
 
     // 外幣帳戶不列入：同幣別唯一即推測。
+    const usd = deposit("bank:sinopac:2366:USD", "USD");
     await persistStagedSyncWrite(db, {
-      records: [twd, deposit("bank:sinopac:2366:USD", "USD"), card()],
+      records: [twd, usd, card()],
     });
     expect(await payment()).toEqual([twd.recordKey, "inferred"]);
+
+    // 外幣卡推測仍只用同幣別帳戶，但可手動指定台幣帳戶扣款；外幣帳戶不能扣台幣款項。
+    const usdCard = bankAccountRecord(
+      "sinopac",
+      {
+        sourceId: "credit:sinopac:USD",
+        institutionName: "永豐銀行",
+        accountName: "永豐信用卡（USD）",
+        accountType: "credit",
+        currency: "USD",
+      },
+      now,
+    );
+    const usdPayment = async () => {
+      const row = (await getBankAccounts(db)).find(
+        (item) => item.id === usdCard.recordKey,
+      );
+      return [row?.paymentAccountId, row?.paymentAccountSource];
+    };
+    await persistStagedSyncWrite(db, { records: [usdCard] });
+    expect(await usdPayment()).toEqual([usd.recordKey, "inferred"]);
+    await setPaymentAccount(db, usdCard.recordKey, twd.recordKey);
+    expect(await usdPayment()).toEqual([twd.recordKey, "manual"]);
+    await expect(
+      setPaymentAccount(db, cardId, usd.recordKey),
+    ).rejects.toBeInstanceOf(InvalidPaymentAccountError);
 
     // 同銀行有兩個台幣帳戶時無法判斷。
     await persistStagedSyncWrite(db, {

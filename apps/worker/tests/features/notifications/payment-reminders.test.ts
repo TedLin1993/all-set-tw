@@ -247,6 +247,50 @@ describe("collectPaymentReminders", () => {
         ]);
       }
     });
+
+    it("外幣帳單由台幣帳戶扣款時，依匯率加換匯緩衝換算後判斷；沒有匯率時不判斷", () => {
+      const runJpy = (
+        availableBalance: number,
+        rates: Record<string, number> = { JPY: 0.21 },
+      ) =>
+        collectPaymentReminders(
+          [
+            card({
+              id: "jpy",
+              currency: "JPY",
+              balance: -30_000,
+              ...paidFromDeposit,
+            }),
+            deposit({ availableBalance }),
+          ],
+          [
+            bill({
+              accountId: "jpy",
+              currency: "JPY",
+              statementAmount: 30_000,
+            }),
+          ],
+          now,
+          rates,
+        );
+
+      // JP¥30,000 × 0.21 × 1.02 = NT$6,426。
+      expect(runJpy(7_000).covered.map((item) => item.accountId)).toEqual([
+        "jpy",
+      ]);
+      expect(runJpy(6_000).reminders).toEqual([
+        expect.objectContaining({
+          accountId: "jpy",
+          currency: "JPY",
+          state: "insufficient_funds",
+          shortfall: 426,
+          paymentAccount: expect.objectContaining({ currency: "TWD" }),
+        }),
+      ]);
+      const noRate = runJpy(7_000, {});
+      expect(noRate.covered).toEqual([]);
+      expect(noRate.reminders.map((item) => item.state)).toEqual(["due"]);
+    });
   });
 });
 
@@ -368,6 +412,7 @@ describe("scheduledSummaryNotification", () => {
           id: "deposit",
           name: "台新銀行 末五碼 12345",
           institution: "台新銀行",
+          currency: "TWD",
         },
         shortfall: 800,
       }),

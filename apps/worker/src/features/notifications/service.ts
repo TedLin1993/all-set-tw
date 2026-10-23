@@ -7,6 +7,7 @@ import type {
 import { collectPaymentReminders, taipeiDateKey } from "@taiwan-fin-hub/shared";
 import { sanitizeDatabaseError } from "../../db";
 import { getBankAccounts, getCreditCardBillsRange } from "../bank/service";
+import { getExchangeRates } from "../exchange-rates/service";
 import { configEncryptionKey } from "../../platform/config";
 import { decryptJson, encryptJson } from "../../platform/crypto";
 import type { Env } from "../../platform/env";
@@ -221,11 +222,15 @@ async function safelyLoadPaymentReminders(
       const date = new Date(Date.UTC(year!, month! - 1 + offset, 1));
       return date.toISOString().slice(0, 10);
     };
-    const [accounts, bills] = await Promise.all([
+    const [accounts, bills, rates] = await Promise.all([
       getBankAccounts(db),
       getCreditCardBillsRange(db, { from: monthStart(-2), to: monthStart(1) }),
+      getExchangeRates(db),
     ]);
-    return collectPaymentReminders(accounts, bills, now).reminders;
+    const ratesToTwd = Object.fromEntries(
+      rates.map((rate) => [rate.currency, rate.rateTwd]),
+    );
+    return collectPaymentReminders(accounts, bills, now, ratesToTwd).reminders;
   } catch (error) {
     const safeError = sanitizeDatabaseError(error);
     console.error(

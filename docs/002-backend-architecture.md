@@ -578,7 +578,7 @@ X-Next-Cursor: <opaque-cursor>
 - 自動對應只在唯一時採用：有存款 sourceId 時精準比對；否則需同時符合銀行代碼與末四碼。對不到或不只一個候選時不帶入，由使用者手動指定。
 - 銀行完全沒提供扣款資料（`autopay_status` 為 NULL）時，以同一資料來源（同銀行）唯一的同幣別可扣款帳戶推測（`inferred`）；有多個候選時不推測。銀行明確顯示未設定，或提供的帳戶對不到時也不推測，避免誤用其他帳戶的餘額而隱藏提醒。
 - 手動設定存於 `bank_account_payment_accounts`，優先於銀行資料；`payment_account_id` 為 NULL 表示明確「不指定」。指定的帳戶已不存在或不再符合條件時，退回銀行資料。此表的兩個帳戶 ID 都不設 FK：帳戶被移除或合併時視為未設定，不阻擋同步資料清理，也不以 CASCADE 悄悄刪除使用者設定。
-- 扣款帳戶須是同幣別、非信用卡／貸款／定存／儲值的帳戶。`PUT /api/bank/accounts/:id/payment-account`（`{ paymentAccountId: string | null }`）寫入手動設定，`DELETE` 同路徑移除手動設定、改回銀行資料；對象不是有效的信用卡或貸款時回 `BANK_ACCOUNT_NOT_FOUND`（404），扣款帳戶不符合條件時回 `INVALID_PAYMENT_ACCOUNT`（400）。
+- 扣款帳戶須是非信用卡／貸款／定存／儲值的帳戶，且與款項同幣別或為台幣帳戶（外幣帳單常由台幣帳戶換匯扣繳）；銀行提供的扣款帳戶也依此比對，推測則只用同幣別帳戶。`PUT /api/bank/accounts/:id/payment-account`（`{ paymentAccountId: string | null }`）寫入手動設定，`DELETE` 同路徑移除手動設定、改回銀行資料；對象不是有效的信用卡或貸款時回 `BANK_ACCOUNT_NOT_FOUND`（404），扣款帳戶不符合條件時回 `INVALID_PAYMENT_ACCOUNT`（400）。
 - 帳戶 API（`/api/bank/accounts`、`/api/bank`）的信用卡與貸款附上 `paymentAccountId`、`paymentAccountSource`（`manual`／`bank`／`inferred`）與 `bankAutopay`；銀行資料的內部欄位不回傳。
 
 ## 讀取 API 效能

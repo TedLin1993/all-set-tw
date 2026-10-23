@@ -16,6 +16,7 @@
     manualAssetsQuery,
     netWorthHistoryQuery,
   } from "@/data/assets/queries";
+  import { depositAccountCount } from "@/data/bank/account-groups";
   import { bankRangeQuery, creditCardBillsQuery } from "@/data/bank/queries";
   import { syncJobsQuery } from "@/data/connectors/queries";
   import type { ConnectorId } from "@/data/connectors/types";
@@ -156,7 +157,7 @@
     {
       label: "銀行與現金",
       value: depositTotal,
-      detail: `${deposits.length} 個帳戶`,
+      detail: `${depositAccountCount(deposits)} 個帳戶`,
     },
     {
       label: "投資",
@@ -204,7 +205,12 @@
   const paymentSummary = $derived(
     reminderBills.isPending
       ? { reminders: [], covered: [] }
-      : collectPaymentReminders(bankData.accounts, reminderBills.data ?? []),
+      : collectPaymentReminders(
+          bankData.accounts,
+          reminderBills.data ?? [],
+          new Date(),
+          rateValues,
+        ),
   );
   const paymentReminders = $derived(paymentSummary.reminders);
   const coveredPayments = $derived(paymentSummary.covered.length);
@@ -280,7 +286,10 @@
   function insufficientText(reminder: PaymentReminder) {
     const shortfall =
       reminder.shortfall != null
-        ? `，差 ${formatCurrency(reminder.shortfall, reminder.currency)}`
+        ? `，差 ${formatCurrency(
+            reminder.shortfall,
+            reminder.paymentAccount?.currency ?? reminder.currency,
+          )}`
         : "";
     return `${reminder.paymentAccount?.name ?? "扣款帳戶"} 餘額可能不足${shortfall}`;
   }

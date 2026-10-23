@@ -153,7 +153,7 @@
             {formatCurrency(summary.bankTotal)}
           </p>
           <p class="mt-1 text-caption text-subtle">
-            {summary.deposits.length} 個帳戶
+            {summary.depositAccountCount} 個帳戶
           </p>
         </div>
         <div class="min-w-0">
@@ -234,7 +234,8 @@
                       {group.institution}
                     </strong>
                     <small class="mt-1 block truncate text-caption text-subtle">
-                      {group.accounts.length} 帳戶 · {group.loans.length} 貸款 · {group.cardAccountCount}
+                      {group.depositAccountCount} 帳戶 · {group.loans.length} 貸款
+                      · {group.cardAccountCount}
                       信用卡帳戶{group.foreignCurrencies.length
                         ? ` · 含 ${group.foreignCurrencies.join("、")}`
                         : ""}
@@ -372,7 +373,8 @@
                     {group.institution}
                   </strong>
                   <small class="mt-1 block truncate text-caption text-subtle">
-                    {group.accounts.length} 帳戶 · {group.loans.length} 貸款 · {group.cardAccountCount}
+                    {group.depositAccountCount} 帳戶 · {group.loans.length} 貸款 ·
+                    {group.cardAccountCount}
                     信用卡帳戶{group.foreignCurrencies.length
                       ? ` · 含 ${group.foreignCurrencies.join("、")}`
                       : ""}
