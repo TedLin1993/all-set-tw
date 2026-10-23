@@ -80,28 +80,30 @@
 
   const monthKey = new Date().toISOString().slice(0, 7);
   const currentMonthRange = { from: monthKey, to: monthKey };
-  const monthlyBank = createQuery(bankRangeQuery(() => api, currentMonthRange));
-  const investments = createQuery(investmentsQuery(() => api));
-  const monthlyInvoices = createQuery(
+  const monthlyBank = createQuery(() =>
+    bankRangeQuery(() => api, currentMonthRange),
+  );
+  const investments = createQuery(() => investmentsQuery(() => api));
+  const monthlyInvoices = createQuery(() =>
     invoicesRangeQuery(() => api, currentMonthRange),
   );
-  const invoiceMappings = createQuery(
+  const invoiceMappings = createQuery(() =>
     invoiceTransactionMappingsQuery(() => api, currentMonthRange),
   );
-  const manualAssets = createQuery(manualAssetsQuery(() => api));
-  const rates = createQuery(exchangeRatesQuery(() => api));
-  const jobs = createQuery(syncJobsQuery(() => api));
-  const latestSyncReport = createQuery(latestSyncReportQuery(() => api));
-  const history = createQuery(netWorthHistoryQuery(() => api));
+  const manualAssets = createQuery(() => manualAssetsQuery(() => api));
+  const rates = createQuery(() => exchangeRatesQuery(() => api));
+  const jobs = createQuery(() => syncJobsQuery(() => api));
+  const latestSyncReport = createQuery(() => latestSyncReportQuery(() => api));
+  const history = createQuery(() => netWorthHistoryQuery(() => api));
   // 本月到期的帳單通常屬於上一或上上期別。
-  const reminderBills = createQuery(
+  const reminderBills = createQuery(() =>
     creditCardBillsQuery(() => api, recentMonthRange(3)),
   );
 
   const bankData = $derived(
-    $monthlyBank.data ?? { accounts: [], transactions: [] },
+    monthlyBank.data ?? { accounts: [], transactions: [] },
   );
-  const rateValues = $derived(rateMap($rates.data));
+  const rateValues = $derived(rateMap(rates.data));
   const toTwd = (value: number, currency: string) =>
     currency === "TWD" ? value : value * (rateValues[currency] ?? 0);
   const deposits = $derived(
@@ -135,7 +137,7 @@
     ),
   );
   const investmentTotal = $derived(
-    ($investments.data ?? []).reduce(
+    (investments.data ?? []).reduce(
       (sum, item) =>
         sum +
         toTwd((item.marketValue ?? 0) + (item.cashBalance ?? 0), item.currency),
@@ -143,7 +145,7 @@
     ),
   );
   const manualTotal = $derived(
-    ($manualAssets.data ?? []).reduce(
+    (manualAssets.data ?? []).reduce(
       (sum, item) => sum + toTwd(item.value ?? 0, item.currency),
       0,
     ),
@@ -159,7 +161,7 @@
     {
       label: "投資",
       value: investmentTotal,
-      detail: `${$investments.data?.length ?? 0} 個持倉`,
+      detail: `${investments.data?.length ?? 0} 個持倉`,
     },
     {
       label: "其他資產",
@@ -169,17 +171,17 @@
   ]);
   const monthlyTotals = $derived(
     calculateMonthlyActivityTotals(
-      $monthlyBank.data ?? { accounts: [], transactions: [] },
-      $monthlyInvoices.data ?? [],
-      $invoiceMappings.data ?? [],
+      monthlyBank.data ?? { accounts: [], transactions: [] },
+      monthlyInvoices.data ?? [],
+      invoiceMappings.data ?? [],
       rateValues,
     ),
   );
   const monthlyIncome = $derived(monthlyTotals.income);
   const monthlyExpense = $derived(monthlyTotals.expense);
   const monthlyNet = $derived(monthlyIncome - monthlyExpense);
-  const syncJobsReady = $derived($jobs.isSuccess);
-  const syncJobRows = $derived($jobs.data ?? []);
+  const syncJobsReady = $derived(jobs.isSuccess);
+  const syncJobRows = $derived(jobs.data ?? []);
   const unhealthy = $derived(getActionableSyncJobs(syncJobRows));
   const pendingSyncJobs = $derived(getPendingSyncJobs(syncJobRows));
   const configuredSyncJobs = $derived(getConfiguredSyncJobs(syncJobRows));
@@ -200,9 +202,9 @@
   const sourceCount = $derived(configuredSyncJobs.length);
   const healthyCount = $derived(healthySyncJobs.length);
   const paymentSummary = $derived(
-    $reminderBills.isPending
+    reminderBills.isPending
       ? { reminders: [], covered: [] }
-      : collectPaymentReminders(bankData.accounts, $reminderBills.data ?? []),
+      : collectPaymentReminders(bankData.accounts, reminderBills.data ?? []),
   );
   const paymentReminders = $derived(paymentSummary.reminders);
   const coveredPayments = $derived(paymentSummary.covered.length);
@@ -349,11 +351,11 @@
     if (!syncJobsReady) {
       items.push({
         id: "sync-status-unavailable",
-        title: $jobs.isError ? "無法載入同步狀態" : "正在載入同步狀態",
-        detail: $jobs.isError
+        title: jobs.isError ? "無法載入同步狀態" : "正在載入同步狀態",
+        detail: jobs.isError
           ? "目前無法確認資料來源狀態，請稍後再試"
           : "正在讀取資料來源狀態",
-        tone: $jobs.isError ? "coral" : "steel",
+        tone: jobs.isError ? "coral" : "steel",
         icon: "sync",
         view: "data-sources",
       });
@@ -445,7 +447,7 @@
     return items.slice(0, 2);
   });
   const missingRates = $derived(
-    $rates.isSuccess
+    rates.isSuccess
       ? missingExchangeRateCurrencies(
           [
             ...deposits.map((account) => ({
@@ -460,11 +462,11 @@
               currency: account.currency,
               amount: Math.abs(account.balance ?? 0),
             })),
-            ...($investments.data ?? []).map((item) => ({
+            ...(investments.data ?? []).map((item) => ({
               currency: item.currency,
               amount: (item.marketValue ?? 0) + (item.cashBalance ?? 0),
             })),
-            ...($manualAssets.data ?? []).map((item) => ({
+            ...(manualAssets.data ?? []).map((item) => ({
               currency: item.currency,
               amount: item.value ?? 0,
             })),
@@ -474,18 +476,18 @@
       : [],
   );
   const loading = $derived(
-    $monthlyBank.isPending ||
-      $monthlyInvoices.isPending ||
-      $invoiceMappings.isPending ||
-      $investments.isPending ||
-      $manualAssets.isPending,
+    monthlyBank.isPending ||
+      monthlyInvoices.isPending ||
+      invoiceMappings.isPending ||
+      investments.isPending ||
+      manualAssets.isPending,
   );
   const failed = $derived(
-    $monthlyBank.isError ||
-      $monthlyInvoices.isError ||
-      $invoiceMappings.isError ||
-      $investments.isError ||
-      $manualAssets.isError,
+    monthlyBank.isError ||
+      monthlyInvoices.isError ||
+      invoiceMappings.isError ||
+      investments.isError ||
+      manualAssets.isError,
   );
 </script>
 
@@ -587,8 +589,8 @@
 
     <div class="min-w-0 border-t border-ink/10 pt-6">
       <NetWorthHistoryChart
-        data={$history.data ?? []}
-        loading={$history.isPending}
+        data={history.data ?? []}
+        loading={history.isPending}
       />
     </div>
 
@@ -721,8 +723,8 @@
 
     <LatestSyncReportCard
       {api}
-      report={$latestSyncReport.data}
-      loading={$latestSyncReport.isPending}
+      report={latestSyncReport.data}
+      loading={latestSyncReport.isPending}
     />
   </div>
 {/if}

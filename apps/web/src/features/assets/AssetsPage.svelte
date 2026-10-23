@@ -28,29 +28,29 @@
 
   let { api }: { api: ApiClient } = $props();
 
-  const bank = createQuery(bankAccountsQuery(() => api));
-  const bills = createQuery(creditCardBillsQuery(() => api));
-  const investments = createQuery(investmentsQuery(() => api));
-  const trades = createQuery(investmentTransactionsQuery(() => api));
-  const manual = createQuery(manualAssetsQuery(() => api));
-  const rates = createQuery(exchangeRatesQuery(() => api));
+  const bank = createQuery(() => bankAccountsQuery(() => api));
+  const bills = createQuery(() => creditCardBillsQuery(() => api));
+  const investments = createQuery(() => investmentsQuery(() => api));
+  const trades = createQuery(() => investmentTransactionsQuery(() => api));
+  const manual = createQuery(() => manualAssetsQuery(() => api));
+  const rates = createQuery(() => exchangeRatesQuery(() => api));
 
   const summary = $derived(
     calculateAssetSummary({
-      bank: { accounts: $bank.data ?? [], transactions: [] },
-      investments: $investments.data ?? [],
-      manualAssets: $manual.data ?? [],
-      rates: $rates.data,
+      bank: { accounts: bank.data ?? [], transactions: [] },
+      investments: investments.data ?? [],
+      manualAssets: manual.data ?? [],
+      rates: rates.data,
     }),
   );
   const loading = $derived(
-    $bank.isPending ||
-      $investments.isPending ||
-      $manual.isPending ||
-      $rates.isPending,
+    bank.isPending ||
+      investments.isPending ||
+      manual.isPending ||
+      rates.isPending,
   );
   const failed = $derived(
-    $bank.isError || $investments.isError || $manual.isError || $rates.isError,
+    bank.isError || investments.isError || manual.isError || rates.isError,
   );
   const ledgerItems = $derived<LedgerItem[]>([
     ...summary.institutionGroups.map((group): LedgerItem => ({
@@ -59,10 +59,10 @@
       label: group.institution,
       group,
     })),
-    ...(($investments.data?.length ?? 0) > 0
+    ...((investments.data?.length ?? 0) > 0
       ? ([{ key: "investments", kind: "investments", label: "投資" }] as const)
       : []),
-    ...(($manual.data?.length ?? 0) > 0
+    ...((manual.data?.length ?? 0) > 0
       ? ([
           {
             key: "manual-assets",
@@ -169,7 +169,7 @@
             {formatCurrency(summary.investmentTotal)}
           </p>
           <p class="mt-1 text-caption text-subtle">
-            {$investments.data?.length ?? 0} 個持倉
+            {investments.data?.length ?? 0} 個持倉
           </p>
         </div>
         <div class="min-w-0">
@@ -185,7 +185,7 @@
             {formatCurrency(summary.manualTotal)}
           </p>
           <p class="mt-1 text-caption text-subtle">
-            {$manual.data?.length ?? 0} 筆
+            {manual.data?.length ?? 0} 筆
           </p>
         </div>
       </div>
@@ -273,7 +273,7 @@
               {/each}
             {/if}
 
-            {#if ($investments.data?.length ?? 0) > 0}
+            {#if (investments.data?.length ?? 0) > 0}
               <button
                 class={`grid min-h-[68px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-ink/8 px-3 py-2 text-left transition hover:bg-ink/3 ${activeKey === "investments" ? "bg-ink/4 shadow-[inset_3px_0_0_var(--color-steel)]" : ""}`}
                 type="button"
@@ -283,7 +283,7 @@
                 <span class="min-w-0">
                   <strong class="block text-sm">投資</strong>
                   <small class="mt-1 block text-caption text-subtle">
-                    {$investments.data?.length ?? 0} 個持倉 · 持倉與交易紀錄
+                    {investments.data?.length ?? 0} 個持倉 · 持倉與交易紀錄
                   </small>
                 </span>
                 <strong class="text-sm tabular-nums text-steel">
@@ -292,7 +292,7 @@
               </button>
             {/if}
 
-            {#if ($manual.data?.length ?? 0) > 0}
+            {#if (manual.data?.length ?? 0) > 0}
               <button
                 class={`grid min-h-[68px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-ink/8 px-3 py-2 text-left transition hover:bg-ink/3 ${activeKey === "manual-assets" ? "bg-ink/4 shadow-[inset_3px_0_0_var(--color-steel)]" : ""}`}
                 type="button"
@@ -302,7 +302,7 @@
                 <span class="min-w-0">
                   <strong class="block text-sm">其他資產</strong>
                   <small class="mt-1 block text-caption text-subtle">
-                    {$manual.data?.length ?? 0} 筆 · 手動維護估值
+                    {manual.data?.length ?? 0} 筆 · 手動維護估值
                   </small>
                 </span>
                 <strong class="text-sm tabular-nums text-moss">
@@ -317,19 +317,19 @@
           {#if activeItem?.kind === "institution"}
             <InstitutionDetails
               group={activeItem.group}
-              bills={$bills.data ?? []}
-              billsPending={$bills.isPending}
-              billsError={$bills.isError}
+              bills={bills.data ?? []}
+              billsPending={bills.isPending}
+              billsError={bills.isError}
               {api}
-              accounts={$bank.data ?? []}
+              accounts={bank.data ?? []}
             />
           {:else if activeItem?.kind === "investments"}
             <InvestmentWorkspace
-              positions={$investments.data ?? []}
-              trades={$trades.data ?? []}
+              positions={investments.data ?? []}
+              trades={trades.data ?? []}
               total={summary.investmentTotal}
-              tradesPending={$trades.isPending}
-              tradesError={$trades.isError}
+              tradesPending={trades.isPending}
+              tradesError={trades.isError}
             />
           {:else if activeItem?.kind === "manual-assets"}
             <ManualAssets {api} variant="embedded" />
@@ -415,11 +415,11 @@
                 <div class="border-t border-ink/8 pb-5 pl-4 pt-3">
                   <InstitutionDetails
                     {group}
-                    bills={$bills.data ?? []}
-                    billsPending={$bills.isPending}
-                    billsError={$bills.isError}
+                    bills={bills.data ?? []}
+                    billsPending={bills.isPending}
+                    billsError={bills.isError}
                     {api}
-                    accounts={$bank.data ?? []}
+                    accounts={bank.data ?? []}
                     compact
                   />
                 </div>
@@ -428,13 +428,13 @@
           {/each}
         {/if}
 
-        {#if ($investments.data?.length ?? 0) > 0}
+        {#if (investments.data?.length ?? 0) > 0}
           <div class="border-t border-ink/10 pt-5">
             <div class="flex items-start justify-between gap-3 pb-1">
               <div class="min-w-0">
                 <h2 class="text-base font-semibold">投資</h2>
                 <p class="mt-1 text-caption text-subtle">
-                  {$investments.data?.length ?? 0} 個持倉 · 交易紀錄
+                  {investments.data?.length ?? 0} 個持倉 · 交易紀錄
                 </p>
               </div>
               <strong
@@ -444,11 +444,11 @@
               </strong>
             </div>
             <InvestmentWorkspace
-              positions={$investments.data ?? []}
-              trades={$trades.data ?? []}
+              positions={investments.data ?? []}
+              trades={trades.data ?? []}
               total={summary.investmentTotal}
-              tradesPending={$trades.isPending}
-              tradesError={$trades.isError}
+              tradesPending={trades.isPending}
+              tradesError={trades.isError}
               compact
             />
           </div>
@@ -459,7 +459,7 @@
             <div class="min-w-0">
               <h2 class="text-base font-semibold">其他資產</h2>
               <p class="mt-1 text-caption text-subtle">
-                {$manual.data?.length ?? 0} 筆 · 估值歷史
+                {manual.data?.length ?? 0} 筆 · 估值歷史
               </p>
             </div>
             <div class="shrink-0 text-right">

@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { ApiClient } from "@/shared/api/client";
-  import { toStore } from "svelte/store";
   import { createQuery } from "@tanstack/svelte-query";
   import SyncActivityDetails from "./SyncActivityDetails.svelte";
   import { CircleCheckBig, RefreshCw, TriangleAlert } from "@lucide/svelte";
@@ -90,13 +89,11 @@
       : [],
   );
   let sourcesOpen = $state(false);
-  const activities = createQuery(
-    toStore(() =>
-      syncReportActivitiesQuery(
-        () => api,
-        report?.id ?? "",
-        Boolean(report?.id) && sourcesOpen,
-      ),
+  const activities = createQuery(() =>
+    syncReportActivitiesQuery(
+      () => api,
+      report?.id ?? "",
+      Boolean(report?.id) && sourcesOpen,
     ),
   );
 
@@ -273,10 +270,10 @@
                   </span>
                 </div>
                 <SyncActivityDetails
-                  page={$activities.data?.sources[source.connectorId]}
-                  loading={$activities.isPending}
-                  failed={$activities.isError}
-                  onRetry={() => $activities.refetch()}
+                  page={activities.data?.sources[source.connectorId]}
+                  loading={activities.isPending}
+                  failed={activities.isError}
+                  onRetry={() => activities.refetch()}
                 />
               </div>
             {/each}

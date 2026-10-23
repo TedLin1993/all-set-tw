@@ -19,12 +19,12 @@
   let { api, demoMode = false }: { api: ApiClient; demoMode?: boolean } =
     $props();
 
-  const status = createQuery(aiClassificationQuery(() => api));
+  const status = createQuery(() => aiClassificationQuery(() => api));
   const qc = useQueryClient();
   let confirming = $state<"enable" | "backfill" | "clear" | null>(null);
   let error = $state("");
 
-  const data = $derived($status.data);
+  const data = $derived(status.data);
   const enabled = $derived(data?.enabled ?? false);
   const hasResults = $derived(
     (data?.classifiedCount ?? 0) + (data?.undeterminedCount ?? 0) > 0,
@@ -44,21 +44,21 @@
     wasScanning = scanning;
   });
 
-  const setEnabled = createMutation({
+  const setEnabled = createMutation(() => ({
     mutationFn: (next: boolean) =>
       api.put<AiClassificationStatus>("/api/classification/ai", {
         enabled: next,
       }),
     onSuccess: applyStatus,
     onError: (cause) => (error = messageFromError(cause)),
-  });
-  const backfill = createMutation({
+  }));
+  const backfill = createMutation(() => ({
     mutationFn: () =>
       api.post<AiClassificationStatus>("/api/classification/ai/backfill", {}),
     onSuccess: applyStatus,
     onError: (cause) => (error = messageFromError(cause)),
-  });
-  const clear = createMutation({
+  }));
+  const clear = createMutation(() => ({
     mutationFn: () =>
       api.delete<AiClassificationStatus>("/api/classification/ai/results"),
     onSuccess: (next) => {
@@ -66,24 +66,24 @@
       qc.invalidateQueries({ queryKey: queryKeys.bank });
     },
     onError: (cause) => (error = messageFromError(cause)),
-  });
+  }));
   const busy = $derived(
-    $setEnabled.isPending || $backfill.isPending || $clear.isPending,
+    setEnabled.isPending || backfill.isPending || clear.isPending,
   );
 
   // Turning it on explains what is sent and what it costs first; turning it
   // off keeps the results already applied, so it needs no confirmation.
   function requestEnabled(next: boolean) {
     if (next) confirming = "enable";
-    else $setEnabled.mutate(false);
+    else setEnabled.mutate(false);
   }
 
   function confirm() {
     const action = confirming;
     confirming = null;
-    if (action === "enable") $setEnabled.mutate(true);
-    if (action === "backfill") $backfill.mutate();
-    if (action === "clear") $clear.mutate();
+    if (action === "enable") setEnabled.mutate(true);
+    if (action === "backfill") backfill.mutate();
+    if (action === "clear") clear.mutate();
   }
 
   // One set of numbers: every stored AI result, whichever scan produced it.
@@ -122,9 +122,9 @@
     </div>
   </CardHeader>
   <CardContent class="grid gap-4">
-    {#if $status.isPending}
+    {#if status.isPending}
       <p class="text-sm text-muted-foreground">載入中…</p>
-    {:else if $status.isError}
+    {:else if status.isError}
       <p class="text-sm text-coral">AI 自動分類狀態載入失敗。</p>
     {:else if data}
       {#if enabled}

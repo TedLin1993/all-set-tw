@@ -38,7 +38,7 @@
   } = $props();
 
   const queryClient = useQueryClient();
-  const config = createQuery(notificationConfigQuery(() => api));
+  const config = createQuery(() => notificationConfigQuery(() => api));
   const defaults: NotificationPreferences = {
     success: false,
     failed: true,
@@ -52,8 +52,8 @@
   let feedback = $state<{ tone: "success" | "error"; text: string } | null>(
     null,
   );
-  const preferences = $derived($config.data?.preferences ?? defaults);
-  const serverEnabled = $derived($config.data?.enabled ?? false);
+  const preferences = $derived(config.data?.preferences ?? defaults);
+  const serverEnabled = $derived(config.data?.enabled ?? false);
   const subscribed = $derived(Boolean(subscription));
 
   onMount(() => {
@@ -87,13 +87,13 @@
   }
 
   async function enablePush() {
-    if (!serverEnabled || !$config.data?.publicKey) return;
+    if (!serverEnabled || !config.data?.publicKey) return;
     busy = true;
     feedback = null;
     try {
       const previousId = localStorage.getItem("taiwan-fin-hub-push-id");
       await registerPushServiceWorker();
-      const current = await subscribeToPush($config.data.publicKey);
+      const current = await subscribeToPush(config.data.publicKey);
       const registered = await api.post<PushSubscriptionRegistration>(
         "/api/notifications/subscriptions",
         subscriptionInput(current),

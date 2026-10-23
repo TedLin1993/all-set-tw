@@ -33,13 +33,13 @@
     variant?: "default" | "desktop";
   } = $props();
 
-  const rates = createQuery(exchangeRatesQuery(() => api));
-  const currencyList = createQuery(exchangeRateCurrenciesQuery(() => api));
-  const currencies = $derived(
-    $currencyList.data ?? DEFAULT_EXCHANGE_CURRENCIES,
+  const rates = createQuery(() => exchangeRatesQuery(() => api));
+  const currencyList = createQuery(() =>
+    exchangeRateCurrenciesQuery(() => api),
   );
+  const currencies = $derived(currencyList.data ?? DEFAULT_EXCHANGE_CURRENCIES);
   const queryClient = useQueryClient();
-  const refresh = createMutation({
+  const refresh = createMutation(() => ({
     mutationFn: () =>
       api.post<ExchangeRateRow[]>("/api/exchange-rates/refresh"),
     onSuccess: (data) => {
@@ -48,14 +48,14 @@
         queryKey: queryKeys.exchangeRateCurrencies,
       });
     },
-  });
+  }));
 
   const lastUpdatedAt = $derived(
-    ($rates.data ?? []).find((rate) => rate.updatedAt)?.updatedAt,
+    (rates.data ?? []).find((rate) => rate.updatedAt)?.updatedAt,
   );
 
   function rateFor(currency: string) {
-    return ($rates.data ?? []).find((rate) => rate.currency === currency);
+    return (rates.data ?? []).find((rate) => rate.currency === currency);
   }
 
   function displayRate(rate: ExchangeRateRow | undefined) {
@@ -89,12 +89,12 @@
               ? formatDateTime(lastUpdatedAt)
               : "尚未更新"}
           </p>
-          {#if $refresh.error}
+          {#if refresh.error}
             <p role="alert" class="text-coral">
-              {messageFromError($refresh.error)} 目前仍保留原有匯率。
+              {messageFromError(refresh.error)} 目前仍保留原有匯率。
             </p>
           {/if}
-          {#if $currencyList.isError || $rates.isError}
+          {#if currencyList.isError || rates.isError}
             <p role="alert" class="text-coral">
               無法載入完整匯率清單，請稍後再按更新。
             </p>
@@ -102,12 +102,12 @@
         </div>
         <Button
           variant="primary"
-          disabled={demoMode || $refresh.isPending}
-          onclick={() => $refresh.mutate()}
+          disabled={demoMode || refresh.isPending}
+          onclick={() => refresh.mutate()}
         >
           <RefreshCw
-            class={$refresh.isPending ? "size-4 animate-spin" : "size-4"}
-          />{$refresh.isPending ? "更新中…" : "更新匯率"}
+            class={refresh.isPending ? "size-4 animate-spin" : "size-4"}
+          />{refresh.isPending ? "更新中…" : "更新匯率"}
         </Button>
       </div>
     </CardHeader>
@@ -150,12 +150,12 @@
         <Button
           variant="primary"
           size="sm"
-          disabled={demoMode || $refresh.isPending}
-          onclick={() => $refresh.mutate()}
+          disabled={demoMode || refresh.isPending}
+          onclick={() => refresh.mutate()}
         >
           <RefreshCw
-            class={$refresh.isPending ? "size-4 animate-spin" : "size-4"}
-          />{$refresh.isPending ? "更新中…" : "更新"}
+            class={refresh.isPending ? "size-4 animate-spin" : "size-4"}
+          />{refresh.isPending ? "更新中…" : "更新"}
         </Button>
       </div>
     </CardHeader>
@@ -186,12 +186,12 @@
         <p>
           最後更新：{lastUpdatedAt ? formatDateTime(lastUpdatedAt) : "尚未更新"}
         </p>
-        {#if $refresh.error}
+        {#if refresh.error}
           <p role="alert" class="text-coral">
-            {messageFromError($refresh.error)} 目前仍保留原有匯率。
+            {messageFromError(refresh.error)} 目前仍保留原有匯率。
           </p>
         {/if}
-        {#if $currencyList.isError || $rates.isError}
+        {#if currencyList.isError || rates.isError}
           <p role="alert" class="text-coral">
             無法載入完整匯率清單，請稍後再按更新。
           </p>
