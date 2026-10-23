@@ -654,6 +654,10 @@ export function parseUbotCreditCardData(
   const bankTransactions: Array<Omit<BankTransaction, "id" | "connectorId">> =
     [];
 
+  // 已出帳與未出帳共用 occurrence：相同 identity 的不同消費分屬兩個清單時仍取得不同 sourceId；
+  // 只出現在未出帳的消費轉入帳單後（帳單先處理）沿用原本的 occurrence 與 sourceId。
+  const postedOccurrences = new Map<string, number>();
+
   // 已出帳帳單與明細 (NNBC010104)
   if (Array.isArray(payloads.statements)) {
     for (const statement of payloads.statements) {
@@ -708,7 +712,6 @@ export function parseUbotCreditCardData(
       const billList = Array.isArray(stmtBody.BillList)
         ? stmtBody.BillList
         : [];
-      const stmtOccurrences = new Map<string, number>();
       for (const tx of billList) {
         if (!isRecord(tx)) continue;
         const txAmt = numberValue(tx.TxAmt);
@@ -729,8 +732,8 @@ export function parseUbotCreditCardData(
           amount,
           description,
         ].join("|");
-        const occurrence = (stmtOccurrences.get(identity) ?? 0) + 1;
-        stmtOccurrences.set(identity, occurrence);
+        const occurrence = (postedOccurrences.get(identity) ?? 0) + 1;
+        postedOccurrences.set(identity, occurrence);
 
         bankTransactions.push({
           accountId: CREDIT_ACCOUNT_SOURCE_ID,
@@ -762,7 +765,6 @@ export function parseUbotCreditCardData(
   const unbillList = Array.isArray(unbilledBody.UnbillList)
     ? unbilledBody.UnbillList
     : [];
-  const unbilledOccurrences = new Map<string, number>();
   for (const tx of unbillList) {
     if (!isRecord(tx)) continue;
     const txCode = stringValue(tx.TxCode).trim();
@@ -791,8 +793,8 @@ export function parseUbotCreditCardData(
       amount,
       description,
     ].join("|");
-    const occurrence = (unbilledOccurrences.get(identity) ?? 0) + 1;
-    unbilledOccurrences.set(identity, occurrence);
+    const occurrence = (postedOccurrences.get(identity) ?? 0) + 1;
+    postedOccurrences.set(identity, occurrence);
 
     bankTransactions.push({
       accountId: CREDIT_ACCOUNT_SOURCE_ID,

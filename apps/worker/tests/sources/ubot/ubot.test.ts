@@ -416,6 +416,42 @@ describe("ubot financial data parsing", () => {
     );
   });
 
+  it("keeps two identical purchases split across a statement and the unbilled list", () => {
+    const purchase = {
+      CardNo: "8899",
+      EffectiveDate: "20261015",
+      PostingDate: "20261015",
+      TxAmt: 300,
+      TxDesc: "範例超商",
+    };
+    const parsed = parseUbotCreditCardData(
+      {
+        cardList: {
+          ErCode_1: "0000",
+          CardTypeList: [{ CardNo: "4000-12XX-XXXX-8899", CardName: "範例卡" }],
+        },
+        summary: { BillList: [{ CrLmt: 200000, HasBill: "Y" }] },
+        unbilled: { UnbillList: [{ ...purchase, TxCode: "40" }] },
+        statements: [
+          {
+            period: "202610",
+            payload: {
+              HeaderInfo: [{ StmtDate: "20261015", DueDate: "20261105" }],
+              BillList: [purchase],
+            },
+          },
+        ],
+      },
+      now,
+    );
+
+    const sourceIds = parsed.bankTransactions
+      .filter((tx) => tx.status === "posted")
+      .map((tx) => tx.sourceId);
+    expect(sourceIds).toHaveLength(2);
+    expect(new Set(sourceIds).size).toBe(2);
+  });
+
   it("parses personal loans with negative balance and autopay reference", () => {
     const parsed = parseUbotLoanData(
       {
