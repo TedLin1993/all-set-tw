@@ -17,14 +17,30 @@ function groupBy(
 /**
  * 依實體帳戶分組存款：同一資料來源、末四碼相同的幣別子帳戶
  * （例如同一外幣帳號的 USD 與 JPY）為一組；定存與沒有末四碼的帳戶各自一組。
+ * 同一組已有相同幣別時視為末四碼碰巧相同的另一個帳戶，另開一組。
  * 分組順序與組內順序沿用輸入順序。
  */
 export function groupDepositAccounts(deposits: BankAccountRow[]) {
-  return groupBy(deposits, (account) =>
-    account.accountType !== "time_deposit" && account.accountLast4
-      ? `${account.connectorId}:${account.accountLast4}`
-      : `id:${account.id}`,
-  );
+  const groups: BankAccountRow[][] = [];
+  const byKey = new Map<string, BankAccountRow[][]>();
+  for (const account of deposits) {
+    const key =
+      account.accountType !== "time_deposit" && account.accountLast4
+        ? `${account.connectorId}:${account.accountLast4}`
+        : `id:${account.id}`;
+    const candidates = byKey.get(key) ?? [];
+    const group = candidates.find((members) =>
+      members.every((member) => member.currency !== account.currency),
+    );
+    if (group) {
+      group.push(account);
+      continue;
+    }
+    const created = [account];
+    groups.push(created);
+    byKey.set(key, [...candidates, created]);
+  }
+  return groups;
 }
 
 /** 存款帳戶數，以實體帳戶計算，與銀行的帳戶數一致。 */

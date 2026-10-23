@@ -3,6 +3,38 @@ import { calculateAssetSummary } from "./summary";
 import { formatCurrency } from "@/shared/format/financial";
 
 describe("calculateAssetSummary", () => {
+  it("存款依實體帳戶計數：同帳號多幣別算一個，末四碼相同但同幣別的帳戶分開", () => {
+    const deposit = (
+      id: string,
+      connectorId: string,
+      accountLast4: string,
+      currency: string,
+    ) => ({
+      id,
+      connectorId,
+      sourceId: id,
+      accountType: "savings",
+      accountLast4,
+      balance: 0,
+      currency,
+    });
+    const summary = calculateAssetSummary({
+      bank: {
+        accounts: [
+          deposit("usd", "sinopac", "2366", "USD"),
+          deposit("jpy", "sinopac", "2366", "JPY"),
+          deposit("twd-a", "ctbc", "1234", "TWD"),
+          deposit("twd-b", "ctbc", "1234", "TWD"),
+        ],
+        transactions: [],
+      },
+      investments: [],
+      manualAssets: [],
+      rates: [],
+    });
+    expect(summary.depositAccountCount).toBe(3);
+  });
+
   it("counts credit-card overpayments toward net worth instead of debt", () => {
     const summary = calculateAssetSummary({
       bank: {

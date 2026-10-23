@@ -210,8 +210,11 @@ export async function safelySendScheduledSyncSummary(
   }
 }
 
-/** 繳款提醒只是附加資訊；讀取失敗時照常送出同步摘要。 */
-async function safelyLoadPaymentReminders(
+/**
+ * 繳款提醒只是附加資訊；讀取失敗時照常送出同步摘要。匯率只用於外幣款項由
+ * 台幣帳戶扣繳時的換算，讀取失敗時以空匯率表繼續，該類款項維持原提醒。
+ */
+export async function safelyLoadPaymentReminders(
   db: D1Database,
   now = new Date(),
 ): Promise<PaymentReminder[]> {
@@ -225,7 +228,19 @@ async function safelyLoadPaymentReminders(
     const [accounts, bills, rates] = await Promise.all([
       getBankAccounts(db),
       getCreditCardBillsRange(db, { from: monthStart(-2), to: monthStart(1) }),
-      getExchangeRates(db),
+      getExchangeRates(db).catch((error: unknown) => {
+        const safeError = sanitizeDatabaseError(error);
+        console.error(
+          JSON.stringify({
+            event: "payment_reminder_rates_load_failed",
+            message:
+              safeError instanceof Error
+                ? safeError.message
+                : String(safeError),
+          }),
+        );
+        return [];
+      }),
     ]);
     const ratesToTwd = Object.fromEntries(
       rates.map((rate) => [rate.currency, rate.rateTwd]),
