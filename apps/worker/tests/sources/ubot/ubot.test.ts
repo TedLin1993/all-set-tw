@@ -367,6 +367,55 @@ describe("ubot financial data parsing", () => {
     });
   });
 
+  it("keeps the same sourceId when an unbilled purchase moves onto a statement", () => {
+    const purchase = {
+      CardNo: "8899",
+      EffectiveDate: "20261018",
+      PostingDate: "20261020",
+      TxAmt: 4000,
+      TxDesc: "範例航空",
+    };
+    const base = {
+      cardList: {
+        ErCode_1: "0000",
+        CardTypeList: [{ CardNo: "4000-12XX-XXXX-8899", CardName: "範例卡" }],
+      },
+      summary: { BillList: [{ CrLmt: 200000, HasBill: "Y" }] },
+    };
+    const postedSourceIds = (
+      data: ReturnType<typeof parseUbotCreditCardData>,
+    ) =>
+      data.bankTransactions
+        .filter((tx) => tx.status === "posted")
+        .map((tx) => tx.sourceId);
+
+    const beforeClosing = parseUbotCreditCardData(
+      { ...base, unbilled: { UnbillList: [{ ...purchase, TxCode: "40" }] } },
+      now,
+    );
+    const afterClosing = parseUbotCreditCardData(
+      {
+        ...base,
+        unbilled: { UnbillList: [] },
+        statements: [
+          {
+            period: "202610",
+            payload: {
+              HeaderInfo: [{ StmtDate: "20261115", DueDate: "20261205" }],
+              BillList: [purchase],
+            },
+          },
+        ],
+      },
+      now,
+    );
+
+    expect(postedSourceIds(beforeClosing)).toHaveLength(1);
+    expect(postedSourceIds(afterClosing)).toEqual(
+      postedSourceIds(beforeClosing),
+    );
+  });
+
   it("parses personal loans with negative balance and autopay reference", () => {
     const parsed = parseUbotLoanData(
       {

@@ -721,8 +721,8 @@ export function parseUbotCreditCardData(
           ? uniqueCardNameByLast4.get(cardLast4)
           : undefined;
         const description = sanitizeCardText(tx.TxDesc) ?? "聯邦銀行信用卡交易";
+        // 與未出帳明細共用 identity 與前綴，結帳後同一筆消費覆寫原列而不是多一筆。
         const identity = [
-          billingPeriod,
           cardLast4 ?? "account",
           effectiveDate ?? postedDate,
           postedDate,
@@ -734,7 +734,7 @@ export function parseUbotCreditCardData(
 
         bankTransactions.push({
           accountId: CREDIT_ACCOUNT_SOURCE_ID,
-          sourceId: `ubot:card:tx:stmt:${billingPeriod}:${stableHash(`${identity}|${occurrence}`)}`,
+          sourceId: `ubot:card:tx:posted:${stableHash(`${identity}|${occurrence}`)}`,
           postedDate,
           ...(effectiveDate ? { authorizedAt: effectiveDate } : {}),
           amount,
@@ -796,7 +796,7 @@ export function parseUbotCreditCardData(
 
     bankTransactions.push({
       accountId: CREDIT_ACCOUNT_SOURCE_ID,
-      sourceId: `ubot:card:tx:unbilled:${stableHash(`${identity}|${occurrence}`)}`,
+      sourceId: `ubot:card:tx:posted:${stableHash(`${identity}|${occurrence}`)}`,
       postedDate,
       ...(effectiveDate ? { authorizedAt: effectiveDate } : {}),
       amount,
