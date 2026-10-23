@@ -417,13 +417,27 @@ describe("ubot connector session lifecycle", () => {
       const body = init?.body ? JSON.parse(String(init.body)) : {};
 
       const jsonResponse = (
-        payload: unknown,
+        payload: Record<string, unknown>,
         headers: Record<string, string> = {},
-      ) =>
-        new Response(JSON.stringify(payload), {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...headers },
-        });
+      ) => {
+        const resCode =
+          typeof payload.ResCode === "object" && payload.ResCode !== null
+            ? payload.ResCode
+            : {
+                RtnCode: payload.RtnCode ?? "0000",
+                RtnDesc: payload.RtnMsg ?? "交易成功",
+              };
+        return new Response(
+          JSON.stringify({
+            ResCode: resCode,
+            ResBody: payload.ResBody ?? {},
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json", ...headers },
+          },
+        );
+      };
 
       switch (api) {
         case "NNBCM000007":
@@ -524,8 +538,17 @@ describe("ubot connector session lifecycle", () => {
   it("stops immediately with UbotVerificationRequiredError on invalid credentials (NS169)", async () => {
     const fetcher = async (input: RequestInfo | URL) => {
       const api = new URL(String(input)).pathname.replace("/NNBank/svc/", "");
-      const jsonResponse = (payload: unknown) =>
-        new Response(JSON.stringify(payload), { status: 200 });
+      const jsonResponse = (payload: Record<string, unknown>) =>
+        new Response(
+          JSON.stringify({
+            ResCode: {
+              RtnCode: payload.RtnCode ?? "0000",
+              RtnDesc: payload.RtnMsg ?? "交易成功",
+            },
+            ResBody: payload.ResBody ?? {},
+          }),
+          { status: 200 },
+        );
       if (api === "NNBCM000007") {
         return jsonResponse({
           RtnCode: "0000",

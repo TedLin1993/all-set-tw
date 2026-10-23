@@ -117,7 +117,10 @@ export function classifyUbotError(error: unknown) {
   ) {
     return error;
   }
-  return new UbotConnectionError();
+  const message = error instanceof Error ? error.message : String(error);
+  return new UbotConnectionError(
+    message ? `聯邦 New New Bank 資料同步失敗：${message}` : undefined,
+  );
 }
 
 export function buildUbotApiDiagnostic(
@@ -343,7 +346,11 @@ class UbotMobileSession {
           ),
         ),
       );
-      throw new UbotConnectionError();
+      throw new UbotConnectionError(
+        rsaKeyRes.rtnMsg
+          ? `聯邦 New New Bank 連線失敗 (${RSA_KEY_API})：${rsaKeyRes.rtnMsg} (${rsaKeyRes.rtnCode})`
+          : undefined,
+      );
     }
     const publicKey = stringValue(rsaKeyRes.resBody.PublicKey).trim();
 
@@ -358,7 +365,11 @@ class UbotMobileSession {
           ),
         ),
       );
-      throw new UbotConnectionError();
+      throw new UbotConnectionError(
+        reqecKeyRes.rtnMsg
+          ? `聯邦 New New Bank 連線失敗 (${REQEC_KEY_API})：${reqecKeyRes.rtnMsg} (${reqecKeyRes.rtnCode})`
+          : undefined,
+      );
     }
     const k1 = stringValue(reqecKeyRes.resBody.k1).trim();
     const k2 = stringValue(reqecKeyRes.resBody.k2).trim();
@@ -383,9 +394,16 @@ class UbotMobileSession {
           buildUbotApiDiagnostic(LOGIN_API, loginRes.rtnCode, loginRes.rtnMsg),
         ),
       );
-      if (CREDENTIAL_ERROR_CODES.has(loginRes.rtnCode)) {
+      if (
+        CREDENTIAL_ERROR_CODES.has(loginRes.rtnCode) ||
+        loginRes.rtnMsg.includes("密碼") ||
+        loginRes.rtnMsg.includes("代號") ||
+        loginRes.rtnMsg.includes("使用者")
+      ) {
         throw new UbotVerificationRequiredError(
-          "聯邦 New New Bank 登入失敗，請確認身分證字號、使用者代號與使用者密碼。",
+          loginRes.rtnMsg
+            ? `聯邦 New New Bank 登入失敗：${loginRes.rtnMsg} (${loginRes.rtnCode})`
+            : "聯邦 New New Bank 登入失敗，請確認身分證字號、使用者代號與使用者密碼。",
         );
       }
       if (loginRes.rtnCode === "NS090") {
@@ -393,7 +411,11 @@ class UbotMobileSession {
           "聯邦 New New Bank 要求先於官方 App 完成身分核驗後再同步。",
         );
       }
-      throw new UbotConnectionError();
+      throw new UbotConnectionError(
+        loginRes.rtnMsg
+          ? `聯邦 New New Bank 登入未完成：${loginRes.rtnMsg} (${loginRes.rtnCode})`
+          : undefined,
+      );
     }
 
     if (!this.ssid) {
@@ -437,7 +459,11 @@ class UbotMobileSession {
           buildUbotApiDiagnostic(apiName, envelope.rtnCode, envelope.rtnMsg),
         ),
       );
-      throw new UbotConnectionError();
+      throw new UbotConnectionError(
+        envelope.rtnMsg
+          ? `聯邦 New New Bank 查詢失敗 (${apiName})：${envelope.rtnMsg} (${envelope.rtnCode})`
+          : undefined,
+      );
     }
     return envelope.resBody;
   }
@@ -558,10 +584,14 @@ class UbotMobileSession {
     const headers: Record<string, string> = {
       Accept: "application/json, text/plain, */*",
       "Content-Type": "application/json;charset=UTF-8",
-      Authorization: this.ssid,
+      "User-Agent":
+        "Mozilla/5.0 (Linux; Android 15; google-husky Build/AP3A.241005.015) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
       Origin: UBOT_ORIGIN,
       Referer: UBOT_REFERER,
     };
+    if (this.ssid) {
+      headers.Authorization = this.ssid;
+    }
     const cookieHeader = Array.from(this.cookies.entries())
       .map(([k, v]) => `${k}=${v}`)
       .join("; ");
@@ -583,7 +613,9 @@ class UbotMobileSession {
       this.captureResponseHeaders(response.headers);
 
       if (response.status >= 300 && response.status < 400) {
-        throw new UbotConnectionError();
+        throw new UbotConnectionError(
+          `聯邦 New New Bank 回傳轉址 HTTP ${response.status}。`,
+        );
       }
       const payload = await readLimitedJson(response);
       if (!response.ok) {
@@ -592,16 +624,40 @@ class UbotMobileSession {
             "聯邦 New New Bank 登入狀態已失效，請重新同步。",
           );
         }
-        throw new UbotConnectionError();
+        throw new UbotConnectionError(
+          `聯邦 New New Bank 伺服器錯誤 HTTP ${response.status}。`,
+        );
       }
       if (!isRecord(payload)) {
         throw new UbotProtocolError();
       }
+      const resCode = isRecord(payload.ResCode) ? payload.ResCode : {};
+      const rtnCode = (
+        stringValue(resCode.RtnCode) || stringValue(payload.RtnCode)
+      ).trim();
+      const rtnMsg = (
+        stringValue(resCode.RtnDesc) ||
+        stringValue(resCode.RtnMsg) ||
+        stringValue(payload.RtnMsg) ||
+        stringValue(payload.RtnDesc)
+      ).trim();
       return {
-        rtnCode: stringValue(payload.RtnCode).trim(),
-        rtnMsg: stringValue(payload.RtnMsg).trim(),
+        rtnCode,
+        rtnMsg,
         resBody: isRecord(payload.ResBody) ? payload.ResBody : {},
       };
+    } catch (error) {
+      if (
+        error instanceof UbotVerificationRequiredError ||
+        error instanceof UbotConnectionError ||
+        error instanceof UbotProtocolError
+      ) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new UbotConnectionError(
+        `聯邦 New New Bank 連線失敗 (${apiName})：${message}`,
+      );
     } finally {
       clearTimeout(timeout);
     }
