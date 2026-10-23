@@ -83,11 +83,11 @@
     // 與 Worker 相同：銀行未提供時，同銀行唯一的同幣別帳戶即為推測的扣款帳戶。
     if (!bank)
       return sameBank.length === 1
-        ? `自動：${fullLabel(sameBank[0]!)}（推測）`
+        ? `自動：${fullLabel(sameBank[0]!)}`
         : "自動：無法判斷，請選擇";
     if (bank.status === "none") return "自動：銀行顯示未約定自動扣繳";
     const matched = bank.accountId ? accountsById.get(bank.accountId) : null;
-    if (matched) return `自動：${fullLabel(matched)}（銀行提供）`;
+    if (matched) return `銀行約定：${fullLabel(matched)}`;
     return bank.last4
       ? `自動：找不到末四碼 ${bank.last4} 的帳戶`
       : "自動：找不到銀行提供的帳戶";
