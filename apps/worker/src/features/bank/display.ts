@@ -140,6 +140,13 @@ function normalizeDepositDisplay<T extends BankDisplayRow>(row: T): T {
     settlement.bankCode ??
     CONNECTOR_BANK_CODES.get(row.connectorId ?? "");
   const accountSuffix = accountSuffixFromSourceId(sourceId);
+  // 連接器組好的「名稱 末四碼 xxxx」（見 sources/deposit-account-name.ts）直接保留。
+  if (hasMatchingAccountSuffix(row.accountName, sourceId))
+    return {
+      ...row,
+      institutionName:
+        (bankCode && TAIWAN_BANK_NAMES[bankCode]) || row.institutionName,
+    };
   return {
     ...row,
     institutionName:
@@ -151,6 +158,17 @@ function normalizeDepositDisplay<T extends BankDisplayRow>(row: T): T {
           : row.accountName
         : accountSuffix || row.accountName,
   };
+}
+
+/** 名稱以「 末四碼 xxxx」或「 末五碼 xxxxx」結尾，且末碼與 sourceId 的帳號一致。 */
+function hasMatchingAccountSuffix(
+  name: string | null | undefined,
+  sourceId: string,
+) {
+  const digits =
+    parseBankAccountSource(sourceId).account?.replace(/\D/g, "") ?? "";
+  const suffix = name?.match(/ 末[四五]碼 (\d{4,5})$/)?.[1];
+  return Boolean(digits && suffix && digits.endsWith(suffix));
 }
 
 function parseBankAccountSource(sourceId: string): {

@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import type { SyncResult } from "../types";
 import {
   prepareBrowserLoginWithRetry,
@@ -596,9 +597,12 @@ async function scrapeDepositAccounts(
     bankAccounts.push({
       sourceId: accountId,
       institutionName: "玉山銀行",
-      accountName:
+      accountName: depositAccountName(
+        account.alias,
+        account.accountNo,
         account.alias ||
-        (foreign ? `玉山外幣帳戶 (${account.currency})` : "玉山臺幣帳戶"),
+          (foreign ? `玉山外幣帳戶 (${account.currency})` : "玉山臺幣帳戶"),
+      ),
       accountType: "savings",
       currency: account.currency,
     });

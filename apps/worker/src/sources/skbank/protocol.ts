@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type {
   BankAccount,
@@ -231,9 +232,13 @@ function parseAccountDetail(
     nickname ||
     productFullName ||
     (last4 ? `新光銀行存款末四碼 ${last4}` : "新光銀行存款帳戶");
-  const accountName =
-    sanitizeText(baseName, accountNumber) +
-    (currency === "TWD" ? "" : ` (${currency})`);
+  const currencyLabel = currency === "TWD" ? "" : ` (${currency})`;
+  const named = nickname || productFullName;
+  const accountName = depositAccountName(
+    named && sanitizeText(named, accountNumber) + currencyLabel,
+    last4,
+    sanitizeText(baseName, accountNumber) + currencyLabel,
+  );
 
   return [
     {

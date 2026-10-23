@@ -149,6 +149,7 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 - `sourceId` 必須在重複同步間穩定。一般交易不得使用本次同步時間產生 ID。
 - `BankBalanceSnapshot.accountId`、`BankTransaction.accountId` 與 `CreditCardBill.accountId` 必須等於對應 `BankAccount.sourceId`。
 - 日期使用 ISO 8601；帳單期間使用 `YYYY-MM`；幣別使用大寫代碼。
+- 存款帳戶名稱：銀行提供帳戶種類、別名或暱稱時，以 `sources/deposit-account-name.ts` 的 `depositAccountName` 組成「名稱 末四碼 xxxx」，方便分辨同銀行的多個帳戶；沒有名稱時沿用各來源的預設名稱。API 顯示層（`features/bank/display.ts`）只保留名稱與末碼以空格分隔、且末碼與 sourceId 帳號結尾一致的名稱（定存也不再重複附加末碼），其他名稱改顯示 sourceId 推得的「末四碼／末五碼 xxxx」。目前使用的欄位：台新 `accountTypeName`／`ACCT_TYPE_NAME`、永豐 `AcctText`、國泰 `accountTypeName`、玉山 `alias`、中信 `accountNickName`、兆豐 `NAME`、華南帳戶類別、第一銀行暱稱、新光暱稱或產品名、凱基暱稱或帳戶類別、王道 `aliasName`／`accountName`／`productName`；富邦、遠東商銀沿用既有「類別 末四碼」名稱。
 - `BankTransaction.authorizedAt` 與 `Invoice.invoiceDate`：來源只有日期時使用 `YYYY-MM-DD`；來源確實提供時間時使用含明確時區的 ISO timestamp。不得以補上的午夜或同步時間假造交易時間；台灣來源未標時區的交易時間以 `+08:00` 解讀。
 - 補充交易時間時須保留既有 `sourceId` 算法；`postedDate` 維持入帳日期用途。未入帳轉已入帳或重新同步只提供日期時，須保留同筆交易原有的可靠時間。
 - 多張卡共用一個信用卡帳戶時，以 `BankTransaction.cardLast4` 標示實際刷卡的末四碼；只有能唯一對應到具名卡片時才填 `cardName`，無法確定就留空，不猜測。兩者只供顯示（交易帳戶名稱顯示為「卡名 · 末四碼」，缺卡名時為「帳戶名稱 · 末四碼」；資產頁另以近 90 天交易列出各信用卡帳戶近期使用的卡片），不得納入 `sourceId`、配對或負債計算，也不改變帳戶與帳單的拆分方式。
@@ -377,7 +378,7 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 #### 臺外幣活存
 
 - 純查詢與解析邏輯位於 `apps/worker/src/sources/sinopac/deposit-protocol.ts`，Worker adapter 沿用 App JSON transport 與加密 session，不保存新的帳密或 session 欄位。
-- 以 POST `/ws/bank/bankbal/ws_bankbal.ashx` 的 `SubInfo` 取得各帳戶與幣別；`AvailBalInt` 為活存餘額、`MaxAvail` 為可用餘額。零餘額仍建立帳戶與快照，`FixBalance` 的綜存定存不納入本次活存範圍。
+- 以 POST `/ws/bank/bankbal/ws_bankbal.ashx` 的 `SubInfo` 取得各帳戶與幣別；`AvailBalInt` 為活存餘額、`MaxAvail` 為可用餘額。零餘額仍建立帳戶與快照，`FixBalance` 的綜存定存不納入本次活存範圍。帳戶名稱為 `AcctText`（帳戶種類，例如「活期儲蓄存款」）加「末四碼 xxxx」，沒有種類時只用末四碼。
 - 每個帳戶依序 POST `/ws/bank/transdetail/ws_transdetailMerge.ashx`，form 欄位為 `AcctValue`、`Curr`、`QueryType=3`、`StartDate`、`EndDate`。日期格式為 `YYYYMMDD`，依臺灣當日回溯 `BANK_SYNC_MONTHS`（三個月），月底取目標月份最後一天。
 - `DataText4` 保留銀行提供的金額正負號。`DataText1` 為交易日期／時間，僅有日期時不補午夜；`DataText2` 是計息日，只存於白名單 raw，不用作入帳日。HTML 先去除再正規化，摘要與備註中的完整帳號／身分證字號須遮罩。
 - `RecordCount` 是最後一筆的 index，非總筆數；有交易時應等於 `SubInfo.length - 1`。筆數不符時切成不重疊的日期區間重查；單日仍不完整就失敗，不提交部分結果。僅交易端點的 `Header=FAIL`、`Message=查無資料` 且 `SubInfo=[]` 可作為明確無交易回應；缺少必要清單、session 失效與未知錯誤仍失敗。
@@ -477,6 +478,8 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 | `web2/rb0800/getRB08000100Data`                                                  | `error = null`，`data.FCS_ACCOUNT[].FCS_ACCOUNT_DETAIL` 列出帳號與各幣別活存；不使用 `FTS_ACCOUNT` 或 `ALL_BALANCE`。                                                               |
 | `web2/rb0800/getRB08000100QueryRealtimeBalance`                                  | `{ requestAccount, requestAccountAlias, requestCcyCode }`；核對回應 `ACCT_NO`、`CURRENCY_CODE`，保存 `BALANCE`；官方未提供可用餘額，保持未知。                                      |
 | `web2/rb0812/getRB08120100Options`、`web2/rb0802/getRB08020100ForeignTranDetail` | 官方 RB0802 初始化使用 RB0812 options。按各幣別以 `requestAcctNo`、`requestCurrency`、`requestStartDate`、`requestEndDate`、`requestDateType = I` 查詢；解析 `data.TRANS_DETAILS`。 |
+
+帳戶名稱為銀行提供的帳戶種類加「末四碼 xxxx」，方便分辨同銀行的多個帳戶：臺幣取 RB0100 的 `accountTypeName`（例如「綜合存款」），外幣取即時餘額回應的 `ACCT_TYPE_NAME`；沒有種類時只用末四碼。外幣群組的 `ACCOUNT_NAME` 可能是自訂別名，不用於命名。
 
 外幣總覽的 `FCS_ACCOUNT` 接受陣列或物件映射，包含空 `[]`／`{}`。清單 schema 驗證失敗時仍中止同步，訊息使用「格式驗證失敗」並附第一筆去識別診斷，不將錯誤推定為銀行改版或空產品。Worker 日誌以 `event = taishin_deposit_schema_validation_failed`、`endpoint = getRB08000100Data` 提供最多五筆去重後的診斷；超過時標記 `truncated: true`。
 

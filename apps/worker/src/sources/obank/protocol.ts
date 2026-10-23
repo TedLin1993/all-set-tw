@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import type {
   BankAccount,
   BankBalanceSnapshot,
@@ -80,13 +81,16 @@ export function parseObankData(
   const bankAccounts: ObankData["bankAccounts"] = accounts.map((account) => ({
     sourceId: account.sourceId,
     institutionName: "王道銀行",
-    accountName:
+    accountName: depositAccountName(
+      account.name,
+      account.last4,
       account.name ||
-      (account.last5
-        ? `${account.type === "time_deposit" ? "定存" : "存款"}末五碼 ${account.last5}`
-        : account.type === "time_deposit"
-          ? "王道銀行定存"
-          : "王道銀行存款帳戶"),
+        (account.last5
+          ? `${account.type === "time_deposit" ? "定存" : "存款"}末五碼 ${account.last5}`
+          : account.type === "time_deposit"
+            ? "王道銀行定存"
+            : "王道銀行存款帳戶"),
+    ),
     accountType: account.type,
     openedDate: account.openedDate,
     maturityDate: account.maturityDate,

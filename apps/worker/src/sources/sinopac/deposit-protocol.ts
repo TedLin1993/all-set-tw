@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import forge from "node-forge";
 import { z } from "zod";
 import type {
@@ -155,10 +156,16 @@ export function parseSinopacDepositAccounts(
   const day = new Date(now.getTime() + 8 * 3600_000).toISOString().slice(0, 10);
   for (const account of accounts(payload)) {
     const id = accountId(account.AcctValue, account.Curr);
+    const last4 = account.AcctValue.replace(/\D/g, "").slice(-4);
     bankAccounts.push({
       sourceId: id,
       institutionName: "永豐銀行",
-      accountName: `末四碼 ${account.AcctValue.replace(/\D/g, "").slice(-4)}`,
+      // 銀行提供的帳戶種類（例如「活期儲蓄存款」）作為顯示名稱前綴。
+      accountName: depositAccountName(
+        account.AcctText,
+        last4,
+        `末四碼 ${last4}`,
+      ),
       accountType: /支票|支存/.test(account.AcctText) ? "checking" : "savings",
       currency: account.Curr,
     });

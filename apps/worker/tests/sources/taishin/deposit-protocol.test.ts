@@ -38,6 +38,12 @@ describe("台新臺外幣活存", () => {
       "USD",
       "JPY",
     ]);
+    // 帳戶名稱以銀行提供的帳戶種類加末四碼，方便分辨同銀行的多個帳戶。
+    expect(data.bankAccounts.map((row) => row.accountName)).toEqual([
+      expect.stringMatching(/^綜合存款 末四碼 \d{4}$/),
+      expect.stringMatching(/^外幣綜合存款 末四碼 \d{4}$/),
+      expect.stringMatching(/^外幣綜合存款 末四碼 \d{4}$/),
+    ]);
     expect(data.bankBalanceSnapshots.map((row) => row.balance)).toEqual([
       2000, 125.25, 0,
     ]);

@@ -1,3 +1,4 @@
+import { depositAccountName } from "../deposit-account-name";
 import type {
   BankAccount,
   BankBalanceSnapshot,
@@ -93,9 +94,11 @@ export function parseKgibankData(
   const bankAccounts: KgibankData["bankAccounts"] = accounts.map((account) => ({
     sourceId: account.sourceId,
     institutionName: "凱基銀行",
-    accountName:
-      account.nickName ||
-      `${account.typeName || "臺幣活存"} 末四碼 ${account.accountNo.slice(-4)}`,
+    accountName: depositAccountName(
+      account.nickName || account.typeName || "臺幣活存",
+      account.accountNo,
+      account.nickName || account.typeName || "臺幣活存",
+    ),
     accountType: "savings",
     currency: "TWD",
     raw: sanitizeAccount(account),
