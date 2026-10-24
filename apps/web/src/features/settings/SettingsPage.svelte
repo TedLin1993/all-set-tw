@@ -787,11 +787,9 @@
   {/if}
 </div>
 
-{#if addSourceOpen}
-  <AddSourceDialog
-    sources={sourceGroups.available}
-    connectedCount={linkedSources.length}
-    onSelect={pickNewSource}
-    onClose={() => (addSourceOpen = false)}
-  />
-{/if}
+<AddSourceDialog
+  bind:open={addSourceOpen}
+  sources={sourceGroups.available}
+  connectedCount={linkedSources.length}
+  onSelect={pickNewSource}
+/>
