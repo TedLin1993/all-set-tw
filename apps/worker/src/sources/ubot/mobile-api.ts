@@ -235,9 +235,9 @@ export function createUbotConnector(
         );
 
         // 4. 信用卡帳務、未出帳消費、近期帳單與即時消費授權
-        const cardList = await session.postOptional(CARD_LIST_API, {});
+        const cardList = await session.postRequired(CARD_LIST_API, {});
         let creditCardData = parseUbotCreditCardData({ cardList: {} }, now);
-        if (cardList && hasUbotCreditCard(cardList)) {
+        if (hasUbotCreditCard(cardList)) {
           const [
             cardSummary,
             cardUnbilled,
@@ -246,31 +246,37 @@ export function createUbotConnector(
             autopay,
           ] = await Promise.all([
             session.postOptional(CARD_SUMMARY_API, {}),
-            session.postOptional(CARD_UNBILLED_API, {}),
-            session.postOptional(CARD_STATEMENT_HEADERS_API, {}),
+            session.postRequired(CARD_UNBILLED_API, {}),
+            session.postRequired(CARD_STATEMENT_HEADERS_API, {}),
             session.postOptional(CARD_REALTIME_AUTH_API, {}, ["0002"]),
             session.postOptional(CARD_AUTOPAY_API, {}),
           ]);
 
+          // occurrence 依完整的已出帳與未出帳清單計算，缺資料時不能回傳部分結果。
+          if (
+            !Array.isArray(cardUnbilled.UnbillList) ||
+            !Array.isArray(statementHeaders.HeaderInfo)
+          ) {
+            throw new UbotProtocolError();
+          }
+          const periods = statementHeaders.HeaderInfo.map((header) => {
+            const period = isRecord(header)
+              ? stringValue(header.Date).trim()
+              : "";
+            if (!/^\d{5,6}$/.test(period)) throw new UbotProtocolError();
+            return period;
+          }).slice(0, BANK_SYNC_MONTHS);
           const statements: UbotStatementPayload[] = [];
-          const headerList =
-            statementHeaders && Array.isArray(statementHeaders.HeaderInfo)
-              ? statementHeaders.HeaderInfo
-              : [];
-          const periods = headerList
-            .map((h) => (isRecord(h) ? stringValue(h.Date).trim() : ""))
-            .filter((d) => /^\d{5,6}$/.test(d))
-            .slice(0, BANK_SYNC_MONTHS);
-
           for (const period of periods) {
-            const stmtPayload = await session.postOptional(
+            // 已列於帳單清單的期別必須取得明細，B060 也不可當作空帳單略過。
+            const stmtPayload = await session.postRequired(
               CARD_STATEMENT_DETAIL_API,
               { date: period },
-              ["B060"],
             );
-            if (stmtPayload) {
-              statements.push({ period, payload: stmtPayload });
+            if (!Array.isArray(stmtPayload.BillList)) {
+              throw new UbotProtocolError();
             }
+            statements.push({ period, payload: stmtPayload });
           }
 
           creditCardData = parseUbotCreditCardData(

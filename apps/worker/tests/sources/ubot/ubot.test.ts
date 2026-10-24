@@ -620,6 +620,100 @@ describe("ubot connector session lifecycle", () => {
     expect(calledEndpoints).not.toContain("NNBI020102");
   });
 
+  it.each([
+    ["NNBC010105", "error"],
+    ["NNBC010102", "error"],
+    ["NNBC080201", "error"],
+    ["NNBC010104", "error"],
+    ["NNBC010104", "network"],
+    ["NNBC010104", "B060"],
+    ["NNBC010102", "missing-list"],
+    ["NNBC080201", "missing-list"],
+    ["NNBC010104", "missing-list"],
+  ])(
+    "rejects incomplete card sync after a complete sync: %s / %s",
+    async (failedApi, failure) => {
+      const purchase = {
+        CardNo: "8899",
+        EffectiveDate: "20261015",
+        PostingDate: "20261015",
+        TxAmt: 300,
+        TxDesc: "範例超商",
+      };
+      const responses: Record<string, Record<string, unknown>> = {
+        NNBCM000007: { PublicKey: testPkcs1PublicKeyBase64 },
+        NNBCM000011: { k1: testSpkiPublicKeyBase64, k2: testAesKeyBase64 },
+        NNBI010101: { FlagList: {} },
+        NNBI010103: {},
+        NNBN020101: { Account: "068509086798", AccountBal: 12345 },
+        NNBN010201: { Details: [] },
+        NNBN030101: { CtList: [] },
+        NNBF010201: { FTList: [] },
+        NNBF020301: {},
+        NNBL010401: { LoanList: [] },
+        NNBC010105: {
+          ErCode_1: "0000",
+          CardTypeList: [{ CardNo: "4000-12XX-XXXX-8899", CardName: "範例卡" }],
+        },
+        NNBC010101: { BillList: [{ CrLmt: 200000, HasBill: "Y" }] },
+        NNBC010102: { UnbillList: [{ ...purchase, TxCode: "40" }] },
+        NNBC080201: { HeaderInfo: [{ Date: "202610" }] },
+        NNBC010104: { BillList: [purchase] },
+        NNBC080101: { CardBillList: [] },
+        NNBC030101: {},
+      };
+      let fail = false;
+      let logoutCount = 0;
+      const connector = createUbotConnector(async (input) => {
+        const api = new URL(String(input)).pathname.replace("/NNBank/svc/", "");
+        if (api === "NNBI010103") logoutCount++;
+        if (!(api in responses)) throw new Error(`Unexpected endpoint: ${api}`);
+        const rejected = fail && api === failedApi;
+        if (rejected && failure === "network")
+          throw new Error("Network unavailable");
+        return new Response(
+          JSON.stringify({
+            ResCode: {
+              RtnCode:
+                rejected && failure !== "missing-list"
+                  ? failure === "B060"
+                    ? "B060"
+                    : "9999"
+                  : "0000",
+            },
+            ResBody: rejected ? {} : responses[api],
+          }),
+          { headers: api === "NNBI010101" ? { ssid: "test-ssid" } : {} },
+        );
+      });
+      const config = {
+        userId: "A123456789",
+        account: "user01",
+        password: "Password1",
+      };
+      const first = await connector.sync(config);
+      const firstIds = first.bankTransactions!.map((tx) => tx.sourceId);
+      expect(firstIds).toHaveLength(2);
+      expect(new Set(firstIds).size).toBe(2);
+
+      fail = true;
+      // No SyncResult reaches syncUbot's persistence or cursor update on failure.
+      await expect(connector.sync(config, first.cursor)).rejects.toThrow();
+      expect(logoutCount).toBe(2);
+
+      fail = false;
+      const recovered = await connector.sync(config, first.cursor);
+      expect(recovered.bankTransactions!.map((tx) => tx.sourceId)).toEqual(
+        firstIds,
+      );
+
+      // Successful empty lists are valid, unlike a failed or missing response.
+      responses.NNBC010102 = { UnbillList: [] };
+      responses.NNBC080201 = { HeaderInfo: [] };
+      expect((await connector.sync(config)).bankTransactions).toEqual([]);
+    },
+  );
+
   it("stops immediately with UbotVerificationRequiredError on invalid credentials (NS169)", async () => {
     const fetcher = async (input: RequestInfo | URL) => {
       const api = new URL(String(input)).pathname.replace("/NNBank/svc/", "");
