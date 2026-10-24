@@ -392,7 +392,22 @@ class UbotMobileSession {
       deviceOSVer: UBOT_DEVICE_OS_VER,
     };
     const encryptedBody = encryptUbotRequest(sendData, k1, k2);
-    const loginRes = await this.rawPost(LOGIN_API, encryptedBody);
+    const loginRes = await this.rawPost(LOGIN_API, encryptedBody, {
+      allowHttpError: true,
+    });
+
+    // 帳密有誤時銀行可能以 HTTP 4xx 拒絕登入；停止排程交由使用者確認，
+    // 避免以錯誤帳密反覆登入。
+    if (loginRes.httpStatus >= 400) {
+      console.warn(
+        JSON.stringify(
+          buildUbotApiDiagnostic(LOGIN_API, loginRes.rtnCode, loginRes.rtnMsg),
+        ),
+      );
+      throw new UbotVerificationRequiredError(
+        `聯邦 New New Bank 拒絕登入：${loginRes.rtnMsg || "未提供原因"} (${loginRes.rtnCode})。請確認身分證字號、使用者代號與使用者密碼後再同步。`,
+      );
+    }
 
     if (!LOGIN_ACCEPT_CODES.has(loginRes.rtnCode)) {
       console.warn(
@@ -580,7 +595,13 @@ class UbotMobileSession {
   private async rawPost(
     apiName: string,
     body: Record<string, unknown>,
-  ): Promise<{ rtnCode: string; rtnMsg: string; resBody: JsonRecord }> {
+    options: { allowHttpError?: boolean } = {},
+  ): Promise<{
+    httpStatus: number;
+    rtnCode: string;
+    rtnMsg: string;
+    resBody: JsonRecord;
+  }> {
     const path = `${SVC_PREFIX}${apiName}`;
     const url = new URL(path, UBOT_ORIGIN);
     if (url.origin !== UBOT_ORIGIN || url.pathname !== path) {
@@ -624,34 +645,33 @@ class UbotMobileSession {
         );
       }
       const payload = await readLimitedJson(response);
+      const envelope = isRecord(payload)
+        ? readUbotEnvelope(payload)
+        : undefined;
       if (!response.ok) {
+        // 登入請求的含碼 4xx（含 401／403）交由登入流程顯示銀行代碼與確認帳密提示。
+        if (
+          options.allowHttpError &&
+          response.status < 500 &&
+          envelope?.rtnCode
+        ) {
+          return { httpStatus: response.status, ...envelope };
+        }
         if (response.status === 401 || response.status === 403) {
           throw new UbotVerificationRequiredError(
             "聯邦 New New Bank 登入狀態已失效，請重新同步。",
           );
         }
         throw new UbotConnectionError(
-          `聯邦 New New Bank 伺服器錯誤 HTTP ${response.status}。`,
+          envelope?.rtnCode
+            ? `聯邦 New New Bank 伺服器錯誤 HTTP ${response.status} (${apiName})：${envelope.rtnMsg} (${envelope.rtnCode})。`
+            : `聯邦 New New Bank 伺服器錯誤 HTTP ${response.status} (${apiName})。`,
         );
       }
-      if (!isRecord(payload)) {
+      if (!envelope) {
         throw new UbotProtocolError();
       }
-      const resCode = isRecord(payload.ResCode) ? payload.ResCode : {};
-      const rtnCode = (
-        stringValue(resCode.RtnCode) || stringValue(payload.RtnCode)
-      ).trim();
-      const rtnMsg = (
-        stringValue(resCode.RtnDesc) ||
-        stringValue(resCode.RtnMsg) ||
-        stringValue(payload.RtnMsg) ||
-        stringValue(payload.RtnDesc)
-      ).trim();
-      return {
-        rtnCode,
-        rtnMsg,
-        resBody: isRecord(payload.ResBody) ? payload.ResBody : {},
-      };
+      return { httpStatus: response.status, ...envelope };
     } catch (error) {
       if (
         error instanceof UbotVerificationRequiredError ||
@@ -692,6 +712,22 @@ class UbotMobileSession {
       }
     }
   }
+}
+
+function readUbotEnvelope(payload: JsonRecord) {
+  const resCode = isRecord(payload.ResCode) ? payload.ResCode : {};
+  return {
+    rtnCode: (
+      stringValue(resCode.RtnCode) || stringValue(payload.RtnCode)
+    ).trim(),
+    rtnMsg: (
+      stringValue(resCode.RtnDesc) ||
+      stringValue(resCode.RtnMsg) ||
+      stringValue(payload.RtnMsg) ||
+      stringValue(payload.RtnDesc)
+    ).trim(),
+    resBody: isRecord(payload.ResBody) ? payload.ResBody : {},
+  };
 }
 
 async function readLimitedJson(response: Response): Promise<unknown> {
