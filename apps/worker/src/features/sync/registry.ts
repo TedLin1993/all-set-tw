@@ -62,6 +62,7 @@ import {
 import { syncCtbc } from "../../sources/ctbc/sync";
 import type { CtbcSyncOverrides } from "../../sources/ctbc/mobile-api";
 import { syncSkbank } from "../../sources/skbank/sync";
+import { syncUbot } from "../../sources/ubot/sync";
 import { syncEsun } from "../../sources/esun/sync";
 import {
   syncNextbank,
@@ -204,6 +205,9 @@ export const connectorRuntimeRegistry: Record<
       prepare: prepareFeibCaptchaSession,
       failureCode: "FEIB_CAPTCHA_FAILED",
     },
+  },
+  ubot: {
+    run: (env, trigger) => syncUbot(env, trigger),
   },
 };
 

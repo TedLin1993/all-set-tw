@@ -14,6 +14,7 @@ const MEGABANK_BANK_CODE = "017";
 const TAISHIN_BANK_CODE = "812";
 const FUBON_BANK_CODE = "012";
 const FEIB_BANK_CODE = "805";
+const UBOT_BANK_CODE = "803";
 const CONNECTOR_BANK_CODES: ReadonlyMap<string, string> = new Map([
   ["esun", ESUN_BANK_CODE],
   ["cathaybk", CATHAYBK_BANK_CODE],
@@ -28,6 +29,7 @@ const CONNECTOR_BANK_CODES: ReadonlyMap<string, string> = new Map([
   ["rakuten", RAKUTEN_BANK_CODE],
   ["fubon", FUBON_BANK_CODE],
   ["feib", FEIB_BANK_CODE],
+  ["ubot", UBOT_BANK_CODE],
 ]);
 
 type BankDisplayRow = {
@@ -102,6 +104,11 @@ export function deriveBankMatchKey(
   if (connectorId === "rakuten" && sourceId.startsWith("bank:rakuten:")) {
     const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
     return { bankCode: RAKUTEN_BANK_CODE, last4: last4 || null };
+  }
+  if (connectorId === "ubot" && sourceId.startsWith("bank:ubot:")) {
+    // sourceId 為 bank:ubot:<末四碼>:<帳號雜湊>:<幣別>，不含完整帳號。
+    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
+    return { bankCode: UBOT_BANK_CODE, last4: last4 || null };
   }
   const match = sourceId.match(/^settlement:([^:]+):([^:]+)/);
   const last4 = match?.[2]?.replace(/\D/g, "").slice(-4) ?? "";
@@ -206,6 +213,8 @@ function parseBankAccountSource(sourceId: string): {
   if (feib) return { bankCode: FEIB_BANK_CODE, account: feib[1] };
   const rakuten = sourceId.match(/^bank:rakuten:([^:]+)/);
   if (rakuten) return { bankCode: RAKUTEN_BANK_CODE, account: rakuten[1] };
+  const ubot = sourceId.match(/^bank:ubot:([^:]+)/);
+  if (ubot) return { bankCode: UBOT_BANK_CODE, account: ubot[1] };
   return {};
 }
 
