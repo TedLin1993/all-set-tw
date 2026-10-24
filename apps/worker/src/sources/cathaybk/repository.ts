@@ -30,3 +30,26 @@ export function reconcileCathayUnpaidCurrentBillStatements(
   }
   return statements;
 }
+
+/** 本次同步未再回報的國泰貸款帳戶標記為停用（例如已清償），保留歷史資料。 */
+export function deactivateMissingCathayLoanAccountsStatement(
+  db: D1Database,
+  activeSourceIds: readonly string[],
+  now: string,
+) {
+  return db
+    .prepare(
+      `UPDATE bank_accounts
+       SET inactive_at = ?, updated_at = ?
+       WHERE connector_id = 'cathaybk'
+         AND account_type = 'loan'
+         AND source_id LIKE 'loan:cathaybk:%'
+         AND inactive_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1
+           FROM json_each(?) active
+           WHERE active.value = bank_accounts.source_id
+         )`,
+    )
+    .bind(now, now, JSON.stringify(activeSourceIds));
+}

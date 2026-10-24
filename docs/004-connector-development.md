@@ -222,6 +222,7 @@ promotion 放在同一 D1 batch，沿用來源的 lock 與設定版本 guard。�
 - 手動／排程必須把 `createSyncExecution` 的 scoped env 傳給來源同步，不得改用原始 DB 寫入金融資料、session、cursor 或結果。CAPTCHA preparation 同樣使用 scoped env，並維持 3 分鐘期限。Browser 透過共用 launch／connect helper 接收取消訊號；durable HTTP client 傳遞 `syncSignal`。
 - 一般同步的 connector 在登入成功、開始取得資料時呼叫 `reportSyncProgress("fetching")`（`sources/sync-progress.ts`）；登入與儲存階段由共用執行流程回報。
 - 需要 CAPTCHA／OTP 時，runtime registry 提供 `challenge`（`prepare` 與保底的 `failureCode`），route 依此註冊 `POST /connectors/:id/captcha`。準備失敗的錯誤沿用 `classifySyncError`，錯誤未宣告代碼時回傳該來源的 `failureCode`（HTTP 502）；route 只處理輸入驗證，不新增來源錯誤判斷。
+- 手動同步一律由 route 依 runtime registry 註冊 `POST /connectors/:id/sync`，不在 `features/sync/route.ts` 為個別來源新增路由。需要驗證碼、OTP 等接續參數時，在 registry 該來源的 `syncBody` 宣告 Zod schema 與格式錯誤訊息；沒有接續參數的來源省略 `syncBody`，route 不讀取 body。
 - API 型 CAPTCHA 來源（兆豐、王道、將來銀行）的自動辨識使用 `sources/captcha-retry.ts` 的 `runAutoCaptchaAttempts`，規則與台新相同：每輪取得新驗證碼、辨識並登入，最多辨識六張、最多向銀行送出三次登入。辨識結果不符格式時拋出 `CaptchaUnreadableError`，不送出登入、不扣登入額度；只有銀行明確回覆驗證碼錯誤時扣登入額度並換新驗證碼。帳密遭拒、登入結果不明或辨識服務不可用立即停止，不重送帳密；耗盡時分別提示登入送出次數或辨識上限，並標記 `needs_user_action`。人工輸入的驗證碼只使用一次。重試只記 `auto_captcha_retry` 的來源、結果分類、累計辨識與登入次數。Browser 型來源因換圖、重開頁面與時間預算各不相同，仍維持各自的重試實作。
 - 排程不得主動寄送 OTP；需要互動時標記 `needs_user_action`。
 - 若外部服務支援接管其他登入中的裝置，必須明確定義手動與排程的 `force` policy，並在介面與使用文件提示可能中斷使用者目前的工作階段。
@@ -245,7 +246,7 @@ promotion 放在同一 D1 batch，沿用來源的 lock 與設定版本 guard。�
 3. 需要 binding 時，在同一來源目錄建立 `connector.ts` adapter。
 4. 在同一來源目錄的 `sync.ts` 實作單次同步與 challenge use case，使用 `features/sync` 的共用 record mapping 與 staged persistence；需分段續跑的來源則沿用 durable sync 與 `run-repository.ts` 模式。來源專用的配對、存款生命週期與舊資料修復放在相鄰檔案。
    若來源提供直接存款帳戶，在 catalog 填入 `bankCode`，並確認存款 sourceId 符合「共同註冊點」的格式約定；無法遵守時才在 `sources/deposit-source-registry.ts` 註冊例外。
-5. 在 Worker runtime registry 註冊 sync／challenge handler。
+5. 在 Worker runtime registry 註冊 sync／challenge handler；需要接續參數時一併宣告 `syncBody`，手動同步路由會自動註冊。
    前端需要依代碼接續流程或顯示專屬提示的錯誤，在 `shared/api/errors.ts` 宣告代碼，並讓錯誤類別實作 `sources/sync-error.ts` 的 `toSyncError()`；需要使用者回來處理的錯誤同時宣告 `needsUserAction: true`。不在 `features/sync/error-response.ts` 或 `features/sync/errors.ts` 新增來源判斷。
 6. 在前端補上必要的 challenge UI；一般帳密表單由 catalog 的 `credentialFields` 產生，不需另外新增欄位。
 7. 新增 sync job migration。

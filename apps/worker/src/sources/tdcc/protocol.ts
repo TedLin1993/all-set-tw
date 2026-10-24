@@ -10,6 +10,7 @@ import type {
   NetWorthHistoryPoint,
 } from "../financial-types";
 import { z } from "zod";
+import { TAIWAN_BANK_NAMES } from "../taiwan-banks";
 import {
   EPassbookClient,
   EPassbookError,
@@ -1207,56 +1208,13 @@ function toInvestmentPosition(
   };
 }
 
-// Common Taiwan financial institution codes used by TDCC settlement accounts.
-const SETTLEMENT_BANK_NAMES: Record<string, string> = {
-  "004": "台灣銀行",
-  "005": "土地銀行",
-  "006": "合作金庫銀行",
-  "007": "第一銀行",
-  "008": "華南銀行",
-  "009": "彰化銀行",
-  "011": "上海商銀",
-  "012": "台北富邦銀行",
-  "013": "國泰世華銀行",
-  "016": "高雄銀行",
-  "017": "兆豐銀行",
-  "021": "花旗銀行",
-  "048": "王道銀行",
-  "050": "台灣企銀",
-  "052": "渣打銀行",
-  "053": "台中銀行",
-  "054": "京城銀行",
-  "081": "匯豐銀行",
-  "101": "瑞興銀行",
-  "102": "華泰銀行",
-  "103": "新光銀行",
-  "108": "陽信銀行",
-  "118": "板信銀行",
-  "147": "三信銀行",
-  "700": "中華郵政",
-  "803": "聯邦銀行",
-  "805": "遠東銀行",
-  "806": "元大銀行",
-  "807": "永豐銀行",
-  "808": "玉山銀行",
-  "809": "凱基銀行",
-  "810": "星展銀行",
-  "812": "台新銀行",
-  "815": "日盛銀行",
-  "816": "安泰銀行",
-  "822": "中國信託銀行",
-  "823": "將來銀行",
-  "824": "連線銀行",
-  "826": "樂天銀行",
-};
-
 function toSettlementBankAccount(
   input: TdccHolding | TdccCashBalance | TdccCashMovement,
 ): Omit<BankAccount, "id" | "connectorId"> {
   const sourceId = settlementAccountSourceId(input);
   const settlement = parseSettlementSourceId(sourceId);
   const bankName = settlement.bankCode
-    ? SETTLEMENT_BANK_NAMES[settlement.bankCode]
+    ? TAIWAN_BANK_NAMES[settlement.bankCode]
     : undefined;
   const accountName = settlement.accountLast5
     ? `末五碼 ${settlement.accountLast5}`

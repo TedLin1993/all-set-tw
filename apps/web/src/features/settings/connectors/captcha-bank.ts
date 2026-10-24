@@ -1,18 +1,4 @@
-import { ApiRequestError, type ApiRequestErrorCode } from "@/shared/api/client";
-
-const INVALIDATED_CAPTCHA_SESSION_CODES = new Set<ApiRequestErrorCode>([
-  "USER_ACTION_REQUIRED",
-  "TAISHIN_BROWSER_BUSY",
-  "TAISHIN_CONNECTION_FAILED",
-  "OBANK_CONNECTION_FAILED",
-  "FIRSTBANK_BROWSER_BUSY",
-  "FIRSTBANK_CONNECTION_FAILED",
-  "MEGABANK_CONNECTION_FAILED",
-  "FUBON_BROWSER_BUSY",
-  "FUBON_CONNECTION_FAILED",
-  "FEIB_BROWSER_BUSY",
-  "FEIB_CONNECTION_FAILED",
-]);
+import { ApiRequestError } from "@/shared/api/client";
 
 /** 伺服器判定自動辨識驗證碼失敗，應改走人工驗證碼流程。 */
 export function isManualCaptchaRequired(error: unknown) {
@@ -21,21 +7,17 @@ export function isManualCaptchaRequired(error: unknown) {
   );
 }
 
-export function captchaBankFailure(error: unknown) {
+/**
+ * 送出驗證碼或 OTP 後失敗的訊息。伺服器回應錯誤時畫面會清除目前的驗證碼，
+ * 因此提示重新取得；銀行頁面或 API 格式改變時重新取得也無法解決，不附加提示。
+ */
+export function captchaBankFailureMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "驗證或同步失敗";
-  const sessionInvalidated =
+  // 來源訊息若已提示重新取得驗證碼，避免重複追加。
+  const needsHint =
     error instanceof ApiRequestError &&
-    INVALIDATED_CAPTCHA_SESSION_CODES.has(error.code) &&
-    !(
-      error.code === "FIRSTBANK_CONNECTION_FAILED" && /格式已變更/.test(message)
-    );
-
-  // 來源訊息多半已提示重新取得驗證碼，避免重複追加。
-  const needsHint = sessionInvalidated && !/重新取得驗證碼/.test(message);
-  return {
-    message: needsHint ? `${message} 請重新取得驗證碼。` : message,
-    sessionInvalidated,
-  };
+    !/格式已(?:變更|改變)|重新取得驗證碼/.test(message);
+  return needsHint ? `${message} 請重新取得驗證碼。` : message;
 }
 
 export function needsNextbankCaptcha(connectorId: string, error: unknown) {

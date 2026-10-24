@@ -48,7 +48,7 @@
   } from "@/data/connectors/types";
   import { formatDateTime } from "@/shared/format/financial";
   import {
-    captchaBankFailure,
+    captchaBankFailureMessage,
     isManualCaptchaRequired,
     isBankOtpRequired,
     megabankOtpFailure,
@@ -601,9 +601,8 @@
         });
         return;
       }
-      const failure = captchaBankFailure(e);
-      error = failure.message;
-      if (failure.sessionInvalidated || bankVerificationSubmitted) {
+      error = captchaBankFailureMessage(e);
+      if (bankVerificationSubmitted) {
         bankCaptcha = "";
         bankCaptchaImage = "";
         qc.invalidateQueries({
@@ -640,9 +639,8 @@
             : `${otpBankName}銀行驗證碼不正確，請重新輸入。`;
         return;
       }
-      const failure = captchaBankFailure(e);
       resetMegabankOtp();
-      error = failure.message;
+      error = captchaBankFailureMessage(e);
       qc.invalidateQueries({
         queryKey: queryKeys.connectorSettings(connectorId),
       });
