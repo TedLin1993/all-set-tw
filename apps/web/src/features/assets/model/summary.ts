@@ -1,3 +1,4 @@
+import { connectorBankCode } from "@taiwan-fin-hub/shared";
 import type { ExchangeRateRow, ManualAssetRow } from "@/data/assets/types";
 import {
   cardAccountCount,
@@ -6,24 +7,6 @@ import {
 import type { BankAccountRow, BankData } from "@/data/bank/types";
 import type { InvestmentRow } from "@/data/investments/types";
 import { missingExchangeRateCurrencies } from "@/shared/format/financial";
-
-const CONNECTOR_BANK_CODES: Record<string, string> = {
-  firstbank: "007",
-  hncb: "008",
-  cathaybk: "013",
-  obank: "048",
-  skbank: "103",
-  sinopac: "807",
-  esun: "808",
-  taishin: "812",
-  ctbc: "822",
-  kgibank: "809",
-  megabank: "017",
-  rakuten: "826",
-  fubon: "012",
-  feib: "805",
-  ubot: "803",
-};
 
 export interface InstitutionAssetGroup {
   key: string;
@@ -63,8 +46,7 @@ export interface AssetSummary {
 }
 
 function institutionKey(account: BankAccountRow) {
-  const bankCode =
-    account.bankCode ?? CONNECTOR_BANK_CODES[account.connectorId];
+  const bankCode = account.bankCode ?? connectorBankCode(account.connectorId);
   return bankCode ? `bank:${bankCode}` : `connector:${account.connectorId}`;
 }
 

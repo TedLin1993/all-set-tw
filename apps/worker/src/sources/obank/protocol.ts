@@ -406,6 +406,11 @@ function accountSourceId(
   return `bank:obank:${type}:${last4 || "unknown"}:${stableHash(externalId)}:${currency}`;
 }
 
+/** 王道存款 sourceId（`bank:obank:<類型>:<末四碼>:<識別雜湊>:<幣別>`）多一段帳戶類型，末四碼位於第四段。 */
+export function obankDepositAccountFromSourceId(sourceId: string) {
+  return sourceId.split(":")[3] ?? "";
+}
+
 function sanitizeAccount(account: ParsedAccount) {
   return {
     bankCode: "048",

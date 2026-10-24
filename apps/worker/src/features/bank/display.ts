@@ -1,36 +1,6 @@
-import type { ConnectorId } from "@taiwan-fin-hub/shared";
+import { connectorBankCode, type ConnectorId } from "@taiwan-fin-hub/shared";
+import { parseDepositSourceId } from "../../sources/deposit-source-registry";
 import { TAIWAN_BANK_NAMES } from "../../sources/taiwan-banks";
-
-const ESUN_BANK_CODE = "808";
-const CATHAYBK_BANK_CODE = "013";
-const CTBC_BANK_CODE = "822";
-const SKBANK_BANK_CODE = "103";
-const OBANK_BANK_CODE = "048";
-const HNCB_BANK_CODE = "008";
-const KGIBANK_BANK_CODE = "809";
-const RAKUTEN_BANK_CODE = "826";
-const FIRSTBANK_BANK_CODE = "007";
-const MEGABANK_BANK_CODE = "017";
-const TAISHIN_BANK_CODE = "812";
-const FUBON_BANK_CODE = "012";
-const FEIB_BANK_CODE = "805";
-const UBOT_BANK_CODE = "803";
-const CONNECTOR_BANK_CODES: ReadonlyMap<string, string> = new Map([
-  ["esun", ESUN_BANK_CODE],
-  ["cathaybk", CATHAYBK_BANK_CODE],
-  ["taishin", TAISHIN_BANK_CODE],
-  ["ctbc", CTBC_BANK_CODE],
-  ["skbank", SKBANK_BANK_CODE],
-  ["obank", OBANK_BANK_CODE],
-  ["firstbank", FIRSTBANK_BANK_CODE],
-  ["hncb", HNCB_BANK_CODE],
-  ["kgibank", KGIBANK_BANK_CODE],
-  ["megabank", MEGABANK_BANK_CODE],
-  ["rakuten", RAKUTEN_BANK_CODE],
-  ["fubon", FUBON_BANK_CODE],
-  ["feib", FEIB_BANK_CODE],
-  ["ubot", UBOT_BANK_CODE],
-]);
 
 type BankDisplayRow = {
   sourceId?: string;
@@ -47,68 +17,10 @@ export function deriveBankMatchKey(
   connectorId: ConnectorId,
   sourceId: string,
 ): { bankCode: string | null; last4: string | null } {
-  if (connectorId === "esun" && sourceId.startsWith("bank:esun:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: ESUN_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "cathaybk" && sourceId.startsWith("bank:cathaybk:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: CATHAYBK_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "sinopac" && sourceId.startsWith("bank:sinopac:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: "807", last4: last4 || null };
-  }
-  if (connectorId === "taishin" && sourceId.startsWith("bank:taishin:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: TAISHIN_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "ctbc" && sourceId.startsWith("bank:ctbc:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: CTBC_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "skbank" && sourceId.startsWith("bank:skbank:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: SKBANK_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "obank" && sourceId.startsWith("bank:obank:")) {
-    const last4 = sourceId.split(":")[3]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: OBANK_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "firstbank" && sourceId.startsWith("bank:firstbank:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: FIRSTBANK_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "hncb" && sourceId.startsWith("bank:hncb:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: HNCB_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "kgibank" && sourceId.startsWith("bank:kgibank:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: KGIBANK_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "megabank" && sourceId.startsWith("bank:megabank:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: MEGABANK_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "fubon" && sourceId.startsWith("bank:fubon:")) {
-    // sourceId 為 bank:fubon:<末四碼>:<帳號雜湊>:<幣別>，不含完整帳號。
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: FUBON_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "feib" && sourceId.startsWith("bank:feib:")) {
-    // sourceId 為 bank:feib:<末四碼>:<帳號雜湊>:<幣別>，不含完整帳號。
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: FEIB_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "rakuten" && sourceId.startsWith("bank:rakuten:")) {
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: RAKUTEN_BANK_CODE, last4: last4 || null };
-  }
-  if (connectorId === "ubot" && sourceId.startsWith("bank:ubot:")) {
-    // sourceId 為 bank:ubot:<末四碼>:<帳號雜湊>:<幣別>，不含完整帳號。
-    const last4 = sourceId.split(":")[2]?.replace(/\D/g, "").slice(-4) ?? "";
-    return { bankCode: UBOT_BANK_CODE, last4: last4 || null };
+  const deposit = parseDepositSourceId(sourceId);
+  if (deposit?.connectorId === connectorId) {
+    const last4 = deposit.account.replace(/\D/g, "").slice(-4);
+    return { bankCode: deposit.bankCode, last4: last4 || null };
   }
   const match = sourceId.match(/^settlement:([^:]+):([^:]+)/);
   const last4 = match?.[2]?.replace(/\D/g, "").slice(-4) ?? "";
@@ -145,7 +57,7 @@ function normalizeDepositDisplay<T extends BankDisplayRow>(row: T): T {
   const bankCode =
     row.bankCode ??
     settlement.bankCode ??
-    CONNECTOR_BANK_CODES.get(row.connectorId ?? "");
+    connectorBankCode(row.connectorId ?? "");
   const accountSuffix = accountSuffixFromSourceId(sourceId);
   // 連接器組好的「名稱 末四碼 xxxx」（見 sources/deposit-account-name.ts）直接保留。
   if (hasMatchingAccountSuffix(row.accountName, sourceId))
@@ -184,38 +96,10 @@ function parseBankAccountSource(sourceId: string): {
 } {
   const settlement = sourceId.match(/^settlement:([^:]+):([^:]+)/);
   if (settlement) return { bankCode: settlement[1], account: settlement[2] };
-  const esun = sourceId.match(/^bank:esun:([^:]+)/);
-  if (esun) return { bankCode: ESUN_BANK_CODE, account: esun[1] };
-  const cathaybk = sourceId.match(/^bank:cathaybk:([^:]+)/);
-  if (cathaybk) return { bankCode: CATHAYBK_BANK_CODE, account: cathaybk[1] };
-  const sinopac = sourceId.match(/^bank:sinopac:([^:]+)/);
-  if (sinopac) return { bankCode: "807", account: sinopac[1] };
-  const taishin = sourceId.match(/^bank:taishin:([^:]+)/);
-  if (taishin) return { bankCode: TAISHIN_BANK_CODE, account: taishin[1] };
-  const ctbc = sourceId.match(/^bank:ctbc:([^:]+)/);
-  if (ctbc) return { bankCode: CTBC_BANK_CODE, account: ctbc[1] };
-  const skbank = sourceId.match(/^bank:skbank:([^:]+)/);
-  if (skbank) return { bankCode: SKBANK_BANK_CODE, account: skbank[1] };
-  const obank = sourceId.match(/^bank:obank:[^:]+:([^:]+)/);
-  if (obank) return { bankCode: OBANK_BANK_CODE, account: obank[1] };
-  const firstbank = sourceId.match(/^bank:firstbank:([^:]+):/);
-  if (firstbank)
-    return { bankCode: FIRSTBANK_BANK_CODE, account: firstbank[1] };
-  const hncb = sourceId.match(/^bank:hncb:([^:]+)/);
-  if (hncb) return { bankCode: HNCB_BANK_CODE, account: hncb[1] };
-  const kgibank = sourceId.match(/^bank:kgibank:([^:]+)/);
-  if (kgibank) return { bankCode: KGIBANK_BANK_CODE, account: kgibank[1] };
-  const megabank = sourceId.match(/^bank:megabank:([^:]+)/);
-  if (megabank) return { bankCode: MEGABANK_BANK_CODE, account: megabank[1] };
-  const fubon = sourceId.match(/^bank:fubon:([^:]+)/);
-  if (fubon) return { bankCode: FUBON_BANK_CODE, account: fubon[1] };
-  const feib = sourceId.match(/^bank:feib:([^:]+)/);
-  if (feib) return { bankCode: FEIB_BANK_CODE, account: feib[1] };
-  const rakuten = sourceId.match(/^bank:rakuten:([^:]+)/);
-  if (rakuten) return { bankCode: RAKUTEN_BANK_CODE, account: rakuten[1] };
-  const ubot = sourceId.match(/^bank:ubot:([^:]+)/);
-  if (ubot) return { bankCode: UBOT_BANK_CODE, account: ubot[1] };
-  return {};
+  const deposit = parseDepositSourceId(sourceId);
+  return deposit
+    ? { bankCode: deposit.bankCode, account: deposit.account }
+    : {};
 }
 
 function accountSuffixFromSourceId(sourceId: string) {
