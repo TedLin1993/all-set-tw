@@ -13,14 +13,18 @@
     sources,
     connectedCount,
     onSelect,
+    onSelectedClose,
   }: {
     open?: boolean;
     sources: readonly ConnectorSource[];
     connectedCount: number;
     onSelect: (id: ConnectorId) => void;
+    /** 選取來源後關閉時呼叫，由頁面把焦點移到新顯示的詳情；一般取消仍還原到原觸發按鈕。 */
+    onSelectedClose: () => void;
   } = $props();
   let query = $state("");
   let searchInput = $state<HTMLInputElement>();
+  let selected = false;
   const filtered = $derived.by(() => {
     const term = query.trim().toLowerCase();
     if (!term) return sources;
@@ -55,6 +59,12 @@
       onOpenAutoFocus={(event) => {
         event.preventDefault();
         searchInput?.focus();
+      }}
+      onCloseAutoFocus={(event) => {
+        if (!selected) return;
+        selected = false;
+        event.preventDefault();
+        onSelectedClose();
       }}
     >
       <div
@@ -105,7 +115,10 @@
                   type="button"
                   class="flex min-h-14 min-w-0 items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition hover:border-steel/50 hover:bg-steel/5 focus-visible:outline-2 focus-visible:outline-steel md:bg-muted/40"
                   aria-label={`連接${source.title}`}
-                  onclick={() => onSelect(source.id)}
+                  onclick={() => {
+                    selected = true;
+                    onSelect(source.id);
+                  }}
                 >
                   <span
                     class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-steel/10 text-steel"

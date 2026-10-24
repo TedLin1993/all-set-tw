@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { createQuery } from "@tanstack/svelte-query";
   import { Plus } from "@lucide/svelte";
   import type { ApiClient } from "@/shared/api/client";
@@ -148,6 +149,16 @@
     navigate("data-sources", id);
   }
 
+  let desktopDetailHeading = $state<HTMLElement>();
+  let mobileDetailHeading = $state<HTMLElement>();
+  async function focusConnectorDetail() {
+    await tick();
+    // 桌面與手機詳情同時存在於 DOM，只聚焦目前顯示的那一個。
+    [desktopDetailHeading, mobileDetailHeading]
+      .find((heading) => heading?.offsetParent)
+      ?.focus();
+  }
+
   function isActiveTab(tabView: (typeof settingTabs)[number]["view"]) {
     return tabView === "settings"
       ? !mobileView || mobileView === "more"
@@ -289,7 +300,13 @@
             )}
             <div class="mb-4 flex items-start justify-between gap-3">
               <div>
-                <h2 class="text-lg font-bold">{selectedSource?.title}</h2>
+                <h2
+                  bind:this={desktopDetailHeading}
+                  class="text-lg font-bold outline-none"
+                  tabindex="-1"
+                >
+                  {selectedSource?.title}
+                </h2>
                 <p class="mt-1 text-sm text-muted-foreground">
                   {selectedSource && sourceCapabilitySummary(selectedSource)}
                 </p>
@@ -330,7 +347,13 @@
             <div
               class="min-w-0 rounded-xl border border-border bg-card p-4 shadow-xs"
             >
-              <h2 class="text-lg font-bold">{mobileSource?.title}</h2>
+              <h2
+                bind:this={mobileDetailHeading}
+                class="text-lg font-bold outline-none"
+                tabindex="-1"
+              >
+                {mobileSource?.title}
+              </h2>
               <p class="mt-1 text-sm text-muted-foreground">
                 {mobileSource && sourceCapabilitySummary(mobileSource)}
               </p>
@@ -792,4 +815,5 @@
   sources={sourceGroups.available}
   connectedCount={linkedSources.length}
   onSelect={pickNewSource}
+  onSelectedClose={focusConnectorDetail}
 />
