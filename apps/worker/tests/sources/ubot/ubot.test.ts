@@ -256,7 +256,8 @@ describe("ubot financial data parsing", () => {
               CrLmt: 200000,
               AvalCrLmt: 186000,
               UnsettleAmt: 4000,
-              PaymentAcctno: "068509086798",
+              // 帳務總覽的 PaymentAcctno 是卡號，不可當成扣款帳號。
+              PaymentAcctno: "4000123456788899",
               HasBill: "Y",
               CycleDay: "15",
             },
@@ -319,10 +320,13 @@ describe("ubot financial data parsing", () => {
           ],
         },
         autopay: {
+          Account: "068509086798",
           BillList: [
             {
+              AppDate: "2026/03/03",
+              Account: "068509086798",
               Status: "0",
-              PaymentAcctno: "068509086798",
+              Type: "20",
             },
           ],
         },
