@@ -16,8 +16,6 @@
     getActionableSyncJobs,
     getHealthySyncJobs,
     getPendingSyncJobs,
-    getSyncSourceStatus,
-    getSyncSourceStatusLabel,
   } from "@/data/connectors/sync-status";
   import type { ConnectorId, SyncJobRow } from "@/data/connectors/types";
   let {
@@ -48,6 +46,11 @@
   const unhealthy = $derived(getActionableSyncJobs(jobs));
   const healthy = $derived(getHealthySyncJobs(jobs));
   const pending = $derived(getPendingSyncJobs(jobs));
+  const actionableSources = $derived(
+    sources.filter((source) =>
+      unhealthy.some((job) => job.connectorId === source.id),
+    ),
+  );
 </script>
 
 <div class="grid gap-4">
@@ -97,7 +100,7 @@
               class="block text-sm text-ink/45">狀態、憑證、排程與重新驗證</span
             ></span
           ><span class="text-sm font-semibold text-steel"
-            >{sources.length} 個　›</span
+            >{configuredSources.length} 個　›</span
           ></button
         >
         <button
@@ -154,37 +157,30 @@
       </div></Card
     >
   </section>
-  <section>
-    <div class="mb-2 flex items-center justify-between">
-      <h2 class="text-base font-semibold text-ink/50">資料來源</h2>
-      <button
-        class="min-h-8 px-2 text-sm font-semibold text-steel"
-        onclick={() => navigate("data-sources")}>管理</button
-      >
-    </div>
-    <Card
-      ><div class="divide-y divide-ink/8">
-        {#each sources as source (source.id)}{@const job = jobs.find(
-            (item) => item.connectorId === source.id,
-          )}
-          <button
-            type="button"
-            class="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm transition hover:bg-paper focus-visible:outline-2 focus-visible:outline-steel"
-            aria-label={`管理${source.title}`}
-            onclick={() => openConnector(source.id)}
-          >
-            <span class="font-semibold">{source.title}</span><span
-              class={getSyncSourceStatus(job) === "needs_action"
-                ? "text-coral"
-                : getSyncSourceStatus(job) === "not_synced"
-                  ? "text-amber-700"
-                  : getSyncSourceStatus(job) === "healthy"
-                    ? "text-moss"
-                    : "text-ink/45"}
-              >{getSyncSourceStatusLabel(getSyncSourceStatus(job))}</span
+  {#if actionableSources.length}
+    <section>
+      <div class="mb-2 flex items-center justify-between">
+        <h2 class="text-base font-semibold text-coral">需要處理</h2>
+        <button
+          class="min-h-8 px-2 text-sm font-semibold text-steel"
+          onclick={() => navigate("data-sources")}>全部來源</button
+        >
+      </div>
+      <Card
+        ><div class="divide-y divide-ink/8">
+          {#each actionableSources as source (source.id)}
+            <button
+              type="button"
+              class="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm transition hover:bg-paper focus-visible:outline-2 focus-visible:outline-steel"
+              aria-label={`管理${source.title}`}
+              onclick={() => openConnector(source.id)}
             >
-          </button>{/each}
-      </div></Card
-    >
-  </section>
+              <span class="font-semibold">{source.title}</span><span
+                class="text-coral">需要處理 ›</span
+              >
+            </button>{/each}
+        </div></Card
+      >
+    </section>
+  {/if}
 </div>

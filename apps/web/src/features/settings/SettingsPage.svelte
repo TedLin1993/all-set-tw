@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { createQuery } from "@tanstack/svelte-query";
+  import { Plus } from "@lucide/svelte";
   import type { ApiClient } from "@/shared/api/client";
   import type { MobileSettingsView, View } from "@/app/types";
   import { exchangeRatesQuery } from "@/data/assets/queries";
@@ -11,10 +13,12 @@
     getConfiguredSyncJobs,
     getHealthySyncJobs,
     getPendingSyncJobs,
+    getSyncSourceStatus,
   } from "@/data/connectors/sync-status";
   import { notificationConfigQuery } from "@/data/notifications/queries";
   import type { ConnectorId } from "@/data/connectors/types";
   import { formatDateTime } from "@/shared/format/financial";
+  import Button from "@/shared/ui/Button.svelte";
   import AboutPanel from "./components/AboutPanel.svelte";
   import ClassificationRulesPanel from "./components/ClassificationRulesPanel.svelte";
   import AiClassificationPanel from "./components/AiClassificationPanel.svelte";
@@ -22,9 +26,14 @@
   import ExchangeRatesPanel from "./components/ExchangeRatesPanel.svelte";
   import MobileMore from "./components/MobileMore.svelte";
   import NotificationPanel from "./components/NotificationPanel.svelte";
-  import SourceCard from "./components/SourceCard.svelte";
+  import AddSourceDialog from "./components/AddSourceDialog.svelte";
+  import SourceRow from "./components/SourceRow.svelte";
   import ConnectorPanel from "./connectors/ConnectorPanel.svelte";
   import { formatSyncSchedule } from "./model/schedule";
+  import {
+    groupSourcesByStatus,
+    sourceCapabilitySummary,
+  } from "./model/sources";
   let {
     api,
     demoMode,
@@ -36,7 +45,7 @@
     demoMode: boolean;
     connectorTarget?: ConnectorId | null;
     mobileView?: MobileSettingsView | "more";
-    navigate: (view: View) => void;
+    navigate: (view: View, targetConnector?: ConnectorId) => void;
   } = $props();
   const sources = connectorList;
   const settingTabs = [
@@ -51,16 +60,17 @@
   const rules = createQuery(() => classificationRulesQuery(() => api));
   const rates = createQuery(() => exchangeRatesQuery(() => api));
   const notifications = createQuery(() => notificationConfigQuery(() => api));
-  let selectedConnector = $state<ConnectorId | null | undefined>(undefined);
-  const activeConnector = $derived(
-    selectedConnector === undefined
-      ? (connectorTarget ?? null)
-      : selectedConnector,
-  );
+  // 選取的來源由 App 管理，手機版頂部返回鍵才能從詳情回到清單。
+  const activeConnector = $derived(connectorTarget ?? null);
   const syncJobsState = $derived(
     jobs.isPending ? "loading" : jobs.isError ? "error" : "ready",
   );
   const syncJobRows = $derived(jobs.data ?? []);
+  const sourceGroups = $derived(groupSourcesByStatus(sources, syncJobRows));
+  const linkedSources = $derived(
+    sources.filter((source) => !sourceGroups.available.includes(source)),
+  );
+  let addSourceOpen = $state(false);
   const needsActionJobs = $derived(getActionableSyncJobs(syncJobRows));
   const pendingSyncJobs = $derived(getPendingSyncJobs(syncJobRows));
   const configuredSources = $derived(getConfiguredSyncJobs(syncJobRows));
@@ -127,40 +137,26 @@
     }, undefined),
   );
   function selectConnector(id: ConnectorId) {
-    selectedConnector = activeConnector === id ? null : id;
+    navigate("data-sources", activeConnector === id ? undefined : id);
   }
 
   function openConnector(id: ConnectorId) {
-    selectedConnector = id;
-    navigate("data-sources");
+    navigate("data-sources", id);
   }
 
-  function scrollSelectedConnector(node: HTMLElement, selected: boolean) {
-    let firstFrame: number | undefined;
-    let secondFrame: number | undefined;
+  function pickNewSource(id: ConnectorId) {
+    addSourceOpen = false;
+    navigate("data-sources", id);
+  }
 
-    function cancelScheduledScroll() {
-      if (firstFrame !== undefined) cancelAnimationFrame(firstFrame);
-      if (secondFrame !== undefined) cancelAnimationFrame(secondFrame);
-      firstFrame = undefined;
-      secondFrame = undefined;
-    }
-
-    function scheduleScroll(active: boolean) {
-      cancelScheduledScroll();
-      if (!active) return;
-      firstFrame = requestAnimationFrame(() => {
-        secondFrame = requestAnimationFrame(() => {
-          node.scrollIntoView({ behavior: "smooth", block: "start" });
-        });
-      });
-    }
-
-    scheduleScroll(selected);
-    return {
-      update: scheduleScroll,
-      destroy: cancelScheduledScroll,
-    };
+  let desktopDetailHeading = $state<HTMLElement>();
+  let mobileDetailHeading = $state<HTMLElement>();
+  async function focusConnectorDetail() {
+    await tick();
+    // 桌面與手機詳情同時存在於 DOM，只聚焦目前顯示的那一個。
+    [desktopDetailHeading, mobileDetailHeading]
+      .find((heading) => heading?.offsetParent)
+      ?.focus();
   }
 
   function isActiveTab(tabView: (typeof settingTabs)[number]["view"]) {
@@ -202,40 +198,101 @@
     </div>
   {:else if mobileView === "data-sources"}
     <div class="grid min-w-0 gap-4">
-      <section aria-label="資料來源頁標題" class="hidden min-w-0 md:block">
+      <section
+        aria-label="資料來源頁標題"
+        class={`min-w-0 flex-wrap items-center justify-between gap-3 pt-3 md:items-end md:pt-0 ${activeConnector ? "hidden md:flex" : "flex"}`}
+      >
         <div>
-          <h2 class="text-2xl font-bold tracking-tight">資料來源與連接器</h2>
-          <p class="mt-1 text-sm text-muted-foreground">
-            管理連線、驗證狀態與最近同步結果。
+          <h2 class="hidden text-2xl font-bold tracking-tight md:block">
+            資料來源與連接器
+          </h2>
+          <p class="text-sm text-muted-foreground md:mt-1">
+            {#if syncJobsState === "loading"}
+              正在讀取資料來源狀態…
+            {:else if syncJobsState === "error"}
+              無法取得資料來源狀態，請稍後再試。
+            {:else}
+              {linkedSources.length} 個已連接 · {sourceGroups.actionable.length}
+              個需要處理
+            {/if}
           </p>
         </div>
+        <Button
+          size="sm"
+          disabled={syncJobsState !== "ready"}
+          onclick={() => (addSourceOpen = true)}
+          ><Plus class="size-4" />新增資料來源</Button
+        >
       </section>
 
       <div
-        class="hidden gap-4 md:grid lg:grid-cols-[minmax(0,620px)_minmax(0,1fr)]"
+        class="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,560px)_minmax(0,1fr)]"
       >
         <section
           aria-label="資料來源清單"
-          class="grid min-w-0 content-start gap-3"
+          class={`min-w-0 content-start ${activeConnector ? "hidden md:grid" : "grid"}`}
         >
-          {#each sources as source (source.id)}
-            <SourceCard
-              {api}
-              id={source.id}
-              title={source.title}
-              description={source.description}
-              jobs={jobs.data ?? []}
-              compact
-              compactCard
-              selected={activeConnector === source.id}
-              onConfigure={() => selectConnector(source.id)}
-            />
-          {/each}
+          {#if syncJobsState === "ready" && linkedSources.length === 0}
+            <div
+              class="rounded-xl border border-dashed border-border bg-card p-6 text-center"
+            >
+              <p class="font-semibold">尚未連接任何資料來源</p>
+              <p class="mt-1 text-sm text-muted-foreground">
+                選擇銀行、電子發票或集保，輸入登入資訊後即可開始同步。
+              </p>
+              <Button
+                class="mt-4"
+                size="sm"
+                onclick={() => (addSourceOpen = true)}
+                ><Plus class="size-4" />新增資料來源</Button
+              >
+            </div>
+          {:else if syncJobsState === "ready"}
+            <div
+              class="overflow-hidden rounded-xl border border-border bg-card shadow-xs"
+            >
+              {#if sourceGroups.actionable.length}
+                <h3
+                  class="flex justify-between px-4 pb-2 pt-3 text-sm font-semibold text-coral"
+                >
+                  <span>需要處理</span><span
+                    >{sourceGroups.actionable.length}</span
+                  >
+                </h3>
+                {#each sourceGroups.actionable as source (source.id)}
+                  <SourceRow
+                    id={source.id}
+                    title={source.title}
+                    job={sourceGroups.jobById.get(source.id)}
+                    selected={activeConnector === source.id}
+                    onSelect={() => selectConnector(source.id)}
+                  />
+                {/each}
+              {/if}
+              {#if sourceGroups.connected.length}
+                <h3
+                  class={`flex justify-between px-4 pb-2 pt-3 text-sm font-semibold text-muted-foreground ${sourceGroups.actionable.length ? "border-t border-border" : ""}`}
+                >
+                  <span>已連接</span><span>{sourceGroups.connected.length}</span
+                  >
+                </h3>
+                {#each sourceGroups.connected as source (source.id)}
+                  <SourceRow
+                    id={source.id}
+                    title={source.title}
+                    job={sourceGroups.jobById.get(source.id)}
+                    selected={activeConnector === source.id}
+                    onSelect={() => selectConnector(source.id)}
+                  />
+                {/each}
+              {/if}
+            </div>
+          {/if}
         </section>
 
         <section
           aria-label="連接器詳情"
-          class="min-h-[520px] min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs"
+          class="hidden min-h-[520px] min-w-0 rounded-xl border border-border bg-card p-5 shadow-xs md:block"
         >
           {#if activeConnector}
             {@const selectedSource = sources.find(
@@ -243,14 +300,20 @@
             )}
             <div class="mb-4 flex items-start justify-between gap-3">
               <div>
-                <h2 class="text-lg font-bold">{selectedSource?.title}</h2>
+                <h2
+                  bind:this={desktopDetailHeading}
+                  class="text-lg font-bold outline-none"
+                  tabindex="-1"
+                >
+                  {selectedSource?.title}
+                </h2>
                 <p class="mt-1 text-sm text-muted-foreground">
-                  {selectedSource?.description}
+                  {selectedSource && sourceCapabilitySummary(selectedSource)}
                 </p>
               </div>
               <button
                 class="text-sm font-semibold text-muted-foreground hover:text-foreground"
-                onclick={() => (selectedConnector = null)}>關閉</button
+                onclick={() => navigate("data-sources")}>關閉</button
               >
             </div>
             {#key activeConnector}<ConnectorPanel
@@ -263,7 +326,7 @@
           {:else}
             <div class="grid min-h-[480px] place-items-center text-center">
               <div>
-                <p class="text-base font-semibold">選擇一個連接器</p>
+                <p class="text-base font-semibold">選擇一個資料來源</p>
                 <p class="mt-1 text-sm text-muted-foreground">
                   查看連線狀態、同步範圍與驗證設定。
                 </p>
@@ -271,40 +334,42 @@
             </div>
           {/if}
         </section>
-      </div>
 
-      <section
-        aria-label="資料來源與連接器"
-        class="grid min-w-0 gap-3 sm:grid-cols-2 md:hidden"
-      >
-        {#each sources as source (source.id)}
-          <div
-            class={`min-w-0 scroll-mt-24 ${activeConnector === source.id ? "sm:col-span-2" : ""}`}
-            data-connector-settings={source.id}
-            use:scrollSelectedConnector={activeConnector === source.id}
+        {#if activeConnector}
+          {@const mobileSource = sources.find(
+            (source) => source.id === activeConnector,
+          )}
+          <section
+            aria-label="連接器設定"
+            class="min-w-0 md:hidden"
+            data-connector-settings={activeConnector}
           >
-            <SourceCard
-              {api}
-              id={source.id}
-              title={source.title}
-              description={source.description}
-              jobs={jobs.data ?? []}
-              selected={activeConnector === source.id}
-              onConfigure={() => selectConnector(source.id)}
+            <div
+              class="min-w-0 rounded-xl border border-border bg-card p-4 shadow-xs"
             >
-              {#if activeConnector === source.id}
-                {#key source.id}<ConnectorPanel
+              <h2
+                bind:this={mobileDetailHeading}
+                class="text-lg font-bold outline-none"
+                tabindex="-1"
+              >
+                {mobileSource?.title}
+              </h2>
+              <p class="mt-1 text-sm text-muted-foreground">
+                {mobileSource && sourceCapabilitySummary(mobileSource)}
+              </p>
+              <div class="mt-4">
+                {#key activeConnector}<ConnectorPanel
                     {api}
-                    connectorId={source.id}
+                    connectorId={activeConnector}
                     {demoMode}
-                    title={source.title}
+                    title={mobileSource?.title ?? "連接器"}
                     embedded
                   />{/key}
-              {/if}
-            </SourceCard>
-          </div>
-        {/each}
-      </section>
+              </div>
+            </div>
+          </section>
+        {/if}
+      </div>
     </div>
   {:else if mobileView === "sync-notifications"}
     <div class="grid min-w-0 gap-4">
@@ -615,28 +680,72 @@
           class="min-w-0 rounded-xl border border-border bg-card p-[18px] shadow-xs"
         >
           <div class="flex items-center justify-between gap-3">
-            <h2 class="text-lg font-bold">資料來源與連接器</h2>
+            <h2 class="text-lg font-bold">
+              {sourceGroups.actionable.length ? "需要注意" : "資料來源與連接器"}
+            </h2>
             <button
               class="text-sm font-semibold text-steel transition hover:text-steel/80"
               onclick={() => navigate("data-sources")}>管理全部 →</button
             >
           </div>
-          <div class="mt-2">
-            {#each sources as source (source.id)}
-              <SourceCard
-                {api}
-                id={source.id}
-                title={source.title}
-                description={source.description}
-                jobs={jobs.data ?? []}
-                compact
-                selected={false}
-                onConfigure={() => openConnector(source.id)}
-              />
-            {/each}
-          </div>
+          {#if syncJobsState === "loading"}
+            <p class="mt-3 text-sm text-muted-foreground">
+              正在讀取資料來源狀態…
+            </p>
+          {:else if syncJobsState === "error"}
+            <p class="mt-3 text-sm text-coral">無法取得資料來源狀態。</p>
+          {:else}
+            {#if sourceGroups.actionable.length}
+              <div class="-mx-[18px] mt-3 border-b border-border">
+                {#each sourceGroups.actionable as source (source.id)}
+                  <SourceRow
+                    id={source.id}
+                    title={source.title}
+                    job={sourceGroups.jobById.get(source.id)}
+                    onSelect={() => openConnector(source.id)}
+                  />
+                {/each}
+              </div>
+            {:else}
+              <p class="mt-2 text-sm text-muted-foreground">
+                {linkedSources.length
+                  ? "所有已連接來源都沒有需要處理的問題。"
+                  : "尚未連接資料來源，新增後即可開始同步。"}
+              </p>
+            {/if}
+            <div class="mt-4">
+              {#if linkedSources.length}
+                <p class="text-sm text-muted-foreground">
+                  已連接 {linkedSources.length} 個來源
+                </p>
+              {/if}
+              <div class="mt-2 flex flex-wrap gap-2">
+                {#each linkedSources as source (source.id)}
+                  {@const status = getSyncSourceStatus(
+                    sourceGroups.jobById.get(source.id),
+                  )}
+                  <button
+                    type="button"
+                    class="inline-flex min-h-9 items-center gap-2 rounded-full border border-border bg-muted/40 px-3 text-sm font-medium transition hover:border-steel/50"
+                    onclick={() => openConnector(source.id)}
+                    ><span
+                      aria-hidden="true"
+                      class={`size-2 rounded-full ${status === "needs_action" ? "bg-coral" : status === "healthy" ? "bg-moss" : "bg-amber-500"}`}
+                    ></span>{source.title}</button
+                  >
+                {/each}
+                <button
+                  type="button"
+                  class="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-dashed border-border px-3 text-sm font-medium text-steel transition hover:border-steel/50"
+                  onclick={() => {
+                    addSourceOpen = true;
+                    navigate("data-sources");
+                  }}><Plus class="size-4" />新增</button
+                >
+              </div>
+            </div>
+          {/if}
         </div>
-
         <div class="grid min-w-0 gap-3">
           <button
             type="button"
@@ -700,3 +809,11 @@
     </div>
   {/if}
 </div>
+
+<AddSourceDialog
+  bind:open={addSourceOpen}
+  sources={sourceGroups.available}
+  connectedCount={linkedSources.length}
+  onSelect={pickNewSource}
+  onSelectedClose={focusConnectorDetail}
+/>
