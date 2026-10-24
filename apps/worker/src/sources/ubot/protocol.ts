@@ -581,10 +581,7 @@ export function parseUbotCreditCardData(
     ? stringValue(bill0.HasBill).trim().toUpperCase()
     : undefined;
   const paymentDueDate = bill0 ? normalizeUbotDate(bill0.DueDate) : undefined;
-  const autopayAccount = resolveCreditCardAutopay(
-    payloads.autopay,
-    bill0?.PaymentAcctno,
-  );
+  const autopayAccount = resolveCreditCardAutopay(payloads.autopay);
 
   const statementRemaining =
     hasBill === "N"
@@ -1138,9 +1135,12 @@ function parseFxTransactions(
   return transactions;
 }
 
+/**
+ * 自動扣繳帳號取自 `NNBC030101` 的 `BillList[].Account`。帳務總覽的
+ * `PaymentAcctno` 是信用卡卡號而非扣款帳號，不可作為備援。
+ */
 function resolveCreditCardAutopay(
   autopayPayload: unknown,
-  fallbackPaymentAcctno: unknown,
 ): AutopayAccountHint | null | undefined {
   const autopayBody = resBodyRecord(autopayPayload);
   const autopayRow =
@@ -1148,34 +1148,17 @@ function resolveCreditCardAutopay(
       ? autopayBody.BillList[0]
       : undefined;
 
-  if (autopayRow) {
-    const status = stringValue(autopayRow.Status).trim();
-    const acctText = normalizeHalfWidth(stringValue(autopayRow.PaymentAcctno));
-    if (status === "9" || acctText.toUpperCase() === "NON") {
-      return null;
-    }
-    const digits = acctText.replace(/\D/g, "");
-    if (status === "0" && digits.length >= 6) {
-      return {
-        bankCode: UBOT_BANK_CODE,
-        last4: digits.slice(-4),
-        depositSourceId: ubotDepositSourceId(digits, "TWD"),
-      };
-    }
-  }
-
-  const fallbackText = normalizeHalfWidth(stringValue(fallbackPaymentAcctno));
-  if (!fallbackText) return undefined;
-  if (fallbackText.toUpperCase() === "NON") return null;
-  const fallbackDigits = fallbackText.replace(/\D/g, "");
-  if (fallbackDigits.length >= 6) {
-    return {
-      bankCode: UBOT_BANK_CODE,
-      last4: fallbackDigits.slice(-4),
-      depositSourceId: ubotDepositSourceId(fallbackDigits, "TWD"),
-    };
-  }
-  return undefined;
+  if (!autopayRow) return undefined;
+  const status = stringValue(autopayRow.Status).trim();
+  const acctText = normalizeHalfWidth(stringValue(autopayRow.Account));
+  if (status === "9" || acctText.toUpperCase() === "NON") return null;
+  const digits = acctText.replace(/\D/g, "");
+  if (status !== "0" || digits.length < 6) return undefined;
+  return {
+    bankCode: UBOT_BANK_CODE,
+    last4: digits.slice(-4),
+    depositSourceId: ubotDepositSourceId(digits, "TWD"),
+  };
 }
 
 /**
