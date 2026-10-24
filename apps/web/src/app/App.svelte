@@ -148,6 +148,8 @@
   }
   function navigateBack() {
     if (isDetail(view)) navigate("assets");
+    else if (view === "data-sources" && connectorTarget)
+      navigate("data-sources");
     else if (isMobileSetting(view)) navigate("more");
   }
   function toggleMoneyVisibility() {
@@ -216,9 +218,11 @@
               {#if mobileSetting}
                 <div class="flex items-center gap-2 md:block">
                   <button
-                    aria-label="返回更多"
+                    aria-label={view === "data-sources" && connectorTarget
+                      ? "返回資料來源清單"
+                      : "返回更多"}
                     class="flex size-10 shrink-0 items-center justify-center rounded-full text-xl text-ink hover:bg-ink/5 md:hidden"
-                    onclick={() => navigate("more")}>←</button
+                    onclick={navigateBack}>←</button
                   >
                   <h1
                     class="truncate text-2xl font-semibold tracking-tight xl:text-3xl"

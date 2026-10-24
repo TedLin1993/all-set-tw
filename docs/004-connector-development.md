@@ -242,6 +242,7 @@ promotion 放在同一 D1 batch，沿用來源的 lock 與設定版本 guard。�
 ## 新增流程
 
 1. 在 `connectorCatalog` 末尾加入 ID、`bankCode`、mode、scope、capabilities、欄位分類，以及含標籤與輸入類型的 `credentialFields`。
+   設定頁的支援範圍標籤（例如「存款・信用卡・貸款」）由 `capabilities` 產生，須列出實際寫入的資料種類（含 `loan`），並同步更新 README「支援資料來源」表格。
 2. 在 `apps/worker/src/sources/<connectorId>` 建立 `protocol.ts`、必要的 client 與 parser，並在 `sources/config-registry.ts` 註冊 config schema 與 session 狀態判斷。
 3. 需要 binding 時，在同一來源目錄建立 `connector.ts` adapter。
 4. 在同一來源目錄的 `sync.ts` 實作單次同步與 challenge use case，使用 `features/sync` 的共用 record mapping 與 staged persistence；需分段續跑的來源則沿用 durable sync 與 `run-repository.ts` 模式。來源專用的配對、存款生命週期與舊資料修復放在相鄰檔案。
