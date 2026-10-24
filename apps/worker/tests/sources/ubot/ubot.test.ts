@@ -725,48 +725,50 @@ describe("ubot connector session lifecycle", () => {
     },
   );
 
-  it("stops immediately with UbotVerificationRequiredError on invalid credentials (NS169)", async () => {
-    const fetcher = async (input: RequestInfo | URL) => {
-      const api = new URL(String(input)).pathname.replace("/NNBank/svc/", "");
-      const jsonResponse = (payload: Record<string, unknown>) =>
-        new Response(
-          JSON.stringify({
-            ResCode: {
-              RtnCode: payload.RtnCode ?? "0000",
-              RtnDesc: payload.RtnMsg ?? "交易成功",
+  it.each([
+    ["NS169", "使用者代號或密碼錯誤", 200],
+    ["NM85", "系統忙碌中", 400],
+  ])(
+    "stops immediately with UbotVerificationRequiredError on rejected login (%s, HTTP %i)",
+    async (rtnCode, rtnMsg, loginStatus) => {
+      const fetcher = async (input: RequestInfo | URL) => {
+        const api = new URL(String(input)).pathname.replace("/NNBank/svc/", "");
+        const jsonResponse = (payload: Record<string, unknown>, status = 200) =>
+          new Response(
+            JSON.stringify({
+              ResCode: {
+                RtnCode: payload.RtnCode ?? "0000",
+                RtnDesc: payload.RtnMsg ?? "交易成功",
+              },
+              ResBody: payload.ResBody ?? {},
+            }),
+            { status },
+          );
+        if (api === "NNBCM000007") {
+          return jsonResponse({
+            RtnCode: "0000",
+            ResBody: { PublicKey: testPkcs1PublicKeyBase64 },
+          });
+        }
+        if (api === "NNBCM000011") {
+          return jsonResponse({
+            RtnCode: "0000",
+            ResBody: {
+              k1: testSpkiPublicKeyBase64,
+              k2: testAesKeyBase64,
             },
-            ResBody: payload.ResBody ?? {},
-          }),
-          { status: 200 },
-        );
-      if (api === "NNBCM000007") {
-        return jsonResponse({
-          RtnCode: "0000",
-          ResBody: { PublicKey: testPkcs1PublicKeyBase64 },
-        });
-      }
-      if (api === "NNBCM000011") {
-        return jsonResponse({
-          RtnCode: "0000",
-          ResBody: {
-            k1: testSpkiPublicKeyBase64,
-            k2: testAesKeyBase64,
-          },
-        });
-      }
-      return jsonResponse({
-        RtnCode: "NS169",
-        RtnMsg: "使用者代號或密碼錯誤",
-        ResBody: {},
-      });
-    };
+          });
+        }
+        return jsonResponse({ RtnCode: rtnCode, RtnMsg: rtnMsg }, loginStatus);
+      };
 
-    await expect(
-      createUbotConnector(fetcher).sync({
+      const sync = createUbotConnector(fetcher).sync({
         userId: "A123456789",
         account: "user01",
         password: "WrongPass1",
-      }),
-    ).rejects.toBeInstanceOf(UbotVerificationRequiredError);
-  });
+      });
+      await expect(sync).rejects.toBeInstanceOf(UbotVerificationRequiredError);
+      await expect(sync).rejects.toThrow(rtnCode);
+    },
+  );
 });
