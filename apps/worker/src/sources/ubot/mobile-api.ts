@@ -649,17 +649,18 @@ class UbotMobileSession {
         ? readUbotEnvelope(payload)
         : undefined;
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          throw new UbotVerificationRequiredError(
-            "聯邦 New New Bank 登入狀態已失效，請重新同步。",
-          );
-        }
+        // 登入請求的含碼 4xx（含 401／403）交由登入流程顯示銀行代碼與確認帳密提示。
         if (
           options.allowHttpError &&
           response.status < 500 &&
           envelope?.rtnCode
         ) {
           return { httpStatus: response.status, ...envelope };
+        }
+        if (response.status === 401 || response.status === 403) {
+          throw new UbotVerificationRequiredError(
+            "聯邦 New New Bank 登入狀態已失效，請重新同步。",
+          );
         }
         throw new UbotConnectionError(
           envelope?.rtnCode

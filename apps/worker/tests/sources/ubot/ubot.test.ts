@@ -728,6 +728,7 @@ describe("ubot connector session lifecycle", () => {
   it.each([
     ["NS169", "使用者代號或密碼錯誤", 200],
     ["NM85", "系統忙碌中", 400],
+    ["NM85", "系統忙碌中", 403],
   ])(
     "stops immediately with UbotVerificationRequiredError on rejected login (%s, HTTP %i)",
     async (rtnCode, rtnMsg, loginStatus) => {
