@@ -27,7 +27,6 @@ import {
   updateConnectorEncryptedConfig,
   connectorStateStatement,
   linkCanonicalBankAccountsStatement,
-  deactivateMissingCathayLoanAccountsStatement,
 } from "../../features/sync/connector-repository";
 import {
   type SyncWriteRecord,
@@ -43,7 +42,10 @@ import {
   rebuildBankDepositHistory,
   dateFromIso,
 } from "../../features/net-worth/service";
-import { reconcileCathayUnpaidCurrentBillStatements } from "./repository";
+import {
+  deactivateMissingCathayLoanAccountsStatement,
+  reconcileCathayUnpaidCurrentBillStatements,
+} from "./repository";
 
 function isCathayCurrentBill(raw: unknown): boolean {
   return (

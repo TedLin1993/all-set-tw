@@ -10,8 +10,8 @@ import {
   connectorStateStatement,
   updateConnectorEncryptedConfigIfCurrent,
   linkCanonicalBankAccountsStatement,
-  deactivateMissingCathayLoanAccountsStatement,
 } from "../../../src/features/sync/connector-repository";
+import { deactivateMissingCathayLoanAccountsStatement } from "../../../src/sources/cathaybk/repository";
 import {
   bankAccountRecord,
   bankBalanceSnapshotRecord,
