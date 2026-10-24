@@ -87,6 +87,7 @@ export function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** 帳戶沒有名稱時的顯示；存款末碼已由 Worker 依 sourceId 整理進 `accountName`，前端不另行解析。 */
 export function formatBankAccountName(account: {
   accountName?: string | null;
   sourceId?: string | null;
@@ -98,27 +99,10 @@ export function formatBankAccountName(account: {
       account.accountName ?? account.sourceId ?? account.accountSourceId ?? "-"
     );
   const sourceId = account.accountSourceId ?? account.sourceId ?? "";
-  const last5 = bankAccountLast5(sourceId);
-  if (last5) return last5;
   const name = account.accountName?.startsWith("末五碼 ")
     ? account.accountName.slice(4)
     : account.accountName;
   return name ?? sourceId ?? "-";
-}
-
-export function bankAccountLast5(sourceId: string) {
-  const settlement = sourceId.match(/^settlement:[^:]+:([^:]+)/);
-  const esun = sourceId.match(/^bank:esun:([^:]+)/);
-  const skbank = sourceId.match(/^bank:skbank:([^:]+)/);
-  const firstbank = sourceId.match(/^bank:firstbank:([^:]+)/);
-  const digits = (
-    settlement?.[1] ??
-    esun?.[1] ??
-    skbank?.[1] ??
-    firstbank?.[1] ??
-    ""
-  ).replace(/\D/g, "");
-  return digits ? digits.slice(-5) : undefined;
 }
 
 export function formatCurrencyTotals(totals: Record<string, number>) {
