@@ -4,15 +4,20 @@
 
 ## 共同註冊點
 
-Connector 採三層 registry：
+Connector 採三層 registry，直接提供自家存款帳戶的銀行另有存款 sourceId registry：
 
-| 層級            | 位置                                                                      | 責任                                                                          |
-| --------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| 共用 catalog    | `shared/connector-catalog.ts` 的 `connectorCatalog`                       | ID、顯示名稱、連接模式、scope、資料能力、設定欄位分類、表單欄位標籤與顯示順序 |
-| Config registry | `apps/worker/src/sources/config-registry.ts` 的 `connectorConfigSchemas`  | Zod schema、設定解析與設定頁 session 狀態判斷                                 |
-| Worker runtime  | `apps/worker/src/features/sync/registry.ts` 的 `connectorRuntimeRegistry` | 手動／排程同步與互動式 challenge handler                                      |
+| 層級            | 位置                                                                      | 責任                                                                                            |
+| --------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 共用 catalog    | `shared/connector-catalog.ts` 的 `connectorCatalog`                       | ID、顯示名稱、直接存款銀行代碼、連接模式、scope、資料能力、設定欄位分類、表單欄位標籤與顯示順序 |
+| Config registry | `apps/worker/src/sources/config-registry.ts` 的 `connectorConfigSchemas`  | Zod schema、設定解析與設定頁 session 狀態判斷                                                   |
+| Worker runtime  | `apps/worker/src/features/sync/registry.ts` 的 `connectorRuntimeRegistry` | 手動／排程同步與互動式 challenge handler                                                        |
+| 存款 sourceId   | `apps/worker/src/sources/deposit-source-registry.ts`                      | 依約定解析直接存款 sourceId 的帳號段，註冊格式例外，並提供直接存款來源清單                      |
 
 `ConnectorId` 由 `connectorCatalog` 的 key 推得；catalog 每筆 `id` 必須與 key 相同。Config 與 Worker runtime registry 都必須以 `Record<ConnectorId, ...>` 宣告，新增 catalog 項目後，TypeScript 應立即指出尚未補齊的 config 或 runtime。
+
+Catalog 的 `bankCode` 是直接存款銀行代碼的唯一來源：前端資產依銀行分組、API 顯示的銀行名稱、跨來源帳戶比對，以及集保交割帳戶連結直接存款帳戶（`linkCanonicalBankAccountsStatement`）都由此推得；非銀行或尚未接入跨來源存款比對的來源填 `null`。同步通知的來源名稱直接使用 catalog 的 `title`。
+
+宣告 `bankCode` 的來源，存款帳戶 sourceId 必須遵守 `bank:<connectorId>:<帳號或末四碼>:...` 約定：第三段是完整帳號或末四碼（可為 `unknown`），其後可接帳號雜湊、幣別等識別段。`deposit-source-registry.ts` 依此約定取出帳號段，用於推得 `bank_accounts.account_last4` 與顯示「末四碼／末五碼」。既有格式無法遵守時（例如王道多一段帳戶類型），在來源 `protocol.ts` 匯出解析函式並註冊於該 registry 的 `depositAccountOverrides`；第三段不是帳號或末四碼（例如將來銀行使用帳號雜湊）的來源不得宣告 `bankCode`。`features/bank/display.ts` 不逐一判斷來源。
 
 各來源的同步、connector、protocol、API client 與專用配對／修復集中於 `apps/worker/src/sources/<connectorId>`。電子發票與集保使用該目錄的 `sync.ts`／`run-repository.ts` 執行 Queue 分段同步；runtime registry 的 `run` 拒絕單次呼叫，避免繞過 durable run 的進度與鎖。手動同步控制、排程、報告與共用資料寫入仍位於 `features/sync`。
 
@@ -235,11 +240,11 @@ promotion 放在同一 D1 batch，沿用來源的 lock 與設定版本 guard。�
 
 ## 新增流程
 
-1. 在 `connectorCatalog` 末尾加入 ID、mode、scope、capabilities、欄位分類，以及含標籤與輸入類型的 `credentialFields`。
+1. 在 `connectorCatalog` 末尾加入 ID、`bankCode`、mode、scope、capabilities、欄位分類，以及含標籤與輸入類型的 `credentialFields`。
 2. 在 `apps/worker/src/sources/<connectorId>` 建立 `protocol.ts`、必要的 client 與 parser，並在 `sources/config-registry.ts` 註冊 config schema 與 session 狀態判斷。
 3. 需要 binding 時，在同一來源目錄建立 `connector.ts` adapter。
 4. 在同一來源目錄的 `sync.ts` 實作單次同步與 challenge use case，使用 `features/sync` 的共用 record mapping 與 staged persistence；需分段續跑的來源則沿用 durable sync 與 `run-repository.ts` 模式。來源專用的配對、存款生命週期與舊資料修復放在相鄰檔案。
-   若來源提供直接存款帳戶，確認 `DIRECT_DEPOSIT_CONNECTOR_IDS` 是否需加入，以連結集保交割帳戶。
+   若來源提供直接存款帳戶，在 catalog 填入 `bankCode`，並確認存款 sourceId 符合「共同註冊點」的格式約定；無法遵守時才在 `sources/deposit-source-registry.ts` 註冊例外。
 5. 在 Worker runtime registry 註冊 sync／challenge handler。
    前端需要依代碼接續流程或顯示專屬提示的錯誤，在 `shared/api/errors.ts` 宣告代碼，並讓錯誤類別實作 `sources/sync-error.ts` 的 `toSyncError()`；需要使用者回來處理的錯誤同時宣告 `needsUserAction: true`。不在 `features/sync/error-response.ts` 或 `features/sync/errors.ts` 新增來源判斷。
 6. 在前端補上必要的 challenge UI；一般帳密表單由 catalog 的 `credentialFields` 產生，不需另外新增欄位。
