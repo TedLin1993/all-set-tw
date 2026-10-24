@@ -497,7 +497,7 @@ export function hasUbotCreditCard(cardListPayload: unknown): boolean {
     return false;
   }
   if (erCode1 && erCode1 !== "0000") {
-    return false;
+    throw new UbotProtocolError();
   }
   return Array.isArray(body.CardTypeList) && body.CardTypeList.length > 0;
 }

@@ -622,6 +622,8 @@ describe("ubot connector session lifecycle", () => {
 
   it.each([
     ["NNBC010105", "error"],
+    ["NNBC010105", "inner-error"],
+    ["NNBC010105", "unknown-no-card"],
     ["NNBC010102", "error"],
     ["NNBC080201", "error"],
     ["NNBC010104", "error"],
@@ -671,17 +673,26 @@ describe("ubot connector session lifecycle", () => {
         const rejected = fail && api === failedApi;
         if (rejected && failure === "network")
           throw new Error("Network unavailable");
+        const innerError =
+          failure === "inner-error" || failure === "unknown-no-card";
         return new Response(
           JSON.stringify({
             ResCode: {
               RtnCode:
-                rejected && failure !== "missing-list"
+                rejected && failure !== "missing-list" && !innerError
                   ? failure === "B060"
                     ? "B060"
                     : "9999"
                   : "0000",
             },
-            ResBody: rejected ? {} : responses[api],
+            ResBody: rejected
+              ? innerError
+                ? {
+                    ErCode_1: failure === "inner-error" ? "9999" : "NSCRD",
+                    ErCode_2: "UNKNOWN",
+                  }
+                : {}
+              : responses[api],
           }),
           { headers: api === "NNBI010101" ? { ssid: "test-ssid" } : {} },
         );
