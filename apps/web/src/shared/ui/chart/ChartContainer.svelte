@@ -32,7 +32,7 @@
     "[&_.lc-root-container]:w-full [&_.lc-axis-tick]:stroke-0",
     "[&_.lc-axis-tick-label]:fill-subtle [&_.lc-axis-tick-label]:text-xs [&_.lc-axis-tick-label]:font-normal",
     "[&_.lc-axis-grid]:stroke-ink/10 [&_.lc-highlight-line]:stroke-steel/30",
-    "[&_.lc-highlight-point]:stroke-white [&_.lc-highlight-point]:stroke-2",
+    "[&_.lc-highlight-point]:stroke-card [&_.lc-highlight-point]:stroke-2",
     "[&_.lc-path]:transition-opacity [&_.lc-text-svg]:overflow-visible",
     className,
   )}

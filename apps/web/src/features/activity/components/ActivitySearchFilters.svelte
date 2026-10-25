@@ -167,7 +167,7 @@
 </div>
 {#if open}
   <div
-    class="fixed inset-0 z-[70] flex items-end bg-ink/40 md:hidden"
+    class="fixed inset-0 z-[70] flex items-end bg-inverse/40 md:hidden"
     role="presentation"
   >
     <button
@@ -184,7 +184,7 @@
       onkeydown={(e) => {
         if (e.key === "Escape") open = false;
       }}
-      class="relative max-h-[85dvh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 pb-8"
+      class="relative max-h-[85dvh] w-full overflow-y-auto rounded-t-2xl bg-card p-5 pb-8"
     >
       <div class="mb-4 flex items-center justify-between">
         <h2 class="text-lg font-semibold">搜尋篩選</h2>

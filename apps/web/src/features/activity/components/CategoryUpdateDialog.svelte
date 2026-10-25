@@ -29,11 +29,11 @@
 
 <div
   aria-modal="true"
-  class="fixed inset-0 z-[70] flex items-end bg-ink/45 md:items-center md:justify-center md:p-6"
+  class="fixed inset-0 z-[70] flex items-end bg-inverse/45 md:items-center md:justify-center md:p-6"
   role="dialog"
 >
   <div
-    class="max-h-[88vh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-2xl md:max-w-lg md:rounded-2xl md:p-6"
+    class="max-h-[88vh] w-full overflow-y-auto rounded-t-2xl bg-card p-5 shadow-2xl md:max-w-lg md:rounded-2xl md:p-6"
   >
     <h2 class="text-xl font-semibold">更新活動分類</h2>
     <p class="mt-1 text-sm text-subtle">

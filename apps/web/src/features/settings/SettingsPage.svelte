@@ -20,6 +20,7 @@
   import { formatDateTime } from "@/shared/format/financial";
   import Button from "@/shared/ui/Button.svelte";
   import AboutPanel from "./components/AboutPanel.svelte";
+  import AppearancePanel from "./components/AppearancePanel.svelte";
   import ClassificationRulesPanel from "./components/ClassificationRulesPanel.svelte";
   import AiClassificationPanel from "./components/AiClassificationPanel.svelte";
   import DefaultSchedulePanel from "./components/DefaultSchedulePanel.svelte";
@@ -194,6 +195,7 @@
   {:else if mobileView === "about"}
     <div class="grid min-w-0 gap-4">
       <h2 class="hidden text-2xl font-bold tracking-tight md:block">關於</h2>
+      <AppearancePanel />
       <AboutPanel />
     </div>
   {:else if mobileView === "data-sources"}

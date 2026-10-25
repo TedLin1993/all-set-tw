@@ -128,7 +128,7 @@
   class={`overflow-hidden ${variant === "desktop" ? "border-border shadow-xs" : ""}`}
 >
   <div
-    class={`flex flex-wrap items-start justify-between gap-4 border-b px-5 py-4 ${variant === "desktop" ? "border-border bg-card text-foreground" : "border-border bg-ink text-white"}`}
+    class={`flex flex-wrap items-start justify-between gap-4 border-b px-5 py-4 ${variant === "desktop" ? "border-border bg-card text-foreground" : "border-border bg-inverse text-white"}`}
   >
     <div class="flex items-start gap-3">
       <span

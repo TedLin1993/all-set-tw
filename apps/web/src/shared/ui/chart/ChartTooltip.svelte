@@ -51,7 +51,7 @@
 <TooltipPrimitive.Root variant="none" portal={true}>
   <div
     class={cn(
-      "grid min-w-40 gap-2 rounded-lg border border-ink/10 bg-white/95 px-3 py-2 text-xs text-ink shadow-xl backdrop-blur-sm",
+      "grid min-w-40 gap-2 rounded-lg border border-ink/10 bg-card/95 px-3 py-2 text-xs text-ink shadow-xl backdrop-blur-sm",
       className,
     )}
   >

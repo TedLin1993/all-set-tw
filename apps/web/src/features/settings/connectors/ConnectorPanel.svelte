@@ -1703,7 +1703,7 @@
         <label class="grid gap-1.5 text-sm font-medium">
           一次性驗證碼
           <Input
-            class="bg-white/80 tracking-[0.2em]"
+            class="bg-card/80 tracking-[0.2em]"
             inputmode="numeric"
             autocomplete="one-time-code"
             placeholder="輸入驗證碼"
@@ -1814,7 +1814,7 @@
           <label class="grid gap-1.5 text-sm font-medium">
             驗證碼後 6 位數字
             <Input
-              class="bg-white/80 tracking-[0.2em]"
+              class="bg-card/80 tracking-[0.2em]"
               inputmode="numeric"
               autocomplete="one-time-code"
               placeholder="例如 310307（不含英文前綴）"

@@ -170,7 +170,7 @@
     }}
   >
     <aside
-      class="hidden border-r border-white/10 bg-ink px-6 py-7 text-white xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col"
+      class="hidden border-r border-white/10 bg-inverse px-6 py-7 text-white xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col"
     >
       <div class="px-2">
         <h1 class="text-xl font-semibold tracking-normal">不用記帳</h1>
@@ -201,7 +201,7 @@
         {#each navItems as item (item.view)}
           {@const NavIcon = item.icon}
           <button
-            class={`flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium ${primaryView === item.view ? "bg-ink text-white" : "text-subtle hover:bg-ink/5"}`}
+            class={`flex min-h-10 items-center gap-2 rounded-lg px-3 text-sm font-medium ${primaryView === item.view ? "bg-inverse text-white" : "text-subtle hover:bg-ink/5"}`}
             onclick={() => navigate(item.view)}
             ><NavIcon class="size-4" />{item.label}</button
           >
@@ -348,7 +348,7 @@
 
     <nav
       aria-label="主要導覽"
-      class="fixed inset-x-0 bottom-0 z-50 grid grid-cols-4 gap-1 border-t border-ink/10 bg-ink px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2 text-white shadow-[0_-8px_28px_rgba(31,41,51,0.12)] md:hidden"
+      class="fixed inset-x-0 bottom-0 z-50 grid grid-cols-4 gap-1 border-t border-ink/10 bg-inverse px-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-2 text-white shadow-[0_-8px_28px_rgba(31,41,51,0.12)] md:hidden"
     >
       {#each mobilePrimaryViews as mobileView (mobileView)}
         {@const item = navItems.find(

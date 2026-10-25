@@ -53,7 +53,7 @@
   }}
 >
   <Dialog.Portal>
-    <Dialog.Overlay class="fixed inset-0 z-[70] bg-ink/45" />
+    <Dialog.Overlay class="fixed inset-0 z-[70] bg-inverse/45" />
     <Dialog.Content
       class="fixed inset-0 z-[70] flex flex-col overflow-hidden bg-paper shadow-2xl outline-none md:inset-auto md:left-1/2 md:top-[8vh] md:max-h-[84vh] md:w-[calc(100%-3rem)] md:max-w-2xl md:-translate-x-1/2 md:rounded-2xl md:bg-card"
       onOpenAutoFocus={(event) => {
