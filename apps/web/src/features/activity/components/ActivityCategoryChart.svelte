@@ -102,7 +102,7 @@
               {tooltip}
               onArcClick={(_, detail) =>
                 onSelect((detail.data as ActivityCategorySlice).category)}
-              props={{ arc: { stroke: "#f7f7f2", strokeWidth: 2 } }}
+              props={{ arc: { stroke: "var(--color-paper)", strokeWidth: 2 } }}
             />
           </ChartContainer>
           <button
