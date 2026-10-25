@@ -60,6 +60,16 @@ Vite 在組建時注入 `__BUILD_INFO__`，型別宣告位於 `src/vite-env.d.ts
 Commit 顯示前七碼，複製內容包含來源專案、完整上游 SHA 與相同的台灣組建時間；剪貼簿寫入失敗時顯示唯讀文字框，供手動選取完整診斷資訊。
 資訊來源與本機開發時間的定義見部署文件。
 
+## 外觀主題
+
+主題由 `<html data-theme="light|dark">` 決定，`dark:` variant 也以它為準。偏好（跟隨系統、淺色、深色）存在本機 `localStorage`，
+規則集中於 `shared/theme/theme.ts`；`index.html` 的 inline script 以相同規則在 app 載入前套用主題與 `theme-color`，修改時兩處需一致。
+桌面「設定 → 關於」與手機「更多 → 關於」提供「外觀」選項。
+
+- `styles.css` 的深色主題只覆寫色票變數（`ink`、`paper`、`moss`、`coral`、`steel`、`inverse` 與 shadcn 變數），元件不需逐一加 `dark:`。
+- `ink` 在深色主題是淺色字：文字、邊框與淡色底（`text-ink`、`border-ink/10`、`bg-ink/5`）可直接使用；深色底＋白字的區塊（側欄、主要按鈕、提示、遮罩）使用 `bg-inverse`。
+- 卡片等表面使用 `bg-card`，不要用 `bg-white`；提醒色沿用 `amber`、`emerald` 既有色階，深色主題已在 `styles.css` 反向對應，新增其他色階時要一併補上。
+
 ## 資料來源頁
 
 資料來源頁只列出已設定的來源：依 `getSyncSourceStatus` 分成「需要處理」與「已連接」（含等待首次同步），

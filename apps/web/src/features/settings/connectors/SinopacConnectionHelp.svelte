@@ -48,7 +48,7 @@
       <img
         src={captchaImage}
         alt="永豐圖形驗證碼"
-        class="h-[70px] w-[200px] shrink-0 rounded border border-ink/25 bg-white object-fill shadow-sm"
+        class="h-[70px] w-[200px] shrink-0 rounded border border-ink/25 bg-card object-fill shadow-sm"
       />
       <Input
         class="min-w-40 flex-1"

@@ -177,11 +177,11 @@
   <div
     aria-modal="true"
     aria-labelledby="ai-classification-confirm-title"
-    class="fixed inset-0 z-[70] flex items-end bg-ink/45 md:items-center md:justify-center md:p-6"
+    class="fixed inset-0 z-[70] flex items-end bg-inverse/45 md:items-center md:justify-center md:p-6"
     role="dialog"
   >
     <div
-      class="max-h-[88vh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-2xl md:max-w-lg md:rounded-2xl md:p-6"
+      class="max-h-[88vh] w-full overflow-y-auto rounded-t-2xl bg-card p-5 shadow-2xl md:max-w-lg md:rounded-2xl md:p-6"
     >
       <h2 id="ai-classification-confirm-title" class="text-xl font-semibold">
         {confirming === "enable"

@@ -26,7 +26,7 @@
     [key: string]: unknown;
   } = $props();
   const variants = {
-    default: "bg-ink text-white shadow-xs hover:bg-ink/90",
+    default: "bg-inverse text-white shadow-xs hover:bg-inverse/90",
     primary: "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90",
     secondary:
       "bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80",

@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* 主題由 <html data-theme> 決定（見 index.html 與 shared/theme）；dark: variant 跟著它，不直接看系統設定。 */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
   --breakpoint-*: initial;
   --breakpoint-sm: 640px;
@@ -10,6 +13,8 @@
 
   --color-ink: #1f2933;
   --color-paper: #f7f7f2;
+  /* 深色底＋白字的區塊（側欄、主要按鈕、提示訊息、遮罩）；ink 在深色主題會變成淺色字，不能拿來當底色。 */
+  --color-inverse: #1f2933;
   --color-subtle: #4f5d69;
   --text-caption: 0.8125rem;
   --text-caption--line-height: 1.5;
@@ -90,8 +95,54 @@
     box-sizing: border-box;
   }
 
+  [data-theme="dark"] {
+    color-scheme: dark;
+
+    --color-ink: #e5e7eb;
+    --color-paper: #111827;
+    --color-subtle: #9ca3af;
+    --color-moss: #8fae5a;
+    --color-coral: #c9704f;
+    --color-steel: #427e8a;
+    --color-inverse: #263241;
+    /* 預設邊框（見上方相容樣式）。 */
+    --color-gray-200: hsl(var(--border));
+    /*
+      元件裡的提醒色是淺底深字（amber-50 底、amber-800 字）；深色主題反過來對應，
+      讓既有 class 不用逐一加 dark: 也維持可讀。
+    */
+    --color-amber-50: #2a2112;
+    --color-amber-200: #5c4615;
+    --color-amber-600: #f5a524;
+    --color-amber-700: #fbbf24;
+    --color-amber-800: #fcd34d;
+    --color-amber-900: #fde68a;
+    --color-emerald-50: #11291f;
+    --color-emerald-700: #34d399;
+
+    --background: 222 39% 11%;
+    --foreground: 220 9% 91%;
+    --card: 215 28% 17%;
+    --card-foreground: 220 9% 91%;
+    --popover: 215 28% 17%;
+    --popover-foreground: 220 9% 91%;
+    --primary: 190 35% 40%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 19% 20%;
+    --secondary-foreground: 220 9% 91%;
+    --muted: 217 19% 18%;
+    --muted-foreground: 218 11% 65%;
+    --accent: 199 24% 22%;
+    --accent-foreground: 192 45% 80%;
+    --destructive: 12 55% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --input: 217 19% 27%;
+    --border: 217 19% 24%;
+    --ring: 190 35% 40%;
+  }
+
   html {
-    background: #f7f7f2;
+    background: var(--color-paper);
   }
 
   body {

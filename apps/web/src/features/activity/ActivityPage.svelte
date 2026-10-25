@@ -1392,7 +1392,7 @@
       {@const amount = activityDisplayAmount(detailItem)}
       {@const transaction = transactionForItem(detailItem)}
       {@const invoice = invoiceForItem(detailItem)}
-      <div class="fixed inset-0 z-[60] bg-ink/40 md:flex md:justify-end">
+      <div class="fixed inset-0 z-[60] bg-inverse/40 md:flex md:justify-end">
         <button
           aria-label="關閉活動明細"
           class="absolute inset-0 hidden md:block"
@@ -1401,7 +1401,7 @@
         <div
           aria-labelledby="activity-detail-title"
           aria-modal="true"
-          class="relative flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl md:max-w-[32rem]"
+          class="relative flex h-full w-full flex-col overflow-hidden bg-card shadow-2xl md:max-w-[32rem]"
           role="dialog"
           use:swipeBack={{
             enabled:
@@ -1672,11 +1672,11 @@
     {/if}
     {#if mappingDialog}<div
         aria-modal="true"
-        class="fixed inset-0 z-[75] flex items-end bg-ink/45 md:items-center md:justify-center md:p-6"
+        class="fixed inset-0 z-[75] flex items-end bg-inverse/45 md:items-center md:justify-center md:p-6"
         role="dialog"
       >
         <div
-          class="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 shadow-2xl md:max-w-xl md:rounded-2xl md:p-6"
+          class="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-card p-5 shadow-2xl md:max-w-xl md:rounded-2xl md:p-6"
         >
           <div
             class="mx-auto mb-4 h-1.5 w-14 rounded-full bg-ink/20 md:hidden"
@@ -1896,7 +1896,7 @@
       </div>{/if}
     {#if mappingNotice}<div
         aria-live="polite"
-        class="fixed left-1/2 top-20 z-[85] flex w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 items-center gap-3 rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-white shadow-xl"
+        class="fixed left-1/2 top-20 z-[85] flex w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 items-center gap-3 rounded-xl bg-inverse px-4 py-3 text-sm font-semibold text-white shadow-xl"
       >
         <Check class="size-5 shrink-0 text-lime-300" />{mappingNotice}
       </div>{/if}

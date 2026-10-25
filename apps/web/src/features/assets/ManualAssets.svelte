@@ -496,13 +496,13 @@
       </CardContent>
     </Card>
     {#if adding || editing}<div
-        class="fixed inset-0 z-[70] flex items-end bg-ink/45 md:items-center md:justify-center md:p-6"
+        class="fixed inset-0 z-[70] flex items-end bg-inverse/45 md:items-center md:justify-center md:p-6"
       >
         <div
           aria-labelledby="manual-asset-editor-title"
           aria-modal="true"
           bind:this={editorDialog}
-          class="w-full rounded-t-2xl bg-white p-5 shadow-2xl md:max-w-lg md:rounded-2xl"
+          class="w-full rounded-t-2xl bg-card p-5 shadow-2xl md:max-w-lg md:rounded-2xl"
           role="dialog"
           tabindex="-1"
         >
@@ -562,13 +562,13 @@
         </div>
       </div>{/if}
     {#if deletingAsset || deletingHistory}<div
-        class="fixed inset-0 z-[80] flex items-center justify-center bg-ink/45 p-5"
+        class="fixed inset-0 z-[80] flex items-center justify-center bg-inverse/45 p-5"
       >
         <div
           aria-labelledby="delete-confirmation-title"
           aria-modal="true"
           bind:this={deleteDialog}
-          class="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+          class="w-full max-w-sm rounded-2xl bg-card p-5 shadow-2xl"
           role="dialog"
           tabindex="-1"
         >

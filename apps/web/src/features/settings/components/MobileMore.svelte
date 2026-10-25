@@ -150,7 +150,8 @@
             ><Info class="size-5" /></span
           ><span class="flex-1"
             ><span class="block font-semibold">關於</span><span
-              class="block text-sm text-ink/45">Commit、分支與組建時間</span
+              class="block text-sm text-ink/45"
+              >外觀主題、Commit 與組建時間</span
             ></span
           ><span class="text-sm font-semibold text-steel">›</span></button
         >
