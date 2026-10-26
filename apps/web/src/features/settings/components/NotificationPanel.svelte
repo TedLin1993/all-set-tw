@@ -334,7 +334,7 @@
           >
             通知內容
           </p>
-          {#each [toggleButton("同步失敗", "連接器暫時無法完成同步", "failed"), toggleButton("需要重新驗證", "需要 OTP、CAPTCHA 或重新登入", "needsUserAction"), toggleButton("同步完成", "排程同步成功完成（預設關閉）", "success"), toggleButton("繳款提醒", "排程同步通知附上 5 天內的應繳款；明天到期或扣款未完成時，同步成功也會通知", "paymentDue")] as item (item.key)}
+          {#each [toggleButton("同步失敗", "連接器暫時無法完成同步", "failed"), toggleButton("需要重新驗證", "需要 OTP、CAPTCHA 或重新登入", "needsUserAction"), toggleButton("同步完成", "排程同步成功完成（預設關閉）", "success"), toggleButton("繳款與定存提醒", "排程同步通知附上 5 天內的應繳款與今天到期的定存；定存到期、繳款明天到期或扣款未完成時，同步成功也會通知", "paymentDue")] as item (item.key)}
             <button
               type="button"
               role="switch"
