@@ -17,6 +17,7 @@
     navItems,
   } from "./navigation-config";
   import { parseViewHash, viewHash } from "./navigation";
+  import { recoverFromChunkLoadError } from "./chunk-reload";
   import { queryClient } from "./query-client";
   import type {
     DetailView,
@@ -323,16 +324,21 @@
                 />
               {/if}
             {/if}
-          {:catch}
-            <section class="min-w-0 py-16" role="alert" aria-live="assertive">
-              <h2 class="text-base font-semibold tracking-tight">
-                頁面載入失敗
-              </h2>
-              <p class="mt-2 text-caption text-subtle">請再試一次。</p>
-              <Button class="mt-5" variant="outline" onclick={retryPage}
-                >重新載入</Button
-              >
-            </section>
+          {:catch error}
+            {@const recovered = recoverFromChunkLoadError(error)}
+            {#if recovered}
+              <EmptyState title="偵測到新版本" body="正在重新整理頁面。" />
+            {:else}
+              <section class="min-w-0 py-16" role="alert" aria-live="assertive">
+                <h2 class="text-base font-semibold tracking-tight">
+                  頁面載入失敗
+                </h2>
+                <p class="mt-2 text-caption text-subtle">請再試一次。</p>
+                <Button class="mt-5" variant="outline" onclick={retryPage}
+                  >重新載入</Button
+                >
+              </section>
+            {/if}
           {/await}
         {/if}
       </main>
