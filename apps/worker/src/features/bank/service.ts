@@ -314,8 +314,27 @@ async function presentBankTransactions(
       classification?.source !== "user_rule"
     );
   });
+  // A user rule that excludes one side from calculation (e.g. an own-account
+  // transfer category) may still serve as the pairing counterpart, so the other
+  // side is recognized as a transfer between own accounts. The rule-matched side
+  // keeps its own classification.
+  const transferPairingTransactions = transferCandidates.filter(
+    (transaction) => {
+      const classification = classificationMap.get(transaction.id);
+      return (
+        transaction.calculationPreference !== 0 &&
+        (classification?.source === "user_rule"
+          ? classification.excludedFromCalculation === true
+          : classification?.source !== "override")
+      );
+    },
+  );
   const automaticTransferIds = classificationsReady
-    ? findAutomaticTransferTransactionIds(eligibleTransactions)
+    ? new Set(
+        [
+          ...findAutomaticTransferTransactionIds(transferPairingTransactions),
+        ].filter((id) => classificationMap.get(id)?.source !== "user_rule"),
+      )
     : new Set<string>();
   const automaticCreditOffsetIds = classificationsReady
     ? findAutomaticCreditOffsetTransactionIds(eligibleTransactions)
