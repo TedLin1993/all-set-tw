@@ -15,6 +15,7 @@ import { isDemoMode } from "../../platform/http";
 import {
   countPushSubscriptions,
   getNotificationPreferences,
+  listMaturingTimeDeposits,
   listPushSubscriptions,
   markPushFailure,
   markPushSuccess,
@@ -23,6 +24,10 @@ import {
   saveNotificationPreferences,
   upsertPushSubscription,
 } from "./repository";
+import {
+  collectMaturityReminders,
+  type MaturityReminder,
+} from "./deposit-maturity";
 import {
   scheduledSummaryNotification,
   shouldNotify,
@@ -178,17 +183,20 @@ export async function safelySendScheduledSyncSummary(
   env: Env,
   events: SyncNotificationEvent[],
 ) {
-  if (events.length === 0) return;
   const status = summaryStatus(events);
   try {
     const preferences = await getNotificationPreferences(env.DB);
-    const reminders = preferences.paymentDue
-      ? await safelyLoadPaymentReminders(env.DB)
-      : [];
+    const [reminders, maturities] = preferences.paymentDue
+      ? await Promise.all([
+          safelyLoadPaymentReminders(env.DB),
+          safelyLoadMaturityReminders(env.DB),
+        ])
+      : [[], []];
     const payload = scheduledSummaryNotification(
       preferences,
       events,
       reminders,
+      maturities,
     );
     if (!payload) return;
     if (!isPushConfigured(env)) {
@@ -251,6 +259,27 @@ export async function safelyLoadPaymentReminders(
     console.error(
       JSON.stringify({
         event: "payment_reminder_load_failed",
+        message:
+          safeError instanceof Error ? safeError.message : String(safeError),
+      }),
+    );
+    return [];
+  }
+}
+
+/** 定存到期提醒同樣是附加資訊；讀取失敗只記錄 log，照常送出同步摘要。 */
+export async function safelyLoadMaturityReminders(
+  db: D1Database,
+  now = new Date(),
+): Promise<MaturityReminder[]> {
+  try {
+    const rows = await listMaturingTimeDeposits(db, taipeiDateKey(now));
+    return collectMaturityReminders(rows, now);
+  } catch (error) {
+    const safeError = sanitizeDatabaseError(error);
+    console.error(
+      JSON.stringify({
+        event: "maturity_reminder_load_failed",
         message:
           safeError instanceof Error ? safeError.message : String(safeError),
       }),

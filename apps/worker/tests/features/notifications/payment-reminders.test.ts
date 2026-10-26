@@ -9,7 +9,14 @@ import {
   scheduledSummaryNotification,
   type SyncNotificationEvent,
 } from "../../../src/features/notifications/payload";
-import { safelyLoadPaymentReminders } from "../../../src/features/notifications/service";
+import {
+  collectMaturityReminders,
+  type MaturingTimeDepositRow,
+} from "../../../src/features/notifications/deposit-maturity";
+import {
+  safelyLoadMaturityReminders,
+  safelyLoadPaymentReminders,
+} from "../../../src/features/notifications/service";
 import { persistStagedSyncWrite } from "../../../src/features/sync/persistence";
 import {
   bankAccountRecord,
@@ -454,6 +461,98 @@ describe("scheduledSummaryNotification", () => {
       "台北富邦信用卡明天到期（請確認是否已繳）、國泰世華房貸今天扣款（請確認餘額）。",
     );
   });
+
+  it("定存今天到期時，成功通知關閉也照常送出，只寫機構與筆數", () => {
+    const maturities = [
+      { institution: "王道銀行", count: 2 },
+      { institution: "將來銀行", count: 1 },
+    ];
+    expect(
+      scheduledSummaryNotification(preferences, succeeded, [], maturities),
+    ).toEqual({
+      title: "同步完成，3 筆定存今天到期",
+      body: "王道銀行 2 筆定存今天到期、將來銀行定存今天到期。",
+      url: "/#/overview",
+      tag: "sync-default-schedule-success",
+    });
+
+    const combined = scheduledSummaryNotification(
+      preferences,
+      [{ connectorId: "fubon", status: "failed" }],
+      [reminder({ accountId: "a", daysUntilDue: 1 })],
+      maturities.slice(0, 1),
+    );
+    expect(combined?.body).toBe(
+      "預設排程同步完成：失敗 1。另有 1 筆繳款即將到期、2 筆定存今天到期：國泰世華信用卡明天到期。王道銀行 2 筆定存今天到期。",
+    );
+
+    expect(
+      scheduledSummaryNotification(
+        { ...preferences, paymentDue: false },
+        succeeded,
+        [],
+        maturities,
+      ),
+    ).toBeNull();
+  });
+
+  it("批次成員都被略過時，只有緊急提醒送出，且不寫成同步完成", () => {
+    const all = { ...preferences, success: true };
+    const maturities = [{ institution: "王道銀行", count: 1 }];
+    expect(scheduledSummaryNotification(all, [], [], maturities)).toEqual({
+      title: "1 筆定存今天到期",
+      body: "王道銀行定存今天到期。",
+      url: "/#/overview",
+      tag: "sync-default-schedule-payment-due",
+    });
+    expect(
+      scheduledSummaryNotification(
+        all,
+        [],
+        [reminder({ accountId: "a", daysUntilDue: 3 })],
+      ),
+    ).toBeNull();
+    expect(scheduledSummaryNotification(all, [], [])).toBeNull();
+  });
+});
+
+describe("collectMaturityReminders", () => {
+  const deposit = (
+    input: Partial<MaturingTimeDepositRow> & Pick<MaturingTimeDepositRow, "id">,
+  ): MaturingTimeDepositRow => ({
+    institutionName: "王道銀行",
+    maturityDate: "2026-10-21",
+    inactiveAt: null,
+    ...input,
+  });
+
+  it("只提醒台北日期今天到期；到期當天才失效仍提醒，提前解約不提醒", () => {
+    const reminders = collectMaturityReminders(
+      [
+        deposit({ id: "today-a" }),
+        deposit({ id: "today-b" }),
+        // 台北 10-21 00:30 同步時已解約入帳。
+        deposit({
+          id: "settled-today",
+          institutionName: "將來銀行",
+          inactiveAt: "2026-10-20T16:30:00Z",
+        }),
+        deposit({
+          id: "closed-early",
+          institutionName: "聯邦銀行",
+          inactiveAt: "2026-10-19T03:00:00Z",
+        }),
+        deposit({ id: "tomorrow", maturityDate: "2026-10-22" }),
+        deposit({ id: "yesterday", maturityDate: "2026-10-20" }),
+      ],
+      now,
+    );
+
+    expect(reminders).toEqual([
+      { institution: "將來銀行", count: 1 },
+      { institution: "王道銀行", count: 2 },
+    ]);
+  });
 });
 
 describe("推播讀取繳款提醒（隔離 D1）", () => {
@@ -513,6 +612,52 @@ describe("推播讀取繳款提醒（隔離 D1）", () => {
     const reminders = await safelyLoadPaymentReminders(db, now);
     expect(reminders.map((item) => [item.accountId, item.state])).toEqual([
       [card.recordKey, "due"],
+    ]);
+  });
+
+  it("定存提醒包含到期當天才失效的帳戶，排除其他帳戶類型", async () => {
+    const db = harness.binding;
+    await persistStagedSyncWrite(db, {
+      records: [
+        bankAccountRecord(
+          "obank",
+          {
+            sourceId: "td-today",
+            institutionName: "王道銀行",
+            accountType: "time_deposit",
+            currency: "TWD",
+            maturityDate: "2026-10-21",
+            inactiveAt: "2026-10-20T16:30:00Z",
+          },
+          freshAsOf,
+        ),
+        bankAccountRecord(
+          "obank",
+          {
+            sourceId: "td-tomorrow",
+            institutionName: "王道銀行",
+            accountType: "time_deposit",
+            currency: "TWD",
+            maturityDate: "2026-10-22",
+          },
+          freshAsOf,
+        ),
+        bankAccountRecord(
+          "obank",
+          {
+            sourceId: "loan",
+            institutionName: "王道銀行",
+            accountType: "loan",
+            currency: "TWD",
+            maturityDate: "2026-10-21",
+          },
+          freshAsOf,
+        ),
+      ],
+    });
+
+    expect(await safelyLoadMaturityReminders(db, now)).toEqual([
+      { institution: "王道銀行", count: 1 },
     ]);
   });
 });

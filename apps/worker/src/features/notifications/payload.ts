@@ -5,6 +5,7 @@ import type {
   SyncNotificationStatus,
 } from "@taiwan-fin-hub/shared";
 import { connectorCatalog, describeDueDay } from "@taiwan-fin-hub/shared";
+import type { MaturityReminder } from "./deposit-maturity";
 
 export type SyncNotificationEvent = {
   connectorId: ConnectorId;
@@ -52,6 +53,7 @@ export function syncNotificationPayload(
 export function scheduledSyncSummaryPayload(
   events: SyncNotificationEvent[],
   reminders: PaymentReminder[] = [],
+  maturities: MaturityReminder[] = [],
 ): PushNotificationPayload {
   const success = events.filter((event) => event.status === "success").length;
   const failed = events.filter((event) => event.status === "failed").length;
@@ -59,7 +61,7 @@ export function scheduledSyncSummaryPayload(
     (event) => event.status === "needs_user_action",
   ).length;
   const status = summaryStatus(events);
-  const payment = paymentReminderSummary(reminders);
+  const payment = reminderSummary(reminders, maturities);
 
   if (status === "success") {
     if (payment)
@@ -128,22 +130,31 @@ export function isUrgentPaymentReminder(reminder: PaymentReminder) {
 
 /**
  * 預設排程摘要的推播內容；不需送出時回傳 null。
- * 繳款提醒附在同一則推播，不另外送出，且只寫機構與天數、不含金額。
+ * 繳款與定存到期提醒附在同一則推播，不另外送出，且只寫機構與天數、不含金額。
+ * 定存只收今天到期，一律視為緊急。
  * 同步狀態的通知被關閉、只因緊急繳款而送出時，不帶入該同步狀態的內容。
+ * 批次成員都被略過而沒有同步結果時，只有緊急提醒會送出，且只含提醒內容。
  */
 export function scheduledSummaryNotification(
   preferences: NotificationPreferences,
   events: SyncNotificationEvent[],
   reminders: PaymentReminder[],
+  maturities: MaturityReminder[] = [],
 ): PushNotificationPayload | null {
   const included = preferences.paymentDue ? reminders : [];
+  const includedMaturities = preferences.paymentDue ? maturities : [];
+  const synced = events.length > 0;
   const status = summaryStatus(events);
-  if (shouldNotify(preferences, status))
-    return scheduledSyncSummaryPayload(events, included);
-  if (!included.some(isUrgentPaymentReminder)) return null;
-  if (status === "success")
-    return scheduledSyncSummaryPayload(events, included);
-  const payment = paymentReminderSummary(included)!;
+  if (synced && shouldNotify(preferences, status))
+    return scheduledSyncSummaryPayload(events, included, includedMaturities);
+  if (
+    !included.some(isUrgentPaymentReminder) &&
+    includedMaturities.length === 0
+  )
+    return null;
+  if (synced && status === "success")
+    return scheduledSyncSummaryPayload(events, included, includedMaturities);
+  const payment = reminderSummary(included, includedMaturities)!;
   return {
     title: payment.label,
     body: payment.detail,
@@ -182,5 +193,38 @@ function paymentReminderSummary(reminders: PaymentReminder[]) {
       ? `${reminders.length} 筆繳款需要留意`
       : `${reminders.length} 筆繳款即將到期`,
     detail: `${listed}${reminders.length > 2 ? ` 等 ${reminders.length} 筆` : ""}。`,
+  };
+}
+
+function maturityPhrase(reminder: MaturityReminder) {
+  const deposits =
+    reminder.count > 1
+      ? `${reminder.institution} ${reminder.count} 筆定存`
+      : `${reminder.institution}定存`;
+  return `${deposits}今天到期`;
+}
+
+function maturityReminderSummary(maturities: MaturityReminder[]) {
+  if (maturities.length === 0) return null;
+  const count = maturities.reduce((sum, item) => sum + item.count, 0);
+  const listed = maturities.slice(0, 2).map(maturityPhrase).join("、");
+  return {
+    label: `${count} 筆定存今天到期`,
+    detail: `${listed}${maturities.length > 2 ? ` 等 ${count} 筆` : ""}。`,
+  };
+}
+
+function reminderSummary(
+  reminders: PaymentReminder[],
+  maturities: MaturityReminder[],
+) {
+  const parts = [
+    paymentReminderSummary(reminders),
+    maturityReminderSummary(maturities),
+  ].filter((part) => part !== null);
+  if (parts.length === 0) return null;
+  return {
+    label: parts.map((part) => part.label).join("、"),
+    detail: parts.map((part) => part.detail).join(""),
   };
 }
