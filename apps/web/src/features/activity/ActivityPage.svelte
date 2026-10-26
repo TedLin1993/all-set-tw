@@ -32,6 +32,7 @@
   import ActivityCategoryChart from "./components/ActivityCategoryChart.svelte";
   import CalculationUpdateDialog from "./components/CalculationUpdateDialog.svelte";
   import CategoryUpdateDialog from "./components/CategoryUpdateDialog.svelte";
+  import CategoryDetailSheet from "./components/CategoryDetailSheet.svelte";
   import type { ApiClient } from "@/shared/api/client";
   import { queryKeys } from "@/shared/api/query-keys";
   import { exchangeRatesQuery } from "@/data/assets/queries";
@@ -81,6 +82,7 @@
     matchInvoicesToTransactions,
   } from "@/data/activity/matching";
   import { getActivityDataStatus } from "./model/load-status";
+  import { createCategorySheet } from "./model/category-sheet.svelte";
   import {
     flowAmountSign,
     formatCompactTwd,
@@ -209,6 +211,7 @@
     flow = "all";
     source = "all";
     selectedCategory = null;
+    categorySheet.key = null;
     searchTime = "all";
     searchFrom = "";
     searchTo = "";
@@ -305,9 +308,11 @@
         search = state.activitySearch.query;
         submittedSearch = search;
         detailKey = state.activityDetail ?? null;
+        categorySheet.key = state.categorySheet ?? null;
       } else {
         restoreMonthly();
         detailKey = state?.activityDetail ?? null;
+        categorySheet.key = state?.categorySheet ?? null;
       }
     };
     restoreHistory();
@@ -316,6 +321,14 @@
       window.removeEventListener("popstate", restoreHistory);
     };
   });
+  const categorySheet = createCategorySheet({
+    getSlices: (flow) => (flow === "income" ? incomeSlices : expenseSlices),
+    chooseCategory,
+    isCategorySelected: (flow, category) =>
+      selectedCategory?.flow === flow && selectedCategory.category === category,
+    getListElement: () => activityListEl,
+  });
+  let activityListEl = $state<HTMLElement>();
   let selectedCategory = $state<ActivityCategoryFilter | null>(null);
   let pending = $state<PendingCategoryUpdate | null>(null);
   let pendingCalculation = $state<PendingCalculationUpdate | null>(null);
@@ -1007,7 +1020,8 @@
               : undefined}
             flowSelected={flow === "income" && !selectedCategory}
             dataIncomplete={activitySummaryIncomplete}
-            onSelect={(category) => chooseCategory("income", category)}
+            onSelect={(category) =>
+              categorySheet.handleCategorySelect("income", category)}
             onSelectFlow={() => chooseChartFlow("income")}
           />
           <ActivityCategoryChart
@@ -1019,7 +1033,8 @@
               : undefined}
             flowSelected={flow === "expense" && !selectedCategory}
             dataIncomplete={activitySummaryIncomplete}
-            onSelect={(category) => chooseCategory("expense", category)}
+            onSelect={(category) =>
+              categorySheet.handleCategorySelect("expense", category)}
             onSelectFlow={() => chooseChartFlow("expense")}
           />
         </div>
@@ -1090,6 +1105,7 @@
     <section
       class="min-w-0 max-w-full overflow-hidden border-t border-ink/10 pt-5"
       aria-label="活動列表"
+      bind:this={activityListEl}
     >
       <header class="grid min-w-0 gap-3 pb-4">
         <div
@@ -1387,6 +1403,22 @@
           </p>
         {/if}
       </div>
+    {/if}
+    {#if !searching && categorySheet.key && categorySheet.isMobileViewport}
+      <CategoryDetailSheet
+        flow={categorySheet.key.flow}
+        category={categorySheet.key.category}
+        slice={categorySheet.slice}
+        {selectedMonth}
+        monthLabel={selectedMonthLabel}
+        monthKeys={cashFlowMonths}
+        items={rawItems}
+        rates={rateValues}
+        {sourceLabel}
+        onClose={categorySheet.close}
+        onFilter={categorySheet.applyFilter}
+        onOpenDetail={openDetail}
+      />
     {/if}
     {#if detailItem}
       {@const amount = activityDisplayAmount(detailItem)}
