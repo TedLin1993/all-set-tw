@@ -11,12 +11,15 @@ type SheetFlow = "income" | "expense";
 export function createCategorySheet({
   getSlices,
   chooseCategory,
+  isCategorySelected,
   getListElement,
 }: {
   /** 目前月份對應收支別的圓餅切片。 */
   getSlices: (flow: SheetFlow) => ActivityCategorySlice[];
   /** 在列表中套用分類篩選（桌面點圖表、卡片的「在列表中篩選」共用）。 */
   chooseCategory: (flow: SheetFlow, category: string) => void;
+  /** 列表目前是否已套用這個分類篩選（chooseCategory 對同一分類會切換成取消）。 */
+  isCategorySelected: (flow: SheetFlow, category: string) => boolean;
   getListElement: () => HTMLElement | undefined;
 }) {
   let isMobileViewport = $state(false);
@@ -62,7 +65,8 @@ export function createCategorySheet({
   }
   function applyFilter() {
     if (!key) return;
-    chooseCategory(key.flow, key.category);
+    if (!isCategorySelected(key.flow, key.category))
+      chooseCategory(key.flow, key.category);
     close();
     void tick().then(() => {
       getListElement()?.scrollIntoView({ behavior: "smooth", block: "start" });

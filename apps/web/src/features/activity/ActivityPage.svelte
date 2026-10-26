@@ -324,6 +324,8 @@
   const categorySheet = createCategorySheet({
     getSlices: (flow) => (flow === "income" ? incomeSlices : expenseSlices),
     chooseCategory,
+    isCategorySelected: (flow, category) =>
+      selectedCategory?.flow === flow && selectedCategory.category === category,
     getListElement: () => activityListEl,
   });
   let activityListEl = $state<HTMLElement>();
