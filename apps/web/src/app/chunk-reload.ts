@@ -6,11 +6,15 @@
 const STORAGE_KEY = "taiwan-fin-hub-chunk-reload-at";
 const GUARD_WINDOW_MS = 60_000;
 
-/** 各瀏覽器對「動態 import 的模組載入失敗」的錯誤訊息措辭。 */
+/**
+ * 各瀏覽器對「動態 import 的模組載入失敗」的錯誤訊息措辭，以及 Vite 預先載入 lazy chunk
+ * 的 CSS 失敗時丟出的錯誤（未取消 `vite:preloadError` 時會成為動態 import 的 rejection）。
+ */
 const CHUNK_ERROR_PATTERNS = [
   "failed to fetch dynamically imported module",
   "importing a module script failed",
   "error loading dynamically imported module",
+  "unable to preload css",
 ];
 
 function errorMessage(error: unknown): string {
@@ -19,7 +23,7 @@ function errorMessage(error: unknown): string {
   return "";
 }
 
-/** 是否看起來是動態 import／chunk 載入失敗（含 vite:preloadError 事件帶的原始 rejection）。 */
+/** 是否看起來是動態 import／chunk 載入失敗。 */
 function isChunkLoadError(error: unknown): boolean {
   const message = errorMessage(error).toLowerCase();
   return CHUNK_ERROR_PATTERNS.some((pattern) => message.includes(pattern));

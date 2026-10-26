@@ -120,13 +120,6 @@
       }
     };
     window.addEventListener("hashchange", handleHashChange);
-    // 部署後 lazy chunk 預先載入（<link rel="modulepreload">）失敗時 Vite 會丟這個事件；
-    // 跟下面 {:catch} 裡的動態 import 失敗共用同一套偵測＋自動重整（含防迴圈）邏輯。
-    const handlePreloadError = (event: Event) => {
-      event.preventDefault();
-      recoverFromChunkLoadError((event as { payload?: unknown }).payload);
-    };
-    window.addEventListener("vite:preloadError", handlePreloadError);
 
     void api
       .get<RuntimeInfo>("/api/runtime")
@@ -134,10 +127,7 @@
       .catch(() => (runtime = { demoMode: false }));
     moneyState.hidden =
       localStorage.getItem("taiwan-fin-hub-money-hidden") === "true";
-    return () => {
-      window.removeEventListener("hashchange", handleHashChange);
-      window.removeEventListener("vite:preloadError", handlePreloadError);
-    };
+    return () => window.removeEventListener("hashchange", handleHashChange);
   });
   function navigate(next: View, targetConnector?: ConnectorId) {
     view = next;
