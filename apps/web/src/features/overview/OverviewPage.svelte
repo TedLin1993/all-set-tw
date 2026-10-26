@@ -8,6 +8,7 @@
     RefreshCw,
   } from "@lucide/svelte";
   import { createQuery } from "@tanstack/svelte-query";
+  import { onMount } from "svelte";
   import Button from "@/shared/ui/Button.svelte";
   import EmptyState from "@/shared/ui/EmptyState.svelte";
   import type { ApiClient } from "@/shared/api/client";
@@ -49,6 +50,7 @@
   import {
     PAYMENT_REMINDER_DAYS,
     collectPaymentReminders,
+    currentActivityMonthKey,
     describeDueDay,
   } from "@taiwan-fin-hub/shared";
   import type { PaymentReminder } from "@taiwan-fin-hub/shared";
@@ -79,8 +81,21 @@
     navigate: (view: View, connectorId?: ConnectorId) => void;
   } = $props();
 
-  const monthKey = new Date().toISOString().slice(0, 7);
-  const currentMonthRange = { from: monthKey, to: monthKey };
+  // 「本月」一律是 Asia/Taipei 的月份（與活動頁相同）；toISOString 是 UTC，
+  // 台灣每月 1 日 00:00–08:00 會被算成上個月。App 開著跨月時，回到前景就重新取值。
+  let monthKey = $state(currentActivityMonthKey());
+  const currentMonthRange = $derived({ from: monthKey, to: monthKey });
+  onMount(() => {
+    const refreshMonthKey = () => {
+      monthKey = currentActivityMonthKey();
+    };
+    document.addEventListener("visibilitychange", refreshMonthKey);
+    window.addEventListener("focus", refreshMonthKey);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshMonthKey);
+      window.removeEventListener("focus", refreshMonthKey);
+    };
+  });
   const monthlyBank = createQuery(() =>
     bankRangeQuery(() => api, currentMonthRange),
   );
