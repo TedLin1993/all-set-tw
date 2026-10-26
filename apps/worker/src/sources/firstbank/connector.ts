@@ -1063,7 +1063,12 @@ async function collectFirstbankPayloads(
   const onPageRequest = (request: object) => {
     transactionPageRequestCaptures.set(request, transactionResponse);
     const url = (request as { url?: () => string }).url?.();
-    const cardKey = url ? cardResponseKey(url) : undefined;
+    // 帳單月份查詢屬於 cardBill 輪次：它的「無帳單」結果會讓 cardBill 等待結束。
+    const cardKey = !url
+      ? undefined
+      : urlPathname(url) === CARD_BILL_DATES_PATH
+        ? "cardBill"
+        : cardResponseKey(url);
     if (cardKey)
       cardRequestAttempts.set(request, currentCardAttempt(captured, cardKey));
   };
@@ -1265,7 +1270,11 @@ async function collectFirstbankPayloads(
       collectingCards &&
       urlPathname(response.url()) === CARD_BILL_DATES_PATH
     ) {
-      const task = captureCardBillDates(response, captured);
+      const task = captureCardBillDates(
+        response,
+        captured,
+        request ? cardRequestAttempts.get(request) : undefined,
+      );
       responseTasks.push(task);
       void task.catch(() => undefined);
       return;
@@ -1472,6 +1481,7 @@ async function collectCardPayloads(
       (attempt) => {
         if (attempt > 1) {
           delete captured[query.key];
+          if (query.key === "cardBill") delete captured.noBillDates;
           captured.queryAttempts = {
             ...captured.queryAttempts,
             [query.key]: attempt,
@@ -1740,9 +1750,7 @@ async function captureCardResponse(
   const status = httpStatus(response);
   if (status !== undefined && (status < 200 || status >= 300)) return;
   // 讀取 body 期間可能已開始重試，存入前再確認仍是本輪請求。
-  const isCurrent = () =>
-    requestAttempt === undefined ||
-    requestAttempt === currentCardAttempt(captured, key);
+  const isCurrent = () => isCurrentCardAttempt(captured, key, requestAttempt);
   try {
     const payload = await response.json();
     if (isCurrent()) storeCardResponse(captured, key, payload);
@@ -1766,16 +1774,33 @@ function currentCardAttempt(
   return captured.queryAttempts?.[key] ?? 1;
 }
 
+/** 無法對應請求的回應沿用原行為接受；已知輪次時只接受目前輪次。 */
+function isCurrentCardAttempt(
+  captured: CapturedCardResponses,
+  key: CardPayloadKey,
+  requestAttempt: number | undefined,
+) {
+  return (
+    requestAttempt === undefined ||
+    requestAttempt === currentCardAttempt(captured, key)
+  );
+}
+
 // An empty bill date list only means there is no statement to query; whether
 // the account has a card is decided by the 0006 and 0008 responses that follow.
 async function captureCardBillDates(
   response: BrowserResponse,
   captured: CapturedCardResponses,
+  requestAttempt: number | undefined,
 ) {
   const status = httpStatus(response);
   if (status !== undefined && (status < 200 || status >= 300)) return;
   const payload = await response.json().catch(() => undefined);
-  if (!isRecord(payload)) return;
+  if (
+    !isRecord(payload) ||
+    !isCurrentCardAttempt(captured, "cardBill", requestAttempt)
+  )
+    return;
   const content = isRecord(payload.CONTENT) ? payload.CONTENT : payload.content;
   if (
     isRecord(content) &&
