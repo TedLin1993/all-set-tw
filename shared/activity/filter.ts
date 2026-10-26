@@ -3,7 +3,8 @@ import { activityDateKey } from "./list";
 import type { ActivityItem } from "./types";
 
 export type ActivityFlowFilter = "all" | ActivityFlow;
-export type ActivitySourceFilter = "all" | "bank" | "card" | "invoice";
+export type ActivitySourceFilter =
+  "all" | "bank" | "card" | "invoice" | "manual";
 
 export interface ActivityCategoryFilter {
   flow: ActivityFlow;

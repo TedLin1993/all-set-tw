@@ -262,4 +262,36 @@ describe("資產幣別匯率與更新完整性（隔離 D1）", () => {
     ).rejects.toThrow();
     expect(await getExchangeRates(db)).toEqual(before);
   });
+
+  it("指定幣別與持有幣別一起寫入；provider 沒回傳的指定幣別略過，不帶參數時行為不變", async () => {
+    const db = harness.binding;
+    await seedBankBalance("HKD", 100);
+
+    const withoutRequest = await refreshExchangeRates(
+      db,
+      providerFetcher({ HKD: 0.25, GBP: 0.025 }),
+    );
+    expect(withoutRequest.map((rate) => rate.currency)).toEqual([
+      "USD",
+      "JPY",
+      "EUR",
+      "HKD",
+    ]);
+
+    const withRequest = await refreshExchangeRates(
+      db,
+      providerFetcher({ HKD: 0.25, GBP: 0.025 }),
+      ["GBP", "XYZ", "TWD", "USD"],
+    );
+    expect(withRequest.map((rate) => rate.currency)).toEqual([
+      "USD",
+      "JPY",
+      "EUR",
+      "GBP",
+      "HKD",
+    ]);
+    expect(withRequest.find((rate) => rate.currency === "GBP")?.rateTwd).toBe(
+      40,
+    );
+  });
 });

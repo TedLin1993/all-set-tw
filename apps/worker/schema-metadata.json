@@ -26,7 +26,8 @@
         "autopay_status": "銀行頁面揭露的自動扣繳狀態：enabled（已設定）或 none（未設定）；來源未提供時為 NULL。",
         "autopay_bank_code": "自動扣繳帳戶的金融機構代碼；銀行頁面未提供或無法辨識時為 NULL。",
         "autopay_account_last4": "自動扣繳帳戶的帳號末四碼；不保存完整帳號。",
-        "autopay_account_source_id": "來源以完整帳號算出的自家存款帳戶 source_id，用於精準對應；只含雜湊，不含完整帳號。"
+        "autopay_account_source_id": "來源以完整帳號算出的自家存款帳戶 source_id，用於精準對應；只含雜湊，不含完整帳號。",
+        "is_manual": "是否為手動記錄使用的虛擬帳戶（0 否、1 是）；此類帳戶沒有餘額、不同步，也不參與轉帳或沖銷自動配對，且不計入資產與淨值。"
       }
     },
     "bank_account_payment_accounts": {

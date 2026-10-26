@@ -52,6 +52,13 @@ export interface PaymentAccountInput {
   paymentAccountId: string | null;
 }
 
+/** 手動記錄的外幣資訊：`amount` 為原幣金額，`rate` 為每 1 單位原幣折合台幣。 */
+export interface ManualActivityFx {
+  currency: string;
+  amount: number;
+  rate: number;
+}
+
 export interface BankTransactionResponse {
   id: string;
   connectorId: string;
@@ -72,6 +79,10 @@ export interface BankTransactionResponse {
   counterparty?: string | null;
   status: BankTransactionStatus;
   calculationPreference?: number | null;
+  /** 手動記錄（掛在 is_manual 虛擬帳戶底下）；前端以此判斷可否編輯、刪除。 */
+  manual: boolean;
+  /** 手動記錄的原幣資訊（僅紀錄用，入帳金額已是台幣）；沒有外幣或非手動記錄時省略。 */
+  manualFx?: ManualActivityFx | null;
   excludedFromCalculation: boolean;
   classification?: {
     categoryId: string;

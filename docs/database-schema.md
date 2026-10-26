@@ -11,7 +11,7 @@
 - Tables：35
 - Explicit indexes：47
 - Other objects：0
-- Migrations：63
+- Migrations：64
 
 ## Tables
 
@@ -20,7 +20,7 @@
 | [`ai_classification_settings`](#ai_classification_settings) | AI 自動分類的單列設定、掃描進度與每日呼叫用量。 | 18 | 0 | 0 |
 | [`ai_classifications`](#ai_classifications) | AI 對單筆銀行交易的分類判斷結果。 | 7 | 1 | 1 |
 | [`bank_account_payment_accounts`](#bank_account_payment_accounts) | 使用者手動指定的信用卡或貸款扣款帳戶，優先於銀行提供的自動扣繳帳戶。 | 4 | 0 | 0 |
-| [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 23 | 1 | 1 |
+| [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 24 | 1 | 1 |
 | [`bank_balance_snapshots`](#bank_balance_snapshots) | 帳戶在特定時間點的餘額快照，供資產總值與歷史圖表計算。 | 19 | 1 | 2 |
 | [`bank_transaction_preferences`](#bank_transaction_preferences) | 使用者對銀行交易計算方式的個別偏好。 | 4 | 1 | 1 |
 | [`bank_transactions`](#bank_transactions) | 銀行帳戶、信用卡與其他存款型連接器同步回來的交易明細。 | 19 | 3 | 7 |
@@ -223,6 +223,7 @@ CREATE TABLE bank_account_payment_accounts (
 | 21 | `autopay_bank_code` | 自動扣繳帳戶的金融機構代碼；銀行頁面未提供或無法辨識時為 NULL。 | TEXT | YES | — | — | — |
 | 22 | `autopay_account_last4` | 自動扣繳帳戶的帳號末四碼；不保存完整帳號。 | TEXT | YES | — | — | — |
 | 23 | `autopay_account_source_id` | 來源以完整帳號算出的自家存款帳戶 source_id，用於精準對應；只含雜湊，不含完整帳號。 | TEXT | YES | — | — | — |
+| 24 | `is_manual` | 是否為手動記錄使用的虛擬帳戶（0 否、1 是）；此類帳戶沒有餘額、不同步，也不參與轉帳或沖銷自動配對，且不計入資產與淨值。 | INTEGER | NO | 0 | — | — |
 
 #### Foreign keys
 
@@ -261,7 +262,7 @@ CHECK (
   loan_category IS NULL
   OR loan_category IN ('housing', 'personal', 'other')
 ), autopay_status TEXT
-  CHECK (autopay_status IS NULL OR autopay_status IN ('enabled', 'none')), autopay_bank_code TEXT, autopay_account_last4 TEXT, autopay_account_source_id TEXT,
+  CHECK (autopay_status IS NULL OR autopay_status IN ('enabled', 'none')), autopay_bank_code TEXT, autopay_account_last4 TEXT, autopay_account_source_id TEXT, is_manual INTEGER NOT NULL DEFAULT 0 CHECK (is_manual IN (0, 1)),
   UNIQUE (connector_id, source_id)
 )
 ```
@@ -1915,6 +1916,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0063_payment_due_notification.sql`](../apps/worker/migrations/0063_payment_due_notification.sql)
 - [`0064_payment_accounts.sql`](../apps/worker/migrations/0064_payment_accounts.sql)
 - [`0065_ubot_sync_job.sql`](../apps/worker/migrations/0065_ubot_sync_job.sql)
+- [`0066_manual_activity.sql`](../apps/worker/migrations/0066_manual_activity.sql)
 
 ## 程式碼導覽
 

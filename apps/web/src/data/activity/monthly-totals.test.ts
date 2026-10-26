@@ -18,6 +18,7 @@ function transaction(
     currency: "TWD",
     status: "posted",
     excludedFromCalculation: false,
+    manual: false,
     ...input,
   };
 }

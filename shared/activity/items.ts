@@ -1,3 +1,4 @@
+import type { ManualActivityFx } from "../api/bank";
 import type { ActivityItem } from "./types";
 import { compareActivityItems, isActivityDateTime } from "./list";
 import type {
@@ -19,6 +20,8 @@ export interface ActivityTransaction extends MatchingTransaction {
   accountLast4?: string | null;
   status: string;
   excludedFromCalculation?: boolean;
+  manual?: boolean;
+  manualFx?: ManualActivityFx | null;
   classification?: {
     label: string;
     categoryId: string;
@@ -63,18 +66,21 @@ export function buildActivityItems(
     ...activityBankTransactions.map((t) => {
       const account = accounts.get(t.accountId);
       const matchedInvoice = invoiceMatches.transactionToInvoice.get(t.id);
+      const isManual = t.manual === true;
       const isCard =
-        account?.accountType === "credit" || t.accountType === "credit";
+        !isManual &&
+        (account?.accountType === "credit" || t.accountType === "credit");
       const hasAuthorizationTime = isActivityDateTime(
         t.authorizedAt ?? undefined,
       );
       const invoiceTime = isActivityDateTime(matchedInvoice?.invoiceDate)
         ? matchedInvoice.invoiceDate
         : undefined;
-      const institutionName =
-        t.institutionName ??
-        account?.institutionName ??
-        (isCard ? "信用卡" : "銀行");
+      const institutionName = isManual
+        ? "手動記錄"
+        : (t.institutionName ??
+          account?.institutionName ??
+          (isCard ? "信用卡" : "銀行"));
       const accountLast4 = t.accountLast4 ?? account?.accountLast4;
       const accountName =
         t.accountName ??
@@ -82,7 +88,11 @@ export function buildActivityItems(
         (accountLast4 ? `末四碼 ${accountLast4}` : "");
       return {
         id: t.id,
-        source: isCard ? ("card" as const) : ("bank" as const),
+        source: isManual
+          ? ("manual" as const)
+          : isCard
+            ? ("card" as const)
+            : ("bank" as const),
         date: invoiceTime ?? t.authorizedAt ?? t.postedDate ?? "",
         dateHasTime: hasAuthorizationTime || invoiceTime != null,
         title: t.description ?? t.counterparty ?? "銀行交易",
@@ -91,7 +101,7 @@ export function buildActivityItems(
           matchedInvoice?.sellerName,
           matchedInvoice ? "電子發票" : undefined,
           accountLast4,
-          isCard ? "信用卡" : "銀行",
+          isManual ? "手動記錄" : isCard ? "信用卡" : "銀行",
         ]
           .filter(Boolean)
           .join(" "),
@@ -109,6 +119,7 @@ export function buildActivityItems(
         classificationRuleId: t.classification?.ruleId,
         refund: t.classification?.refund,
         transactionId: t.id,
+        manualFx: t.manualFx,
         invoiceId: matchedInvoice?.id,
         invoiceAmount: matchedInvoice?.amount,
         excludedFromCalculation: t.excludedFromCalculation,

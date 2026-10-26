@@ -6,7 +6,7 @@ import {
   invoices,
   isLatestInvestmentPosition,
 } from "../../db";
-import { and, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 export async function loadDashboardSummary(db: D1Database) {
   const database = createDrizzle(db);
@@ -36,6 +36,7 @@ export async function loadDashboardSummary(db: D1Database) {
           and(
             isNull(bankAccounts.canonicalAccountId),
             isNull(bankAccounts.inactiveAt),
+            eq(bankAccounts.isManual, 0),
           ),
         )
         .get(),
@@ -58,6 +59,7 @@ export async function loadDashboardSummary(db: D1Database) {
             )
             FROM bank_accounts account
             WHERE account.canonical_account_id IS NULL AND account.inactive_at IS NULL
+              AND account.is_manual = 0
           )`,
         )
         .get(),

@@ -1,6 +1,8 @@
+import type { ManualActivityFx } from "../api/bank";
+
 export interface ActivityItem {
   id: string;
-  source: "bank" | "card" | "investment" | "invoice";
+  source: "bank" | "card" | "investment" | "invoice" | "manual";
   date: string;
   /** Only true when the selected source value contains a reliable timestamp. */
   dateHasTime?: boolean;
@@ -28,6 +30,8 @@ export interface ActivityItem {
   excludedFromCalculation?: boolean;
   /** A merchant refund that reduces its category's expense. */
   refund?: boolean;
+  /** 手動記錄的原幣資訊，編輯時帶入；入帳金額已是台幣。 */
+  manualFx?: ManualActivityFx | null;
   invoiceId?: string;
   invoiceAmount?: number;
   status: string;

@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { buildActivityItems } from "@taiwan-fin-hub/shared";
+  import {
+    buildActivityItems,
+    isActivityCashSource,
+  } from "@taiwan-fin-hub/shared";
   import { onMount, tick } from "svelte";
   import {
     createMutation,
@@ -15,6 +18,7 @@
     Unlink2,
     ArrowLeft,
     ChevronRight,
+    Plus,
     X,
   } from "@lucide/svelte";
   import Button from "@/shared/ui/Button.svelte";
@@ -33,6 +37,8 @@
   import CalculationUpdateDialog from "./components/CalculationUpdateDialog.svelte";
   import CategoryUpdateDialog from "./components/CategoryUpdateDialog.svelte";
   import CategoryDetailSheet from "./components/CategoryDetailSheet.svelte";
+  import ManualActivityDialog from "./components/ManualActivityDialog.svelte";
+  import ManualSection from "./components/ManualSection.svelte";
   import type { ApiClient } from "@/shared/api/client";
   import { queryKeys } from "@/shared/api/query-keys";
   import { exchangeRatesQuery } from "@/data/assets/queries";
@@ -338,6 +344,8 @@
     transactionId?: string;
   } | null>(null);
   let mappingNotice = $state("");
+  // 手動記錄視窗：item 為 null 是新增，否則編輯該筆手動記錄。
+  let manualDialog = $state<{ item: ActivityItem | null } | null>(null);
   let detailKey = $state<string | null>(null);
   const fallbackCategories = [
     { id: "salary", label: "薪資" },
@@ -448,9 +456,7 @@
     rawItems.filter(
       (item) =>
         activityDateKey(item).startsWith(selectedMonth) &&
-        (item.source === "bank" ||
-          item.source === "card" ||
-          item.source === "invoice"),
+        isActivityCashSource(item),
     ),
   );
   const missingMonthlyRates = $derived([
@@ -460,7 +466,7 @@
           (item) =>
             !item.excludedFromCalculation &&
             item.amount != null &&
-            ["bank", "card", "invoice"].includes(item.source) &&
+            isActivityCashSource(item) &&
             activityAmountTwd(item, rateValues) == null,
         )
         .map((item) => item.currency),
@@ -484,10 +490,7 @@
     cashFlowMonths.map((month) => {
       const items = rawItems.filter(
         (item) =>
-          activityDateKey(item).startsWith(month) &&
-          (item.source === "bank" ||
-            item.source === "card" ||
-            item.source === "invoice"),
+          activityDateKey(item).startsWith(month) && isActivityCashSource(item),
       );
       return {
         month,
@@ -719,6 +722,7 @@
       card: "信用卡",
       investment: "投資",
       invoice: "發票",
+      manual: "手動",
     }[item.source];
     return item.source !== "invoice" && item.invoiceId
       ? `${label}＋發票`
@@ -891,6 +895,16 @@
           >{/if}
       </div>
       <Button type="submit" class="h-12">搜尋</Button>
+      <Button
+        type="button"
+        variant="outline"
+        class="h-12 shrink-0 px-3"
+        aria-label="新增手動記錄"
+        onclick={() => (manualDialog = { item: null })}
+        ><Plus class="size-5" /><span class="hidden sm:inline"
+          >新增手動記錄</span
+        ></Button
+      >
     </form>
     {#if searching}
       <section class="grid min-w-0 gap-3" aria-label="全歷史搜尋">
@@ -955,7 +969,7 @@
             <p class="mt-1 text-caption leading-6 text-ink/70">
               {activitySummaryIncomplete
                 ? "資料尚未完整載入"
-                : "銀行與信用卡活動，含未配對發票，不計入已排除活動"}
+                : "銀行、信用卡與手動記錄，含未配對發票，不計入已排除活動"}
             </p>
           </div>
           <Select
@@ -1155,8 +1169,8 @@
             <span class="text-caption font-semibold text-subtle">來源</span>
             <TabsList
               aria-label="活動來源"
-              class="grid h-auto w-full grid-cols-4"
-              >{#each [{ key: "all", label: "全部" }, { key: "bank", label: "銀行" }, { key: "card", label: "信用卡" }, { key: "invoice", label: "發票" }] as filter (filter.key)}<TabsTrigger
+              class="grid h-auto w-full grid-cols-5"
+              >{#each [{ key: "all", label: "全部" }, { key: "bank", label: "銀行" }, { key: "card", label: "信用卡" }, { key: "invoice", label: "發票" }, { key: "manual", label: "手動" }] as filter (filter.key)}<TabsTrigger
                   class="min-h-9 min-w-0 px-1 text-caption md:text-sm"
                   active={source === filter.key}
                   onclick={() => (source = filter.key as ActivitySourceFilter)}
@@ -1512,7 +1526,9 @@
               <div class="mt-3 grid gap-3">
                 {#if transaction}<div class="rounded-xl bg-steel/10 p-4">
                     <p class="text-caption font-semibold text-steel">
-                      銀行／信用卡原始名稱
+                      {detailItem.source === "manual"
+                        ? "手動記錄名稱"
+                        : "銀行／信用卡原始名稱"}
                     </p>
                     <p class="mt-1 break-words font-semibold">
                       {mappingMerchant(transaction)}
@@ -1655,6 +1671,14 @@
                         handleCalculationChange(detailItem, event)}
                     />
                   </label>{/if}
+
+                {#if detailItem.source === "manual"}<ManualSection
+                    {api}
+                    item={detailItem}
+                    onEdit={(item) => (manualDialog = { item })}
+                    {closeDetail}
+                    notify={showMappingNotice}
+                  />{/if}
 
                 {#if invoice}<div
                     class="flex items-center justify-between gap-4 py-4"
@@ -1926,6 +1950,18 @@
             </p>{/if}
         </div>
       </div>{/if}
+    {#if manualDialog}
+      <ManualActivityDialog
+        {api}
+        categories={categoryOptions}
+        item={manualDialog.item}
+        onClose={() => (manualDialog = null)}
+        onSaved={(message) => {
+          manualDialog = null;
+          showMappingNotice(message);
+        }}
+      />
+    {/if}
     {#if mappingNotice}<div
         aria-live="polite"
         class="fixed left-1/2 top-20 z-[85] flex w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 items-center gap-3 rounded-xl bg-inverse px-4 py-3 text-sm font-semibold text-white shadow-xl"
