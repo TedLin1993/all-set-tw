@@ -183,7 +183,6 @@ export async function safelySendScheduledSyncSummary(
   env: Env,
   events: SyncNotificationEvent[],
 ) {
-  if (events.length === 0) return;
   const status = summaryStatus(events);
   try {
     const preferences = await getNotificationPreferences(env.DB);

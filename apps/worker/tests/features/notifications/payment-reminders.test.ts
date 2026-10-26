@@ -495,6 +495,25 @@ describe("scheduledSummaryNotification", () => {
       ),
     ).toBeNull();
   });
+
+  it("批次成員都被略過時，只有緊急提醒送出，且不寫成同步完成", () => {
+    const all = { ...preferences, success: true };
+    const maturities = [{ institution: "王道銀行", count: 1 }];
+    expect(scheduledSummaryNotification(all, [], [], maturities)).toEqual({
+      title: "1 筆定存今天到期",
+      body: "王道銀行定存今天到期。",
+      url: "/#/overview",
+      tag: "sync-default-schedule-payment-due",
+    });
+    expect(
+      scheduledSummaryNotification(
+        all,
+        [],
+        [reminder({ accountId: "a", daysUntilDue: 3 })],
+      ),
+    ).toBeNull();
+    expect(scheduledSummaryNotification(all, [], [])).toBeNull();
+  });
 });
 
 describe("collectMaturityReminders", () => {

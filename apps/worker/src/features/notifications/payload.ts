@@ -133,6 +133,7 @@ export function isUrgentPaymentReminder(reminder: PaymentReminder) {
  * 繳款與定存到期提醒附在同一則推播，不另外送出，且只寫機構與天數、不含金額。
  * 定存只收今天到期，一律視為緊急。
  * 同步狀態的通知被關閉、只因緊急繳款而送出時，不帶入該同步狀態的內容。
+ * 批次成員都被略過而沒有同步結果時，只有緊急提醒會送出，且只含提醒內容。
  */
 export function scheduledSummaryNotification(
   preferences: NotificationPreferences,
@@ -142,15 +143,16 @@ export function scheduledSummaryNotification(
 ): PushNotificationPayload | null {
   const included = preferences.paymentDue ? reminders : [];
   const includedMaturities = preferences.paymentDue ? maturities : [];
+  const synced = events.length > 0;
   const status = summaryStatus(events);
-  if (shouldNotify(preferences, status))
+  if (synced && shouldNotify(preferences, status))
     return scheduledSyncSummaryPayload(events, included, includedMaturities);
   if (
     !included.some(isUrgentPaymentReminder) &&
     includedMaturities.length === 0
   )
     return null;
-  if (status === "success")
+  if (synced && status === "success")
     return scheduledSyncSummaryPayload(events, included, includedMaturities);
   const payment = reminderSummary(included, includedMaturities)!;
   return {
