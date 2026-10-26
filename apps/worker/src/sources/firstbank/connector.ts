@@ -111,6 +111,8 @@ type CapturedCardResponses = Partial<Record<CardPayloadKey, unknown>> & {
   noCreditCard?: boolean;
   cardMemberLoggedOut?: boolean;
   noBillDates?: boolean;
+  /** 各查詢目前的嘗試輪次；未設定視為第 1 輪。 */
+  queryAttempts?: Partial<Record<CardPayloadKey, number>>;
 };
 
 type DepositResponseCapture = {
@@ -1036,6 +1038,9 @@ async function collectFirstbankPayloads(
 ): Promise<FirstbankPayloads> {
   const frame = await waitForAuthenticatedFrame(page);
   const captured: CapturedCardResponses = {};
+  // 信用卡查詢重試時，以請求送出當下的輪次判斷回應是否屬於本輪，避免前一輪
+  // 晚到的回應讓重試提早結束或與本輪結果串接。
+  const cardRequestAttempts = new WeakMap<object, number>();
   const responseTasks: Promise<void>[] = [];
   const depositResponse = createDepositResponseCapture();
   let transactionResponse = createTransactionResponseCapture();
@@ -1057,6 +1062,10 @@ async function collectFirstbankPayloads(
   >();
   const onPageRequest = (request: object) => {
     transactionPageRequestCaptures.set(request, transactionResponse);
+    const url = (request as { url?: () => string }).url?.();
+    const cardKey = url ? cardResponseKey(url) : undefined;
+    if (cardKey)
+      cardRequestAttempts.set(request, currentCardAttempt(captured, cardKey));
   };
   const cdp = await page.createCDPSession();
   try {
@@ -1269,7 +1278,12 @@ async function collectFirstbankPayloads(
       status: httpStatus(response),
       detail: key,
     });
-    const task = captureCardResponse(response, key, captured);
+    const task = captureCardResponse(
+      response,
+      key,
+      captured,
+      request ? cardRequestAttempts.get(request) : undefined,
+    );
     responseTasks.push(task);
     void task.catch(() => undefined);
   };
@@ -1455,14 +1469,22 @@ async function collectCardPayloads(
         step: `card:${query.key}`,
         isRetryable: (error) => error instanceof FirstbankCardQueryTimeoutError,
       },
-      () =>
-        collectCardPayload(
+      (attempt) => {
+        if (attempt > 1) {
+          delete captured[query.key];
+          captured.queryAttempts = {
+            ...captured.queryAttempts,
+            [query.key]: attempt,
+          };
+        }
+        return collectCardPayload(
           page,
           startFrame,
           query.dataFunc,
           query.key,
           captured,
-        ),
+        );
+      },
     );
   }
 }
@@ -1713,21 +1735,35 @@ async function captureCardResponse(
   response: BrowserResponse,
   key: CardPayloadKey,
   captured: CapturedCardResponses,
+  requestAttempt: number | undefined,
 ) {
   const status = httpStatus(response);
   if (status !== undefined && (status < 200 || status >= 300)) return;
+  // 讀取 body 期間可能已開始重試，存入前再確認仍是本輪請求。
+  const isCurrent = () =>
+    requestAttempt === undefined ||
+    requestAttempt === currentCardAttempt(captured, key);
   try {
-    storeCardResponse(captured, key, await response.json());
+    const payload = await response.json();
+    if (isCurrent()) storeCardResponse(captured, key, payload);
     return;
   } catch {
     try {
       const text = await response.text();
-      storeCardResponse(captured, key, JSON.parse(text) as unknown);
+      const payload = JSON.parse(text) as unknown;
+      if (isCurrent()) storeCardResponse(captured, key, payload);
     } catch {
       // A matching non-JSON response is ignored; parser must not receive an
       // invented payload that could look like a successful empty sync.
     }
   }
+}
+
+function currentCardAttempt(
+  captured: CapturedCardResponses,
+  key: CardPayloadKey,
+) {
+  return captured.queryAttempts?.[key] ?? 1;
 }
 
 // An empty bill date list only means there is no statement to query; whether

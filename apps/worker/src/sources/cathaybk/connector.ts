@@ -1283,6 +1283,8 @@ async function scrapeDomAccounts(
         const rowText = (el as HTMLElement).innerText?.trim() ?? "";
         if (rowText.includes("$") && rowText.length < 200) {
           const amounts = rowText.match(/\$([\d,]+)/g) ?? [];
+          // 有 $ 但沒有數字（例如 $—）時不能當成 0 元，交由 unparsedCount 使同步失敗。
+          if (!amounts[0]) break;
           const parseAmt = (s: string) =>
             parseInt(s.replace(/[$,]/g, ""), 10) || 0;
           results.push({
@@ -1292,7 +1294,7 @@ async function scrapeDomAccounts(
                 .split(text)[0]
                 ?.replace(/[●\s]+/g, " ")
                 .trim() || "臺幣存款",
-            balance: amounts[0] ? parseAmt(amounts[0]) : 0,
+            balance: parseAmt(amounts[0]),
             availableBalance: amounts[1] ? parseAmt(amounts[1]) : 0,
             currency: "TWD",
           });
