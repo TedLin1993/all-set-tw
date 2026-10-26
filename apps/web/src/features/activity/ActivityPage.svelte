@@ -1407,6 +1407,7 @@
     {#if !searching && categorySheet.key && categorySheet.isMobileViewport}
       <CategoryDetailSheet
         flow={categorySheet.key.flow}
+        category={categorySheet.key.category}
         slice={categorySheet.slice}
         {selectedMonth}
         monthLabel={selectedMonthLabel}

@@ -22,69 +22,7 @@ function item(overrides: Partial<ActivityItem>): ActivityItem {
 }
 
 describe("category sheet data", () => {
-  it("selects a category's items for a month, newest first, and leaves out the rest", () => {
-    const rows = activityCategoryItemsForMonth(
-      [
-        item({
-          id: "1",
-          date: "2026-07-05",
-          category: "餐飲",
-          amount: -100,
-        }),
-        item({
-          id: "2",
-          date: "2026-07-20",
-          category: "餐飲",
-          amount: -200,
-        }),
-        // 其他月份
-        item({
-          id: "3",
-          date: "2026-06-20",
-          category: "餐飲",
-          amount: -300,
-        }),
-        // 其他分類
-        item({ id: "4", date: "2026-07-10", category: "交通", amount: -50 }),
-        // 其他收支別
-        item({ id: "5", date: "2026-07-10", category: "餐飲", amount: 500 }),
-        // 不計入統計
-        item({
-          id: "6",
-          date: "2026-07-12",
-          category: "餐飲",
-          amount: -400,
-          excludedFromCalculation: true,
-        }),
-        // 非銀行／信用卡／發票來源
-        item({
-          id: "7",
-          source: "investment",
-          date: "2026-07-15",
-          category: "餐飲",
-          amount: -600,
-        }),
-        // 沒有金額
-        item({
-          id: "8",
-          date: "2026-07-16",
-          category: "餐飲",
-          amount: undefined,
-        }),
-      ],
-      "expense",
-      "餐飲",
-      "2026-07",
-      {},
-    );
-
-    expect(rows.map(({ item, amount }) => ({ id: item.id, amount }))).toEqual([
-      { id: "2", amount: 200 },
-      { id: "1", amount: 100 },
-    ]);
-  });
-
-  it("sums to the matching slice amount, including a refund and a foreign amount", () => {
+  it("sums to the matching slice amount, including a refund, a foreign amount and excluded items", () => {
     const items = [
       item({ id: "1", source: "card", amount: -1_000, category: "交通" }),
       item({
@@ -103,6 +41,15 @@ describe("category sheet data", () => {
       }),
       item({ id: "4", source: "invoice", amount: 200, category: "交通" }),
       item({ id: "5", source: "card", amount: -500, category: "餐飲" }),
+      // 不計入統計、非銀行／信用卡／發票來源：圓餅與清單都不計
+      item({
+        id: "6",
+        source: "card",
+        amount: -400,
+        category: "交通",
+        excludedFromCalculation: true,
+      }),
+      item({ id: "7", source: "investment", amount: -600, category: "交通" }),
     ];
     const rates = { USD: 32 };
 

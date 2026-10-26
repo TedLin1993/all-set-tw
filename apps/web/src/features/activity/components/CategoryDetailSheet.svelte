@@ -15,6 +15,7 @@
 
   let {
     flow,
+    category,
     slice,
     selectedMonth,
     monthLabel,
@@ -27,7 +28,12 @@
     onOpenDetail,
   }: {
     flow: ActivityFlow;
-    /** 對應這個分類、這個月份的圓餅切片；理論上一定找得到，型別上容許找不到以求穩健。 */
+    /** 卡片對應的分類名稱；標題、清單與 6 個月長條都依此計算。 */
+    category: string;
+    /**
+     * 這個分類、這個月份的圓餅切片。卡片開著時若把該分類唯一一筆改成其他分類或排除計算，
+     * 切片會消失；此時總額改用清單加總、佔比顯示 0，卡片其餘內容不受影響。
+     */
     slice: ActivityCategorySlice | undefined;
     selectedMonth: string;
     monthLabel: string;
@@ -41,28 +47,14 @@
     onOpenDetail: (item: ActivityItem) => void;
   } = $props();
 
-  const category = $derived(slice?.category ?? "");
   const rows = $derived(
-    slice
-      ? activityCategoryItemsForMonth(
-          items,
-          flow,
-          slice.category,
-          selectedMonth,
-          rates,
-        )
-      : [],
+    activityCategoryItemsForMonth(items, flow, category, selectedMonth, rates),
   );
   const series = $derived(
-    slice
-      ? activityCategorySixMonthSeries(
-          items,
-          flow,
-          slice.category,
-          monthKeys,
-          rates,
-        )
-      : [],
+    activityCategorySixMonthSeries(items, flow, category, monthKeys, rates),
+  );
+  const total = $derived(
+    slice?.amount ?? rows.reduce((sum, row) => sum + row.amount, 0),
   );
   const maxSeries = $derived(
     Math.max(...series.map((point) => point.amount), 1),
@@ -141,9 +133,7 @@
         <p
           class={`text-xl font-semibold tabular-nums ${flow === "income" ? "text-moss" : "text-coral"}`}
         >
-          {flowAmountSign(flow, slice?.amount ?? 0)}{formatCurrency(
-            Math.abs(slice?.amount ?? 0),
-          )}
+          {flowAmountSign(flow, total)}{formatCurrency(Math.abs(total))}
         </p>
         <p class="text-caption text-subtle">
           佔{flow === "income" ? "收入" : "支出"}
