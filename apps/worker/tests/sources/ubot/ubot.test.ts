@@ -371,6 +371,46 @@ describe("ubot financial data parsing", () => {
     });
   });
 
+  it("builds the latest bill from the account summary when statement detail has no header", () => {
+    const parsed = parseUbotCreditCardData(
+      {
+        cardList: {
+          ErCode_1: "0000",
+          CardTypeList: [{ CardNo: "4000-12XX-XXXX-8899", CardName: "範例卡" }],
+        },
+        summary: {
+          BillList: [
+            {
+              CurrBal: 83,
+              CTDPayAmt: 0,
+              UnsettleAmt: 0,
+              DueDate: "20261027",
+              HasBill: "Y",
+            },
+          ],
+        },
+        unbilled: { UnbillList: [] },
+        statements: [
+          { period: "202608", payload: { BillList: [] } },
+          { period: "202610", payload: { BillList: [] } },
+          { period: "202609", payload: { BillList: [] } },
+        ],
+      },
+      now,
+    );
+
+    expect(parsed.creditCardBills).toEqual([
+      expect.objectContaining({
+        sourceId: "credit:ubot:TWD:bill:2026-10",
+        billingPeriod: "2026-10",
+        statementAmount: 83,
+        paidAmount: 0,
+        isPaid: false,
+        paymentDueDate: "2026-10-27",
+      }),
+    ]);
+  });
+
   it("keeps the same sourceId when an unbilled purchase moves onto a statement", () => {
     const purchase = {
       CardNo: "8899",

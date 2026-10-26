@@ -575,7 +575,8 @@ export function parseUbotCreditCardData(
   const creditLimit = bill0 ? numberValue(bill0.CrLmt) : undefined;
   const availableCredit = bill0 ? numberValue(bill0.AvalCrLmt) : undefined;
   const currBal = bill0 ? numberValue(bill0.CurrBal) : undefined;
-  const ctdPayAmt = bill0 ? (numberValue(bill0.CTDPayAmt) ?? 0) : 0;
+  const summaryPaidAmt = bill0 ? numberValue(bill0.CTDPayAmt) : undefined;
+  const ctdPayAmt = summaryPaidAmt ?? 0;
   const unsettleAmt = bill0 ? numberValue(bill0.UnsettleAmt) : undefined;
   const hasBill = bill0
     ? stringValue(bill0.HasBill).trim().toUpperCase()
@@ -755,6 +756,43 @@ export function parseUbotCreditCardData(
         });
       }
     }
+  }
+
+  // 帳單明細未附表頭金額時，以帳務總覽的本期帳單補上最新一期，讓繳款提醒取得應繳金額。
+  const latestPeriod = (payloads.statements ?? [])
+    .map((statement) => normalizeBillingPeriod(statement.period))
+    .filter((period): period is string => Boolean(period))
+    .sort()
+    .at(-1);
+  if (
+    latestPeriod &&
+    hasBill === "Y" &&
+    currBal !== undefined &&
+    !creditCardBills.some((bill) => bill.billingPeriod === latestPeriod)
+  ) {
+    creditCardBills.push({
+      accountId: CREDIT_ACCOUNT_SOURCE_ID,
+      sourceId: `${CREDIT_ACCOUNT_SOURCE_ID}:bill:${latestPeriod}`,
+      billingPeriod: latestPeriod,
+      statementAmount: Math.max(currBal, 0),
+      ...(summaryPaidAmt !== undefined
+        ? { paidAmount: Math.max(summaryPaidAmt, 0) }
+        : {}),
+      isPaid:
+        currBal <= 0
+          ? true
+          : summaryPaidAmt !== undefined
+            ? summaryPaidAmt >= currBal
+            : undefined,
+      ...(paymentDueDate ? { paymentDueDate } : {}),
+      currency: "TWD",
+      raw: {
+        billingPeriod: latestPeriod,
+        source: "summary",
+        currentBalance: currBal,
+        paidAmount: summaryPaidAmt,
+      },
+    });
   }
 
   // 未出帳已請款明細 (NNBC010102)
