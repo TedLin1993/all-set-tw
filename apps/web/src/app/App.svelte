@@ -17,6 +17,7 @@
     navItems,
   } from "./navigation-config";
   import { parseViewHash, viewHash } from "./navigation";
+  import { recoverFromChunkLoadError } from "./chunk-reload";
   import { queryClient } from "./query-client";
   import type {
     DetailView,
@@ -119,6 +120,13 @@
       }
     };
     window.addEventListener("hashchange", handleHashChange);
+    // 部署後 lazy chunk 預先載入（<link rel="modulepreload">）失敗時 Vite 會丟這個事件；
+    // 跟下面 {:catch} 裡的動態 import 失敗共用同一套偵測＋自動重整（含防迴圈）邏輯。
+    const handlePreloadError = (event: Event) => {
+      event.preventDefault();
+      recoverFromChunkLoadError((event as { payload?: unknown }).payload);
+    };
+    window.addEventListener("vite:preloadError", handlePreloadError);
 
     void api
       .get<RuntimeInfo>("/api/runtime")
@@ -126,7 +134,10 @@
       .catch(() => (runtime = { demoMode: false }));
     moneyState.hidden =
       localStorage.getItem("taiwan-fin-hub-money-hidden") === "true";
-    return () => window.removeEventListener("hashchange", handleHashChange);
+    return () => {
+      window.removeEventListener("hashchange", handleHashChange);
+      window.removeEventListener("vite:preloadError", handlePreloadError);
+    };
   });
   function navigate(next: View, targetConnector?: ConnectorId) {
     view = next;
@@ -323,16 +334,21 @@
                 />
               {/if}
             {/if}
-          {:catch}
-            <section class="min-w-0 py-16" role="alert" aria-live="assertive">
-              <h2 class="text-base font-semibold tracking-tight">
-                頁面載入失敗
-              </h2>
-              <p class="mt-2 text-caption text-subtle">請再試一次。</p>
-              <Button class="mt-5" variant="outline" onclick={retryPage}
-                >重新載入</Button
-              >
-            </section>
+          {:catch error}
+            {@const recovered = recoverFromChunkLoadError(error)}
+            {#if recovered}
+              <EmptyState title="偵測到新版本" body="正在重新整理頁面。" />
+            {:else}
+              <section class="min-w-0 py-16" role="alert" aria-live="assertive">
+                <h2 class="text-base font-semibold tracking-tight">
+                  頁面載入失敗
+                </h2>
+                <p class="mt-2 text-caption text-subtle">請再試一次。</p>
+                <Button class="mt-5" variant="outline" onclick={retryPage}
+                  >重新載入</Button
+                >
+              </section>
+            {/if}
           {/await}
         {/if}
       </main>
