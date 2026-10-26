@@ -67,10 +67,25 @@ export function createCategorySheet({
     if (!key) return;
     if (!isCategorySelected(key.flow, key.category))
       chooseCategory(key.flow, key.category);
-    close();
-    void tick().then(() => {
-      getListElement()?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+    const scrollToList = () =>
+      void tick().then(() => {
+        getListElement()?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+    if (window.history.state?.categorySheet) {
+      // 返回是非同步的，瀏覽器還原捲動位置會蓋掉先做的捲動；等返回完成的下一個 frame 再捲到列表。
+      window.addEventListener(
+        "popstate",
+        () => requestAnimationFrame(scrollToList),
+        { once: true },
+      );
+      window.history.back();
+    } else {
+      key = null;
+      scrollToList();
+    }
   }
   return {
     get isMobileViewport() {
