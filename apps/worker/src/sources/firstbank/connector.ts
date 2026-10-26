@@ -23,6 +23,7 @@ import {
 } from "./protocol";
 import { isNoCreditCardMessage } from "../credit-card-status";
 import { reportSyncProgress } from "../sync-progress";
+import { retryPostLoginStep } from "../post-login-retry";
 
 const ORIGIN = "https://ibank.firstbank.com.tw";
 const FRAME_URL = `${ORIGIN}/NetBank/frame.html`;
@@ -269,6 +270,14 @@ class FirstbankCaptchaUnavailableError extends FirstbankConnectionError {
   constructor(message: string) {
     super(message);
     this.name = "FirstbankCaptchaUnavailableError";
+  }
+}
+
+/** 已點擊信用卡功能但查詢回應沒有在期限內出現；可在同一工作階段重新開啟功能頁。 */
+class FirstbankCardQueryTimeoutError extends FirstbankConnectionError {
+  constructor() {
+    super("第一銀行信用卡資料讀取失敗。");
+    this.name = "FirstbankCardQueryTimeoutError";
   }
 }
 
@@ -1438,12 +1447,22 @@ async function collectCardPayloads(
   let frame = preferred;
   for (const query of CARD_QUERIES) {
     if (captured.noCreditCard) break;
-    frame = await collectCardPayload(
-      page,
-      frame,
-      query.dataFunc,
-      query.key,
-      captured,
+    const startFrame = frame;
+    // 每次都重新導回信用卡首頁再點擊，頁面資源沒載入時可在同一工作階段重查。
+    frame = await retryPostLoginStep(
+      {
+        connectorId: "firstbank",
+        step: `card:${query.key}`,
+        isRetryable: (error) => error instanceof FirstbankCardQueryTimeoutError,
+      },
+      () =>
+        collectCardPayload(
+          page,
+          startFrame,
+          query.dataFunc,
+          query.key,
+          captured,
+        ),
     );
   }
 }
@@ -1490,7 +1509,7 @@ async function collectCardPayload(
       elapsedMs: Date.now() - startedAt,
       detail: key,
     });
-    throw new FirstbankConnectionError("第一銀行信用卡資料讀取失敗。");
+    throw new FirstbankCardQueryTimeoutError();
   }
   logFirstbankStage("card-query-complete", {
     path: framePathname(frame),

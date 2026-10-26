@@ -30,7 +30,7 @@
 - `apps/worker/src/features/sync/scheduling`：排程設定、到期工作選取、Queue dispatch 與預設排程批次。
 - `apps/worker/src/features/sync/reports`：同步報告 API、金融快照與活動變化明細。
 - `apps/worker/src/sources/<connectorId>`：依資料來源集中 `sync.ts`、connector、protocol、client 與專用配對／修復；電子發票與集保在此管理 Queue 分段同步與 `run-repository.ts`。
-- `apps/worker/src/sources` 根目錄：跨來源共用的 browser 工具、設定與存款 sourceId registry、純型別、來源錯誤代碼介面、同步回溯與自動驗證碼重試 policy。來源的 protocol／client 不依賴 Hono、D1、Worker `Env` 或同步流程。
+- `apps/worker/src/sources` 根目錄：跨來源共用的 browser 工具、設定與存款 sourceId registry、純型別、來源錯誤代碼介面、同步回溯、自動驗證碼重試與登入後步驟重試 policy。來源的 protocol／client 不依賴 Hono、D1、Worker `Env` 或同步流程。
 - `apps/worker/src/db`：跨後端 feature 共用的 D1 基礎能力與 Drizzle schema／client。
 - `apps/worker/migrations`、`apps/worker/schema-metadata.json`、`apps/worker/seeds`：資料庫遷移、schema 文件語意與 Demo 種子資料。
 - 根目錄 `shared/`：前後端共用的穩定型別、契約與純活動處理邏輯，一律從 `@taiwan-fin-hub/shared` 的 `index.ts` 引用；只有 Worker 使用的型別不放這裡。
