@@ -300,6 +300,49 @@ test("failed upload removes the temporary generated secrets file", async () => {
   );
 });
 
+test("Workers Builds counts only the first successful deployment", async (t) => {
+  t.mock.method(console, "log", () => {});
+  const requests = [];
+  const fetchPublic = async (url) => {
+    requests.push(url);
+    return new Response("ok");
+  };
+  const environment = { WORKERS_CI: "1", ACCESS_AUTO_SETUP: "false" };
+  const counterUrl =
+    "https://github.com/TedLin1993/all-set-tw/releases/download/deploy-counter/first-deploy.txt";
+
+  const failed = deploymentRunner({ failDeployment: true });
+  failed.options.environment = environment;
+  failed.options.fetchPublic = fetchPublic;
+  assert.equal(await deploy([], failed.options), 2);
+  assert.deepEqual(requests, []);
+
+  const runner = deploymentRunner();
+  runner.options.environment = environment;
+  runner.options.fetchPublic = fetchPublic;
+  assert.equal(await deploy([], runner.options), 0);
+  assert.equal(await deploy([], runner.options), 0);
+  assert.deepEqual(requests, [counterUrl]);
+
+  for (const options of [
+    { environment: {} },
+    { environment: { ...environment, DEPLOY_COUNTER: "false" } },
+  ]) {
+    const skipped = deploymentRunner();
+    Object.assign(skipped.options, options, { fetchPublic });
+    assert.equal(await deploy([], skipped.options), 0);
+  }
+  assert.deepEqual(requests, [counterUrl]);
+
+  const offline = deploymentRunner();
+  offline.options.environment = environment;
+  offline.options.fetchPublic = async () => {
+    throw new Error("network unavailable");
+  };
+  assert.equal(await deploy([], offline.options), 0);
+  assert.ok(offline.runtimeSecrets.VAPID_PUBLIC_KEY);
+});
+
 test("Cloudflare build token reaches resource preparation, migrations and deployment without printing the token", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cloudflare-build-auth-"));
   const { scripts } = JSON.parse(

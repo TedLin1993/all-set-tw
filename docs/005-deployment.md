@@ -51,6 +51,17 @@ Deploy to Cloudflare 會建立部署用 repository、D1 並設定 Workers Builds
 
 GUI 部署使用 Cloudflare Builds 原有的部署 token，不需另建 token 或授予 Access API 權限。
 
+### 首次部署計數
+
+為了解有多少人部署本專案，部署 script 會在 Worker 首次部署成功後，下載一次上游 repository 的公開 Release 檔案 [`deploy-counter/first-deploy.txt`](https://github.com/TedLin1993/all-set-tw/releases/tag/deploy-counter)。維護者只能從 GitHub 看到這個檔案的累計下載次數。
+
+- **觸發時機**：只在 Workers Builds（`WORKERS_CI=1`）中、Worker 尚未有 VAPID 金鑰且首次 `wrangler deploy` 成功後執行。之後的 build、自動更新與 Worker 執行期間都不會再發出請求。
+- **送出內容**：一般的 HTTPS GET，不附加 ID、Worker 名稱、帳號、設定或金融資料。請求從 Cloudflare 的建置環境發出，不是使用者的瀏覽器或裝置。
+- **失敗處理**：逾時（5 秒）或任何錯誤只會在 log 顯示 `[deploy] First-deployment count skipped.`，不影響部署。
+- **關閉方式**：在首次 build 執行前，於 Workers Builds 的 **Build variables and secrets** 設定 `DEPLOY_COUNTER=false`。本機部署與 `--dry-run` 不會計數。
+
+刪除 Worker 後重新部署，或手動刪除兩個 VAPID Secrets 後重新部署，會再計數一次。
+
 ## Cloudflare Access
 
 ### 自動設定登入保護

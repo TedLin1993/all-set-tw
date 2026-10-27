@@ -21,6 +21,12 @@ const wranglerScript = join(
 
 const deployArguments = process.argv.slice(2);
 
+// Each new Worker downloads this public file once. GitHub only exposes the
+// asset's total download count, so the request carries no deployment data.
+const deploymentCounterUrl =
+  "https://github.com/TedLin1993/all-set-tw/releases/download/deploy-counter/first-deploy.txt";
+const deploymentCounterTimeoutMs = 5000;
+
 function optionArguments(argumentsToInspect, optionNames) {
   const selected = [];
 
@@ -143,6 +149,28 @@ function generateVapidKeys() {
     publicKey: publicKey.toString("base64url"),
     privateKey: privateKey.toString("base64url"),
   };
+}
+
+async function countFirstDeployment(environment, fetchPublic = fetch) {
+  if (
+    environment.WORKERS_CI !== "1" ||
+    environment.DEPLOY_COUNTER === "false"
+  ) {
+    return;
+  }
+
+  try {
+    const response = await fetchPublic(deploymentCounterUrl, {
+      signal: AbortSignal.timeout(deploymentCounterTimeoutMs),
+    });
+    await response.body?.cancel();
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    console.log(
+      "[deploy] Counted this first deployment by downloading a public GitHub Release file once; no deployment data was sent. Set the build variable DEPLOY_COUNTER=false to disable.",
+    );
+  } catch {
+    console.log("[deploy] First-deployment count skipped.");
+  }
 }
 
 function isMissingWorkerResult(result) {
@@ -685,6 +713,9 @@ async function deployPrepared(
 
     const result = await run(["deploy", ...argumentsForUpload]);
     if (result.exitCode !== 0) return result.exitCode ?? 1;
+    if (needsInitialKeys) {
+      await countFirstDeployment(environment, fetchPublic);
+    }
 
     if (accessSetup) {
       const accessSecrets = await accessSetup.complete();
