@@ -50,7 +50,7 @@ export const investmentPositions = sqliteTable(
     unique().on(table.connectorId, table.sourceId, table.asOfDate),
     check(
       "investment_positions_check_1",
-      sql`asset_type IN ('stock', 'etf', 'fund')`,
+      sql`asset_type IN ('stock', 'etf', 'fund', 'crypto')`,
     ),
   ],
 );

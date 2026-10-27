@@ -1,4 +1,9 @@
-import { ChartCandlestick, Landmark, ReceiptText } from "@lucide/svelte";
+import {
+  Bitcoin,
+  ChartCandlestick,
+  Landmark,
+  ReceiptText,
+} from "@lucide/svelte";
 import type {
   ConnectorCapability,
   connectorList,
@@ -37,7 +42,9 @@ export function sourceIcon(id: ConnectorId) {
     ? ReceiptText
     : id === "tdcc"
       ? ChartCandlestick
-      : Landmark;
+      : id === "binance" || id === "max"
+        ? Bitcoin
+        : Landmark;
 }
 
 /**

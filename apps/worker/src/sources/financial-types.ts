@@ -7,7 +7,7 @@ import type { BankTransactionStatus } from "@taiwan-fin-hub/shared";
 export interface NetWorthHistoryPoint {
   date: string; // YYYY-MM-DD
   netWorth: number;
-  assetType?: "total" | "stock" | "fund";
+  assetType?: "total" | "stock" | "fund" | "crypto";
 }
 
 export interface CreditCardBill {
@@ -52,7 +52,7 @@ export interface InvoiceLineItem {
   raw?: unknown;
 }
 
-export type AssetType = "stock" | "etf" | "fund";
+export type AssetType = "stock" | "etf" | "fund" | "crypto";
 
 export interface InvestmentPosition {
   id: string;
@@ -79,7 +79,7 @@ export interface InvestmentTransaction {
   brokerName?: string;
   symbol?: string;
   name?: string;
-  assetType?: AssetType | "bond" | "unknown";
+  assetType?: "stock" | "etf" | "fund" | "bond" | "unknown";
   tradeDate?: string;
   postedDate?: string;
   transactionCode?: string;

@@ -45,7 +45,7 @@ export async function listNetWorthChartHistory(db: D1Database) {
     .where(
       sql`${history.source} = 'manual'
           OR (${history.source} = 'bank' AND ${history.assetType} = 'deposit')
-          OR ${history.assetType} IN ('stock', 'fund')`,
+          OR ${history.assetType} IN ('stock', 'fund', 'crypto')`,
     )
     .orderBy(
       asc(history.date),

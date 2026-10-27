@@ -17,6 +17,10 @@
     formatNumber,
     rateMap,
   } from "@/shared/format/financial";
+  import {
+    formatPositionQuantity,
+    positionAssetTypeLabel,
+  } from "./model/investment-display";
   let { api }: { api: ApiClient } = $props();
   const investments = createQuery(() => investmentsQuery(() => api));
   const trades = createQuery(() => investmentTransactionsQuery(() => api));
@@ -99,11 +103,7 @@
           <Search
             class="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-subtle"
           />
-          <Input
-            class="pl-9"
-            placeholder="搜尋股票／基金"
-            bind:value={search}
-          />
+          <Input class="pl-9" placeholder="搜尋持倉" bind:value={search} />
         </div>
       </div>
       {#if positions.length === 0}
@@ -128,9 +128,11 @@
                   <td class="py-3 pr-4 font-semibold">
                     {p.symbol ? `${p.symbol} ` : ""}{p.name}
                   </td>
-                  <td class="px-4 py-3">{p.assetType.toUpperCase()}</td>
+                  <td class="px-4 py-3"
+                    >{positionAssetTypeLabel(p.assetType)}</td
+                  >
                   <td class="px-4 py-3">
-                    {p.quantity == null ? "-" : formatNumber(p.quantity)}
+                    {formatPositionQuantity(p)}
                   </td>
                   <td class="px-4 py-3 text-right font-semibold tabular-nums">
                     {formatCurrency(
@@ -154,7 +156,8 @@
                   {p.symbol ? `${p.symbol} ` : ""}{p.name}
                 </p>
                 <p class="mt-1 text-caption text-subtle">
-                  {p.quantity ?? 0} 單位 · {p.assetType.toUpperCase()}
+                  {p.quantity == null ? 0 : formatPositionQuantity(p)} 單位 ·
+                  {positionAssetTypeLabel(p.assetType)}
                 </p>
               </div>
               <p class="shrink-0 font-medium tabular-nums text-steel">
