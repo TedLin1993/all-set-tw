@@ -40,11 +40,6 @@ export interface BankAccountResponse {
     last4: string | null;
     accountId: string | null;
   } | null;
-  /**
-   * 信用卡帳戶近期交易出現過的實體卡，依最近使用排序；只供顯示，
-   * 不代表完整的卡片清單（沒刷過的卡與不提供卡號的銀行不會出現）。
-   */
-  recentCards?: { last4: string; name: string | null }[];
 }
 
 /** `PUT /api/bank/accounts/:id/payment-account`；null 表示明確不指定扣款帳戶。 */

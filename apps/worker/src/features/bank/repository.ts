@@ -372,29 +372,6 @@ export async function listPaymentAccountSources(db: D1Database) {
     .all();
 }
 
-/** 信用卡帳戶在指定日期之後的交易中出現過的卡片（末四碼與卡名）。 */
-export async function listRecentCreditCards(db: D1Database, since: string) {
-  const usedOn = sql`substr(COALESCE(${txn.authorizedAt}, ${txn.postedDate}), 1, 10)`;
-  return createDrizzle(db)
-    .select({
-      accountId: txn.accountId,
-      last4: sql<string>`${txn.cardLast4}`.as("last4"),
-      name: txn.cardName,
-      lastUsedOn: sql<string>`max(${usedOn})`.as("lastUsedOn"),
-    })
-    .from(txn)
-    .innerJoin(account, eq(account.id, txn.accountId))
-    .where(
-      and(
-        sql`${account.accountType} = 'credit'`,
-        sql`${txn.cardLast4} IS NOT NULL`,
-        sql`${usedOn} >= ${since}`,
-      ),
-    )
-    .groupBy(txn.accountId, txn.cardLast4, txn.cardName)
-    .all();
-}
-
 export async function savePaymentAccountOverride(
   db: D1Database,
   accountId: string,
