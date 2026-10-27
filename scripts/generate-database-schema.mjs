@@ -70,6 +70,9 @@ function runWrangler(args) {
       env,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      // Wrangler 在非 TTY 環境會重複輸出 migration 進度表，輸出量隨 migration
+      // 數量成長；超過預設 1 MiB 上限時 execFileSync 會以 ENOBUFS 失敗。
+      maxBuffer: 64 * 1024 * 1024,
     });
   } catch (error) {
     const stderr = error?.stderr?.toString().trim();
