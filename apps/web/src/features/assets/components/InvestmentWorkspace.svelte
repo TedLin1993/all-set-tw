@@ -8,9 +8,16 @@
     formatDate,
     formatNumber,
   } from "@/shared/format/financial";
+  import InvestmentHoldings from "./InvestmentHoldings.svelte";
+  import {
+    CRYPTO_TRADES_NOTE,
+    hasCryptoPositions,
+    listedHoldingCount,
+  } from "@/data/investments/holding-groups";
 
   let {
     positions,
+    rates,
     trades,
     total,
     tradesPending = false,
@@ -18,6 +25,7 @@
     compact = false,
   }: {
     positions: InvestmentRow[];
+    rates: Readonly<Record<string, number>>;
     trades: InvestmentTransactionRow[];
     total: number;
     tradesPending?: boolean;
@@ -52,7 +60,7 @@
       <div>
         <p class="text-caption text-subtle">持倉</p>
         <p class="mt-2 text-lg font-medium tabular-nums">
-          {positions.length} 筆
+          {listedHoldingCount(positions, rates)} 筆
         </p>
       </div>
     </div>
@@ -84,57 +92,42 @@
       {#if positions.length === 0}
         <p class="py-8 text-center text-sm text-subtle">尚無投資持倉。</p>
       {:else}
+        <InvestmentHoldings {positions} {rates} />
+      {/if}
+    {:else}
+      {#if hasCryptoPositions(positions)}
+        <p class="pt-3 text-caption text-subtle">{CRYPTO_TRADES_NOTE}</p>
+      {/if}
+      {#if tradesPending}
+        <p class="py-8 text-center text-sm text-subtle">正在載入交易紀錄。</p>
+      {:else if tradesError}
+        <p class="py-8 text-center text-sm text-coral">
+          交易紀錄暫時無法載入。
+        </p>
+      {:else if trades.length === 0}
+        <p class="py-8 text-center text-sm text-subtle">尚無交易紀錄。</p>
+      {:else}
         <div class="divide-y divide-border">
-          {#each positions as position (position.id)}
+          {#each trades.slice(0, 100) as trade (trade.id)}
             <div
               class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3"
             >
               <div class="min-w-0">
                 <p class="break-words text-sm font-semibold">
-                  {position.symbol ? `${position.symbol} ` : ""}{position.name}
+                  {trade.name ?? trade.symbol ?? "投資交易"}
                 </p>
                 <p class="mt-1 text-caption text-subtle">
-                  {position.assetType.toUpperCase()} · {position.currency} ·
-                  {formatNumber(position.quantity ?? 0)} 單位
+                  {trade.transactionName ?? trade.transactionCode ?? "交易"} ·
+                  {formatDate(trade.tradeDate ?? trade.postedDate)}
                 </p>
               </div>
-              <p class="text-right text-sm font-medium tabular-nums text-steel">
-                {formatCurrency(
-                  (position.marketValue ?? 0) + (position.cashBalance ?? 0),
-                  position.currency,
-                )}
+              <p class="text-right text-sm font-semibold">
+                {tradeDisplay(trade)}
               </p>
             </div>
           {/each}
         </div>
       {/if}
-    {:else if tradesPending}
-      <p class="py-8 text-center text-sm text-subtle">正在載入交易紀錄。</p>
-    {:else if tradesError}
-      <p class="py-8 text-center text-sm text-coral">交易紀錄暫時無法載入。</p>
-    {:else if trades.length === 0}
-      <p class="py-8 text-center text-sm text-subtle">尚無交易紀錄。</p>
-    {:else}
-      <div class="divide-y divide-border">
-        {#each trades.slice(0, 100) as trade (trade.id)}
-          <div
-            class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3"
-          >
-            <div class="min-w-0">
-              <p class="break-words text-sm font-semibold">
-                {trade.name ?? trade.symbol ?? "投資交易"}
-              </p>
-              <p class="mt-1 text-caption text-subtle">
-                {trade.transactionName ?? trade.transactionCode ?? "交易"} ·
-                {formatDate(trade.tradeDate ?? trade.postedDate)}
-              </p>
-            </div>
-            <p class="text-right text-sm font-semibold">
-              {tradeDisplay(trade)}
-            </p>
-          </div>
-        {/each}
-      </div>
     {/if}
   </div>
 </div>

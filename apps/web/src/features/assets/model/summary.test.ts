@@ -99,6 +99,8 @@ describe("calculateAssetSummary", () => {
       investments: [
         {
           id: "investment",
+          connectorId: "tdcc",
+          sourceId: "investment",
           assetType: "stock",
           name: "測試持倉",
           marketValue: 10_000,
@@ -330,6 +332,8 @@ describe("calculateAssetSummary", () => {
         investments: [
           {
             id: "investment",
+            connectorId: "tdcc",
+            sourceId: "investment",
             assetType: "stock",
             name: "外幣持倉",
             marketValue: 0,

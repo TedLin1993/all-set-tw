@@ -8,12 +8,17 @@
     investmentTransactionsQuery,
   } from "@/data/investments/queries";
   import type { ApiClient } from "@/shared/api/client";
-  import { formatCompactTwd, formatCurrency } from "@/shared/format/financial";
+  import {
+    formatCompactTwd,
+    formatCurrency,
+    rateMap,
+  } from "@/shared/format/financial";
   import EmptyState from "@/shared/ui/EmptyState.svelte";
   import InstitutionDetails from "./components/InstitutionDetails.svelte";
   import InvestmentWorkspace from "./components/InvestmentWorkspace.svelte";
   import ManualAssets from "./ManualAssets.svelte";
   import { calculateAssetSummary } from "./model/summary";
+  import { listedHoldingCount } from "@/data/investments/holding-groups";
   import type { InstitutionAssetGroup } from "./model/summary";
 
   type LedgerItem =
@@ -42,6 +47,10 @@
       manualAssets: manual.data ?? [],
       rates: rates.data,
     }),
+  );
+  const rateLookup = $derived(rateMap(rates.data));
+  const holdingCount = $derived(
+    listedHoldingCount(investments.data ?? [], rateLookup),
   );
   const loading = $derived(
     bank.isPending ||
@@ -169,7 +178,7 @@
             {formatCurrency(summary.investmentTotal)}
           </p>
           <p class="mt-1 text-caption text-subtle">
-            {investments.data?.length ?? 0} 個持倉
+            {holdingCount} 個持倉
           </p>
         </div>
         <div class="min-w-0">
@@ -284,7 +293,7 @@
                 <span class="min-w-0">
                   <strong class="block text-sm">投資</strong>
                   <small class="mt-1 block text-caption text-subtle">
-                    {investments.data?.length ?? 0} 個持倉 · 持倉與交易紀錄
+                    {holdingCount} 個持倉 · 持倉與交易紀錄
                   </small>
                 </span>
                 <strong class="text-sm tabular-nums text-steel">
@@ -327,6 +336,7 @@
           {:else if activeItem?.kind === "investments"}
             <InvestmentWorkspace
               positions={investments.data ?? []}
+              rates={rateLookup}
               trades={trades.data ?? []}
               total={summary.investmentTotal}
               tradesPending={trades.isPending}
@@ -436,7 +446,7 @@
               <div class="min-w-0">
                 <h2 class="text-base font-semibold">投資</h2>
                 <p class="mt-1 text-caption text-subtle">
-                  {investments.data?.length ?? 0} 個持倉 · 交易紀錄
+                  {holdingCount} 個持倉 · 交易紀錄
                 </p>
               </div>
               <strong
@@ -447,6 +457,7 @@
             </div>
             <InvestmentWorkspace
               positions={investments.data ?? []}
+              rates={rateLookup}
               trades={trades.data ?? []}
               total={summary.investmentTotal}
               tradesPending={trades.isPending}

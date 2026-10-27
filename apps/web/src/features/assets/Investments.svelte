@@ -17,10 +17,12 @@
     formatNumber,
     rateMap,
   } from "@/shared/format/financial";
+  import InvestmentHoldings from "./components/InvestmentHoldings.svelte";
   import {
-    formatPositionQuantity,
-    positionAssetTypeLabel,
-  } from "./model/investment-display";
+    CRYPTO_TRADES_NOTE,
+    hasCryptoPositions,
+    listedHoldingCount,
+  } from "@/data/investments/holding-groups";
   let { api }: { api: ApiClient } = $props();
   const investments = createQuery(() => investmentsQuery(() => api));
   const trades = createQuery(() => investmentTransactionsQuery(() => api));
@@ -84,7 +86,7 @@
         <div class="min-w-0">
           <p class="text-caption text-subtle">持倉數</p>
           <p class="mt-2 text-lg font-medium tracking-tight tabular-nums">
-            {positions.length}
+            {listedHoldingCount(positions, rateValues)}
           </p>
         </div>
         <div class="min-w-0">
@@ -111,70 +113,22 @@
           {search.trim() ? "沒有符合的持倉。" : "尚無投資持倉。"}
         </p>
       {:else}
-        <div class="hidden overflow-x-auto md:block">
-          <table class="w-full text-left text-sm">
-            <thead class="border-y border-ink/8 text-caption text-subtle">
-              <tr>
-                <th class="py-3 pr-4">名稱</th>
-                <th class="px-4 py-3">類型</th>
-                <th class="px-4 py-3">數量</th>
-                <th class="px-4 py-3 text-right">市值</th>
-                <th class="py-3 pl-4">日期</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-ink/8">
-              {#each positions as p (p.id)}
-                <tr>
-                  <td class="py-3 pr-4 font-semibold">
-                    {p.symbol ? `${p.symbol} ` : ""}{p.name}
-                  </td>
-                  <td class="px-4 py-3"
-                    >{positionAssetTypeLabel(p.assetType)}</td
-                  >
-                  <td class="px-4 py-3">
-                    {formatPositionQuantity(p)}
-                  </td>
-                  <td class="px-4 py-3 text-right font-semibold tabular-nums">
-                    {formatCurrency(
-                      (p.marketValue ?? 0) + (p.cashBalance ?? 0),
-                      p.currency,
-                    )}
-                  </td>
-                  <td class="py-3 pl-4 text-caption text-subtle">
-                    {formatDate(p.asOfDate)}
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-        <div class="divide-y divide-ink/8 md:hidden">
-          {#each positions as p (p.id)}
-            <div class="flex items-center justify-between gap-3 py-3">
-              <div class="min-w-0">
-                <p class="truncate font-semibold">
-                  {p.symbol ? `${p.symbol} ` : ""}{p.name}
-                </p>
-                <p class="mt-1 text-caption text-subtle">
-                  {p.quantity == null ? 0 : formatPositionQuantity(p)} 單位 ·
-                  {positionAssetTypeLabel(p.assetType)}
-                </p>
-              </div>
-              <p class="shrink-0 font-medium tabular-nums text-steel">
-                {formatCurrency(
-                  (p.marketValue ?? 0) + (p.cashBalance ?? 0),
-                  p.currency,
-                )}
-              </p>
-            </div>
-          {/each}
-        </div>
+        <InvestmentHoldings
+          {positions}
+          rates={rateValues}
+          expandAll={search.trim() !== ""}
+        />
       {/if}
     </section>
 
     <section class="min-w-0 border-t border-ink/10 pt-5" aria-label="交易紀錄">
       <div class="flex flex-wrap items-center justify-between gap-3 pb-4">
-        <h2 class="text-base font-semibold">交易紀錄</h2>
+        <div class="min-w-0">
+          <h2 class="text-base font-semibold">交易紀錄</h2>
+          {#if hasCryptoPositions(investments.data ?? [])}
+            <p class="mt-1 text-caption text-subtle">{CRYPTO_TRADES_NOTE}</p>
+          {/if}
+        </div>
         <Select class="w-36" bind:value={tradeType}>
           <option value="all">全部類型</option>
           <option value="stock">股票</option>
