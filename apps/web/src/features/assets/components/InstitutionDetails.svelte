@@ -48,19 +48,6 @@
       : name;
   }
 
-  /** 合併各幣別的近期卡片，同一末四碼只列一次。 */
-  function cardGroupRecentCards(members: BankAccountRow[]) {
-    const cards = new Map<string, { last4: string; name: string | null }>();
-    for (const member of members)
-      for (const item of member.recentCards ?? [])
-        if (!cards.has(item.last4)) cards.set(item.last4, item);
-    return [...cards.values()]
-      .map((item) =>
-        item.name ? `${item.name} · ${item.last4}` : `末四碼 ${item.last4}`,
-      )
-      .join("、");
-  }
-
   function cardAmount(card: BankAccountRow) {
     return card.balance == null
       ? "剩餘應繳金額未取得"
@@ -318,7 +305,6 @@
       <div class="mt-2 divide-y divide-border">
         {#each cardGroups as members (members[0]!.id)}
           {@const card = members[0]!}
-          {@const recentCards = cardGroupRecentCards(members)}
           {#if members.length === 1}
             <div
               class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 py-3"
@@ -330,12 +316,6 @@
                 <p class="mt-1 text-caption text-subtle">
                   {cardPaymentLabel(card)}
                 </p>
-                {#if recentCards}
-                  <!-- 來自近 90 天交易的卡號末四碼與卡名，只供參考，不是完整卡片清單。 -->
-                  <p class="mt-1 text-caption text-subtle">
-                    近期使用的卡片：{recentCards}
-                  </p>
-                {/if}
                 {#if api}
                   <PaymentAccountSelect {api} account={card} {accounts} />
                 {/if}
@@ -350,11 +330,6 @@
               <p class="break-words text-sm font-semibold">
                 {cardGroupName(members)}
               </p>
-              {#if recentCards}
-                <p class="mt-1 text-caption text-subtle">
-                  近期使用的卡片：{recentCards}
-                </p>
-              {/if}
               <div class="mt-2 grid gap-3 border-l border-ink/10 pl-3">
                 {#each members as member (member.id)}
                   <div class="min-w-0">

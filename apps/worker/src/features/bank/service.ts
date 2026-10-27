@@ -8,7 +8,6 @@ import {
   listCreditCardBills,
   listCreditCardBillsInRange,
   listPaymentAccountSources,
-  listRecentCreditCards,
   savePaymentAccountOverride,
   type BankTransactionPageRow,
   type CreditCardBillPageCursor,
@@ -62,78 +61,8 @@ function loadClassificationRules(db: D1Database) {
   return settle(listEnabledClassificationRules(db));
 }
 
-export async function getBankAccounts(db: D1Database, now = new Date()) {
-  const [rows, cards] = await Promise.all([
-    listBankAccounts(db),
-    listRecentCreditCards(db, recentCardsSince(now)),
-  ]);
-  const recentCards = groupRecentCards(cards);
-  return (await presentBankAccounts(db, rows)).map((row) => ({
-    ...row,
-    // 只有信用卡帳戶有此欄位；undefined 在 JSON 回應中省略。
-    recentCards:
-      row.accountType === "credit"
-        ? (recentCards.get(row.id) ?? [])
-        : undefined,
-  }));
-}
-
-/** 近期卡片只看最近 90 天的交易，避免已換發或停用的舊卡一直列出。 */
-const RECENT_CARD_DAYS = 90;
-
-function recentCardsSince(now: Date) {
-  return new Date(now.getTime() - RECENT_CARD_DAYS * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
-}
-
-/**
- * 同一末四碼可能在部分交易缺卡名；採最近一次有卡名的名稱。
- * 依最近使用日期排序，同日再依末四碼。
- */
-function groupRecentCards(
-  rows: Awaited<ReturnType<typeof listRecentCreditCards>>,
-) {
-  const byAccount = new Map<
-    string,
-    Map<
-      string,
-      {
-        last4: string;
-        name: string | null;
-        lastUsedOn: string;
-        namedOn: string;
-      }
-    >
-  >();
-  for (const row of rows) {
-    const cards = byAccount.get(row.accountId) ?? new Map();
-    byAccount.set(row.accountId, cards);
-    const card = cards.get(row.last4) ?? {
-      last4: row.last4,
-      name: null,
-      lastUsedOn: "",
-      namedOn: "",
-    };
-    if (row.lastUsedOn > card.lastUsedOn) card.lastUsedOn = row.lastUsedOn;
-    if (row.name && row.lastUsedOn > card.namedOn) {
-      card.name = row.name;
-      card.namedOn = row.lastUsedOn;
-    }
-    cards.set(row.last4, card);
-  }
-  return new Map(
-    [...byAccount].map(([accountId, cards]) => [
-      accountId,
-      [...cards.values()]
-        .sort(
-          (a, b) =>
-            b.lastUsedOn.localeCompare(a.lastUsedOn) ||
-            a.last4.localeCompare(b.last4),
-        )
-        .map(({ last4, name }) => ({ last4, name })),
-    ]),
-  );
+export async function getBankAccounts(db: D1Database) {
+  return presentBankAccounts(db, await listBankAccounts(db));
 }
 
 type BankAccountRows = Awaited<ReturnType<typeof listBankAccounts>>;

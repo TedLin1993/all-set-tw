@@ -499,16 +499,6 @@ describe("同步資料完整性（隔離 D1）", () => {
         account,
         transaction("named", { cardLast4: "1111", cardName: "合成甲卡" }),
         transaction("suffix-only", { cardLast4: "3333" }),
-        // 同一張卡較晚的交易缺卡名，仍沿用最近一次出現的卡名。
-        transaction("named-later", {
-          cardLast4: "1111",
-          postedDate: "2026-09-20",
-        }),
-        // 超過 90 天的舊卡不列入近期使用的卡片。
-        transaction("old-card", {
-          cardLast4: "9999",
-          postedDate: "2026-05-01",
-        }),
       ],
     });
 
@@ -528,14 +518,6 @@ describe("同步資料完整性（隔離 D1）", () => {
       expect(row).not.toHaveProperty("cardLast4");
       expect(row).not.toHaveProperty("cardName");
     }
-
-    const card = (
-      await getBankAccounts(db, new Date("2026-10-01T00:00:00Z"))
-    ).find((row) => row.sourceId === accountId);
-    expect(card?.recentCards).toEqual([
-      { last4: "1111", name: "合成甲卡" },
-      { last4: "3333", name: null },
-    ]);
   });
 
   it("貸款資料缺值時保留既有非空類別、利率、開戶日與繳款欄位", async () => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ChevronDown } from "@lucide/svelte";
   import { useQueryClient } from "@tanstack/svelte-query";
   import type { BankAccountRow } from "@/data/bank/types";
   import type { ApiClient } from "@/shared/api/client";
@@ -78,6 +79,15 @@
     return [item.institutionName, accountLabel(item)].filter(Boolean).join(" ");
   }
 
+  /** 他行帳戶顯示完整名稱，收合時才看得出是哪家銀行。 */
+  function optionLabel(item: BankAccountRow) {
+    const name =
+      item.connectorId === account.connectorId
+        ? accountLabel(item)
+        : fullLabel(item);
+    return account.currency === "TWD" ? name : `${name}（${item.currency}）`;
+  }
+
   const autoLabel = $derived.by(() => {
     const bank = account.bankAutopay;
     // 與 Worker 相同：銀行未提供時，同銀行唯一的同幣別帳戶即為推測的扣款帳戶。
@@ -95,6 +105,11 @@
     return bank.last4
       ? `自動：找不到末四碼 ${bank.last4} 的帳戶`
       : "自動：找不到銀行提供的帳戶";
+  });
+  const selectedLabel = $derived.by(() => {
+    if (value === AUTO) return autoLabel;
+    const item = value === NONE ? null : accountsById.get(value);
+    return item ? optionLabel(item) : "不指定";
   });
 
   async function change(next: string) {
@@ -116,35 +131,37 @@
   }
 </script>
 
-<div
-  class="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-caption text-subtle"
->
-  <span aria-hidden="true">扣款帳戶</span>
-  <select
-    class="min-w-0 max-w-full cursor-pointer truncate rounded-sm border-0 bg-transparent py-0.5 pl-1 pr-6 text-caption text-ink underline decoration-ink/20 underline-offset-4 hover:bg-ink/4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait disabled:opacity-60"
-    aria-label="扣款帳戶"
-    {value}
-    disabled={saving}
-    onchange={(event) => change(event.currentTarget.value)}
-  >
-    <option value={AUTO}>{autoLabel}</option>
-    <option value={NONE}>不指定</option>
-    {#each groups as group (group.label)}
-      <optgroup label={group.label}>
-        {#each group.items as item (item.id)}
-          <!-- 他行帳戶顯示完整名稱，收合時才看得出是哪家銀行。 -->
-          <option value={item.id}
-            >{item.connectorId === account.connectorId
-              ? accountLabel(item)
-              : fullLabel(item)}{account.currency === "TWD"
-              ? ""
-              : `（${item.currency}）`}</option
-          >
+<div class="mt-1 min-w-0 text-caption text-subtle">
+  <div class="flex min-w-0 items-center gap-1.5">
+    <span class="shrink-0" aria-hidden="true">扣款帳戶</span>
+    <!-- 手機版全域將 select 設為 16px 以免 iOS 聚焦時放大；原生 select 透明覆蓋在小字標籤上，保留原生選單。 -->
+    <span
+      class="relative flex min-w-0 items-center gap-0.5 rounded-sm px-1 py-0.5 text-ink hover:bg-ink/4 has-[:disabled]:opacity-60 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+    >
+      <span class="truncate underline decoration-ink/20 underline-offset-4"
+        >{selectedLabel}</span
+      >
+      <ChevronDown class="size-3.5 shrink-0 text-subtle" aria-hidden="true" />
+      <select
+        class="absolute inset-0 size-full cursor-pointer opacity-0 disabled:cursor-wait"
+        aria-label="扣款帳戶"
+        {value}
+        disabled={saving}
+        onchange={(event) => change(event.currentTarget.value)}
+      >
+        <option value={AUTO}>{autoLabel}</option>
+        <option value={NONE}>不指定</option>
+        {#each groups as group (group.label)}
+          <optgroup label={group.label}>
+            {#each group.items as item (item.id)}
+              <option value={item.id}>{optionLabel(item)}</option>
+            {/each}
+          </optgroup>
         {/each}
-      </optgroup>
-    {/each}
-  </select>
+      </select>
+    </span>
+  </div>
   {#if error}
-    <span class="basis-full text-coral">{error}</span>
+    <p class="mt-1 text-coral">{error}</p>
   {/if}
 </div>

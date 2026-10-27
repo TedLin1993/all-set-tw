@@ -587,7 +587,7 @@ X-Next-Cursor: <opaque-cursor>
 因此優先減少每頁請求數與循序 D1 往返，再處理查詢本身。
 `wrangler.toml` 已開啟 `observability.traces`，可在 Workers trace 檢視 D1 與對外 fetch 的耗時。
 
-- 只需帳戶與餘額的頁面使用 `GET /api/bank/accounts`，不載入交易、轉帳配對與分類。信用卡帳戶另附 `recentCards`：以一次 GROUP BY 取近 90 天交易出現過的卡號末四碼與卡名（同一末四碼採最近一次有卡名的名稱），依最近使用排序；只供顯示，不是完整卡片清單。
+- 只需帳戶與餘額的頁面使用 `GET /api/bank/accounts`，不載入交易、轉帳配對與分類。
 - 資料來源卡片的設定狀態沿用 `/api/sync-jobs` 的 `configured`；開啟連接器詳情時才讀取 `/api/connectors/:connectorId/settings`。
 - `GET /api/activity/invoice-mappings` 接受與其他區間 API 相同的 `from`／`to` 月份。發票與交易必須同一個台北日才能連結，因此頁面只讀取區間內發票的決定；未帶區間時回傳全部。
 - 銀行交易分類時，分類規則與第一輪查詢並行，當頁交易的分類覆寫、轉帳候選與退費原消費候選並行；只有頁面外的候選需要再查一次覆寫。退費候選依信用卡帳戶走 `idx_bank_transactions_account_posted_date`，只在當頁有信用卡正數交易時查詢。
