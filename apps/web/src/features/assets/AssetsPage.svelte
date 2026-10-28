@@ -71,6 +71,10 @@
   const exchangeCount = $derived(
     new Set(cryptoPositions.map((row) => row.connectorId)).size,
   );
+  // 證券持倉都賣光時仍保留投資入口，交易紀錄分頁才看得到歷史交易。
+  const showInvestments = $derived(
+    securityPositions.length > 0 || (trades.data?.length ?? 0) > 0,
+  );
   const loading = $derived(
     bank.isPending ||
       investments.isPending ||
@@ -87,7 +91,7 @@
       label: group.institution,
       group,
     })),
-    ...(securityPositions.length > 0
+    ...(showInvestments
       ? ([{ key: "investments", kind: "investments", label: "投資" }] as const)
       : []),
     ...(cryptoPositions.length > 0
@@ -325,7 +329,7 @@
               {/each}
             {/if}
 
-            {#if securityPositions.length > 0}
+            {#if showInvestments}
               <button
                 class={`grid min-h-[68px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-ink/8 px-3 py-2 text-left transition hover:bg-ink/3 ${activeKey === "investments" ? "bg-ink/4 shadow-[inset_3px_0_0_var(--color-steel)]" : ""}`}
                 type="button"
@@ -509,7 +513,7 @@
           {/each}
         {/if}
 
-        {#if securityPositions.length > 0}
+        {#if showInvestments}
           <div class="border-t border-ink/10 pt-5">
             <div class="flex items-start justify-between gap-3 pb-1">
               <div class="min-w-0">

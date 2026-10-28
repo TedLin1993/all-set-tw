@@ -141,7 +141,7 @@ npm run verify:web
 NT$10（`INVESTMENT_DUST_THRESHOLD_TWD`，與後端加密貨幣同步共用）的持倉不列出，但計入小計並提示筆數。加密貨幣「無持倉」零值列（`sourceId` 為 `shared/investments.ts` 的 `EMPTY_INVESTMENT_SOURCE_ID`）不列出，
 交易所顯示「目前沒有持倉」；只有零值列時仍顯示加密貨幣大類。總覽與資產頁的持倉筆數都以 `listedHoldingCount` 計算，只算實際列出的持倉。小計為負（例如 MAX 借款大於資產）時以警示色顯示。
 
-交易紀錄只有集保 e 存摺提供，只出現在「投資」面板；「加密貨幣」面板只有持倉。
+交易紀錄只有集保 e 存摺提供，只出現在「投資」面板；證券持倉都賣出但仍有交易紀錄時，仍顯示「投資」入口。「加密貨幣」面板只有持倉。
 
 `/api/investments` 每頁最多 100 筆，`investmentsQuery` 以 `ApiClient.getAllPages` 依 `X-Has-More`／`X-Next-Cursor` 取完所有頁，避免持倉超過一頁時少算市值。
 
