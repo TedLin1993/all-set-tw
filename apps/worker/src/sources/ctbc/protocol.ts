@@ -100,7 +100,10 @@ type CreditCardGroup = {
   paymentDueDate?: string;
   statementClosingDate?: string;
   statementAmount?: number;
-  paidAmount?: number;
+  /** 前期應繳（prevBal）。 */
+  previousBalance?: number;
+  /** 本期結帳區間入帳的繳款（pmtAmt）；繳的是前一期帳單，不是本期的已繳金額。 */
+  cyclePayment?: number;
   adjustment?: number;
   raw: JsonRecord;
   bills: JsonRecord[];
@@ -180,32 +183,40 @@ export function parseCtbcData(
   );
   const cardAccounts = buildCreditCardAccounts(cardCurrencies, cardMetadata);
   bankAccounts.push(...cardAccounts);
+  const unbilledPayments =
+    payloads.unbilled === undefined
+      ? undefined
+      : unbilledPaymentTotals(unbilledTransactions);
   bankBalanceSnapshots.push(
     ...buildCreditCardSnapshots(
       selectedGroups,
       payloads.unbilled === undefined
         ? undefined
         : unbilledTotals(unbilledTransactions),
+      unbilledPayments,
       now,
     ),
   );
 
-  const creditCardBills = selectedGroups.map((group) => ({
-    accountId: creditCardSourceId(group.currency),
-    sourceId: `${creditCardSourceId(group.currency)}:bill:${group.billingPeriod}`,
-    billingPeriod: group.billingPeriod,
-    statementAmount: group.statementAmount,
-    minimumPayment: group.minimumPayment,
-    paidAmount: group.paidAmount,
-    isPaid:
-      group.statementAmount != null && group.paidAmount != null
-        ? group.paidAmount >= group.statementAmount
-        : undefined,
-    paymentDueDate: group.paymentDueDate,
-    statementClosingDate: group.statementClosingDate,
-    currency: group.currency,
-    raw: sanitizeCreditCardGroup(group),
-  }));
+  const creditCardBills = selectedGroups.map((group) => {
+    const paidAmount = billPaidAmount(group, selectedGroups, unbilledPayments);
+    return {
+      accountId: creditCardSourceId(group.currency),
+      sourceId: `${creditCardSourceId(group.currency)}:bill:${group.billingPeriod}`,
+      billingPeriod: group.billingPeriod,
+      statementAmount: group.statementAmount,
+      minimumPayment: group.minimumPayment,
+      paidAmount,
+      isPaid:
+        group.statementAmount != null && paidAmount != null
+          ? paidAmount >= group.statementAmount
+          : undefined,
+      paymentDueDate: group.paymentDueDate,
+      statementClosingDate: group.statementClosingDate,
+      currency: group.currency,
+      raw: sanitizeCreditCardGroup(group),
+    };
+  });
   const cardNames = uniqueCardNames(cardMetadata);
   bankTransactions.push(
     ...reconcileCreditCardLifecycle(
@@ -343,7 +354,8 @@ function parseCreditCardGroups(payload: unknown): CreditCardGroup[] {
         paymentDueDate: normalizeCardDate(summary.pmtExpDt) ?? undefined,
         statementClosingDate: normalizeCardDate(summary.billDt) ?? undefined,
         statementAmount: numberValue(summary.billAmt),
-        paidAmount: numberValue(summary.pmtAmt),
+        previousBalance: numberValue(summary.prevBal),
+        cyclePayment: numberValue(summary.pmtAmt),
         adjustment: numberValue(summary.adjust),
         raw: summary,
         bills: arrayAt(groupValue, "bills").filter(isRecord),
@@ -401,11 +413,7 @@ function buildCreditCardAccounts(
 function unbilledTotals(transactions: CtbcCardTransactionCandidate[]) {
   const totals = new Map<string, number>();
   for (const transaction of transactions) {
-    if (
-      transaction.amount > 0 &&
-      /繳款|扣繳|自扣|payment/i.test(transaction.description ?? "")
-    )
-      continue;
+    if (isCardPayment(transaction)) continue;
     totals.set(
       transaction.currency,
       (totals.get(transaction.currency) ?? 0) - transaction.amount,
@@ -414,9 +422,58 @@ function unbilledTotals(transactions: CtbcCardTransactionCandidate[]) {
   return totals;
 }
 
+/** 各幣別結帳後已入帳的繳款合計，用於判斷最新一期帳單是否已繳。 */
+function unbilledPaymentTotals(transactions: CtbcCardTransactionCandidate[]) {
+  const totals = new Map<string, number>();
+  for (const transaction of transactions) {
+    if (!isCardPayment(transaction)) continue;
+    totals.set(
+      transaction.currency,
+      (totals.get(transaction.currency) ?? 0) + transaction.amount,
+    );
+  }
+  return totals;
+}
+
+function isCardPayment(transaction: CtbcCardTransactionCandidate) {
+  return (
+    transaction.amount > 0 &&
+    /繳款|扣繳|自扣|payment/i.test(transaction.description ?? "")
+  );
+}
+
+/**
+ * 中信帳單的 pmtAmt 是該結帳區間入帳的繳款，用來繳前一期（prevBal）。
+ * 因此較早期別的已繳金額取下一期的 pmtAmt，且下一期 prevBal 須等於本期應繳，
+ * 對不上時為未知；最新一期尚無下一期帳單，改用本次未出帳明細中的繳款。
+ */
+function billPaidAmount(
+  group: CreditCardGroup,
+  groups: CreditCardGroup[],
+  unbilledPayments: Map<string, number> | undefined,
+) {
+  const next = groups
+    .filter(
+      (candidate) =>
+        candidate.currency === group.currency &&
+        candidate.billingPeriod > group.billingPeriod,
+    )
+    .sort(compareCreditCardGroups)
+    .at(-1);
+  if (!next)
+    return unbilledPayments === undefined
+      ? undefined
+      : (unbilledPayments.get(group.currency) ?? 0);
+  return next.previousBalance != null &&
+    next.previousBalance === group.statementAmount
+    ? next.cyclePayment
+    : undefined;
+}
+
 function buildCreditCardSnapshots(
   groups: CreditCardGroup[],
   unbilled: Map<string, number> | undefined,
+  unbilledPayments: Map<string, number> | undefined,
   now: Date,
 ) {
   const newestByCurrency = new Map<string, CreditCardGroup>();
@@ -426,7 +483,10 @@ function buildCreditCardSnapshots(
   }
   const snapshots: Array<Omit<BankBalanceSnapshot, "id" | "connectorId">> =
     Array.from(newestByCurrency.values()).map((group) => {
-      const remainingDue = remainingDueForGroup(group);
+      const remainingDue = remainingDueForGroup(
+        group,
+        unbilledPayments?.get(group.currency) ?? 0,
+      );
       const sourceId = creditCardSourceId(group.currency);
       return {
         accountId: sourceId,
@@ -439,7 +499,7 @@ function buildCreditCardSnapshots(
         availableBalance: undefined,
         paymentDueDate: group.paymentDueDate,
         statementClosingDate: group.statementClosingDate,
-        noPaymentNeeded: remainingDue == null ? undefined : remainingDue === 0,
+        noPaymentNeeded: remainingDue == null ? undefined : remainingDue <= 0,
         currency: group.currency,
         asOfAt: now.toISOString(),
         raw: sanitizeCreditCardGroup(group),
@@ -832,13 +892,11 @@ function parseCardMetadata(payload: unknown) {
   });
 }
 
-function remainingDueForGroup(group: CreditCardGroup) {
-  if (group.currentPayment != null) return Math.max(0, group.currentPayment);
-  if (group.statementAmount == null) return undefined;
-  return Math.max(
-    0,
-    group.statementAmount - (group.paidAmount ?? 0) + (group.adjustment ?? 0),
-  );
+/** 最新一期帳單應繳扣除結帳後已入帳的繳款；溢繳為負數。 */
+function remainingDueForGroup(group: CreditCardGroup, payments: number) {
+  const due = group.currentPayment ?? group.statementAmount;
+  if (due == null) return undefined;
+  return Math.max(0, due) - payments;
 }
 
 function sanitizeDepositAccount(account: CtbcDepositAccount) {
@@ -874,9 +932,9 @@ function sanitizeCreditCardGroup(group: CreditCardGroup) {
     minPmtAmt: group.minimumPayment,
     pmtExpDt: group.paymentDueDate,
     billDt: group.statementClosingDate,
-    prevBal: numberValue(group.raw.prevBal),
+    prevBal: group.previousBalance,
     billAmt: group.statementAmount,
-    pmtAmt: group.paidAmount,
+    pmtAmt: group.cyclePayment,
     adjust: group.adjustment,
   };
 }
