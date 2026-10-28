@@ -154,6 +154,30 @@ test.beforeEach(async ({ page }) => {
           currency: "TWD",
           asOfDate: "2026-08-08",
         },
+        {
+          id: "binance-btc",
+          connectorId: "binance",
+          sourceId: "BTC",
+          assetType: "crypto",
+          symbol: "BTC",
+          name: "Bitcoin",
+          quantity: 0.05,
+          marketValue: 3_000,
+          currency: "USD",
+          asOfDate: "2026-08-08",
+        },
+        {
+          id: "max-twd",
+          connectorId: "max",
+          sourceId: "TWD",
+          assetType: "crypto",
+          symbol: "TWD",
+          name: "新台幣",
+          quantity: 20_000,
+          marketValue: 20_000,
+          currency: "TWD",
+          asOfDate: "2026-08-08",
+        },
       ];
     else if (path === "/api/investment-transactions")
       body = [
@@ -251,6 +275,18 @@ test("資產清冊區分待繳與未知金額，並可新增手動資產", async
   ).toBeVisible();
   await page.getByRole("tab", { name: "交易紀錄", exact: true }).click();
   await expect(page.getByText("買進 · 2026/8/1")).toBeVisible();
+
+  // 加密貨幣是獨立大類，依交易所分區且不需展開；投資面板不含加密貨幣。
+  await ledger.getByRole("button", { name: /^加密貨幣/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "交易所持倉", exact: true }),
+  ).toBeVisible();
+  await expect(ledger.getByRole("region", { name: "Binance" })).toContainText(
+    "BTC",
+  );
+  await expect(
+    ledger.getByRole("region", { name: "MAX 交易所" }),
+  ).toContainText("NT$20,000");
 
   await ledger.getByRole("button", { name: /^其他資產/ }).click();
   await expect(ledger.getByRole("button", { name: /^自住房屋/ })).toBeVisible();

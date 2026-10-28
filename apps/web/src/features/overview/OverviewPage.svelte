@@ -28,7 +28,10 @@
     getHealthySyncJobs,
     getPendingSyncJobs,
   } from "@/data/connectors/sync-status";
-  import { listedHoldingCount } from "@/data/investments/holding-groups";
+  import {
+    isCryptoPosition,
+    listedHoldingCount,
+  } from "@/data/investments/holding-groups";
   import { investmentsQuery } from "@/data/investments/queries";
   import {
     invoiceTransactionMappingsQuery,
@@ -153,21 +156,31 @@
       0,
     ),
   );
-  const investmentTotal = $derived(
-    (investments.data ?? []).reduce(
+  // 加密貨幣與證券投資分開呈現，與資產頁和淨資產走勢一致。
+  const securityPositions = $derived(
+    (investments.data ?? []).filter((item) => !isCryptoPosition(item)),
+  );
+  const cryptoPositions = $derived(
+    (investments.data ?? []).filter(isCryptoPosition),
+  );
+  const positionTotal = (rows: typeof securityPositions) =>
+    rows.reduce(
       (sum, item) =>
         sum +
         toTwd((item.marketValue ?? 0) + (item.cashBalance ?? 0), item.currency),
       0,
-    ),
-  );
+    );
+  const investmentTotal = $derived(positionTotal(securityPositions));
+  const cryptoTotal = $derived(positionTotal(cryptoPositions));
   const manualTotal = $derived(
     (manualAssets.data ?? []).reduce(
       (sum, item) => sum + toTwd(item.value ?? 0, item.currency),
       0,
     ),
   );
-  const gross = $derived(depositTotal + investmentTotal + manualTotal);
+  const gross = $derived(
+    depositTotal + investmentTotal + cryptoTotal + manualTotal,
+  );
   const netWorth = $derived(gross - cardDebt - loanDebt);
   const allocation = $derived([
     {
@@ -178,8 +191,17 @@
     {
       label: "投資",
       value: investmentTotal,
-      detail: `${listedHoldingCount(investments.data ?? [], rateValues)} 個持倉`,
+      detail: `${listedHoldingCount(securityPositions, rateValues)} 個持倉`,
     },
+    ...(cryptoPositions.length > 0
+      ? [
+          {
+            label: "加密貨幣",
+            value: cryptoTotal,
+            detail: `${listedHoldingCount(cryptoPositions, rateValues)} 個持倉`,
+          },
+        ]
+      : []),
     {
       label: "其他資產",
       value: manualTotal,
@@ -588,7 +610,9 @@
         </p>
         <p>已扣除 {formatCurrency(loanDebt)} 貸款負債</p>
       </div>
-      <div class="mt-6 grid grid-cols-3 gap-3 md:gap-6">
+      <div
+        class={`mt-6 grid gap-3 md:gap-6 ${allocation.length > 3 ? "grid-cols-2 md:grid-cols-4" : "grid-cols-3"}`}
+      >
         {#each allocation as item (item.label)}
           <div class="min-w-0">
             <p class="text-caption text-subtle">

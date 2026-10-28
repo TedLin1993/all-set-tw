@@ -5,6 +5,7 @@ import {
   depositAccountCount,
 } from "@/data/bank/account-groups";
 import type { BankAccountRow, BankData } from "@/data/bank/types";
+import { isCryptoPosition } from "@/data/investments/holding-groups";
 import type { InvestmentRow } from "@/data/investments/types";
 import { missingExchangeRateCurrencies } from "@/shared/format/financial";
 
@@ -33,7 +34,9 @@ export interface AssetSummary {
   cards: BankAccountRow[];
   loans: BankAccountRow[];
   bankTotal: number;
+  /** 集保等證券持倉（不含加密貨幣）。 */
   investmentTotal: number;
+  cryptoTotal: number;
   manualTotal: number;
   cardDebt: number;
   loanDebt: number;
@@ -105,12 +108,17 @@ export function calculateAssetSummary({
     (sum, account) => sum + toTwd(account.balance ?? 0, account.currency),
     0,
   );
-  const investmentTotal = investments.reduce(
-    (sum, item) =>
-      sum +
-      toTwd((item.marketValue ?? 0) + (item.cashBalance ?? 0), item.currency),
-    0,
+  const positionTotal = (rows: InvestmentRow[]) =>
+    rows.reduce(
+      (sum, item) =>
+        sum +
+        toTwd((item.marketValue ?? 0) + (item.cashBalance ?? 0), item.currency),
+      0,
+    );
+  const investmentTotal = positionTotal(
+    investments.filter((item) => !isCryptoPosition(item)),
   );
+  const cryptoTotal = positionTotal(investments.filter(isCryptoPosition));
   const manualTotal = manualAssets.reduce(
     (sum, item) => sum + toTwd(item.value ?? 0, item.currency),
     0,
@@ -123,7 +131,7 @@ export function calculateAssetSummary({
     (sum, account) => sum - toTwd(account.balance ?? 0, account.currency),
     0,
   );
-  const grossAssets = bankTotal + investmentTotal + manualTotal;
+  const grossAssets = bankTotal + investmentTotal + cryptoTotal + manualTotal;
 
   const groups = bank.accounts.reduce<Record<string, BankAccountRow[]>>(
     (result, account) => {
@@ -226,6 +234,7 @@ export function calculateAssetSummary({
     loans,
     bankTotal,
     investmentTotal,
+    cryptoTotal,
     manualTotal,
     cardDebt,
     loanDebt,

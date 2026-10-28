@@ -14,11 +14,16 @@
     rateMap,
   } from "@/shared/format/financial";
   import EmptyState from "@/shared/ui/EmptyState.svelte";
+  import CryptoWorkspace from "./components/CryptoWorkspace.svelte";
+  import InvestmentHoldings from "./components/InvestmentHoldings.svelte";
   import InstitutionDetails from "./components/InstitutionDetails.svelte";
   import InvestmentWorkspace from "./components/InvestmentWorkspace.svelte";
   import ManualAssets from "./ManualAssets.svelte";
   import { calculateAssetSummary } from "./model/summary";
-  import { listedHoldingCount } from "@/data/investments/holding-groups";
+  import {
+    isCryptoPosition,
+    listedHoldingCount,
+  } from "@/data/investments/holding-groups";
   import type { InstitutionAssetGroup } from "./model/summary";
 
   type LedgerItem =
@@ -29,6 +34,7 @@
         group: InstitutionAssetGroup;
       }
     | { key: "investments"; kind: "investments"; label: "投資" }
+    | { key: "crypto"; kind: "crypto"; label: "加密貨幣" }
     | { key: "manual-assets"; kind: "manual-assets"; label: "其他資產" };
 
   let { api }: { api: ApiClient } = $props();
@@ -49,8 +55,21 @@
     }),
   );
   const rateLookup = $derived(rateMap(rates.data));
+  // 加密貨幣與集保等證券投資分成兩個大類；交易紀錄只有證券投資有。
+  const securityPositions = $derived(
+    (investments.data ?? []).filter((row) => !isCryptoPosition(row)),
+  );
+  const cryptoPositions = $derived(
+    (investments.data ?? []).filter(isCryptoPosition),
+  );
   const holdingCount = $derived(
-    listedHoldingCount(investments.data ?? [], rateLookup),
+    listedHoldingCount(securityPositions, rateLookup),
+  );
+  const cryptoHoldingCount = $derived(
+    listedHoldingCount(cryptoPositions, rateLookup),
+  );
+  const exchangeCount = $derived(
+    new Set(cryptoPositions.map((row) => row.connectorId)).size,
   );
   const loading = $derived(
     bank.isPending ||
@@ -68,8 +87,11 @@
       label: group.institution,
       group,
     })),
-    ...((investments.data?.length ?? 0) > 0
+    ...(securityPositions.length > 0
       ? ([{ key: "investments", kind: "investments", label: "投資" }] as const)
+      : []),
+    ...(cryptoPositions.length > 0
+      ? ([{ key: "crypto", kind: "crypto", label: "加密貨幣" }] as const)
       : []),
     ...((manual.data?.length ?? 0) > 0
       ? ([
@@ -148,7 +170,9 @@
           </p>
         </div>
       </div>
-      <div class="mt-6 grid grid-cols-3 gap-3 md:gap-6">
+      <div
+        class={`mt-6 grid gap-3 md:gap-6 ${cryptoPositions.length > 0 ? "grid-cols-2 md:grid-cols-4" : "grid-cols-3"}`}
+      >
         <div class="min-w-0">
           <p class="text-caption text-subtle">銀行與現金</p>
           <p
@@ -181,6 +205,24 @@
             {holdingCount} 個持倉
           </p>
         </div>
+        {#if cryptoPositions.length > 0}
+          <div class="min-w-0">
+            <p class="text-caption text-subtle">加密貨幣</p>
+            <p
+              class="mt-2 text-lg font-medium tracking-tight tabular-nums md:hidden"
+            >
+              {formatCompactTwd(summary.cryptoTotal)}
+            </p>
+            <p
+              class="mt-2 hidden break-all text-2xl font-semibold tracking-tight tabular-nums md:block"
+            >
+              {formatCurrency(summary.cryptoTotal)}
+            </p>
+            <p class="mt-1 text-caption text-subtle">
+              {cryptoHoldingCount} 個持倉
+            </p>
+          </div>
+        {/if}
         <div class="min-w-0">
           <p class="text-caption text-subtle">其他資產</p>
           <p
@@ -283,7 +325,7 @@
               {/each}
             {/if}
 
-            {#if (investments.data?.length ?? 0) > 0}
+            {#if securityPositions.length > 0}
               <button
                 class={`grid min-h-[68px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-ink/8 px-3 py-2 text-left transition hover:bg-ink/3 ${activeKey === "investments" ? "bg-ink/4 shadow-[inset_3px_0_0_var(--color-steel)]" : ""}`}
                 type="button"
@@ -298,6 +340,27 @@
                 </span>
                 <strong class="text-sm tabular-nums text-steel">
                   {formatCurrency(summary.investmentTotal)}
+                </strong>
+              </button>
+            {/if}
+
+            {#if cryptoPositions.length > 0}
+              <button
+                class={`grid min-h-[68px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-ink/8 px-3 py-2 text-left transition hover:bg-ink/3 ${activeKey === "crypto" ? "bg-ink/4 shadow-[inset_3px_0_0_var(--color-steel)]" : ""}`}
+                type="button"
+                aria-pressed={activeKey === "crypto"}
+                onclick={() => (selectedKey = "crypto")}
+              >
+                <span class="min-w-0">
+                  <strong class="block text-sm">加密貨幣</strong>
+                  <small class="mt-1 block text-caption text-subtle">
+                    {cryptoHoldingCount} 個持倉 · {exchangeCount} 個交易所
+                  </small>
+                </span>
+                <strong
+                  class={`text-sm tabular-nums ${summary.cryptoTotal < 0 ? "text-coral" : "text-steel"}`}
+                >
+                  {formatCurrency(summary.cryptoTotal)}
                 </strong>
               </button>
             {/if}
@@ -335,12 +398,18 @@
             />
           {:else if activeItem?.kind === "investments"}
             <InvestmentWorkspace
-              positions={investments.data ?? []}
+              positions={securityPositions}
               rates={rateLookup}
               trades={trades.data ?? []}
               total={summary.investmentTotal}
               tradesPending={trades.isPending}
               tradesError={trades.isError}
+            />
+          {:else if activeItem?.kind === "crypto"}
+            <CryptoWorkspace
+              positions={cryptoPositions}
+              rates={rateLookup}
+              total={summary.cryptoTotal}
             />
           {:else if activeItem?.kind === "manual-assets"}
             <ManualAssets {api} variant="embedded" />
@@ -440,7 +509,7 @@
           {/each}
         {/if}
 
-        {#if (investments.data?.length ?? 0) > 0}
+        {#if securityPositions.length > 0}
           <div class="border-t border-ink/10 pt-5">
             <div class="flex items-start justify-between gap-3 pb-1">
               <div class="min-w-0">
@@ -456,13 +525,36 @@
               </strong>
             </div>
             <InvestmentWorkspace
-              positions={investments.data ?? []}
+              positions={securityPositions}
               rates={rateLookup}
               trades={trades.data ?? []}
               total={summary.investmentTotal}
               tradesPending={trades.isPending}
               tradesError={trades.isError}
               compact
+            />
+          </div>
+        {/if}
+
+        {#if cryptoPositions.length > 0}
+          <div class="border-t border-ink/10 pt-5">
+            <div class="flex items-start justify-between gap-3 pb-1">
+              <div class="min-w-0">
+                <h2 class="text-base font-semibold">加密貨幣</h2>
+                <p class="mt-1 text-caption text-subtle">
+                  {cryptoHoldingCount} 個持倉 · {exchangeCount} 個交易所
+                </p>
+              </div>
+              <strong
+                class={`text-lg font-medium tracking-tight tabular-nums ${summary.cryptoTotal < 0 ? "text-coral" : "text-steel"}`}
+              >
+                {formatCurrency(summary.cryptoTotal)}
+              </strong>
+            </div>
+            <InvestmentHoldings
+              positions={cryptoPositions}
+              rates={rateLookup}
+              grouped
             />
           </div>
         {/if}

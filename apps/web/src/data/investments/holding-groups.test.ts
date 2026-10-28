@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { InvestmentRow } from "@/data/investments/types";
 import {
   groupInvestmentPositions,
-  hasCryptoPositions,
   holdingTitle,
+  isCryptoPosition,
+  listInvestmentHoldings,
   listedHoldingCount,
 } from "./holding-groups";
 
@@ -143,6 +144,20 @@ describe("投資持倉依機構分組", () => {
     ]);
     // 11 筆中 SHIB 低於 NT$10 不列出
     expect(listedHoldingCount(rows, { USD: 32 })).toBe(10);
+    // 加密貨幣列不分交易所時同樣依市值排序並隱藏小額
+    const cryptoList = listInvestmentHoldings(rows.filter(isCryptoPosition), {
+      USD: 32,
+    });
+    expect(cryptoList.holdings.map(({ row }) => row.id)).toEqual([
+      "max:TWD",
+      "binance:BTC",
+      "binance:futures-usdm",
+      "binance:USDT",
+      "binance:futures-coinm",
+      "max:USDT",
+      "binance:XYZ",
+    ]);
+    expect(cryptoList.hiddenCount).toBe(1);
   });
 
   it("無持倉零值列不列出；缺少匯率時保留持倉但不估值", () => {
@@ -185,23 +200,5 @@ describe("投資持倉依機構分組", () => {
     expect(holdingTitle(rows[4]!)).toBe("U 本位");
     expect(holdingTitle(rows[5]!)).toBe("幣本位");
     expect(holdingTitle(rows[8]!)).toBe("2330 台積電");
-  });
-
-  it("只有同步了加密貨幣（含無持倉零值列）才提示交易紀錄不含加密貨幣", () => {
-    expect(hasCryptoPositions(rows)).toBe(true);
-    expect(
-      hasCryptoPositions(rows.filter((item) => item.assetType !== "crypto")),
-    ).toBe(false);
-    expect(
-      hasCryptoPositions([
-        row({
-          connectorId: "max",
-          sourceId: "empty",
-          assetType: "crypto",
-          quantity: 0,
-          marketValue: 0,
-        }),
-      ]),
-    ).toBe(true);
   });
 });

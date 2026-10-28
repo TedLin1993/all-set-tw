@@ -9,11 +9,7 @@
     formatNumber,
   } from "@/shared/format/financial";
   import InvestmentHoldings from "./InvestmentHoldings.svelte";
-  import {
-    CRYPTO_TRADES_NOTE,
-    hasCryptoPositions,
-    listedHoldingCount,
-  } from "@/data/investments/holding-groups";
+  import { listedHoldingCount } from "@/data/investments/holding-groups";
 
   let {
     positions,
@@ -95,9 +91,6 @@
         <InvestmentHoldings {positions} {rates} />
       {/if}
     {:else}
-      {#if hasCryptoPositions(positions)}
-        <p class="pt-3 text-caption text-subtle">{CRYPTO_TRADES_NOTE}</p>
-      {/if}
       {#if tradesPending}
         <p class="py-8 text-center text-sm text-subtle">正在載入交易紀錄。</p>
       {:else if tradesError}
