@@ -175,12 +175,19 @@ describe("Binance 持倉正規化", () => {
     expect(holdings.netWorth.netWorth).toBe(8016 + 320 + 96);
   });
 
-  it("逐一端點未開通或無權限時改用錢包總值，不讓兩邊都漏掉", () => {
+  it("逐一端點取不到時改用錢包總值；活期成功、定期失敗時捨棄理財明細改用 Earn 總值", () => {
     const holdings = normalizeBinanceHoldings(
       {
-        spot: { balances: [] },
-        // 活期有取得、定期無權限：Earn 總值已含活期，仍不補，避免重複計入
-        flexible: [],
+        spot: {
+          balances: [
+            // 活期憑證：本身沒有報價、BTC 有報價 → 已含在 Earn 總值，略過
+            { asset: "LDBTC", free: "0.5", locked: "0" },
+            // 真實幣種：有自己的報價，照常計入
+            { asset: "LDO", free: "2", locked: "0" },
+          ],
+        },
+        // 活期取得、定期無權限：這次的活期明細捨棄，不可與 Earn 總值重複計入
+        flexible: [{ asset: "USDT", totalAmount: "50" }],
         wallets: [
           { activate: true, balance: "100", walletName: "Spot" },
           { activate: true, balance: "20", walletName: "Funding" },
@@ -188,12 +195,16 @@ describe("Binance 持倉正規化", () => {
           { activate: true, balance: "40", walletName: "USDⓈ-M Futures" },
           { activate: true, balance: "50", walletName: "COIN-M Futures" },
         ],
-        tickers: [],
+        tickers: [
+          { symbol: "BTCUSDT", price: "60000" },
+          { symbol: "LDOUSDT", price: "1.5" },
+        ],
         usdtTwd: 32,
       },
       DATE,
     );
-    // Funding 20 × 32 = 640；U 本位 40 × 32 = 1280；幣本位 50 × 32 = 1600
+    // LDO 2 × 1.5 × 32 = 96；Funding 20 × 32 = 640；Earn 30 × 32 = 960；
+    // U 本位 40 × 32 = 1280；幣本位 50 × 32 = 1600
     expect(
       holdings.positions.map(({ sourceId, name, marketValue }) => ({
         sourceId,
@@ -201,7 +212,9 @@ describe("Binance 持倉正規化", () => {
         marketValue,
       })),
     ).toEqual([
+      { sourceId: "LDO", name: "Binance", marketValue: 96 },
       { sourceId: "wallet-funding", name: "資金帳戶", marketValue: 640 },
+      { sourceId: "wallet-earn", name: "理財", marketValue: 960 },
       { sourceId: "wallet-usdmfutures", name: "U 本位合約", marketValue: 1280 },
       {
         sourceId: "wallet-coinmfutures",
@@ -209,6 +222,28 @@ describe("Binance 持倉正規化", () => {
         marketValue: 1600,
       },
     ]);
-    expect(holdings.netWorth.netWorth).toBe(640 + 1280 + 1600);
+    expect(holdings.netWorth.netWorth).toBe(96 + 640 + 960 + 1280 + 1600);
+    expect(holdings.unpricedAssets).toEqual([]);
+  });
+
+  it("連 Earn 總值都取不到時，保留取得的那一半理財明細與無法對應的理財憑證", () => {
+    const holdings = normalizeBinanceHoldings(
+      {
+        // LDBTC 不在這次的活期明細、也沒有 Earn 總值涵蓋：保留成無法估值，不可消失
+        spot: { balances: [{ asset: "LDBTC", free: "0.5", locked: "0" }] },
+        flexible: [{ asset: "USDT", totalAmount: "50" }],
+        // 未開通的 Earn 錢包不算取得總值
+        wallets: [{ activate: false, balance: "999", walletName: "Earn" }],
+        tickers: [{ symbol: "BTCUSDT", price: "60000" }],
+        usdtTwd: 32,
+      },
+      DATE,
+    );
+    // USDT 50 × 32 = 1600
+    expect(holdings.positions).toMatchObject([
+      { sourceId: "LDBTC", quantity: 0.5, marketValue: undefined },
+      { sourceId: "USDT", quantity: 50, marketValue: 1600 },
+    ]);
+    expect(holdings.unpricedAssets).toEqual(["LDBTC"]);
   });
 });

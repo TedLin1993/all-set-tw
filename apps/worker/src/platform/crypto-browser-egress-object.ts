@@ -1,9 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   createCryptoBrowserSession,
-  handleCryptoEgressRequest,
   type CryptoBrowserSession,
 } from "../sources/crypto-browser-egress";
+import { handleCryptoEgressRequest } from "./crypto-browser-egress";
 
 // 最後一次請求後超過此時間沒有新請求，就關閉瀏覽器（呼叫端通常會主動關閉）。
 const IDLE_CLOSE_MS = 90_000;

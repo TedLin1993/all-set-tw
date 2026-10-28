@@ -1,11 +1,10 @@
-import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
+import {
+  EMPTY_INVESTMENT_SOURCE_ID,
+  INVESTMENT_DUST_THRESHOLD_TWD,
+  connectorCatalog,
+  type ConnectorId,
+} from "@taiwan-fin-hub/shared";
 import type { InvestmentRow } from "@/data/investments/types";
-
-/** 台幣估值絕對值低於此金額的持倉不列出，但仍計入小計。 */
-const INVESTMENT_DISPLAY_MIN_TWD = 10;
-
-/** 加密貨幣交易所沒有任何持倉時寫入的零值列，只用來標示「今天沒有持倉」。 */
-const EMPTY_POSITION_SOURCE_ID = "empty";
 
 export type InvestmentHolding = {
   row: InvestmentRow;
@@ -53,7 +52,7 @@ function compareHoldings(left: InvestmentHolding, right: InvestmentHolding) {
 function isHidden(holding: InvestmentHolding) {
   return (
     holding.valueTwd !== null &&
-    Math.abs(holding.valueTwd) < INVESTMENT_DISPLAY_MIN_TWD
+    Math.abs(holding.valueTwd) < INVESTMENT_DUST_THRESHOLD_TWD
   );
 }
 
@@ -70,7 +69,7 @@ export function groupInvestmentPositions(
     const key = row.connectorId ?? "unknown";
     const holdings = institutions.get(key) ?? [];
     institutions.set(key, holdings);
-    if (row.sourceId === EMPTY_POSITION_SOURCE_ID) continue;
+    if (row.sourceId === EMPTY_INVESTMENT_SOURCE_ID) continue;
     holdings.push({ row, valueTwd: holdingValueTwd(row, rates) });
   }
 

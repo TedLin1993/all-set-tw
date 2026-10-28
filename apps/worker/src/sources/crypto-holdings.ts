@@ -1,3 +1,7 @@
+import {
+  EMPTY_INVESTMENT_SOURCE_ID,
+  INVESTMENT_DUST_THRESHOLD_TWD,
+} from "@taiwan-fin-hub/shared";
 import type {
   InvestmentPosition,
   NetWorthHistoryPoint,
@@ -7,12 +11,6 @@ import type {
  * 加密貨幣交易所（Binance、MAX）共用的持倉正規化與簽章；不呼叫外部 API。
  * 市值一律是同步當下換算的台幣整數，`currency` 固定為 TWD，不寫入匯率表。
  */
-
-/** 台幣估值絕對值低於此金額的列不輸出；固定 policy，不做成公開偏好。 */
-export const CRYPTO_DUST_THRESHOLD_TWD = 10;
-
-/** 本次同步沒有任何持倉時寫入的零值列，避免「最新持倉」退回前一天。 */
-const CRYPTO_EMPTY_SOURCE_ID = "empty";
 
 export type CryptoPosition = Omit<InvestmentPosition, "id" | "connectorId">;
 
@@ -66,7 +64,7 @@ export function parseCryptoAmount(value: unknown) {
 }
 
 function isDust(marketValue: number) {
-  return Math.abs(marketValue) < CRYPTO_DUST_THRESHOLD_TWD;
+  return Math.abs(marketValue) < INVESTMENT_DUST_THRESHOLD_TWD;
 }
 
 export function buildCryptoHoldings(
@@ -137,7 +135,7 @@ export function buildCryptoHoldings(
 
   if (positions.length === 0) {
     positions.push({
-      sourceId: CRYPTO_EMPTY_SOURCE_ID,
+      sourceId: EMPTY_INVESTMENT_SOURCE_ID,
       assetType: "crypto",
       name: `${input.exchangeName}（無持倉）`,
       quantity: 0,

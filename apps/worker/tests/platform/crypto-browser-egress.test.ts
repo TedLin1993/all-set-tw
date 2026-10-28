@@ -1,16 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { BrowserRunCapacityError } from "../../src/sources/browser";
 import {
-  CRYPTO_EGRESS_FALLBACK_DELAY_MS,
   CryptoBrowserSession,
-  createCryptoBrowserFetcher,
   cryptoEgressOrigin,
+  type CryptoEgressRequest,
+} from "../../src/sources/crypto-browser-egress";
+import {
+  CRYPTO_EGRESS_FALLBACK_DELAY_MS,
+  createCryptoBrowserFetcher,
   handleCryptoEgressRequest,
   parseCryptoEgressRequest,
   runWithCryptoEgressFallback,
   withCryptoBrowserFetcher,
-  type CryptoEgressRequest,
-} from "../../src/sources/crypto-browser-egress";
+} from "../../src/platform/crypto-browser-egress";
 import {
   BINANCE_EGRESS_ORIGINS,
   fetchBinanceSnapshot,
@@ -163,6 +165,40 @@ describe("加密貨幣交易所 Browser Run 代發", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("頁面內 fetch 不跟隨轉址，也不帶瀏覽器憑證", async () => {
+    const pageFetch = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", pageFetch);
+    try {
+      const page = {
+        goto: vi.fn(async () => null),
+        // 實際執行傳入頁面的函式，檢查頁面內 fetch 的選項
+        evaluate: vi.fn(
+          async (
+            fn: (input: unknown, forwarded: unknown) => unknown,
+            ...args: [unknown, unknown]
+          ) => fn(...args),
+        ),
+        close: vi.fn(async () => undefined),
+      };
+      const browser = { once: vi.fn(), newPage: vi.fn(async () => page) };
+      const session = new CryptoBrowserSession({
+        launch: async () => browser as never,
+        close: async () => undefined,
+      });
+      await session.execute({
+        url: "https://api.binance.com/api/v3/account",
+        method: "GET",
+        headers: { "x-mbx-apikey": "key" },
+      });
+      expect(pageFetch).toHaveBeenCalledWith(
+        "https://api.binance.com/api/v3/account",
+        expect.objectContaining({ redirect: "error", credentials: "omit" }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("物件介面：關閉、格式錯誤、禁止目的地與 Browser Run 額度不足", async () => {
     const dispose = vi.fn(async () => undefined);
     const session = new CryptoBrowserSession({
@@ -286,7 +322,8 @@ describe("加密貨幣交易所 Browser Run 代發", () => {
               ? { market: "usdttwd", last: "32" }
               : path.includes("simple-earn")
                 ? { rows: [], total: 0 }
-                : path === "/sapi/v1/asset/get-funding-asset"
+                : path === "/sapi/v1/asset/get-funding-asset" ||
+                    path === "/sapi/v1/asset/wallet/balance"
                   ? []
                   : { assets: [] };
       return {

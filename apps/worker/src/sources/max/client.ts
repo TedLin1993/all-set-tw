@@ -1,4 +1,5 @@
 import {
+  cryptoEndpointLabel,
   hmacSha256Hex,
   normalizeCryptoQuantity,
   responseEdgeLocation,
@@ -100,6 +101,12 @@ function createMaxClient(options: MaxClientOptions) {
       }
       throw new MaxApiError(path, response.status, code);
     }
+    // 成功狀態卻不是 JSON（例如 HTML 維護頁或空回應）時同步失敗，不可當成未開通的錢包。
+    if (body === undefined) {
+      throw new Error(
+        `MAX ${cryptoEndpointLabel(path)} 回應格式異常，無法同步`,
+      );
+    }
     return body as T;
   }
 
@@ -139,7 +146,14 @@ export async function fetchMaxSnapshot(
     client.mAccounts(),
     fetchMaxMarkets(fetcher, options.signal),
   ]);
-  const accounts = { spot: Array.isArray(spot) ? spot : [], m };
+  // 格式異常的 200 回應（例如維護頁）不可當成沒有持倉，否則會以零值列覆蓋當天快照。
+  if (!Array.isArray(spot)) {
+    throw new Error("MAX 現貨帳戶回應格式異常，無法同步");
+  }
+  if (m !== undefined && !Array.isArray(m)) {
+    throw new Error("MAX M 錢包回應格式異常，無法同步");
+  }
+  const accounts = { spot, m };
   const held = maxWalletBalances(accounts)
     .filter((balance) => normalizeCryptoQuantity(balance.quantity) !== 0)
     .map((balance) => balance.asset);

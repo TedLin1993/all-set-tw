@@ -11,7 +11,7 @@ import { configEncryptionKey } from "../../platform/config";
 import {
   runWithCryptoEgressFallback,
   withCryptoBrowserFetcher,
-} from "../crypto-browser-egress";
+} from "../../platform/crypto-browser-egress";
 import { MaxPublicAccessBlockedError } from "../crypto-prices";
 import { BINANCE_EGRESS_ORIGINS, fetchBinanceSnapshot } from "./client";
 import {

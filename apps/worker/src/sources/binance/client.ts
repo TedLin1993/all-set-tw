@@ -1,4 +1,8 @@
-import { hmacSha256Hex, responseEdgeLocation } from "../crypto-holdings";
+import {
+  cryptoEndpointLabel,
+  hmacSha256Hex,
+  responseEdgeLocation,
+} from "../crypto-holdings";
 import {
   MAX_API_BASE_URL,
   cryptoRequestSignal,
@@ -120,6 +124,12 @@ function createBinanceClient(options: BinanceClientOptions) {
       }
       throw new BinanceApiError(endpoint, response.status, code);
     }
+    // 成功狀態卻不是 JSON（例如 HTML 維護頁或空回應）時同步失敗，不可當成沒有資產。
+    if (body === undefined) {
+      throw new Error(
+        `Binance ${cryptoEndpointLabel(endpoint)} 回應格式異常，無法同步`,
+      );
+    }
     return body as T;
   }
 
@@ -157,7 +167,11 @@ function createBinanceClient(options: BinanceClientOptions) {
         signed: true,
         params: { current: String(current), size: String(EARN_PAGE_SIZE) },
       });
-      const pageRows = page?.rows ?? [];
+      // 空帳戶若省略 rows，只在 total 明確為 0 時視為沒有部位。
+      const pageRows =
+        page?.rows === undefined && Number(page?.total) === 0
+          ? []
+          : requireArray<T>(page?.rows, endpoint);
       rows.push(...pageRows);
       // 缺少 total 時只依本頁筆數判斷，避免第一頁剛好 100 筆時截斷。
       const total = Number(page?.total);
@@ -229,12 +243,32 @@ function createBinanceClient(options: BinanceClientOptions) {
   };
 }
 
-/** 報價回應格式異常時讓同步失敗，避免整批持倉寫成未估值並覆蓋當天快照。 */
+/**
+ * 回應格式異常時讓同步失敗並保留前一次快照，避免把錢包當成空的、
+ * 或整批持倉寫成未估值而覆蓋當天快照。
+ */
 function requireArray<T>(value: T[] | unknown, endpoint: string): T[] {
   if (!Array.isArray(value)) {
-    throw new Error(`Binance ${endpoint} 回應格式異常，無法估值`);
+    throw new Error(
+      `Binance ${cryptoEndpointLabel(endpoint)} 回應格式異常，無法同步`,
+    );
   }
   return value as T[];
+}
+
+/** 選用錢包未開通時為 undefined；有回應時必須是陣列。 */
+function optionalArray<T>(value: T[] | undefined, endpoint: string) {
+  return value === undefined ? undefined : requireArray<T>(value, endpoint);
+}
+
+/** 合約帳戶未開通時為 undefined；有回應時 `assets` 必須是陣列。 */
+function optionalFutures(
+  value: BinanceFuturesAccount | undefined,
+  endpoint: string,
+) {
+  if (value === undefined) return undefined;
+  requireArray(value?.assets, endpoint);
+  return value;
 }
 
 /**
@@ -259,14 +293,15 @@ export async function fetchBinanceSnapshot(
       client.tickerPrices(),
       fetchUsdtTwdRate(fetcher, options.signal),
     ]);
+  requireArray(spot?.balances, "account");
   return {
     spot,
-    funding,
+    funding: optionalArray(funding, "get-funding-asset"),
     flexible,
     locked,
-    usdm,
-    coinm,
-    wallets: Array.isArray(wallets) ? wallets : undefined,
+    usdm: optionalFutures(usdm, "fapi account"),
+    coinm: optionalFutures(coinm, "dapi account"),
+    wallets: optionalArray(wallets, "wallet/balance"),
     tickers: requireArray(tickers, "ticker/price"),
     usdtTwd,
   };

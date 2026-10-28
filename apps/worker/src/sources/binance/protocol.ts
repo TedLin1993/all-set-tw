@@ -106,15 +106,28 @@ export type BinanceSnapshot = {
 const USDT = "USDT";
 
 /**
+ * 理財活期與定期共用同一個 Earn 總值：兩者都取得時採用逐幣明細；只取得其中一個時
+ * 捨棄這次的明細、改用 Earn 總值，避免少算也避免重複計入。連 Earn 總值都取不到時，
+ * 才保留取得的那一半明細。
+ */
+function useEarnDetail(snapshot: BinanceSnapshot) {
+  if (snapshot.flexible && snapshot.locked) return true;
+  return !(snapshot.wallets ?? []).some(
+    (wallet) =>
+      wallet.activate !== false &&
+      binanceWalletKey(wallet.walletName ?? "") === "earn",
+  );
+}
+
+/**
  * 本次確實逐一取得、不可再以錢包總值重複計入的錢包（名稱只保留英文字母比較，
  * 例如 `USDⓈ-M Futures` 比較時為 `usdmfutures`）。逐一端點未開通或無權限時，
  * 改用 `wallet/balance` 的錢包總值補上，避免兩邊都不計入而少算資產。
- * 理財的活期與定期共用同一個 Earn 總值，只要其中一個有取得就不再補總值。
  */
-function detailedWalletKeys(snapshot: BinanceSnapshot) {
+function detailedWalletKeys(snapshot: BinanceSnapshot, earnDetail: boolean) {
   const keys = new Set(["spot"]);
   if (snapshot.funding) keys.add("funding");
-  if (snapshot.flexible || snapshot.locked) keys.add("earn");
+  if (earnDetail) keys.add("earn");
   if (snapshot.usdm) keys.add("usdmfutures");
   if (snapshot.coinm) keys.add("coinmfutures");
   return keys;
@@ -169,14 +182,27 @@ export function normalizeBinanceHoldings(
     return usdt === undefined ? undefined : usdt * usdtTwd;
   };
 
+  const earnDetail = useEarnDetail(snapshot);
   const flexibleAssets = new Set(
     (snapshot.flexible ?? []).map((row) => (row.asset ?? "").toUpperCase()),
   );
+  // 活期理財的 LD 憑證可能同時出現在現貨餘額，已由理財明細或 Earn 總值計入。
+  // 改用 Earn 總值時，活期明細不可靠，改看報價：憑證本身沒有報價、去掉 LD 後的
+  // 幣種有報價才略過；有自己報價的真實幣種（例如 LDO）照常計入。兩者都沒有計入時
+  // 保留憑證（無法估值），不讓部位無聲消失。
+  const isEarnVoucher = (asset: string) => {
+    if (!asset.startsWith("LD")) return false;
+    const underlying = asset.slice(2);
+    if (flexibleAssets.has(underlying)) return true;
+    if (earnDetail) return false;
+    return (
+      usdtPrice(asset) === undefined && usdtPrice(underlying) !== undefined
+    );
+  };
   const balances: CryptoWalletBalance[] = [];
   for (const row of snapshot.spot.balances ?? []) {
     const asset = (row.asset ?? "").toUpperCase();
-    // 活期理財的 LD 憑證可能同時出現在現貨餘額，已由理財端點計入。
-    if (asset.startsWith("LD") && flexibleAssets.has(asset.slice(2))) continue;
+    if (isEarnVoucher(asset)) continue;
     balances.push({
       asset,
       wallet: "spot",
@@ -194,14 +220,14 @@ export function normalizeBinanceHoldings(
         parseCryptoAmount(row.withdrawing),
     });
   }
-  for (const row of snapshot.flexible ?? []) {
+  for (const row of earnDetail ? (snapshot.flexible ?? []) : []) {
     balances.push({
       asset: row.asset ?? "",
       wallet: "earnFlexible",
       quantity: parseCryptoAmount(row.totalAmount),
     });
   }
-  for (const row of snapshot.locked ?? []) {
+  for (const row of earnDetail ? (snapshot.locked ?? []) : []) {
     balances.push({
       asset: row.asset ?? "",
       wallet: "earnLocked",
@@ -245,7 +271,7 @@ export function normalizeBinanceHoldings(
   };
   // 沒有逐一取得的錢包（期權、交易機器人、跟單、槓桿，以及未開通權限的錢包）各列一筆帳戶總值。
   const walletEntries: CryptoValuedEntry[] = [];
-  const detailedWallets = detailedWalletKeys(snapshot);
+  const detailedWallets = detailedWalletKeys(snapshot, earnDetail);
   for (const wallet of snapshot.wallets ?? []) {
     const name = wallet.walletName?.trim() ?? "";
     const key = binanceWalletKey(name);

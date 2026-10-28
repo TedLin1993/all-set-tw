@@ -297,6 +297,61 @@ describe("Binance 簽章與 HTTP client", () => {
     expect(safeErrorMessage(error)).toContain("HTTP 451，回應節點 IAD");
   });
 
+  it("成功狀態但回應格式異常的錢包讓同步失敗，不當成空錢包", async () => {
+    for (const route of [
+      path(
+        "/sapi/v1/simple-earn/flexible/position",
+        () => new Response("<html>maintenance</html>", { status: 200 }),
+      ),
+      path("/sapi/v1/simple-earn/locked/position", () => json({ total: 3 })),
+      path("/api/v3/account", () => json({})),
+      path("/sapi/v1/asset/get-funding-asset", () => json({})),
+      path("/fapi/v2/account", () => new Response("", { status: 200 })),
+      (url: URL) =>
+        url.pathname === "/sapi/v1/asset/wallet/balance"
+          ? json({ success: false })
+          : undefined,
+    ]) {
+      const { fetcher } = fakeFetch([route, ...healthyRoutes]);
+      await expect(
+        fetchBinanceSnapshot({
+          apiKey: API_KEY,
+          apiSecret: API_SECRET,
+          fetcher,
+        }),
+      ).rejects.toThrow("回應格式異常");
+    }
+
+    // 訊息只保留最後兩段路徑，脫敏後仍看得出是哪個端點
+    const { fetcher } = fakeFetch([
+      path(
+        "/sapi/v1/simple-earn/flexible/position",
+        () => new Response("<html>maintenance</html>", { status: 200 }),
+      ),
+      ...healthyRoutes,
+    ]);
+    const error = await fetchBinanceSnapshot({
+      apiKey: API_KEY,
+      apiSecret: API_SECRET,
+      fetcher,
+    }).catch((caught: unknown) => caught);
+    expect(safeErrorMessage(error)).toContain(
+      "Binance flexible/position 回應格式異常",
+    );
+
+    // 空的理財帳戶省略 rows、total 為 0 時視為沒有部位，不讓同步失敗
+    const empty = fakeFetch([
+      path("/sapi/v1/simple-earn/locked/position", () => json({ total: 0 })),
+      ...healthyRoutes,
+    ]);
+    const snapshot = await fetchBinanceSnapshot({
+      apiKey: API_KEY,
+      apiSecret: API_SECRET,
+      fetcher: empty.fetcher,
+    });
+    expect(snapshot.locked).toEqual([]);
+  });
+
   it("報價回應格式異常時同步失敗；理財缺少 total 時依本頁筆數繼續翻頁", async () => {
     const broken = fakeFetch([
       path("/api/v3/ticker/price", () => json({ code: 0 })),

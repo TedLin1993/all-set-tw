@@ -11,7 +11,7 @@ import { configEncryptionKey } from "../../platform/config";
 import {
   runWithCryptoEgressFallback,
   withCryptoBrowserFetcher,
-} from "../crypto-browser-egress";
+} from "../../platform/crypto-browser-egress";
 import { MaxPublicAccessBlockedError } from "../crypto-prices";
 import { MAX_EGRESS_ORIGINS, fetchMaxSnapshot } from "./client";
 import {

@@ -1,5 +1,6 @@
 export * from "./connector-catalog";
 export * from "./exchange-rates";
+export * from "./investments";
 export * from "./api/errors";
 export * from "./api/bank";
 export * from "./api/classification";

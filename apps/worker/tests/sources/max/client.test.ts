@@ -152,6 +152,40 @@ describe("MAX 簽章與 HTTP client", () => {
     }
   });
 
+  it("現貨或 M 錢包回應格式異常時同步失敗，不當成沒有持倉", async () => {
+    const maintenance = () => json({ success: false });
+    const malformedSpot = fakeFetch((url) =>
+      url.pathname === "/api/v3/wallet/spot/accounts"
+        ? maintenance()
+        : healthy(() => json([]))(url),
+    );
+    await expect(
+      fetchMaxSnapshot({
+        accessKey: ACCESS_KEY,
+        secretKey: SECRET_KEY,
+        fetcher: malformedSpot.fetcher,
+      }),
+    ).rejects.toThrow("現貨帳戶回應格式異常");
+    // M 錢包未開通時是 undefined，HTML 維護頁與空回應不可混成未開通而漏扣借款
+    for (const [response, message] of [
+      [maintenance, "M 錢包回應格式異常"],
+      [
+        () => new Response("<html>maintenance</html>", { status: 200 }),
+        "m/accounts 回應格式異常",
+      ],
+      [() => new Response("", { status: 200 }), "m/accounts 回應格式異常"],
+    ] as const) {
+      const malformedM = fakeFetch(healthy(response));
+      await expect(
+        fetchMaxSnapshot({
+          accessKey: ACCESS_KEY,
+          secretKey: SECRET_KEY,
+          fetcher: malformedM.fetcher,
+        }),
+      ).rejects.toThrow(message);
+    }
+  });
+
   it("沒有 MAX 錯誤碼的 403 視為防火牆阻擋並附上節點；有錯誤碼的仍是 API 錯誤", async () => {
     const blocked = fakeFetch(
       () =>
