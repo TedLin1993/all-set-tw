@@ -1,6 +1,6 @@
 import { BarChart3, History, Settings, Wallet } from "@lucide/svelte";
 import type { Component } from "svelte";
-import type { DetailView, MobileSettingsView, PrimaryView } from "./types";
+import type { MobileSettingsView, PrimaryView } from "./types";
 
 export interface NavigationItem {
   view: PrimaryView;
@@ -48,17 +48,6 @@ export const mobilePrimaryViews: PrimaryView[] = [
   "assets",
   "activity",
 ];
-
-export const detailLabels: Record<
-  DetailView,
-  { label: string; description: string }
-> = {
-  investments: { label: "投資", description: "投資持倉與交易紀錄。" },
-  "manual-assets": {
-    label: "其他資產",
-    description: "保險、不動產、交通工具與估值紀錄。",
-  },
-};
 
 export const mobileSettingsLabels: Record<
   MobileSettingsView,

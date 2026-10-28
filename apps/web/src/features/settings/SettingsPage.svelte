@@ -41,12 +41,22 @@
     connectorTarget,
     mobileView,
     navigate,
+    addSourceOpen = $bindable(false),
+    addSourcePreview = false,
   }: {
     api: ApiClient;
     demoMode: boolean;
     connectorTarget?: ConnectorId | null;
     mobileView?: MobileSettingsView | "more";
-    navigate: (view: View, targetConnector?: ConnectorId) => void;
+    navigate: (
+      view: View,
+      targetConnector?: ConnectorId,
+      options?: { fromAddSource?: boolean },
+    ) => void;
+    /** 「新增資料來源」面板是否開啟；由 App 管理，從面板選入的連接器返回時可重新打開。 */
+    addSourceOpen?: boolean;
+    /** 只顯示新增面板的靜態畫面，供手機跟手返回時當作底層頁面。 */
+    addSourcePreview?: boolean;
   } = $props();
   const sources = connectorList;
   const settingTabs = [
@@ -71,7 +81,6 @@
   const linkedSources = $derived(
     sources.filter((source) => !sourceGroups.available.includes(source)),
   );
-  let addSourceOpen = $state(false);
   const needsActionJobs = $derived(getActionableSyncJobs(syncJobRows));
   const pendingSyncJobs = $derived(getPendingSyncJobs(syncJobRows));
   const configuredSources = $derived(getConfiguredSyncJobs(syncJobRows));
@@ -147,15 +156,17 @@
 
   function pickNewSource(id: ConnectorId) {
     addSourceOpen = false;
-    navigate("data-sources", id);
+    navigate("data-sources", id, { fromAddSource: true });
   }
 
   let desktopDetailHeading = $state<HTMLElement>();
-  let mobileDetailHeading = $state<HTMLElement>();
   async function focusConnectorDetail() {
     await tick();
-    // 桌面與手機詳情同時存在於 DOM，只聚焦目前顯示的那一個。
-    [desktopDetailHeading, mobileDetailHeading]
+    // 桌面聚焦詳情面板標題；手機版的連接器名稱在 App 頁首，改聚焦頁首標題。
+    [
+      desktopDetailHeading,
+      document.querySelector<HTMLElement>("header [data-page-title]"),
+    ]
       .find((heading) => heading?.offsetParent)
       ?.focus();
   }
@@ -167,7 +178,7 @@
   }
 </script>
 
-<div class="grid min-w-0 gap-5">
+<div class={addSourcePreview ? "hidden" : "grid min-w-0 gap-5"}>
   <nav
     aria-label="設定分類"
     class="no-scrollbar hidden overflow-x-auto border-b border-border bg-card md:flex md:gap-1 md:px-1"
@@ -343,31 +354,23 @@
           )}
           <section
             aria-label="連接器設定"
-            class="min-w-0 md:hidden"
+            class="grid min-w-0 gap-4 pt-3 md:hidden"
             data-connector-settings={activeConnector}
           >
+            <!-- 連接器名稱在 App 頁首；能力摘要比照清單頁，放在頁首下方當副標。 -->
+            <p class="text-sm text-muted-foreground">
+              {mobileSource && sourceCapabilitySummary(mobileSource)}
+            </p>
             <div
               class="min-w-0 rounded-xl border border-border bg-card p-4 shadow-xs"
             >
-              <h2
-                bind:this={mobileDetailHeading}
-                class="text-lg font-bold outline-none"
-                tabindex="-1"
-              >
-                {mobileSource?.title}
-              </h2>
-              <p class="mt-1 text-sm text-muted-foreground">
-                {mobileSource && sourceCapabilitySummary(mobileSource)}
-              </p>
-              <div class="mt-4">
-                {#key activeConnector}<ConnectorPanel
-                    {api}
-                    connectorId={activeConnector}
-                    {demoMode}
-                    title={mobileSource?.title ?? "連接器"}
-                    embedded
-                  />{/key}
-              </div>
+              {#key activeConnector}<ConnectorPanel
+                  {api}
+                  connectorId={activeConnector}
+                  {demoMode}
+                  title={mobileSource?.title ?? "連接器"}
+                  embedded
+                />{/key}
             </div>
           </section>
         {/if}
@@ -818,4 +821,5 @@
   connectedCount={linkedSources.length}
   onSelect={pickNewSource}
   onSelectedClose={focusConnectorDetail}
+  preview={addSourcePreview}
 />

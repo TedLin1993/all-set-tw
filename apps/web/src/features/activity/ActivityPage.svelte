@@ -339,6 +339,10 @@
   } | null>(null);
   let mappingNotice = $state("");
   let detailKey = $state<string | null>(null);
+  let detailDialogEl = $state<HTMLElement>();
+  let detailSwipeOffset = $state(0);
+  let detailSwiping = $state(false);
+  let detailSwipeTimer: ReturnType<typeof setTimeout> | undefined;
   const fallbackCategories = [
     { id: "salary", label: "薪資" },
     { id: "transfer", label: "轉帳" },
@@ -734,6 +738,39 @@
       "",
     );
   }
+  // 跟手返回：滑動中明細跟著手指往右，底下的活動列表逐漸露出；放開後動畫收尾。
+  const DETAIL_SWIPE_SETTLE_MS = 200;
+  function dragDetail(distance: number) {
+    clearTimeout(detailSwipeTimer);
+    detailSwiping = true;
+    detailSwipeOffset = distance;
+  }
+  function cancelDetailSwipe() {
+    detailSwiping = false;
+    detailSwipeOffset = 0;
+  }
+  function commitDetailSwipe() {
+    detailSwiping = false;
+    detailSwipeOffset = detailDialogEl?.clientWidth ?? window.innerWidth;
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    detailSwipeTimer = setTimeout(
+      closeDetail,
+      reduceMotion ? 0 : DETAIL_SWIPE_SETTLE_MS,
+    );
+  }
+  $effect(() => {
+    void detailKey;
+    clearTimeout(detailSwipeTimer);
+    detailSwiping = false;
+    detailSwipeOffset = 0;
+  });
+  const detailSwipeProgress = $derived(
+    detailSwipeOffset > 0 && detailDialogEl
+      ? Math.min(1, detailSwipeOffset / detailDialogEl.clientWidth)
+      : 0,
+  );
   function transactionForItem(item: ActivityItem) {
     return activityBankTransactions.find(
       (transaction) => transaction.id === item.transactionId,
@@ -1424,21 +1461,32 @@
       {@const amount = activityDisplayAmount(detailItem)}
       {@const transaction = transactionForItem(detailItem)}
       {@const invoice = invoiceForItem(detailItem)}
-      <div class="fixed inset-0 z-[60] bg-inverse/40 md:flex md:justify-end">
+      <div
+        class={`fixed inset-0 z-[60] bg-inverse/40 md:flex md:justify-end ${detailSwiping ? "" : "transition-colors duration-200 ease-out motion-reduce:transition-none"}`}
+        style:background-color={detailSwipeProgress > 0
+          ? `color-mix(in srgb, var(--color-inverse) ${(1 - detailSwipeProgress) * 40}%, transparent)`
+          : undefined}
+      >
         <button
           aria-label="關閉活動明細"
           class="absolute inset-0 hidden md:block"
           onclick={closeDetail}
         ></button>
         <div
+          bind:this={detailDialogEl}
           aria-labelledby="activity-detail-title"
           aria-modal="true"
-          class="relative flex h-full w-full flex-col overflow-hidden bg-card shadow-2xl md:max-w-[32rem]"
+          class={`relative flex h-full w-full flex-col overflow-hidden bg-card shadow-2xl md:max-w-[32rem] ${detailSwiping ? "" : "transition-transform duration-200 ease-out motion-reduce:transition-none"}`}
           role="dialog"
+          style:transform={detailSwipeOffset > 0
+            ? `translateX(${detailSwipeOffset}px)`
+            : undefined}
           use:swipeBack={{
             enabled:
               document.documentElement.classList.contains("is-standalone"),
-            onBack: closeDetail,
+            onBack: commitDetailSwipe,
+            onDrag: dragDetail,
+            onCancel: cancelDetailSwipe,
           }}
         >
           <header
