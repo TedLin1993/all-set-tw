@@ -15,12 +15,9 @@
   let {
     positions,
     rates,
-    expandAll = false,
   }: {
     positions: InvestmentRow[];
     rates: Readonly<Record<string, number>>;
-    /** 搜尋時展開全部，讓符合的持倉直接可見。 */
-    expandAll?: boolean;
   } = $props();
 
   const institutions = $derived(groupInvestmentPositions(positions, rates));
@@ -28,12 +25,10 @@
   let expanded = $state<Set<string>>(new Set());
 
   function isOpen(key: string) {
-    return expandAll || expanded.has(key);
+    return expanded.has(key);
   }
 
   function toggle(key: string) {
-    // 搜尋時全部展開，點擊不改變展開狀態，避免清除搜尋後殘留。
-    if (expandAll) return;
     const next = new Set(expanded);
     if (next.has(key)) next.delete(key);
     else next.add(key);

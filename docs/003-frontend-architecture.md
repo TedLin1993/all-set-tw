@@ -129,15 +129,15 @@ npm run verify:web
 
 ## 投資持倉分組
 
-投資頁與資產頁的投資面板共用 `features/assets/components/InvestmentHoldings.svelte`，分組規則在
+資產頁的投資面板使用 `features/assets/components/InvestmentHoldings.svelte`，分組規則在
 `data/investments/holding-groups.ts`（含 colocated 測試，總覽頁也共用持倉筆數）。持倉依 `connectorId` 分機構、
-機構依台幣小計由大到小排列，預設全部收合，點擊展開；搜尋時全部展開。展開後機構內的持倉平鋪列出、
+機構依台幣小計由大到小排列，預設全部收合，點擊展開。展開後機構內的持倉平鋪列出、
 不依類型分組，類型（STOCK、ETF、FUND、加密貨幣幣種、Binance 合約）放在每筆的副標。
 持倉依換算後的台幣市值由大到小排序，沒有市值的持倉顯示「無法估值」，缺少匯率的持倉顯示原幣金額，兩者都不計入小計並排在最後；台幣估值絕對值低於
 NT$10（`INVESTMENT_DUST_THRESHOLD_TWD`，與後端加密貨幣同步共用）的持倉不列出，但計入小計並提示筆數。加密貨幣「無持倉」零值列（`sourceId` 為 `shared/investments.ts` 的 `EMPTY_INVESTMENT_SOURCE_ID`）不列出，
-機構顯示「目前沒有持倉」。總覽、資產與投資頁的持倉筆數都以 `listedHoldingCount` 計算，只算實際列出的持倉。搜尋時點擊機構不改變展開狀態；小計為負（例如 MAX 借款大於資產）時以警示色顯示。
+機構顯示「目前沒有持倉」。總覽與資產頁的持倉筆數都以 `listedHoldingCount` 計算，只算實際列出的持倉。小計為負（例如 MAX 借款大於資產）時以警示色顯示。
 
-交易紀錄只有集保 e 存摺提供；有加密貨幣持倉（含交易所無持倉的零值列）時，投資頁與資產頁投資面板的交易紀錄顯示「加密貨幣只同步持倉，交易紀錄不包含加密貨幣。」，沒有加密貨幣時不顯示。
+交易紀錄只有集保 e 存摺提供；有加密貨幣持倉（含交易所無持倉的零值列）時，資產頁投資面板的交易紀錄顯示「加密貨幣只同步持倉，交易紀錄不包含加密貨幣。」，沒有加密貨幣時不顯示。
 
 `/api/investments` 每頁最多 100 筆，`investmentsQuery` 以 `ApiClient.getAllPages` 依 `X-Has-More`／`X-Next-Cursor` 取完所有頁，避免持倉超過一頁時少算市值。
 

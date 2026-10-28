@@ -6,8 +6,6 @@ const views = new Set<View>([
   "activity",
   "settings",
   "about",
-  "investments",
-  "manual-assets",
   "data-sources",
   "sync-notifications",
   "exchange-rates",
