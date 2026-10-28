@@ -31,6 +31,7 @@ import {
 
 export { MegabankEgress } from "./platform/megabank-egress-object";
 export { FubonEgress } from "./platform/fubon-egress-object";
+export { CryptoBrowserEgress } from "./platform/crypto-browser-egress-object";
 
 export const app = honoFactory.createApp();
 export const api = honoFactory.createApp();

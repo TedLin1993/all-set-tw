@@ -10,7 +10,8 @@ type ApiProvider = () => ApiClient;
 export const investmentsQuery = (getApi: ApiProvider) =>
   queryOptions({
     queryKey: queryKeys.investments,
-    queryFn: () => getApi().get<InvestmentRow[]>("/api/investments"),
+    // 每頁最多 100 筆；接上加密貨幣後持倉可能超過一頁，必須取完才不會少算市值。
+    queryFn: () => getApi().getAllPages<InvestmentRow>("/api/investments"),
   });
 
 export const investmentTransactionsRangeQuery = (

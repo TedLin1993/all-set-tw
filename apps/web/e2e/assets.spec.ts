@@ -132,6 +132,8 @@ test.beforeEach(async ({ page }) => {
       body = [
         {
           id: "0050",
+          connectorId: "tdcc",
+          sourceId: "0050",
           assetType: "etf",
           symbol: "0050",
           name: "元大台灣50",
@@ -142,6 +144,8 @@ test.beforeEach(async ({ page }) => {
         },
         {
           id: "00878",
+          connectorId: "tdcc",
+          sourceId: "00878",
           assetType: "etf",
           symbol: "00878",
           name: "國泰永續高股息",

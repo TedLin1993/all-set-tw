@@ -31,6 +31,8 @@ import { megabankConfigSchema } from "./megabank/protocol";
 import { fubonConfigSchema } from "./fubon/protocol";
 import { feibConfigSchema } from "./feib/protocol";
 import { ubotConfigSchema } from "./ubot/protocol";
+import { binanceConfigSchema } from "./binance/protocol";
+import { maxConfigSchema } from "./max/protocol";
 
 export const connectorConfigSchemas = {
   einvoice: invoiceConfigSchema,
@@ -51,6 +53,8 @@ export const connectorConfigSchemas = {
   fubon: fubonConfigSchema,
   feib: feibConfigSchema,
   ubot: ubotConfigSchema,
+  binance: binanceConfigSchema,
+  max: maxConfigSchema,
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export function parseConnectorConfig(
@@ -94,6 +98,8 @@ const connectorSessionDescriptors = {
   fubon: noSession,
   feib: noSession,
   ubot: noSession,
+  binance: noSession,
+  max: noSession,
 } satisfies Record<ConnectorId, SessionDescriptor>;
 
 /** 由解密後的設定判斷設定頁顯示的 session 與待驗證狀態，不回傳任何 secret。 */

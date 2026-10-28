@@ -221,7 +221,7 @@ SQL 應放在使用它的 feature 附近。只有確實被多個 feature 共用�
 
 Cloudflare Worker 與 HTTP 平台層，目前包含：
 
-- Worker bindings 與 Hono binding types。兆豐 App API 的對外請求由 `MegabankEgress` 轉送，物件定義見 `platform/megabank-egress-object.ts`。台北富邦網銀的瀏覽器請求由 `FubonEgress` 代發（Browser Run 出口遭銀行重設連線），物件定義見 `platform/fubon-egress-object.ts`，CDP 攔截位於 `sources/fubon/egress.ts`。
+- Worker bindings 與 Hono binding types。兆豐 App API 的對外請求由 `MegabankEgress` 轉送，物件定義見 `platform/megabank-egress-object.ts`。台北富邦網銀的瀏覽器請求由 `FubonEgress` 代發（Browser Run 出口遭銀行重設連線），物件定義見 `platform/fubon-egress-object.ts`，CDP 攔截位於 `sources/fubon/egress.ts`。Binance 與 MAX 的 API 請求由 `CryptoBrowserEgress` 開 Browser Run 代發（交易所拒絕 Workers 的對外連線），物件定義見 `platform/crypto-browser-egress-object.ts`；物件的 HTTP 介面、Worker 端 fetcher 與區域備援在 `platform/crypto-browser-egress.ts`，開瀏覽器與同源頁面代發的瀏覽器端在 `sources/crypto-browser-egress.ts`。這個物件本身就是開 Browser Run 代發，所以 platform 這兩個檔案例外引用 `sources` 根目錄的共用瀏覽器工具（工作階段與 `BrowserRunCapacityError`），不引用任何具體來源。
 - Hono factory。
 - API error response。
 - Demo 唯讀模式。
@@ -256,7 +256,7 @@ Middleware 應只處理跨功能的 request concern，不應承擔 feature 商�
 
 實體目錄集中不改變相依邊界：`sync.ts` 可依賴 connector、protocol、client、repository 與明確的共用 service；protocol／client 不得依賴 Hono、D1、Worker `Env`、adapter 或同步流程，也不得直接寫入資料庫。來源之間不引用彼此的內部實作。
 
-`sources` 根目錄只保留跨來源使用的能力：`browser.ts` 管 browser acquisition、capacity 錯誤、登入前頁面停滯復原與有期限的 session 清理，`sync-error.ts` 定義來源錯誤宣告對外錯誤代碼的介面，`types.ts` 定義後端 `Connector`／`SyncResult`，`financial-types.ts` 定義 connector 正規化後的金融資料（`BankAccount`、`BankTransaction`、`CreditCardBill`、`Invoice` 等），`sync-window.ts`、`credit-card-status.ts`、`captcha-retry.ts`（API 型來源的自動驗證碼重試）與 `post-login-retry.ts`（登入後頁面步驟在同一工作階段內的重試）提供共同 policy／判斷。`config-registry.ts` 直接引用各來源的純 schema、設定頁 session 狀態判斷與身分欄位重設規則，供設定 feature 使用；`deposit-source-registry.ts` 依 `bank:<connectorId>:<帳號或末四碼>:...` 約定解析直接存款 sourceId（王道等格式例外引用來源 protocol），供銀行顯示、帳戶比對與集保交割帳戶連結使用，直接存款銀行代碼由共用 catalog 的 `bankCode` 宣告；同步 handler 仍由 `features/sync/registry.ts` 組裝。Worker 與測試直接引用來源檔案，不建立跨來源的實作匯出入口。
+`sources` 根目錄只保留跨來源使用的能力：`browser.ts` 管 browser acquisition、capacity 錯誤、登入前頁面停滯復原與有期限的 session 清理，`sync-error.ts` 定義來源錯誤宣告對外錯誤代碼的介面，`types.ts` 定義後端 `Connector`／`SyncResult`，`financial-types.ts` 定義 connector 正規化後的金融資料（`BankAccount`、`BankTransaction`、`CreditCardBill`、`Invoice` 等），`sync-window.ts`、`credit-card-status.ts`、`captcha-retry.ts`（API 型來源的自動驗證碼重試）與 `post-login-retry.ts`（登入後頁面步驟在同一工作階段內的重試）提供共同 policy／判斷。`crypto-holdings.ts`、`crypto-prices.ts` 是加密貨幣交易所共用的持倉正規化、HMAC 簽章與 MAX 公開報價，`crypto-browser-egress.ts` 是 Browser Run 代發的瀏覽器端工作階段。`config-registry.ts` 直接引用各來源的純 schema、設定頁 session 狀態判斷與身分欄位重設規則，供設定 feature 使用；`deposit-source-registry.ts` 依 `bank:<connectorId>:<帳號或末四碼>:...` 約定解析直接存款 sourceId（王道等格式例外引用來源 protocol），供銀行顯示、帳戶比對與集保交割帳戶連結使用，直接存款銀行代碼由共用 catalog 的 `bankCode` 宣告；同步 handler 仍由 `features/sync/registry.ts` 組裝。Worker 與測試直接引用來源檔案，不建立跨來源的實作匯出入口。
 
 Browser 登入前復原最多三次嘗試，只包住頁面與驗證碼準備；OCR、送出登入與資料查詢留在來源 adapter，政策細節見 `docs/004-connector-development.md`。
 
@@ -704,8 +704,9 @@ sources/
 | `card-authorization-matching.ts`                 | 依正規化的帳戶、卡片、消費日、幣別與正負金額，按穩定順序逐一配對授權與明細；不依賴 D1 或來源協定。                                                                                                                                                                                 |
 | `card-authorization-write.ts`                    | 共用配對保存、可靠時刻與分類／排除／發票移轉；合併歷史候選、排除既有關係，晚到的舊識別更新已建立的目標。                                                                                                                                                                           |
 | `transaction-merge.ts`、`card-reconciliation.ts` | 共用舊交易合併與單卡摘要帳戶修復；保留使用者偏好、分類與發票關聯。                                                                                                                                                                                                                 |
+| `crypto-holdings-write.ts`                       | 加密貨幣交易所的當天完整持倉快照：設定版本 guard、刪除同 connector 當天持倉、promotion 新列與淨資產歷史在同一 batch。                                                                                                                                                              |
 
-Worker 的 `sources/<connectorId>/sync.ts` 負責設定解密、connector 呼叫與同步資料寫入；單次銀行流程也處理互動式 challenge，override 型別與來源 colocate。`ctbc/authorizations.ts` 管信用卡授權合併，`hncb/repository.ts` 管華南舊交易／帳戶修復，`nextbank/deposits.ts` 與 `obank/time-deposits.ts` 管存款生命週期。共用同步管理留在 `features/sync`，來源之間共用的外部取資料工具留在 `sources` 根目錄。
+Worker 的 `sources/<connectorId>/sync.ts` 負責設定解密、connector 呼叫與同步資料寫入；單次銀行流程也處理互動式 challenge，override 型別與來源 colocate。`ctbc/authorizations.ts` 管信用卡授權合併，`hncb/repository.ts` 管華南舊交易／帳戶修復，`nextbank/deposits.ts` 與 `obank/time-deposits.ts` 管存款生命週期。共用同步管理留在 `features/sync`，來源之間共用的外部取資料工具留在 `sources` 根目錄（例如加密貨幣來源共用的 `crypto-holdings.ts` 正規化、`crypto-prices.ts` MAX 公開報價與 `crypto-browser-egress.ts` Browser Run 代發的瀏覽器端；Durable Object 介面在 `platform/crypto-browser-egress.ts`）。
 
 中信的固定裝置識別、銀行發出的裝置 seed 與短期兩階段登入暫存只保存於加密設定。
 `ctbc/sync.ts` 以設定版本 CAS 在初始化前保存裝置 ID、首次握手後登入前保存 seed；

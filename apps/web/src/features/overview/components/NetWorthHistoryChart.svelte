@@ -26,6 +26,7 @@
     NET_WORTH_COMPARISON_PERIODS,
     NET_WORTH_ASSET_SERIES,
     NET_WORTH_DEFAULT_ASSETS,
+    restoreIncludedNetWorthAssets,
     type NetWorthAssetType,
     type NetWorthChartPoint,
     type NetWorthDisplayMode,
@@ -42,11 +43,13 @@
   const uid = $props.id();
   const gradientId = `net-worth-fill-${uid.replace(/:/g, "")}`;
   const storageKey = "taiwan-fin-hub-net-worth-chart-included-assets";
+  const knownStorageKey = "taiwan-fin-hub-net-worth-chart-known-assets";
   const timeframes: NetWorthTimeframe[] = ["1M", "3M", "6M", "1Y", "ALL"];
   const chartConfig: ChartConfig = {
     selectedTotal: { label: "淨資產", color: "#3e6f7c" },
     stock: { label: "股票/ETF", color: "#6574cd" },
     fund: { label: "基金", color: "#9b6bb0" },
+    crypto: { label: "加密貨幣", color: "#c0703a" },
     deposit: { label: "存款", color: "#3e6f7c" },
     manual: { label: "其他資產", color: "#b5853f" },
   };
@@ -112,12 +115,11 @@
 
   onMount(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null");
-      if (!Array.isArray(saved)) return;
-      const valid = saved.filter((value): value is NetWorthAssetType =>
-        ["stock", "fund", "deposit", "manual"].includes(value),
+      const restored = restoreIncludedNetWorthAssets(
+        JSON.parse(localStorage.getItem(storageKey) ?? "null"),
+        JSON.parse(localStorage.getItem(knownStorageKey) ?? "null"),
       );
-      if (valid.length) includedAssets = valid;
+      if (restored) includedAssets = restored;
     } catch {
       /* keep defaults */
     }
@@ -131,6 +133,10 @@
     if (next.length === 0) return;
     includedAssets = next;
     localStorage.setItem(storageKey, JSON.stringify(next));
+    localStorage.setItem(
+      knownStorageKey,
+      JSON.stringify(NET_WORTH_ASSET_SERIES.map(({ key }) => key)),
+    );
   }
 
   function xValue(point: NetWorthChartPoint) {

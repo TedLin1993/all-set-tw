@@ -28,6 +28,7 @@
     getHealthySyncJobs,
     getPendingSyncJobs,
   } from "@/data/connectors/sync-status";
+  import { listedHoldingCount } from "@/data/investments/holding-groups";
   import { investmentsQuery } from "@/data/investments/queries";
   import {
     invoiceTransactionMappingsQuery,
@@ -177,7 +178,7 @@
     {
       label: "投資",
       value: investmentTotal,
-      detail: `${investments.data?.length ?? 0} 個持倉`,
+      detail: `${listedHoldingCount(investments.data ?? [], rateValues)} 個持倉`,
     },
     {
       label: "其他資產",

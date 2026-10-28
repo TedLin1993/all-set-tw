@@ -45,6 +45,8 @@ export type TransactionPageCursor = {
 
 export type InvestmentPositionRow = {
   id: string;
+  connectorId: string;
+  sourceId: string;
   assetType: string;
   symbol: string | null;
   name: string;
@@ -63,6 +65,8 @@ export async function listLatestInvestmentPositions(
   return createDrizzle(db)
     .select({
       id: investmentPositions.id,
+      connectorId: investmentPositions.connectorId,
+      sourceId: investmentPositions.sourceId,
       assetType: investmentPositions.assetType,
       symbol: investmentPositions.symbol,
       name: investmentPositions.name,

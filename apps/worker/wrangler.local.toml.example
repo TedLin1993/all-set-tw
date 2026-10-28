@@ -15,6 +15,10 @@ class_name = "MegabankEgress"
 name = "FUBON_EGRESS"
 class_name = "FubonEgress"
 
+[[durable_objects.bindings]]
+name = "CRYPTO_BROWSER_EGRESS"
+class_name = "CryptoBrowserEgress"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["MegabankEgress"]
@@ -22,6 +26,10 @@ new_sqlite_classes = ["MegabankEgress"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["FubonEgress"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["CryptoBrowserEgress"]
 
 [[queues.producers]]
 binding = "SYNC_QUEUE"

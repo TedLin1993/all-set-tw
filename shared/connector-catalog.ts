@@ -556,6 +556,44 @@ export const connectorCatalog = {
     secretStateFields: ["deviceUuid"],
     resetOnCredentialChangeFields: ["deviceUuid"],
   },
+  binance: {
+    id: "binance",
+    title: "Binance",
+    bankCode: null,
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: ["investment_position", "net_worth_history"],
+    publicFields: [],
+    credentialFields: [
+      {
+        key: "apiKey",
+        label: "API Key（僅開啟讀取權限）",
+        type: "text",
+      },
+      { key: "apiSecret", label: "Secret Key", type: "password" },
+    ],
+    secretStateFields: [],
+    resetOnCredentialChangeFields: [],
+  },
+  max: {
+    id: "max",
+    title: "MAX 交易所",
+    bankCode: null,
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: ["investment_position", "net_worth_history"],
+    publicFields: [],
+    credentialFields: [
+      {
+        key: "accessKey",
+        label: "Access Key（僅開啟讀取權限）",
+        type: "text",
+      },
+      { key: "secretKey", label: "Secret Key", type: "password" },
+    ],
+    secretStateFields: [],
+    resetOnCredentialChangeFields: [],
+  },
 } as const satisfies Record<string, ConnectorCatalogEntry>;
 
 export type ConnectorId = keyof typeof connectorCatalog;

@@ -11,7 +11,7 @@
 - Tables：35
 - Explicit indexes：47
 - Other objects：0
-- Migrations：63
+- Migrations：65
 
 ## Tables
 
@@ -863,9 +863,9 @@ CREATE TABLE "exchange_rates" (
 | 1 | `id` | 持倉快照的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 產生此持倉的外部連接器識別碼。 | TEXT | NO | — | — | — |
 | 3 | `source_id` | 外部來源系統提供的持倉識別碼。 | TEXT | NO | — | — | — |
-| 4 | `asset_type` | 資產類型，目前限制為 stock、etf 或 fund。 | TEXT | NO | — | — | — |
-| 5 | `symbol` | 證券、基金或 ETF 的代號。 | TEXT | YES | — | — | — |
-| 6 | `name` | 投資標的名稱。 | TEXT | NO | — | — | — |
+| 4 | `asset_type` | 資產類型，目前限制為 stock、etf、fund 或 crypto；crypto 為加密貨幣交易所持倉，市值為同步當下換算的台幣。 | TEXT | NO | — | — | — |
+| 5 | `symbol` | 證券、基金或 ETF 的代號；crypto 為大寫幣種代碼，合約權益與錢包總值為 NULL。 | TEXT | YES | — | — | — |
+| 6 | `name` | 投資標的名稱；crypto 的幣種列為交易所名稱，合約權益與錢包總值為帳戶名稱。 | TEXT | NO | — | — | — |
 | 7 | `quantity` | 持有數量。 | REAL | YES | — | — | — |
 | 8 | `market_value` | 持倉的市場價值。 | INTEGER | YES | — | — | — |
 | 9 | `cash_balance` | 此投資帳戶或資產項目中的現金餘額。 | INTEGER | YES | — | — | — |
@@ -895,7 +895,7 @@ CREATE TABLE "investment_positions" (
   id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   source_id TEXT NOT NULL,
-  asset_type TEXT NOT NULL CHECK (asset_type IN ('stock', 'etf', 'fund')),
+  asset_type TEXT NOT NULL CHECK (asset_type IN ('stock', 'etf', 'fund', 'crypto')),
   symbol TEXT,
   name TEXT NOT NULL,
   quantity REAL,
@@ -1234,7 +1234,7 @@ CREATE TABLE manual_sync_runs (
 | 1 | `id` | 歷史點的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `date` | 此數值所代表的日期。 | TEXT | NO | — | — | — |
 | 3 | `net_worth` | 該日期與資產類型的金額；手動資產保留其設定幣別，其餘讀模型通常以 TWD 表示。 | INTEGER | NO | — | — | — |
-| 4 | `asset_type` | 資產類型，例如 total、deposit、stock、fund 或手動資產 id。 | TEXT | NO | 'total' | — | — |
+| 4 | `asset_type` | 資產類型，例如 total、deposit、stock、fund、crypto 或手動資產 id。 | TEXT | NO | 'total' | — | — |
 | 5 | `source` | 數值來源，例如 bank 或 manual。 | TEXT | NO | — | — | — |
 | 6 | `snapshotted_at` | 此歷史點實際建立或重算的時間。 | TEXT | NO | — | — | — |
 
@@ -1915,6 +1915,8 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0063_payment_due_notification.sql`](../apps/worker/migrations/0063_payment_due_notification.sql)
 - [`0064_payment_accounts.sql`](../apps/worker/migrations/0064_payment_accounts.sql)
 - [`0065_ubot_sync_job.sql`](../apps/worker/migrations/0065_ubot_sync_job.sql)
+- [`0066_crypto_asset_type.sql`](../apps/worker/migrations/0066_crypto_asset_type.sql)
+- [`0067_binance_max_sync_jobs.sql`](../apps/worker/migrations/0067_binance_max_sync_jobs.sql)
 
 ## 程式碼導覽
 

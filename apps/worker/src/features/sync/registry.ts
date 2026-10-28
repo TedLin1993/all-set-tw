@@ -64,6 +64,8 @@ import { syncCtbc } from "../../sources/ctbc/sync";
 import type { CtbcSyncOverrides } from "../../sources/ctbc/mobile-api";
 import { syncSkbank } from "../../sources/skbank/sync";
 import { syncUbot } from "../../sources/ubot/sync";
+import { syncBinance } from "../../sources/binance/sync";
+import { syncMax } from "../../sources/max/sync";
 import { syncEsun } from "../../sources/esun/sync";
 import {
   syncNextbank,
@@ -375,6 +377,12 @@ export const connectorRuntimeRegistry: Record<
   },
   ubot: {
     run: (env, trigger) => syncUbot(env, trigger),
+  },
+  binance: {
+    run: (env, trigger) => syncBinance(env, trigger),
+  },
+  max: {
+    run: (env, trigger) => syncMax(env, trigger),
   },
 };
 
