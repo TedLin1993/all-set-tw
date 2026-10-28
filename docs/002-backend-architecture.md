@@ -32,6 +32,7 @@ apps/
     │   │   ├── exchange-rates/
     │   │   ├── investments/
     │   │   ├── invoices/
+    │   │   ├── manual-activity/
     │   │   ├── manual-assets/
     │   │   ├── net-worth/
     │   │   ├── notifications/
@@ -581,6 +582,25 @@ X-Next-Cursor: <opaque-cursor>
 - 扣款帳戶須是非信用卡／貸款／定存／儲值的帳戶，且與款項同幣別或為台幣帳戶（外幣帳單常由台幣帳戶換匯扣繳）；銀行提供的扣款帳戶也依此比對，推測則只用同幣別帳戶。`PUT /api/bank/accounts/:id/payment-account`（`{ paymentAccountId: string | null }`）寫入手動設定，`DELETE` 同路徑移除手動設定、改回銀行資料；對象不是有效的信用卡或貸款時回 `BANK_ACCOUNT_NOT_FOUND`（404），扣款帳戶不符合條件時回 `INVALID_PAYMENT_ACCOUNT`（400）。
 - 帳戶 API（`/api/bank/accounts`、`/api/bank`）的信用卡與貸款附上 `paymentAccountId`、`paymentAccountSource`（`manual`／`bank`／`inferred`）與 `bankAutopay`；銀行資料的內部欄位不回傳。
 
+## 手動記錄
+
+現金等未串接來源的收支可手動補登。記錄寫成 `bank_transactions`，掛在虛擬帳戶 `manual:cash`
+（`connector_id = 'manual'`；由 migration 0066 建立）底下，因此沿用既有的活動、分類與收支計算。
+
+- `bank_accounts.is_manual = 1` 標示虛擬帳戶：沒有餘額、不同步、不參與轉帳／沖銷自動配對。
+  資產帳戶清單（`GET /api/bank/accounts`）、淨值、總覽帳戶數與餘額加總、匯率幣別清單都以此旗標排除，
+  不比對 connector id。0066 在已存在 `manual:cash` 列的資料庫上只補旗標，不覆蓋其他欄位。
+- 銀行交易 API 的每筆交易帶 `manual: boolean`；手動記錄另帶 `manualFx`（原幣紀錄，非手動記錄省略），
+  只有 `is_manual` 帳戶的 `raw_payload` 會被讀出，其他交易的原始內容不外送。
+- `POST /api/activity/manual`：body `{ date, kind: "expense" | "income", categoryId, name, amount > 0, fx?: { currency, amount, rate } | null }`，
+  回 `201 { id }`。`id` 為 `manual:<uuid>`；金額一律以台幣入帳（支出存負數、收入存正數，`currency` 為 `TWD`）。
+  `fx` 只寫進 `raw_payload`（`{"origin":"manual","fx":...}`）供紀錄與編輯帶入，不參與計算。
+  分類寫入 `classification_overrides`（`override:bank_transaction:<id>`）。
+- `PUT /api/activity/manual/:id`：同欄位的部分更新，空物件回 400；`kind` 改變會翻轉正負號。
+- `DELETE /api/activity/manual/:id`：連同分類 override 與計算偏好一併刪除，已連結的發票改回不關聯。
+- `PUT`／`DELETE` 只作用於 `is_manual` 帳戶底下的交易，其他交易或不存在的 id 回 `MANUAL_ACTIVITY_NOT_FOUND`（404）；
+  分類不存在回 `CATEGORY_NOT_FOUND`（404）。
+
 ## 讀取 API 效能
 
 線上讀取耗時主要來自 D1 往返與冷啟動，個別查詢的執行時間通常只有數毫秒。
@@ -994,6 +1014,9 @@ Connector 不得直接寫入金融資料表。
 外部來源以 TWD 為基準，儲存時取倒數作為原幣換算 TWD 的匯率，使用來源更新時間。
 來源未提供的額外幣別略過並保留已有匯率；來源回傳無效匯率或預設幣別缺值時不寫入。
 取得的匯率以單一 D1 batch upsert，不再清空整張匯率表；`GET /api/exchange-rates` 回傳所有已儲存幣別。
+`POST /api/exchange-rates/refresh` 可帶選用的 JSON body `{ "currencies": ["USD"] }`（3 碼大寫、最多 10 個），
+指定的幣別與持有幣別一起 upsert（例如手動記錄選了尚無匯率的外幣）；來源沒有回傳的指定幣別直接略過，不報錯。
+沒帶 body 時行為不變。
 
 ## 新增一般功能
 

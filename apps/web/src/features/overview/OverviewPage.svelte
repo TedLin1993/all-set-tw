@@ -623,7 +623,7 @@
         <div class="min-w-0">
           <h2 class="text-base font-semibold">本月收支</h2>
           <p class="mt-1 text-caption leading-6 text-ink/70">
-            銀行與信用卡活動，含未配對發票
+            銀行、信用卡與手動記錄，含未配對發票
           </p>
         </div>
         <Button variant="ghost" size="sm" onclick={() => navigate("activity")}

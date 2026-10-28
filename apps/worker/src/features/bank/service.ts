@@ -16,6 +16,7 @@ import {
   assertPaymentAccount,
   resolvePaymentAccounts,
 } from "./payment-accounts";
+import { parseManualFx } from "../manual-activity/payload";
 import type { TransactionPageCursor } from "../investments/repository";
 import type { MonthDateRange } from "../../platform/month-range";
 import {
@@ -240,7 +241,9 @@ async function presentBankTransactions(
       // An explicit include preference or user classification wins.
       transaction.calculationPreference !== 0 &&
       classification?.source !== "override" &&
-      classification?.source !== "user_rule"
+      classification?.source !== "user_rule" &&
+      // 手動記錄不參與轉帳／沖銷自動配對。
+      transaction.isManual !== 1
     );
   });
   // A user rule that excludes one side from calculation (e.g. an own-account
@@ -252,6 +255,7 @@ async function presentBankTransactions(
       const classification = classificationMap.get(transaction.id);
       return (
         transaction.calculationPreference !== 0 &&
+        transaction.isManual !== 1 &&
         (classification?.source === "user_rule"
           ? classification.excludedFromCalculation === true
           : classification?.source !== "override")
@@ -328,6 +332,8 @@ async function presentBankTransactions(
     ({
       effectiveDate: _effectiveDate,
       updatedAt: _updatedAt,
+      isManual,
+      manualPayload,
       ...transaction
     }) => {
       const classification = automaticCreditOffsetIds.has(transaction.id)
@@ -347,6 +353,8 @@ async function presentBankTransactions(
           : refundOrOffsetClassification(transaction.id);
       return {
         ...normalizeBankTransactionDisplay(transaction),
+        manual: isManual === 1,
+        manualFx: isManual === 1 ? parseManualFx(manualPayload) : undefined,
         excludedFromCalculation: resolveCalculationExclusion({
           transferPeerId: transaction.transferPeerId,
           accountType: transaction.accountType,
@@ -404,6 +412,7 @@ async function loadTransferCandidates(
 }
 
 function transferMatchKey(transaction: BankTransactionPageRow) {
+  if (transaction.isManual === 1) return undefined;
   const day = getAutomaticTransferDay(transaction);
   if (!day || !Number.isFinite(transaction.amount) || transaction.amount === 0)
     return undefined;

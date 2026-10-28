@@ -35,17 +35,27 @@ export async function getExchangeRateCurrencies(db: D1Database) {
   return assetExchangeRateCurrencies(await listAssetCurrencyAmounts(db));
 }
 
+/**
+ * 更新匯率。`requestedCurrencies` 是呼叫端額外指定的幣別（例如手動記帳的外幣），
+ * 與持有幣別一起寫入；provider 沒有回傳的指定幣別直接略過，不當成錯誤。
+ */
 export async function refreshExchangeRates(
   db: D1Database,
   fetcher: typeof fetch = fetch,
+  requestedCurrencies: readonly string[] = [],
 ) {
   const provider = await fetchProviderRates(fetcher);
-  const currencies = await getExchangeRateCurrencies(db);
+  const heldCurrencies = await getExchangeRateCurrencies(db);
+  const requested = new Set(
+    requestedCurrencies.filter((currency) => currency !== "TWD"),
+  );
+  const currencies = [...new Set([...heldCurrencies, ...requested])];
   const rates = currencies.flatMap((currency) => {
     const providerRate = provider.rates[currency];
     if (
       providerRate == null &&
-      !DEFAULT_EXCHANGE_CURRENCIES.includes(currency)
+      (requested.has(currency) ||
+        !DEFAULT_EXCHANGE_CURRENCIES.includes(currency))
     ) {
       return [];
     }

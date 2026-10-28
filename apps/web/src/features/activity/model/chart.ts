@@ -3,6 +3,7 @@ import type { ActivityItem } from "./types";
 import {
   activityDisplayAmount,
   activityCashFlow,
+  isActivityCashSource,
   type ActivityFlow,
 } from "@taiwan-fin-hub/shared";
 export {
@@ -50,9 +51,7 @@ export function activityCashAmountTwd(
   if (
     item.amount == null ||
     item.excludedFromCalculation ||
-    (item.source !== "bank" &&
-      item.source !== "card" &&
-      item.source !== "invoice")
+    !isActivityCashSource(item)
   )
     return 0;
   return activityAmountTwd(item, rates) ?? 0;

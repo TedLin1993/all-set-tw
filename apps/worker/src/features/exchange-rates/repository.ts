@@ -65,6 +65,7 @@ export async function listAssetCurrencyAmounts(db: D1Database) {
       and(
         isNull(bankAccounts.canonicalAccountId),
         isNull(bankAccounts.inactiveAt),
+        eq(bankAccounts.isManual, 0),
       ),
     )
     .unionAll(

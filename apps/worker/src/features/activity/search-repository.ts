@@ -5,7 +5,7 @@ export interface ActivitySearchInput {
   q: string;
   from?: string;
   to?: string;
-  source?: "all" | "bank" | "card" | "invoice";
+  source?: "all" | "bank" | "card" | "invoice" | "manual";
   flow?: "all" | "income" | "expense";
   category?: string;
 }

@@ -43,6 +43,13 @@ const bankTransactionColumns = {
     "institutionName",
   ),
   accountType: sql<string>`${account.accountType}`.as("accountType"),
+  isManual: sql<number>`${account.isManual}`.as("isManual"),
+  // 只有手動記錄才帶出 raw_payload（原幣資訊），其餘交易不外送原始內容。
+  manualPayload: sql<
+    string | null
+  >`CASE WHEN ${account.isManual} = 1 THEN ${txn.rawPayload} END`.as(
+    "manualPayload",
+  ),
   bankCode: sql<string>`${account.bankCode}`.as("bankCode"),
   accountLast4: sql<string>`${account.accountLast4}`.as("accountLast4"),
   sourceId: sql<string>`${txn.sourceId}`.as("sourceId"),
@@ -97,6 +104,9 @@ export type BankTransactionPageRow = {
   accountName: string | null;
   institutionName: string | null;
   accountType: string | null;
+  /** 1 表示手動記錄的虛擬帳戶（bank_accounts.is_manual）。 */
+  isManual: number;
+  manualPayload: string | null;
   bankCode: string | null;
   accountLast4: string | null;
   sourceId: string;
@@ -187,7 +197,13 @@ export async function listBankAccounts(db: D1Database) {
         )`,
       ),
     )
-    .where(and(isNull(account.canonicalAccountId), isNull(account.inactiveAt)))
+    .where(
+      and(
+        isNull(account.canonicalAccountId),
+        isNull(account.inactiveAt),
+        eq(account.isManual, 0),
+      ),
+    )
     .orderBy(
       asc(account.institutionName),
       asc(account.accountName),
@@ -265,6 +281,8 @@ export async function listBankTransactionsForTransferMatching(
     .where(
       and(
         visibleBankTransactionFilter,
+        // 手動記錄的虛擬帳戶不參與轉帳配對。
+        eq(account.isManual, 0),
         eq(txn.status, "posted"),
         ne(txn.amount, 0),
         sql`ABS(txn.amount) IN (

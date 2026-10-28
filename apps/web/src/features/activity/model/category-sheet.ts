@@ -1,5 +1,9 @@
 // 手機底部分類快篩卡（CategoryDetailSheet）用的清單與近 6 個月長條圖資料。
-import { activityDateKey, compareActivityItems } from "@taiwan-fin-hub/shared";
+import {
+  activityDateKey,
+  compareActivityItems,
+  isActivityCashSource,
+} from "@taiwan-fin-hub/shared";
 import {
   activityCashFlow,
   activityFlowAmountTwd,
@@ -20,9 +24,7 @@ function isCategoryItem(
   category: string,
 ) {
   return (
-    (item.source === "bank" ||
-      item.source === "card" ||
-      item.source === "invoice") &&
+    isActivityCashSource(item) &&
     !item.excludedFromCalculation &&
     item.amount != null &&
     activityCashFlow(item) === flow &&

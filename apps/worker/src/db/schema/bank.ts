@@ -42,6 +42,7 @@ export const bankAccounts = sqliteTable(
     autopayBankCode: text("autopay_bank_code"),
     autopayAccountLast4: text("autopay_account_last4"),
     autopayAccountSourceId: text("autopay_account_source_id"),
+    isManual: integer("is_manual").notNull().default(0),
   },
   (table) => [
     primaryKey({ columns: [table.id] }),
@@ -70,6 +71,7 @@ export const bankAccounts = sqliteTable(
       "bank_accounts_autopay_status_check",
       sql`autopay_status IS NULL OR autopay_status IN ('enabled', 'none')`,
     ),
+    check("bank_accounts_is_manual_check", sql`is_manual IN (0, 1)`),
   ],
 );
 

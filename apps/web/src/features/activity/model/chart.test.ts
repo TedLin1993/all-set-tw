@@ -91,4 +91,26 @@ describe("activity category chart", () => {
     expect(activityFlowTotalTwd(items, "expense", {})).toBe(400);
     expect(activityFlowTotalTwd(items, "income", {})).toBe(0);
   });
+
+  it("counts manual records in the pie and monthly totals with the same amounts", () => {
+    const items = [
+      item({ id: "bank", amount: -300, category: "餐飲" }),
+      item({ id: "cash", source: "manual", amount: -120, category: "餐飲" }),
+      item({ id: "tip", source: "manual", amount: 500, category: "其他收入" }),
+      item({
+        id: "skipped",
+        source: "manual",
+        amount: -999,
+        category: "餐飲",
+        excludedFromCalculation: true,
+      }),
+    ];
+    const expense = buildActivityCategorySlices(items, "expense", {});
+    const income = buildActivityCategorySlices(items, "income", {});
+
+    expect(expense).toMatchObject([{ category: "餐飲", amount: 420 }]);
+    expect(income).toMatchObject([{ category: "其他收入", amount: 500 }]);
+    expect(activityFlowTotalTwd(items, "expense", {})).toBe(420);
+    expect(activityFlowTotalTwd(items, "income", {})).toBe(500);
+  });
 });
