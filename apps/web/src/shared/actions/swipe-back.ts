@@ -104,8 +104,14 @@ export const swipeBack: Action<HTMLElement, SwipeBackOptions> = (
 
     const horizontalDistance = touch.clientX - start.clientX;
     const verticalDistance = Math.abs(touch.clientY - start.clientY);
+    // touchend 的座標可能比最後一次 touchmove 更遠；有差距時以最後一段計算放開速度。
+    const sinceLastMove = event.timeStamp - last.time;
     const releaseVelocity =
-      event.timeStamp - last.time > VELOCITY_STALE_MS ? 0 : velocity;
+      touch.clientX !== last.clientX && sinceLastMove > 0
+        ? (touch.clientX - last.clientX) / sinceLastMove
+        : sinceLastMove > VELOCITY_STALE_MS
+          ? 0
+          : velocity;
     const isBackSwipe = dragging
       ? horizontalDistance >= node.clientWidth * COMMIT_WIDTH_RATIO ||
         (releaseVelocity >= FLICK_VELOCITY &&
