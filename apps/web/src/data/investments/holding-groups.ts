@@ -95,12 +95,21 @@ export function groupInvestmentPositions(
     );
 }
 
-export const CRYPTO_TRADES_NOTE =
-  "加密貨幣只同步持倉，交易紀錄不包含加密貨幣。";
+/** 加密貨幣在資產頁與總覽是獨立大類，與集保等證券投資分開（含交易所無持倉的零值列）。 */
+export function isCryptoPosition(row: InvestmentRow) {
+  return row.assetType === "crypto";
+}
 
-/** 是否同步了加密貨幣（含交易所無持倉的零值列）；用來提示交易紀錄不含加密貨幣。 */
-export function hasCryptoPositions(rows: readonly InvestmentRow[]) {
-  return rows.some((row) => row.assetType === "crypto");
+/** 不分機構的持倉清單：套用與分組相同的排序與小額隱藏規則。 */
+export function listInvestmentHoldings(
+  rows: readonly InvestmentRow[],
+  rates: Readonly<Record<string, number>>,
+) {
+  const groups = groupInvestmentPositions(rows, rates);
+  return {
+    holdings: groups.flatMap((group) => group.holdings).sort(compareHoldings),
+    hiddenCount: groups.reduce((sum, group) => sum + group.hiddenCount, 0),
+  };
 }
 
 /** 實際列出的持倉筆數（不含小額與無持倉列），與分組畫面一致。 */

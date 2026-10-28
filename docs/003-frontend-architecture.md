@@ -127,17 +127,21 @@ npm run verify:web
 總覽與資產清冊的缺少匯率提示依原始金額判斷，只有實際為 0 才略過。
 外幣金額顯示保留原始小數，換算與總額計算也保留原始精度。
 
-## 投資持倉分組
+## 投資與加密貨幣持倉
 
-資產頁的投資面板使用 `features/assets/components/InvestmentHoldings.svelte`，分組規則在
-`data/investments/holding-groups.ts`（含 colocated 測試，總覽頁也共用持倉筆數）。持倉依 `connectorId` 分機構、
-機構依台幣小計由大到小排列，預設全部收合，點擊展開。展開後機構內的持倉平鋪列出、
-不依類型分組，類型（STOCK、ETF、FUND、加密貨幣幣種、Binance 合約）放在每筆的副標。
+加密貨幣（`assetType` 為 `crypto`，以 `isCryptoPosition` 判斷）與集保等證券投資是兩個獨立大類：
+總覽資產配置、資產頁上方摘要與資產清冊都分成「投資」與「加密貨幣」，與淨資產走勢一致；沒有加密貨幣持倉時不顯示加密貨幣。
+總資產與淨資產仍包含兩者。
+
+持倉清單使用 `features/assets/components/InvestmentHoldings.svelte`，排序與分組規則在
+`data/investments/holding-groups.ts`（含 colocated 測試，總覽頁也共用持倉筆數）。「投資」面板不分組，
+所有證券持倉平鋪成單一清單；「加密貨幣」面板依 `connectorId` 分交易所，交易所依台幣小計由大到小排列，
+各區段標題顯示交易所名稱與小計，一律展開。類型（STOCK、ETF、FUND、加密貨幣幣種、Binance 合約）放在每筆的副標。
 持倉依換算後的台幣市值由大到小排序，沒有市值的持倉顯示「無法估值」，缺少匯率的持倉顯示原幣金額，兩者都不計入小計並排在最後；台幣估值絕對值低於
 NT$10（`INVESTMENT_DUST_THRESHOLD_TWD`，與後端加密貨幣同步共用）的持倉不列出，但計入小計並提示筆數。加密貨幣「無持倉」零值列（`sourceId` 為 `shared/investments.ts` 的 `EMPTY_INVESTMENT_SOURCE_ID`）不列出，
-機構顯示「目前沒有持倉」。總覽與資產頁的持倉筆數都以 `listedHoldingCount` 計算，只算實際列出的持倉。小計為負（例如 MAX 借款大於資產）時以警示色顯示。
+交易所顯示「目前沒有持倉」；只有零值列時仍顯示加密貨幣大類。總覽與資產頁的持倉筆數都以 `listedHoldingCount` 計算，只算實際列出的持倉。小計為負（例如 MAX 借款大於資產）時以警示色顯示。
 
-交易紀錄只有集保 e 存摺提供；有加密貨幣持倉（含交易所無持倉的零值列）時，資產頁投資面板的交易紀錄顯示「加密貨幣只同步持倉，交易紀錄不包含加密貨幣。」，沒有加密貨幣時不顯示。
+交易紀錄只有集保 e 存摺提供，只出現在「投資」面板；證券持倉都賣出但仍有交易紀錄時，仍顯示「投資」入口。「加密貨幣」面板只有持倉。
 
 `/api/investments` 每頁最多 100 筆，`investmentsQuery` 以 `ApiClient.getAllPages` 依 `X-Has-More`／`X-Next-Cursor` 取完所有頁，避免持倉超過一頁時少算市值。
 

@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { ChevronRight } from "@lucide/svelte";
   import type { InvestmentRow } from "@/data/investments/types";
   import { formatCurrency } from "@/shared/format/financial";
   import {
     groupInvestmentPositions,
     holdingTitle,
+    listInvestmentHoldings,
     type InvestmentHolding,
   } from "@/data/investments/holding-groups";
   import {
@@ -15,25 +15,21 @@
   let {
     positions,
     rates,
+    grouped = false,
   }: {
     positions: InvestmentRow[];
     rates: Readonly<Record<string, number>>;
+    /** 依資料來源分區（加密貨幣依交易所）；否則單一清單依市值排序。 */
+    grouped?: boolean;
   } = $props();
 
-  const institutions = $derived(groupInvestmentPositions(positions, rates));
-  // 預設全部收合，與金融機構區塊一致。
-  let expanded = $state<Set<string>>(new Set());
-
-  function isOpen(key: string) {
-    return expanded.has(key);
-  }
-
-  function toggle(key: string) {
-    const next = new Set(expanded);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    expanded = next;
-  }
+  // 分區一律展開：使用者已從資產清冊選了這個大類，不再多一層點擊。
+  const institutions = $derived(
+    grouped ? groupInvestmentPositions(positions, rates) : [],
+  );
+  const flat = $derived(
+    grouped ? undefined : listInvestmentHoldings(positions, rates),
+  );
 
   function holdingDetail({ row }: InvestmentHolding) {
     if (row.assetType === "crypto") {
@@ -77,47 +73,44 @@
   </div>
 {/snippet}
 
-<div class="divide-y divide-ink/10">
-  {#each institutions as institution (institution.key)}
-    <div>
-      <button
-        class="grid min-h-[64px] w-full grid-cols-[minmax(0,1fr)_auto_16px] items-center gap-3 py-2 text-left"
-        type="button"
-        aria-expanded={isOpen(institution.key)}
-        onclick={() => toggle(institution.key)}
-      >
-        <span class="min-w-0">
-          <strong class="block truncate text-sm">{institution.label}</strong>
-          <small class="mt-1 block truncate text-caption text-subtle">
-            {institution.visibleCount
-              ? `${institution.visibleCount} 筆持倉${institution.hiddenCount ? ` · 另有 ${institution.hiddenCount} 筆小額未顯示` : ""}`
-              : institution.hiddenCount
-                ? `${institution.hiddenCount} 筆小額持倉未顯示`
-                : "目前沒有持倉"}
-          </small>
-        </span>
-        <strong
-          class={`text-right text-sm tabular-nums ${institution.totalTwd < 0 ? "text-coral" : "text-steel"}`}
-        >
-          {formatCurrency(institution.totalTwd)}
-        </strong>
-        <ChevronRight
-          class={`size-4 text-subtle transition ${isOpen(institution.key) ? "rotate-90" : ""}`}
-        />
-      </button>
-      {#if isOpen(institution.key)}
-        <div class="border-t border-ink/8 pb-3 pl-4">
-          {#if institution.holdings.length === 0}
-            <p class="py-3 text-sm text-subtle">
-              {institution.hiddenCount
-                ? "所有持倉都低於 NT$10，未列出。"
-                : "目前沒有持倉。"}
+{#if flat}
+  {@render holdingList(flat.holdings)}
+  {#if flat.hiddenCount}
+    <p class="border-t border-ink/8 py-3 text-caption text-subtle">
+      另有 {flat.hiddenCount} 筆台幣估值低於 NT$10 的持倉未顯示，仍計入市值。
+    </p>
+  {/if}
+{:else}
+  <div class="divide-y divide-ink/10">
+    {#each institutions as institution (institution.key)}
+      <section aria-label={institution.label} class="pt-4 pb-1">
+        <div class="flex items-start justify-between gap-3 pb-1">
+          <div class="min-w-0">
+            <h3 class="truncate text-sm font-semibold">{institution.label}</h3>
+            <p class="mt-0.5 truncate text-caption text-subtle">
+              {institution.visibleCount
+                ? `${institution.visibleCount} 筆持倉${institution.hiddenCount ? ` · 另有 ${institution.hiddenCount} 筆小額未顯示` : ""}`
+                : institution.hiddenCount
+                  ? `${institution.hiddenCount} 筆小額持倉未顯示`
+                  : "目前沒有持倉"}
             </p>
-          {:else}
-            {@render holdingList(institution.holdings)}
-          {/if}
+          </div>
+          <strong
+            class={`shrink-0 text-right text-sm tabular-nums ${institution.totalTwd < 0 ? "text-coral" : "text-steel"}`}
+          >
+            {formatCurrency(institution.totalTwd)}
+          </strong>
         </div>
-      {/if}
-    </div>
-  {/each}
-</div>
+        {#if institution.holdings.length === 0}
+          <p class="py-2 text-sm text-subtle">
+            {institution.hiddenCount
+              ? "所有持倉都低於 NT$10，未列出。"
+              : "目前沒有持倉。"}
+          </p>
+        {:else}
+          {@render holdingList(institution.holdings)}
+        {/if}
+      </section>
+    {/each}
+  </div>
+{/if}

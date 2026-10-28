@@ -107,6 +107,16 @@ describe("calculateAssetSummary", () => {
           currency: "TWD",
           asOfDate: "2026-07-22",
         },
+        {
+          id: "btc",
+          connectorId: "binance",
+          sourceId: "BTC",
+          assetType: "crypto",
+          name: "BTC",
+          marketValue: 50,
+          currency: "USD",
+          asOfDate: "2026-07-22",
+        },
       ],
       manualAssets: [
         {
@@ -123,8 +133,12 @@ describe("calculateAssetSummary", () => {
     });
 
     expect(summary.bankTotal).toBe(3_000);
+    // 加密貨幣與證券投資分開加總，總資產與淨資產仍包含兩者。
+    expect(summary.investmentTotal).toBe(10_000);
+    expect(summary.cryptoTotal).toBe(1_500);
+    expect(summary.grossAssets).toBe(20_500);
     expect(summary.cardDebt).toBe(2_000);
-    expect(summary.netWorth).toBe(17_000);
+    expect(summary.netWorth).toBe(18_500);
     expect(summary.institutionGroups).toHaveLength(1);
     expect(summary.institutionGroups[0]).toMatchObject({
       key: "bank:808",
