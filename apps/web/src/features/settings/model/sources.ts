@@ -37,12 +37,17 @@ export function sourceCapabilitySummary(source: ConnectorSource) {
     .join("・");
 }
 
+/** 加密貨幣交易所來源；新增資料來源選擇器將其獨立成一組，並使用比特幣圖示。 */
+export function isCryptoSource(id: ConnectorId) {
+  return id === "binance" || id === "max";
+}
+
 export function sourceIcon(id: ConnectorId) {
   return id === "einvoice"
     ? ReceiptText
     : id === "tdcc"
       ? ChartCandlestick
-      : id === "binance" || id === "max"
+      : isCryptoSource(id)
         ? Bitcoin
         : Landmark;
 }
@@ -75,7 +80,7 @@ export function groupSourcesByStatus(
   return groups;
 }
 
-/** 新增資料來源選擇器的分組：發票與投資放前面，其餘為銀行。 */
+/** 新增資料來源選擇器的分組：發票與證券在前，銀行居中，使用較少的加密貨幣放最後。 */
 export function isBankSource(source: ConnectorSource) {
   const capabilities: readonly string[] = source.capabilities;
   return (
