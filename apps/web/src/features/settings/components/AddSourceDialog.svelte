@@ -6,6 +6,7 @@
   import { swipeBack } from "@/shared/actions/swipe-back";
   import {
     isBankSource,
+    isCryptoSource,
     sourceCapabilitySummary,
     sourceIcon,
     type ConnectorSource,
@@ -69,10 +70,16 @@
   const groups = $derived(
     [
       {
-        label: "發票與投資",
-        items: filtered.filter((source) => !isBankSource(source)),
+        label: "發票與證券",
+        items: filtered.filter(
+          (source) => !isBankSource(source) && !isCryptoSource(source.id),
+        ),
       },
       { label: "銀行", items: filtered.filter(isBankSource) },
+      {
+        label: "加密貨幣",
+        items: filtered.filter((source) => isCryptoSource(source.id)),
+      },
     ].filter((group) => group.items.length),
   );
 </script>

@@ -64,6 +64,10 @@
   let comparisonPeriod = $state<NetWorthComparisonPeriod>("day");
 
   const availableAssets = $derived(getAvailableNetWorthAssets(data));
+  /** 沒有歷史資料的資產類型無法納入，直接不顯示篩選選項。 */
+  const assetOptions = $derived(
+    NET_WORTH_ASSET_SERIES.filter(({ key }) => availableAssets.has(key)),
+  );
   const chartData = $derived(
     buildNetWorthChartData(data, includedAssets, timeframe),
   );
@@ -217,12 +221,10 @@
           aria-label="資產類型篩選"
         >
           <span class="text-caption font-medium text-subtle">包含</span>
-          {#each NET_WORTH_ASSET_SERIES as option (option.key)}
+          {#each assetOptions as option (option.key)}
             {@const active = includedAssets.includes(option.key)}
-            {@const available = availableAssets.has(option.key)}
             <button
-              class={`flex items-center gap-1.5 rounded-md px-2 py-2 text-caption font-medium transition ${active && available ? "bg-ink/5 text-ink" : "bg-transparent text-subtle"} ${available ? "hover:bg-ink/5 hover:text-steel" : "cursor-not-allowed opacity-40"}`}
-              disabled={!available}
+              class={`flex items-center gap-1.5 rounded-md px-2 py-2 text-caption font-medium transition hover:bg-ink/5 hover:text-steel ${active ? "bg-ink/5 text-ink" : "bg-transparent text-subtle"}`}
               aria-pressed={active}
               onclick={() => toggleAsset(option.key)}
               ><span
