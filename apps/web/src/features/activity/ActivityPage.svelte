@@ -6,6 +6,7 @@
     createInfiniteQuery,
     createQuery,
     useQueryClient,
+    type InfiniteData,
   } from "@tanstack/svelte-query";
   import {
     Search,
@@ -25,7 +26,10 @@
   import Select from "@/shared/ui/Select.svelte";
   import TabsList from "@/shared/ui/TabsList.svelte";
   import TabsTrigger from "@/shared/ui/TabsTrigger.svelte";
-  import { activitySearchQuery } from "@/data/activity/queries";
+  import {
+    activitySearchQuery,
+    type ActivitySearchPage,
+  } from "@/data/activity/queries";
   import ActivitySearchFilters from "./components/ActivitySearchFilters.svelte";
   import SearchHighlight from "./components/SearchHighlight.svelte";
   import ActivityAmount from "./components/ActivityAmount.svelte";
@@ -655,19 +659,34 @@
         { excludedFromCalculation: payload.excludedFromCalculation },
       ),
     onSuccess: (_result, payload) => {
+      const excludedFromCalculation = payload.excludedFromCalculation;
+      const markInvoice = <T extends { id: string }>(invoice: T) =>
+        invoice.id === payload.invoiceId
+          ? { ...invoice, excludedFromCalculation }
+          : invoice;
       qc.setQueriesData<InvoiceSummaryRow[]>(
         { queryKey: queryKeys.invoices },
         (current) =>
-          Array.isArray(current)
-            ? current.map((invoice) =>
-                invoice.id === payload.invoiceId
-                  ? {
-                      ...invoice,
-                      excludedFromCalculation: payload.excludedFromCalculation,
-                    }
-                  : invoice,
-              )
-            : current,
+          Array.isArray(current) ? current.map(markInvoice) : current,
+      );
+      // 搜尋時明細讀的是搜尋快取；先同步，避免重新載入前或失敗時再送出相同設定。
+      // 只改純發票活動，已配對的交易沿用交易自己的計算設定。
+      qc.setQueriesData<InfiniteData<ActivitySearchPage>>(
+        { queryKey: ["bank", "activity-search"] },
+        (current) =>
+          current && {
+            ...current,
+            pages: current.pages.map((page) => ({
+              ...page,
+              items: page.items.map((item) =>
+                item.source === "invoice" &&
+                item.invoiceId === payload.invoiceId
+                  ? { ...item, excludedFromCalculation }
+                  : item,
+              ),
+              invoices: page.invoices.map(markInvoice),
+            })),
+          },
       );
       qc.invalidateQueries({ queryKey: queryKeys.invoices });
       qc.invalidateQueries({ queryKey: ["bank", "activity-search"] });
