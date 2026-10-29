@@ -72,11 +72,44 @@ describe("calculateMonthlyActivityTotals", () => {
     expect(
       calculateMonthlyActivityTotals(
         bank,
-        [invoice({ id: "unmatched", amount: 300 })],
+        [
+          invoice({ id: "unmatched", amount: 300 }),
+          // 現金消費的發票提款時已計入，使用者排除後不重複列入支出。
+          invoice({ id: "cash", amount: 80, excludedFromCalculation: true }),
+        ],
         [],
         {},
       ),
     ).toEqual({ income: 10_000, expense: 1_500 });
+  });
+
+  it("已排除的發票配對交易後，改以交易的計算偏好為準", () => {
+    const cardExpense = transaction({
+      id: "card-expense",
+      accountId: "card-1",
+      amount: -1_200,
+    });
+    const matchedInvoice = invoice({
+      id: "matched",
+      amount: 1_200,
+      excludedFromCalculation: true,
+    });
+
+    expect(
+      calculateMonthlyActivityTotals(
+        { accounts: [], transactions: [cardExpense] },
+        [matchedInvoice],
+        [
+          {
+            invoiceId: matchedInvoice.id,
+            decision: "linked",
+            transactionId: cardExpense.id,
+            updatedAt: "2026-07-02T00:00:00.000Z",
+          },
+        ],
+        {},
+      ),
+    ).toEqual({ income: 0, expense: 1_200 });
   });
 
   it("已配對發票不會重複列入支出", () => {

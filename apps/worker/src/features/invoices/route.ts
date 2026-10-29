@@ -19,6 +19,7 @@ import {
   getInvoicePage,
   getInvoicesRange,
   InvoiceNotFoundError,
+  setInvoiceCalculationPreference,
 } from "./service";
 
 const invoicePageCursorSchema = z.object({
@@ -75,6 +76,33 @@ function registerInvoiceRoutes(api: Hono<AppBindings>) {
 
   api.get("/invoices/:invoiceId", async (c) =>
     invoiceDetailResponse(c, c.req.param("invoiceId")),
+  );
+
+  api.patch(
+    "/invoices/:invoiceId/calculation",
+    zValidator(
+      "json",
+      z.object({ excludedFromCalculation: z.boolean() }),
+      validationHook(
+        "INVALID_REQUEST",
+        "Invoice calculation preference is invalid.",
+      ),
+    ),
+    async (c) => {
+      const { excludedFromCalculation } = c.req.valid("json");
+      try {
+        await setInvoiceCalculationPreference(
+          c.env.DB,
+          c.req.param("invoiceId"),
+          excludedFromCalculation,
+        );
+      } catch (error) {
+        if (error instanceof InvoiceNotFoundError)
+          return jsonError("INVOICE_NOT_FOUND", "Invoice was not found.", 404);
+        throw error;
+      }
+      return c.json({ success: true, excludedFromCalculation });
+    },
   );
 }
 

@@ -645,6 +645,34 @@
       qc.invalidateQueries({ queryKey: queryKeys.classificationRules });
     },
   }));
+  const invoiceCalculationMutation = createMutation(() => ({
+    mutationFn: (payload: {
+      invoiceId: string;
+      excludedFromCalculation: boolean;
+    }) =>
+      api.patch(
+        `/api/invoices/${encodeURIComponent(payload.invoiceId)}/calculation`,
+        { excludedFromCalculation: payload.excludedFromCalculation },
+      ),
+    onSuccess: (_result, payload) => {
+      qc.setQueriesData<InvoiceSummaryRow[]>(
+        { queryKey: queryKeys.invoices },
+        (current) =>
+          Array.isArray(current)
+            ? current.map((invoice) =>
+                invoice.id === payload.invoiceId
+                  ? {
+                      ...invoice,
+                      excludedFromCalculation: payload.excludedFromCalculation,
+                    }
+                  : invoice,
+              )
+            : current,
+      );
+      qc.invalidateQueries({ queryKey: queryKeys.invoices });
+      qc.invalidateQueries({ queryKey: ["bank", "activity-search"] });
+    },
+  }));
   const mappingMutation = createMutation(() => ({
     mutationFn: (payload: { invoiceId: string; transactionId: string }) =>
       api.put<InvoiceTransactionPreference>(
@@ -741,6 +769,14 @@
     );
   }
   function toggleCalculation(item: ActivityItem) {
+    if (item.source === "invoice" && item.invoiceId) {
+      // 純發票沒有分類與規則可調整，直接切換是否計入。
+      invoiceCalculationMutation.mutate({
+        invoiceId: item.invoiceId,
+        excludedFromCalculation: !item.excludedFromCalculation,
+      });
+      return;
+    }
     if (!item.transactionId) return;
     if (!item.excludedFromCalculation) {
       pendingCalculation = {
@@ -1631,13 +1667,15 @@
                     >{/if}
                 </div>
 
-                {#if detailItem.transactionId}<label
+                {#if detailItem.transactionId || detailItem.source === "invoice"}<label
                     class="flex cursor-pointer items-center justify-between gap-4 py-4"
                   >
                     <span>
                       <span class="block font-semibold">排除統計計算</span>
                       <span class="mt-1 block text-caption text-subtle"
-                        >保留活動，但不計入收支</span
+                        >{detailItem.source === "invoice"
+                          ? "現金消費已在提款時計入，可排除以免重複"
+                          : "保留活動，但不計入收支"}</span
                       >
                     </span>
                     <Checkbox
@@ -1646,7 +1684,10 @@
                       disabled={(calculationMutation.isPending &&
                         calculationMutation.variables?.transactionId ===
                           detailItem.transactionId) ||
-                        calculationUpdateMutation.isPending}
+                        calculationUpdateMutation.isPending ||
+                        (invoiceCalculationMutation.isPending &&
+                          invoiceCalculationMutation.variables?.invoiceId ===
+                            detailItem.invoiceId)}
                       onchange={(event: Event) =>
                         handleCalculationChange(detailItem, event)}
                     />

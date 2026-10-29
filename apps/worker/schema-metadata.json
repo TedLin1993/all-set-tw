@@ -351,7 +351,7 @@
     },
     "invoices": {
       "description": "電子發票的抬頭與總額主檔。",
-      "notes": "商品明細另存於 invoice_line_items；同一 connector 與 source_id 只保留一張發票。",
+      "notes": "商品明細另存於 invoice_line_items；同一 connector 與 source_id 只保留一張發票。excluded_from_calculation 是使用者設定，同步 upsert 只更新來源欄位，不得覆寫此欄位；變更此欄位也不更新 updated_at。",
       "columns": {
         "id": "發票的系統識別碼。",
         "connector_id": "取得此發票的外部連接器識別碼。",
@@ -362,7 +362,8 @@
         "amount": "發票總金額。",
         "raw_payload": "連接器回傳的原始或正規化 JSON。",
         "created_at": "發票首次寫入的時間。",
-        "updated_at": "發票最後更新的時間。"
+        "updated_at": "發票最後更新的時間。",
+        "excluded_from_calculation": "未配對到銀行或信用卡交易時，是否將此純發票活動排除於收支計算；0 表示納入（預設）、1 表示排除。現金消費的發票在提款時已計入支出，可逐筆排除以免重複計算；配對交易後改以交易的計算偏好為準。"
       }
     },
     "manual_assets": {

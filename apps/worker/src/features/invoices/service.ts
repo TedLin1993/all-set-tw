@@ -3,6 +3,7 @@ import {
   listInvoiceItems,
   listInvoices,
   listInvoicesInRange,
+  updateInvoiceCalculationExclusion,
   type InvoicePageCursor,
   type InvoiceRow,
 } from "./repository";
@@ -42,6 +43,21 @@ export async function getInvoiceDetail(db: D1Database, invoiceId: string) {
     invoice,
     items.map(({ invoiceId: _invoiceId, ...item }) => item),
   );
+}
+
+export async function setInvoiceCalculationPreference(
+  db: D1Database,
+  invoiceId: string,
+  excludedFromCalculation: boolean,
+) {
+  if (
+    !(await updateInvoiceCalculationExclusion(
+      db,
+      invoiceId,
+      excludedFromCalculation,
+    ))
+  )
+    throw new InvoiceNotFoundError();
 }
 
 function presentInvoice<T extends Omit<InvoiceRow, "updatedAt"> | InvoiceRow>(

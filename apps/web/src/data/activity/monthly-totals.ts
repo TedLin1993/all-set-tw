@@ -48,7 +48,11 @@ export function calculateMonthlyActivityTotals(
   );
 
   totals.expense += invoices
-    .filter((invoice) => !matches.invoiceToTransactionId.has(invoice.id))
+    .filter(
+      (invoice) =>
+        !invoice.excludedFromCalculation &&
+        !matches.invoiceToTransactionId.has(invoice.id),
+    )
     .reduce((sum, invoice) => sum + Math.abs(invoice.amount), 0);
 
   return totals;
