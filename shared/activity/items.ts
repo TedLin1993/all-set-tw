@@ -30,6 +30,8 @@ export interface ActivityTransaction extends MatchingTransaction {
 export interface ActivityInvoice extends MatchingInvoice {
   sellerName?: string | null;
   invoiceNumber?: string | null;
+  /** 只在發票未配對交易時生效；配對後以交易的計算偏好為準。 */
+  excludedFromCalculation?: boolean;
 }
 export interface ActivityTrade {
   id: string;
@@ -131,6 +133,7 @@ export function buildActivityItems(
         category: "發票",
         invoiceId: i.id,
         invoiceAmount: i.amount,
+        excludedFromCalculation: i.excludedFromCalculation,
         status: "已開立",
       })),
     ...trades.map((t) => {

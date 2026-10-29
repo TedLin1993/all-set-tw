@@ -21,6 +21,8 @@ export interface InvoiceSummaryRow {
   invoiceNumber?: string;
   sellerName?: string;
   amount: number;
+  /** 純發票活動是否排除於收支計算；配對交易後不使用。 */
+  excludedFromCalculation?: boolean;
 }
 
 export interface InvoiceRow extends InvoiceSummaryRow {

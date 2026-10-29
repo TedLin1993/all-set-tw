@@ -30,6 +30,8 @@ const invoiceSummaryColumns = {
   invoiceDate: invoices.invoiceDate,
   sellerName: invoices.sellerName,
   amount: invoices.amount,
+  excludedFromCalculation:
+    sql<boolean>`${invoices.excludedFromCalculation} = 1`.mapWith(Boolean),
 };
 
 export type InvoicePageCursor = {
@@ -46,6 +48,7 @@ export type InvoiceRow = {
   invoiceDate: string;
   sellerName: string | null;
   amount: number;
+  excludedFromCalculation: boolean;
   updatedAt: string;
 };
 
@@ -143,4 +146,21 @@ export async function findInvoice(db: D1Database, invoiceId: string) {
       .limit(1)
       .get()) ?? null
   );
+}
+
+/**
+ * Leaves updated_at alone: it is the page cursor and the AI scan watermark,
+ * and tracks source data rather than this user preference.
+ */
+export async function updateInvoiceCalculationExclusion(
+  db: D1Database,
+  invoiceId: string,
+  excludedFromCalculation: boolean,
+) {
+  const result = await createDrizzle(db)
+    .update(invoices)
+    .set({ excludedFromCalculation: excludedFromCalculation ? 1 : 0 })
+    .where(eq(invoices.id, invoiceId))
+    .run();
+  return result.meta.changes === 1;
 }

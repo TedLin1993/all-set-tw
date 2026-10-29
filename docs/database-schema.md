@@ -11,7 +11,7 @@
 - Tables：35
 - Explicit indexes：47
 - Other objects：0
-- Migrations：65
+- Migrations：66
 
 ## Tables
 
@@ -36,7 +36,7 @@
 | [`investment_transactions`](#investment_transactions) | 投資帳戶的買賣、配息或其他證券交易明細。 | 22 | 0 | 3 |
 | [`invoice_line_items`](#invoice_line_items) | 電子發票底下的商品或服務明細。 | 13 | 1 | 2 |
 | [`invoice_transaction_preferences`](#invoice_transaction_preferences) | 使用者對電子發票與銀行交易是否關聯的決策。 | 5 | 2 | 2 |
-| [`invoices`](#invoices) | 電子發票的抬頭與總額主檔。 | 10 | 0 | 2 |
+| [`invoices`](#invoices) | 電子發票的抬頭與總額主檔。 | 11 | 0 | 2 |
 | [`manual_assets`](#manual_assets) | 使用者手動登錄、無法由銀行或投資連接器同步的資產。 | 6 | 0 | 0 |
 | [`manual_sync_runs`](#manual_sync_runs) | 使用者按下同步後交由 Queue consumer 執行的背景手動同步，讓前端離開或重新整理不影響同步。 | 11 | 0 | 2 |
 | [`net_worth_history`](#net_worth_history) | 按日期保存的淨資產或資產類別歷史數值，用於圖表與歷史查詢。 | 6 | 0 | 2 |
@@ -1088,7 +1088,7 @@ CREATE TABLE "invoice_transaction_preferences" (
 ### `invoices`
 
 > 用途：電子發票的抬頭與總額主檔。
-> 注意：商品明細另存於 invoice_line_items；同一 connector 與 source_id 只保留一張發票。
+> 注意：商品明細另存於 invoice_line_items；同一 connector 與 source_id 只保留一張發票。excluded_from_calculation 是使用者設定，同步 upsert 只更新來源欄位，不得覆寫此欄位；變更此欄位也不更新 updated_at。
 
 #### Columns
 
@@ -1104,6 +1104,7 @@ CREATE TABLE "invoice_transaction_preferences" (
 | 8 | `raw_payload` | 連接器回傳的原始或正規化 JSON。 | TEXT | YES | — | — | — |
 | 9 | `created_at` | 發票首次寫入的時間。 | TEXT | NO | — | — | — |
 | 10 | `updated_at` | 發票最後更新的時間。 | TEXT | NO | — | — | — |
+| 11 | `excluded_from_calculation` | 未配對到銀行或信用卡交易時，是否將此純發票活動排除於收支計算；0 表示納入（預設）、1 表示排除。現金消費的發票在提款時已計入支出，可逐筆排除以免重複計算；配對交易後改以交易的計算偏好為準。 | INTEGER | NO | 0 | — | — |
 
 #### Foreign keys
 
@@ -1129,7 +1130,8 @@ CREATE TABLE "invoices" (
   amount INTEGER NOT NULL,
   raw_payload TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL, excluded_from_calculation INTEGER NOT NULL DEFAULT 0
+  CHECK (excluded_from_calculation IN (0, 1)),
   UNIQUE (connector_id, source_id)
 )
 ```
@@ -1917,6 +1919,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0065_ubot_sync_job.sql`](../apps/worker/migrations/0065_ubot_sync_job.sql)
 - [`0066_crypto_asset_type.sql`](../apps/worker/migrations/0066_crypto_asset_type.sql)
 - [`0067_binance_max_sync_jobs.sql`](../apps/worker/migrations/0067_binance_max_sync_jobs.sql)
+- [`0068_invoice_calculation_exclusion.sql`](../apps/worker/migrations/0068_invoice_calculation_exclusion.sql)
 
 ## 程式碼導覽
 

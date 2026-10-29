@@ -28,6 +28,9 @@ export const invoices = sqliteTable(
     rawPayload: text("raw_payload"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
+    excludedFromCalculation: integer("excluded_from_calculation")
+      .notNull()
+      .default(sql`0`),
   },
   (table) => [
     primaryKey({ columns: [table.id] }),
@@ -38,6 +41,7 @@ export const invoices = sqliteTable(
     ),
     index("idx_invoices_invoice_date").on(table.invoiceDate),
     unique().on(table.connectorId, table.sourceId),
+    check("invoices_check_1", sql`excluded_from_calculation IN (0, 1)`),
   ],
 );
 
