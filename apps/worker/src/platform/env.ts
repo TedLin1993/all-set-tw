@@ -32,6 +32,8 @@ export interface Env {
 
 export type Variables = {
   connectorId: ConnectorId;
+  /** Access 驗證後的登入 email；Demo、本機略過登入或 service token 時沒有值。 */
+  accessEmail?: string;
 };
 
 export type AppBindings = {

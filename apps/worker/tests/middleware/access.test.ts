@@ -10,6 +10,7 @@ import {
   vi,
 } from "vitest";
 import { accessMiddleware } from "../../src/middleware/access";
+import { mcpRoutes } from "../../src/features/mcp/route";
 import type { AppBindings, Env } from "../../src/platform/env";
 
 const issuer = "https://test-access.cloudflareaccess.com";
@@ -53,6 +54,7 @@ async function token(state: string) {
     JSON.stringify({
       iss: issuer,
       aud: state === "wrong-audience" ? "other-application" : audience,
+      email: "owner@example.com",
       exp: Math.floor(Date.now() / 1000) + (state === "expired" ? -60 : 3600),
     }),
   ).toString("base64url");
@@ -121,5 +123,52 @@ describe("外部請求的授權邊界", () => {
         .status,
     ).toBe(200);
     expect(mutation).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("MCP 端點的授權邊界", () => {
+  async function callWhoami(headers: Record<string, string>) {
+    // 與 src/index.ts 相同的掛載方式。
+    const workerApp = new Hono<AppBindings>();
+    workerApp.use("/mcp", accessMiddleware);
+    workerApp.route("/mcp", mcpRoutes);
+    return workerApp.request(
+      "https://example.com/mcp",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          ...headers,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "whoami", arguments: {} },
+        }),
+      },
+      { ...env, LOCAL_DEV_MODE: "false" },
+    );
+  }
+
+  it.each(["missing", "expired", "wrong-audience", "forged"])(
+    "%s JWT 無法呼叫 MCP 工具",
+    async (state) => {
+      const response = await callWhoami(
+        state === "missing"
+          ? {}
+          : { "Cf-Access-Jwt-Assertion": await token(state) },
+      );
+      expect(response.status).toBe(401);
+    },
+  );
+
+  it("有效 JWT 可以呼叫 whoami 並取得登入 email", async () => {
+    const response = await callWhoami({
+      "Cf-Access-Jwt-Assertion": await token("valid"),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("owner@example.com");
   });
 });

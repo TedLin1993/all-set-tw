@@ -411,6 +411,17 @@ Request
 
 非 `/api` 路徑交由 `ASSETS` binding 提供前端靜態檔案。
 
+`/mcp` 是 MCP（Model Context Protocol）端點，掛在 Composition Root、不經過 `/api` 的 Demo 唯讀 middleware：
+
+```text
+Request
+  → Cloudflare Access middleware（與 /api 共用同一個 Access Application 與 JWT 驗證）
+  → features/mcp/route.ts（Demo 模式回 404、檢查 Origin）
+  → 無狀態 MCP handler（每個 request 建立新的 McpServer）
+```
+
+MCP 只註冊唯讀工具；Access 只驗證身分、不區分權限，因此不得在 MCP 註冊寫入工具。
+
 ## Request 驗證
 
 外部輸入應優先使用 Zod 4 驗證：
