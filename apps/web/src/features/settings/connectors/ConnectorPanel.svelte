@@ -27,6 +27,10 @@
   } from "@taiwan-fin-hub/shared";
   import WeekdayPicker from "../components/WeekdayPicker.svelte";
   import {
+    buildCredentialConfig,
+    selectDisplayValue,
+  } from "./credential-fields";
+  import {
     formatScheduleWeekdays,
     syncIntervalLabel,
     syncIntervalOptions,
@@ -863,13 +867,7 @@
   }
 
   function buildConfig() {
-    const entries: Array<[string, string]> = [];
-    for (const field of fields) {
-      const raw = values[field.key];
-      if (raw === undefined || raw === "") continue;
-      entries.push([field.key, raw]);
-    }
-    return Object.fromEntries(entries);
+    return buildCredentialConfig(fields, values);
   }
   function showDurableSyncQueued() {
     durableSyncQueued = true;
@@ -1612,29 +1610,56 @@
                 </span>
               {/if}
             </span>
-            <Input
-              class={storedCredential && !hasReplacement
-                ? "bg-moss/[0.035] placeholder:text-ink/55"
-                : ""}
-              type={field.type}
-              name={`tfh-${connectorId}-${field.key}`}
-              autocomplete={field.type === "password" ? "new-password" : "off"}
-              autocapitalize="none"
-              spellcheck={false}
-              readonly={!focusedCredentialKeys[field.key]}
-              data-1p-ignore
-              data-lpignore="true"
-              data-form-type="other"
-              placeholder={storedCredential && !hasReplacement
-                ? "••••••••　已安全儲存"
-                : undefined}
-              value={String(values[field.key] ?? "")}
-              onfocus={() => (focusedCredentialKeys[field.key] = true)}
-              oninput={(e: Event) =>
-                (values[field.key] = (
-                  e.currentTarget as HTMLInputElement
-                ).value)}
-            />
+            {#if field.type === "select"}
+              <!-- 設定 API 不回傳憑證內容，已儲存時無法得知目前選項，故提供「維持目前設定」。 -->
+              <Select
+                class={storedCredential && !hasReplacement
+                  ? "bg-moss/[0.035]"
+                  : ""}
+                name={`tfh-${connectorId}-${field.key}`}
+                value={selectDisplayValue(
+                  field,
+                  values[field.key],
+                  storedCredential,
+                )}
+                onchange={(e: Event) =>
+                  (values[field.key] = (
+                    e.currentTarget as HTMLSelectElement
+                  ).value)}
+              >
+                {#if storedCredential}<option value="">維持目前設定</option
+                  >{/if}
+                {#each field.options ?? [] as option (option.value)}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </Select>
+            {:else}
+              <Input
+                class={storedCredential && !hasReplacement
+                  ? "bg-moss/[0.035] placeholder:text-ink/55"
+                  : ""}
+                type={field.type}
+                name={`tfh-${connectorId}-${field.key}`}
+                autocomplete={field.type === "password"
+                  ? "new-password"
+                  : "off"}
+                autocapitalize="none"
+                spellcheck={false}
+                readonly={!focusedCredentialKeys[field.key]}
+                data-1p-ignore
+                data-lpignore="true"
+                data-form-type="other"
+                placeholder={storedCredential && !hasReplacement
+                  ? "••••••••　已安全儲存"
+                  : undefined}
+                value={String(values[field.key] ?? "")}
+                onfocus={() => (focusedCredentialKeys[field.key] = true)}
+                oninput={(e: Event) =>
+                  (values[field.key] = (
+                    e.currentTarget as HTMLInputElement
+                  ).value)}
+              />
+            {/if}
           </label>
         {/each}
       </div>
