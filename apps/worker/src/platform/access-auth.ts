@@ -6,6 +6,7 @@ export interface AccessAuthEnv {
 
 type AccessJwtPayload = {
   aud?: string | string[];
+  email?: string;
   exp?: number;
   iat?: number;
   iss?: string;
@@ -35,15 +36,17 @@ const verifyKeys = new Map<string, CryptoKey>();
 export async function verifyAccessIdentity(
   request: Request,
   env: AccessAuthEnv,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<{ ok: true; email?: string } | { ok: false; message: string }> {
   const token = accessJwtFromRequest(request);
   if (!token) {
     return { ok: false, message: "Cloudflare Access JWT is required." };
   }
 
   try {
-    await verifyAccessJwt(token, env);
-    return { ok: true };
+    const payload = await verifyAccessJwt(token, env);
+    return typeof payload.email === "string"
+      ? { ok: true, email: payload.email }
+      : { ok: true };
   } catch {
     return { ok: false, message: "Cloudflare Access JWT is invalid." };
   }

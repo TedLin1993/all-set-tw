@@ -51,6 +51,7 @@ export const accessMiddleware = honoFactory.createMiddleware(
       );
     }
 
+    if (identity.email) c.set("accessEmail", identity.email);
     await next();
   },
 );
