@@ -191,9 +191,11 @@ function parseDemandDepositAccounts(payload: unknown): ParsedAccount[] {
           externalId,
           last4: digits.slice(-4) || undefined,
           last5: digits.slice(-5) || undefined,
+          // 帳戶層名稱可能帶完整帳號；與群組名稱一樣先移除，再交給顯示名稱組合。
           name:
-            firstString(item, ["aliasName", "accountName", "productName"]) ||
-            stripAccountNumber(groupName),
+            stripAccountNumber(
+              firstString(item, ["aliasName", "accountName", "productName"]),
+            ) || stripAccountNumber(groupName),
           type: "savings" as const,
           currency,
           balance,
@@ -273,12 +275,14 @@ function parseTimeDepositAccount(detail: JsonRecord): ParsedAccount[] {
       last4: digits.slice(-4) || undefined,
       last5: digits.slice(-5) || undefined,
       name:
-        firstString(detail, [
-          "productName",
-          "depositName",
-          "accountName",
-          "displayProductType",
-        ]) || "王道銀行定存",
+        stripAccountNumber(
+          firstString(detail, [
+            "productName",
+            "depositName",
+            "accountName",
+            "displayProductType",
+          ]),
+        ) || "王道銀行定存",
       type: "time_deposit" as const,
       openedDate: normalizeDate(firstString(detail, ["contractDate"])),
       maturityDate: normalizeDate(firstString(detail, ["maturityDate"])),

@@ -1,7 +1,17 @@
 import {
+  buildActivityItems,
+  deduplicateBankTransactions,
+  matchInvoicesToTransactions,
+} from "@taiwan-fin-hub/shared";
+import { getBankRange } from "../bank/service";
+import { getInvestmentTransactionsRange } from "../investments/service";
+import { getInvoicesRange } from "../invoices/service";
+import type { MonthDateRange } from "../../platform/month-range";
+import {
   findLinkedInvoiceId,
   findMappingInvoice,
   findMappingTransaction,
+  listInvoiceTransactionPreferences,
   upsertInvoiceTransactionPreference,
 } from "./repository";
 
@@ -10,6 +20,48 @@ export class MappingTransactionNotFoundError extends Error {}
 export class MappingTransactionUnavailableError extends Error {}
 export class MappingDateMismatchError extends Error {}
 export class MappingTransactionNotExpenseError extends Error {}
+
+/**
+ * 依活動頁相同步驟組出區間內的活動：補帳戶類型、去重、配對發票後建立項目。
+ * 呼叫端若只需要部分月份，應自行以活動日期篩選。
+ */
+export async function getActivityItemsInRange(
+  db: D1Database,
+  range: MonthDateRange,
+) {
+  const [bank, invoiceRows, trades, preferences] = await Promise.all([
+    getBankRange(db, range),
+    getInvoicesRange(db, range),
+    getInvestmentTransactionsRange(db, range),
+    listInvoiceTransactionPreferences(db),
+  ]);
+  const accounts = new Map(
+    bank.accounts.map((account) => [
+      String(account.id),
+      { ...account, id: String(account.id) },
+    ]),
+  );
+  const transactions = deduplicateBankTransactions(
+    bank.transactions.map((transaction) => ({
+      ...transaction,
+      accountType:
+        transaction.accountType ??
+        accounts.get(transaction.accountId)?.accountType,
+    })),
+  );
+  const matches = matchInvoicesToTransactions(
+    transactions,
+    invoiceRows,
+    preferences,
+  );
+  return buildActivityItems(
+    transactions,
+    invoiceRows,
+    trades,
+    accounts,
+    matches,
+  );
+}
 
 const taipeiDayFormatter = new Intl.DateTimeFormat("en", {
   timeZone: "Asia/Taipei",
