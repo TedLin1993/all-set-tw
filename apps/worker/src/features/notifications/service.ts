@@ -219,41 +219,47 @@ export async function safelySendScheduledSyncSummary(
 }
 
 /**
- * 繳款提醒只是附加資訊；讀取失敗時照常送出同步摘要。匯率只用於外幣款項由
- * 台幣帳戶扣繳時的換算，讀取失敗時以空匯率表繼續，該類款項維持原提醒。
+ * 讀取繳款提醒。匯率只用於外幣款項由台幣帳戶扣繳時的換算，讀取失敗時以空
+ * 匯率表繼續，該類款項維持原提醒；帳戶或帳單讀取失敗時拋出錯誤。
  */
+export async function loadPaymentReminders(
+  db: D1Database,
+  now = new Date(),
+): Promise<PaymentReminder[]> {
+  // 本月到期的帳單通常屬於上一或上上期別，與總覽查詢的範圍相同。
+  const [year, month] = taipeiDateKey(now).split("-").map(Number);
+  const monthStart = (offset: number) => {
+    const date = new Date(Date.UTC(year!, month! - 1 + offset, 1));
+    return date.toISOString().slice(0, 10);
+  };
+  const [accounts, bills, rates] = await Promise.all([
+    getBankAccounts(db),
+    getCreditCardBillsRange(db, { from: monthStart(-2), to: monthStart(1) }),
+    getExchangeRates(db).catch((error: unknown) => {
+      const safeError = sanitizeDatabaseError(error);
+      console.error(
+        JSON.stringify({
+          event: "payment_reminder_rates_load_failed",
+          message:
+            safeError instanceof Error ? safeError.message : String(safeError),
+        }),
+      );
+      return [];
+    }),
+  ]);
+  const ratesToTwd = Object.fromEntries(
+    rates.map((rate) => [rate.currency, rate.rateTwd]),
+  );
+  return collectPaymentReminders(accounts, bills, now, ratesToTwd).reminders;
+}
+
+/** 繳款提醒只是同步摘要的附加資訊；讀取失敗時記錄 log 並照常送出摘要。 */
 export async function safelyLoadPaymentReminders(
   db: D1Database,
   now = new Date(),
 ): Promise<PaymentReminder[]> {
   try {
-    // 本月到期的帳單通常屬於上一或上上期別，與總覽查詢的範圍相同。
-    const [year, month] = taipeiDateKey(now).split("-").map(Number);
-    const monthStart = (offset: number) => {
-      const date = new Date(Date.UTC(year!, month! - 1 + offset, 1));
-      return date.toISOString().slice(0, 10);
-    };
-    const [accounts, bills, rates] = await Promise.all([
-      getBankAccounts(db),
-      getCreditCardBillsRange(db, { from: monthStart(-2), to: monthStart(1) }),
-      getExchangeRates(db).catch((error: unknown) => {
-        const safeError = sanitizeDatabaseError(error);
-        console.error(
-          JSON.stringify({
-            event: "payment_reminder_rates_load_failed",
-            message:
-              safeError instanceof Error
-                ? safeError.message
-                : String(safeError),
-          }),
-        );
-        return [];
-      }),
-    ]);
-    const ratesToTwd = Object.fromEntries(
-      rates.map((rate) => [rate.currency, rate.rateTwd]),
-    );
-    return collectPaymentReminders(accounts, bills, now, ratesToTwd).reminders;
+    return await loadPaymentReminders(db, now);
   } catch (error) {
     const safeError = sanitizeDatabaseError(error);
     console.error(

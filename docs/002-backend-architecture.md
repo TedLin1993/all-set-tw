@@ -78,7 +78,7 @@ shared/
 └── activity/              # 活動配對、去重、排序與資料組裝的純邏輯
     ├── types.ts
     ├── list.ts
-    ├── flow.ts
+    ├── flow.ts            # 收支方向、台幣換算與分類加總（活動頁與 MCP 共用）
     ├── filter.ts
     ├── items.ts
     └── matching.ts
@@ -420,7 +420,20 @@ Request
   → 無狀態 MCP handler（每個 request 建立新的 McpServer）
 ```
 
-MCP 只註冊唯讀工具；Access 只驗證身分、不區分權限，因此不得在 MCP 註冊寫入工具。
+MCP 只註冊唯讀工具；Access 只驗證身分、不區分權限，因此不得在 MCP 註冊寫入工具。工具的資料讀取放在 `features/mcp/service.ts`，沿用其他 feature 的 service 與 `shared/` 計算，不另寫查詢或金額邏輯：
+
+| 工具                       | 沿用的計算                                                                      |
+| -------------------------- | ------------------------------------------------------------------------------- |
+| `get_financial_overview`   | `sync/reports` 的 `calculateCurrentFinancialSnapshot`，淨資產公式與總覽頁相同   |
+| `list_accounts`            | `bank` 的 `getBankAccounts` 與 `manual-assets`                                  |
+| `list_investment_holdings` | `investments` 的最新持倉                                                        |
+| `get_monthly_cash_flow`    | `activity` 的 `getActivityItemsInRange` 與 `shared/activity/flow.ts` 的收支加總 |
+| `search_activity`          | `activity` 的 `searchActivity`                                                  |
+| `get_upcoming_payments`    | `notifications` 的 `loadPaymentReminders`                                       |
+
+- `get_monthly_cash_flow` 前後各多讀一個月再以活動日期篩選，讓跨月的發票與刷卡配對結果與活動頁一致。
+- 回傳內容會送到使用者選用的 AI 服務：帳號只留末四碼，不回傳內部 ID、原始備註與來源設定。
+- 工具錯誤只回通用訊息，細節經 `sanitizeDatabaseError` 消毒後寫入 log；讀取失敗不得以空結果代替，避免 AI 誤判為「沒有資料」。
 
 ## Request 驗證
 
