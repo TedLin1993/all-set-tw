@@ -25,9 +25,12 @@ export async function getConnectorSettingsView(
       settings.encrypted_config,
       configEncryptionKey(env),
     );
-    credentialsComplete = connectorCatalog[connectorId].credentialFields.every(
-      ({ key }) => typeof stored[key] === "string" && stored[key].length > 0,
-    );
+    credentialsComplete = connectorCatalog[connectorId].credentialFields
+      // select 欄位有預設值（第一個選項），未設定不算憑證不完整。
+      .filter(({ type }) => type !== "select")
+      .every(
+        ({ key }) => typeof stored[key] === "string" && stored[key].length > 0,
+      );
     sessionState = describeConnectorSession(
       connectorId,
       stored,
