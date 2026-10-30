@@ -432,7 +432,7 @@ MCP 只註冊唯讀工具；Access 只驗證身分、不區分權限，因此不
 | `get_upcoming_payments`    | `notifications` 的 `loadPaymentReminders`                                       |
 
 - `get_monthly_cash_flow` 前後各多讀一個月再以活動日期篩選，讓跨月的發票與刷卡配對結果與活動頁一致。
-- 回傳內容會送到使用者選用的 AI 服務：帳號只留末四碼，不回傳內部 ID、原始備註與來源設定。
+- 回傳內容會送到使用者選用的 AI 服務：帳號只留末四碼，不回傳內部 ID、`raw_payload` 與來源設定。活動的標題與說明和 App 畫面相同，銀行未提供摘要時可能是交易備註；這是搜尋與分類所需的內容，帳號遮蔽由各來源在正規化時負責。
 - 工具錯誤只回通用訊息，細節經 `sanitizeDatabaseError` 消毒後寫入 log；讀取失敗不得以空結果代替，避免 AI 誤判為「沒有資料」。
 
 ## Request 驗證

@@ -18,7 +18,8 @@ import { calculateCurrentFinancialSnapshot } from "../sync/reports/repository";
 import { resolveMonthDateRange } from "../../platform/month-range";
 
 // MCP 回傳內容會送到使用者選用的 AI 服務：只保留回答問題所需的欄位，
-// 帳號只留末四碼，不回傳內部 ID、原始備註與來源設定。
+// 帳號只留末四碼，不回傳內部 ID、raw_payload 與來源設定。活動標題與 App
+// 畫面相同，可能是銀行交易備註；帳號遮蔽由各來源正規化時負責。
 
 const HOLDINGS_LIMIT = 500;
 
