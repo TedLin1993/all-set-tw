@@ -420,7 +420,7 @@ Request
   → 無狀態 MCP handler（每個 request 建立新的 McpServer）
 ```
 
-MCP 只註冊唯讀工具；Access 只驗證身分、不區分權限，因此不得在 MCP 註冊寫入工具。工具的資料讀取放在 `features/mcp/service.ts`，沿用其他 feature 的 service 與 `shared/` 計算，不另寫查詢或金額邏輯：
+MCP 只註冊唯讀工具；Access 只驗證身分、不區分權限，因此不得在 MCP 註冊寫入工具；Managed OAuth 設定與客戶端連線步驟見 [AI 助理連線（MCP）](006-mcp.md)。工具的資料讀取放在 `features/mcp/service.ts`，沿用其他 feature 的 service 與 `shared/` 計算，不另寫查詢或金額邏輯：
 
 | 工具                       | 沿用的計算                                                                      |
 | -------------------------- | ------------------------------------------------------------------------------- |
