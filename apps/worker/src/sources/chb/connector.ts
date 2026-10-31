@@ -1026,7 +1026,8 @@ async function fetchChbPayloads(
       url: "TW01002/tw01002_1_View",
       method: "GET",
       taskID: "tw01002",
-      data: {},
+      // 銀行前端（RouterMixin.getInitPageData）對 tw01002 固定帶 accountData: "none"；空物件會回 E000。
+      data: { accountData: "none" },
     });
     return {
       items: chbSingleAccountItems(parseChbAccountItems(view)),
@@ -1221,7 +1222,8 @@ async function configurePage(page: Page, session: ChbSessionState) {
       session.loginRespondedAt = Date.now();
     }
   });
-  // 原生對話框一律關閉：alert 確認、confirm／prompt 取消（不接受任何確認動作）。
+  // 原生對話框：alert 與 beforeunload 確認（後者是主頁的離開提示，取消會擋住登出導覽），
+  // confirm／prompt 取消（不接受任何確認動作）。
   page.on("dialog", (dialog: Dialog) => {
     const message = dialog.message();
     if (context.dialogs.length < 10) context.dialogs.push(message);
@@ -1230,7 +1232,9 @@ async function configurePage(page: Page, session: ChbSessionState) {
       length: message.length,
     });
     const handled =
-      dialog.type() === "alert" ? dialog.accept() : dialog.dismiss();
+      dialog.type() === "alert" || dialog.type() === "beforeunload"
+        ? dialog.accept()
+        : dialog.dismiss();
     handled.catch(() => undefined);
   });
 }
