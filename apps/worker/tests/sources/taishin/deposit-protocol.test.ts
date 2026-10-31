@@ -112,6 +112,35 @@ describe("台新臺外幣活存", () => {
     });
   });
 
+  it("外幣存入與支出皆為 - 的零元存款息記為存入 0，臺幣兩欄皆為 - 仍失敗", () => {
+    // 2026/10/31 實際回應：餘額 1.59 美元的存款息，DRWAMT 與 DEPAMT 皆為 "-"。
+    const interest = {
+      TRANSACTION_DATE_TIME: "20261031025318000",
+      TRANSACTION_DATE_TIME_DSC: "2026/10/31 02:53",
+      TX_DATE: "2026/11/02",
+      CCY_CODE: "USD",
+      DRWAMT: "-",
+      DEPAMT: "-",
+      ACCT_BAL: "1.59",
+      REMARKS: "存款息",
+    };
+    expect(
+      parseTaishinFxDepositTransactions(
+        { error: null, data: { TRANS_DETAILS: [interest] } },
+        FX_ACCOUNT,
+        "USD",
+      ),
+    ).toMatchObject([
+      { amount: 0, description: "存入 · 存款息", raw: { balance: 1.59 } },
+    ]);
+    const twd = structuredClone(twdTransactions);
+    twd.OUTPUTDATA.userList[0].txnamtOut = "-";
+    twd.OUTPUTDATA.userList[0].txnamtIn = "-";
+    expect(() => parseTaishinTwdDepositTransactions(twd, TWD_ACCOUNT)).toThrow(
+      "交易方向",
+    );
+  });
+
   it("月底仍查完整三個月，外幣沿用官方初始化與各幣別查詢", async () => {
     const request = vi.fn(
       async (path: string, body: Record<string, unknown> | string) => {

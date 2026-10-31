@@ -518,14 +518,18 @@ function normalizeTransactions(
     const postedDate = dateTime(twd ? row.dateNew : row.TX_DATE).slice(0, 10);
     const out = twd ? row.txnamtOut : row.DRWAMT;
     const incoming = twd ? row.txnamtIn : row.DEPAMT;
-    if ((String(out) === "-") === (String(incoming) === "-"))
+    // RB0802 shows a zero-amount deposit interest with both columns as "-".
+    const zeroFx = !twd && String(out) === "-" && String(incoming) === "-";
+    if (!zeroFx && (String(out) === "-") === (String(incoming) === "-"))
       throw new TaishinDepositProtocolError("台新存款交易方向無法確認。");
-    amount(String(out) === "-" ? incoming : out);
-    const signed = twd
-      ? (String(out) === "-" ? 1 : -1) * Math.abs(amount(row.txnamt))
-      : String(out) === "-"
-        ? Math.abs(amount(incoming))
-        : -Math.abs(amount(out));
+    if (!zeroFx) amount(String(out) === "-" ? incoming : out);
+    const signed = zeroFx
+      ? 0
+      : twd
+        ? (String(out) === "-" ? 1 : -1) * Math.abs(amount(row.txnamt))
+        : String(out) === "-"
+          ? Math.abs(amount(incoming))
+          : -Math.abs(amount(out));
     const balance = amount(twd ? row.newbal : row.ACCT_BAL);
     const reference =
       twd && row.procSeq != null ? String(row.procSeq).padStart(7, "0") : "";
