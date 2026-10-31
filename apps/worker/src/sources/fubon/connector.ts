@@ -58,6 +58,42 @@ import {
 // 台北富邦網銀（JSF）。登入頁的帳密欄位 id/name 每次載入都會隨機化，
 // 只能依「一般登入」區塊內的位置定位；不使用動態鍵盤。
 const ORIGIN = "https://ebank.taipeifubon.com.tw";
+/** 登入頁籤設定：一般登入（m1／#tab1）與信用卡網路會員登入（m2／#tab2）。 */
+type FubonLoginProfile = {
+  tab: "m1" | "m2";
+  /** 驗證碼輸入框；m2 的 id 未經實測，以 class `userCaptcha` 定位。 */
+  captchaInput: string;
+  /** 驗證碼圖片；m2 的 id 未經實測，以 pane 內 id／src 特徵定位。 */
+  captchaImage: string;
+  /** 登入表格內所有 input（含驗證碼）。 */
+  inputs: string;
+  otpInput: string;
+  messages: string;
+};
+
+function loginProfile(config: { loginMode?: string }): FubonLoginProfile {
+  if (config.loginMode === "card_member") {
+    return {
+      tab: "m2",
+      captchaInput: "#tab2 input.userCaptcha, #m2_userCaptcha",
+      captchaImage:
+        "#m2_captchaImage, #tab2 img[id$='aptchaImage'], #tab2 img[src*='captchaImage']",
+      inputs: "#tab2 table.login_tb input",
+      otpInput: "#m2_inputOTP",
+      messages:
+        "#tab2 .warning_s, #tab2 [id$='_msg'], #loginError_m2 .error_msg",
+    };
+  }
+  return {
+    tab: "m1",
+    captchaInput: "#m1_userCaptcha",
+    captchaImage: "#m1_captchaImage",
+    inputs: "#tab1 .m1_login_input table.login_tb input",
+    otpInput: "#m1_inputOTP",
+    messages: "#tab1 .warning_s, #tab1 [id$='_msg'], #loginError_m1 .error_msg",
+  };
+}
+
 const LOGIN_URL = `${ORIGIN}/B2C/cmfqu/cmfqu021/CMFQU021_Home.faces?menuId=CMF06&showLogin=true`;
 const CONTEXT_FRAME_PATH = "/B2C/common/ContextFrame.faces";
 const CONTEXT_FRAME_URL = `${ORIGIN}${CONTEXT_FRAME_PATH}`;
@@ -354,7 +390,11 @@ export function createFubonConnector(
               );
               page = await firstPage(browserInstance);
               await configurePage(page, egress, egressStats, session);
-              const verified = await submitTwoFactorOtp(page, config.otp ?? "");
+              const verified = await submitTwoFactorOtp(
+                page,
+                config.otp ?? "",
+                config,
+              );
               if (verified.kind === "retry") {
                 const sessionId = browserInstance.sessionId();
                 session.otpPending = true;
@@ -379,7 +419,11 @@ export function createFubonConnector(
               page = await firstPage(browserInstance);
               await configurePage(page, egress, egressStats, session);
               await fillLoginForm(page, config);
-              const outcome = await submitLogin(page, config.captcha ?? "");
+              const outcome = await submitLogin(
+                page,
+                config.captcha ?? "",
+                config,
+              );
               logFubonEvent("fubon_login_result", {
                 mode: "manual",
                 outcome: outcome.kind,
@@ -437,11 +481,16 @@ export function createFubonConnector(
 
             report = new FubonSyncReport();
             reportSyncProgress("fetching");
-            const payloads = await fetchFubonPayloads(page, report);
+            const payloads = await fetchFubonPayloads(page, report, config);
             const data = parseFubonData(payloads, new Date(), report);
             logFubonSyncSummary(report, "finished");
             summaryLogged = true;
-            if (report.failedCount > 0 && data.bankAccounts.length === 0) {
+            if (
+              report.failedCount > 0 &&
+              data.bankAccounts.length === 0 &&
+              (config.loginMode !== "card_member" ||
+                data.creditCardBills.length === 0)
+            ) {
               throw new FubonConnectionError(
                 `台北富邦同步未取得任何資料。${report.userMessage() ?? ""}`,
               );
@@ -535,9 +584,10 @@ async function loginWithOcr(
       recognizeCaptcha,
       captcha,
       attempt,
+      config,
     );
     if (!answer) continue;
-    const outcome = await submitLogin(page, answer);
+    const outcome = await submitLogin(page, answer, config);
     logFubonEvent("fubon_login_result", {
       attempt,
       mode: "automatic",
@@ -561,6 +611,7 @@ async function recognizeValidCaptcha(
   recognizeCaptcha: RecognizeCaptcha,
   initialCaptcha: Uint8Array,
   loginAttempt: number,
+  config: FubonConfig,
 ): Promise<string | undefined> {
   let captcha = initialCaptcha;
   for (let ocrAttempt = 1; ; ocrAttempt += 1) {
@@ -585,7 +636,7 @@ async function recognizeValidCaptcha(
     });
     if (valid) return answer;
     if (ocrAttempt >= FUBON_CAPTCHA_OCR_ATTEMPTS) return undefined;
-    captcha = await refreshCaptcha(page);
+    captcha = await refreshCaptcha(page, config);
   }
 }
 
@@ -719,6 +770,7 @@ async function requestTwoFactorOtp(
 async function submitTwoFactorOtp(
   page: Page,
   otp: string,
+  config: FubonConfig,
 ): Promise<
   | { kind: "verified"; outcome: FubonLoginOutcome }
   | { kind: "retry"; message: string }
@@ -727,12 +779,12 @@ async function submitTwoFactorOtp(
     throw new FubonVerificationRequiredError("台北富邦驗證碼必須是 6 位數字。");
   }
   const ready = await withActionTimeout(
-    page.evaluate(() => {
-      const input = document.querySelector<HTMLInputElement>("#m1_inputOTP");
+    page.evaluate((selector: string) => {
+      const input = document.querySelector<HTMLInputElement>(selector);
       return Boolean(
         input && typeof (window as { doOtp?: unknown }).doOtp === "function",
       );
-    }),
+    }, loginProfile(config).otpInput),
   ).catch(() => false);
   if (!ready) {
     throw new FubonVerificationRequiredError(
@@ -742,14 +794,18 @@ async function submitTwoFactorOtp(
   const verifyResponse = waitForServletResponse(page, "verifyOtp");
   const loginResponse = waitForServletResponse(page, "login");
   await withActionTimeout(
-    page.evaluate((value: string) => {
-      const input = document.querySelector<HTMLInputElement>("#m1_inputOTP");
-      if (!input) return;
-      input.value = value;
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-      const doOtp = (window as { doOtp?: () => void }).doOtp;
-      setTimeout(() => doOtp?.(), 0);
-    }, otp),
+    page.evaluate(
+      (value: string, selector: string) => {
+        const input = document.querySelector<HTMLInputElement>(selector);
+        if (!input) return;
+        input.value = value;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        const doOtp = (window as { doOtp?: () => void }).doOtp;
+        setTimeout(() => doOtp?.(), 0);
+      },
+      otp,
+      loginProfile(config).otpInput,
+    ),
   );
   const verified = await verifyResponse;
   logFubonEvent("fubon_two_factor_otp_result", {
@@ -824,22 +880,24 @@ async function openLoginAndCaptureCaptcha(
     timeout: NAVIGATION_TIMEOUT_MS,
   });
   reportStage?.("form");
-  await waitForLoginForm(page);
+  await waitForLoginForm(page, config);
   await revealLoginForm(page);
   await fillLoginForm(page, config);
   reportStage?.("captcha");
-  return captureCaptcha(page);
+  return captureCaptcha(page, config);
 }
 
-async function waitForLoginForm(page: Page) {
+async function waitForLoginForm(page: Page, config: FubonConfig) {
+  const profile = loginProfile(config);
   try {
     await page.waitForFunction(
-      () =>
+      (inputs: string, captcha: string) =>
         typeof (window as { doLogin?: unknown }).doLogin === "function" &&
-        document.querySelectorAll("#tab1 .m1_login_input table.login_tb input")
-          .length >= 4 &&
-        Boolean(document.querySelector("#m1_userCaptcha")),
+        document.querySelectorAll(inputs).length >= 4 &&
+        Boolean(document.querySelector(captcha)),
       { timeout: LOGIN_FORM_TIMEOUT_MS },
+      profile.inputs,
+      profile.captchaInput,
     );
   } catch {
     throw new FubonConnectionError("台北富邦登入頁沒有在期限內載入登入表單。");
@@ -916,32 +974,41 @@ async function revealLoginForm(page: Page) {
   }
 }
 
-/** 欄位 id/name 每次載入都不同，只依「一般登入」表格內的位置填入。 */
-async function fillLoginForm(page: Page, config: FubonConfig) {
+/** 欄位 id/name 每次載入都不同，只依所選登入頁籤表格內的位置填入。 */
+export async function fillLoginForm(page: Page, config: FubonConfig) {
+  const profile = loginProfile(config);
   const filled = await withActionTimeout(
     page.evaluate(
-      (userId: string, account: string, password: string) => {
+      (
+        userId: string,
+        account: string,
+        password: string,
+        tabClass: string,
+        inputsSelector: string,
+        captchaSelector: string,
+      ) => {
         const tab = document.querySelector<HTMLAnchorElement>(
-          "#login_div ul.login_m a.m1, ul.login_m a.m1",
+          `#login_div ul.login_m a.${tabClass}, ul.login_m a.${tabClass}`,
         );
         const activeTab = () =>
           document
             .querySelector("ul.login_m li.active a")
             ?.getAttribute("class") ?? null;
-        if (tab && activeTab() !== "m1") tab.click();
-        // validate()/doLogin() 以整個 class 屬性組合欄位 id，必須恰為 "m1"。
-        if (activeTab() !== "m1") return false;
+        if (tab && activeTab() !== tabClass) tab.click();
+        // validate()/doLogin() 以整個 class 屬性組合欄位 id，必須恰為所選頁籤。
+        if (activeTab() !== tabClass) return false;
+        const captchaInput = document.querySelector(captchaSelector);
         const inputs = Array.from(
-          document.querySelectorAll<HTMLInputElement>(
-            "#tab1 .m1_login_input table.login_tb input",
-          ),
-        ).filter((input) => input.id !== "m1_userCaptcha");
+          document.querySelectorAll<HTMLInputElement>(inputsSelector),
+        ).filter((input) => input !== captchaInput);
         const [idInput, userInput, passwordInput] = inputs;
         if (
           !idInput ||
           !userInput ||
           !passwordInput ||
-          !passwordInput.classList.contains("m1_password")
+          (tabClass === "m1"
+            ? !passwordInput.classList.contains("m1_password")
+            : passwordInput.type !== "password")
         ) {
           return false;
         }
@@ -958,6 +1025,9 @@ async function fillLoginForm(page: Page, config: FubonConfig) {
       config.userId ?? "",
       config.account ?? "",
       config.password ?? "",
+      profile.tab,
+      profile.inputs,
+      profile.captchaInput,
     ),
   );
   if (!filled) {
@@ -966,11 +1036,14 @@ async function fillLoginForm(page: Page, config: FubonConfig) {
 }
 
 /** 以官方 doReGenCode 在同一頁換一張驗證碼（不重新載入登入頁、不清除帳密）。 */
-async function refreshCaptcha(page: Page): Promise<Uint8Array> {
+async function refreshCaptcha(
+  page: Page,
+  config: FubonConfig,
+): Promise<Uint8Array> {
+  const imageSelector = loginProfile(config).captchaImage;
   const previous = await withActionTimeout(
-    page.evaluate(() => {
-      const image =
-        document.querySelector<HTMLImageElement>("#m1_captchaImage");
+    page.evaluate((selector: string) => {
+      const image = document.querySelector<HTMLImageElement>(selector);
       const source = image?.getAttribute("src") ?? "";
       const regen = (window as { doReGenCode?: () => unknown }).doReGenCode;
       if (typeof regen === "function") {
@@ -979,13 +1052,12 @@ async function refreshCaptcha(page: Page): Promise<Uint8Array> {
         image.src = `/B2C/captchaImage?timestamp=${Date.now()}`;
       }
       return source;
-    }),
+    }, imageSelector),
   );
   try {
     await page.waitForFunction(
-      (oldSource: string) => {
-        const image =
-          document.querySelector<HTMLImageElement>("#m1_captchaImage");
+      (oldSource: string, selector: string) => {
+        const image = document.querySelector<HTMLImageElement>(selector);
         return Boolean(
           image &&
           image.getAttribute("src") !== oldSource &&
@@ -995,27 +1067,32 @@ async function refreshCaptcha(page: Page): Promise<Uint8Array> {
       },
       { timeout: LOGIN_FORM_TIMEOUT_MS },
       previous,
+      imageSelector,
     );
   } catch {
     throw new FubonConnectionError("台北富邦登入頁沒有在期限內更新驗證碼。");
   }
-  return captureCaptcha(page);
+  return captureCaptcha(page, config);
 }
 
-async function captureCaptcha(page: Page): Promise<Uint8Array> {
+async function captureCaptcha(
+  page: Page,
+  config: FubonConfig,
+): Promise<Uint8Array> {
+  const imageSelector = loginProfile(config).captchaImage;
   try {
     await page.waitForFunction(
-      () => {
-        const image =
-          document.querySelector<HTMLImageElement>("#m1_captchaImage");
+      (selector: string) => {
+        const image = document.querySelector<HTMLImageElement>(selector);
         return Boolean(image?.complete && image.naturalWidth > 0);
       },
       { timeout: LOGIN_FORM_TIMEOUT_MS },
+      imageSelector,
     );
   } catch {
     throw new FubonConnectionError("台北富邦登入頁沒有在期限內顯示驗證碼。");
   }
-  const image = await page.$("#m1_captchaImage");
+  const image = await page.$(imageSelector);
   if (!image) {
     throw new FubonConnectionError("台北富邦登入頁沒有在期限內顯示驗證碼。");
   }
@@ -1039,7 +1116,9 @@ type FubonSubmitDiagnostics = {
 async function submitLogin(
   page: Page,
   captcha: string,
+  config: FubonConfig,
 ): Promise<FubonLoginOutcome> {
+  const profile = loginProfile(config);
   // 不合格式的驗證碼一定會被官方 validate() 擋下，絕不送出。
   assertCaptcha(captcha);
   const loginResponse = waitForServletResponse(
@@ -1056,101 +1135,110 @@ async function submitLogin(
   page.on("dialog", onDialog);
   try {
     const diagnostics = await withActionTimeout(
-      page.evaluate((value: string): FubonSubmitDiagnostics => {
-        const result: FubonSubmitDiagnostics = {
-          ready: false,
-          selectedTab: null,
-          validateOk: null,
-          exception: null,
-          loginRequested: false,
-          celebrusSkipped: false,
-        };
-        type AjaxFn = (...args: unknown[]) => unknown;
-        const win = window as unknown as Record<string, unknown> & {
-          $?: { ajax: AjaxFn };
-          __fubonOriginal?: Record<string, unknown>;
-          __fubonTwoFactor?: string;
-          __fubonDeviceKey?: string;
-          __fubonValidateWrapped?: boolean;
-          __fubonValidateOk?: boolean | null;
-        };
-        const input =
-          document.querySelector<HTMLInputElement>("#m1_userCaptcha");
-        const jq = win.$;
-        if (!input || typeof win.doLogin !== "function" || !jq) return result;
-        result.ready = true;
-        result.selectedTab =
-          document
-            .querySelector("ul.login_m li.active a")
-            ?.getAttribute("class") ?? null;
-        input.value = value;
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-        // 雙重驗證時官方程式會立即寄送 OTP 或 App 推播；先替換為只記錄的函式，
-        // 是否寄送改由連接器依手動／排程決定。
-        win.__fubonOriginal = win.__fubonOriginal ?? {
-          showOtp: win.showOtp,
-          insertTwoFactorAuth: win.insertTwoFactorAuth,
-        };
-        win.showOtp = () => {
-          win.__fubonTwoFactor = "otp";
-        };
-        win.insertTwoFactorAuth = (deviceKey: unknown) => {
-          win.__fubonTwoFactor = "device";
-          win.__fubonDeviceKey =
-            typeof deviceKey === "string" ? deviceKey : undefined;
-        };
-        win.confirm = () => false;
-        // validate() 開頭的點擊追蹤（/B2C/click）失敗不可影響登入。
-        const trackClick = win.trackClick;
-        if (typeof trackClick === "function" && !("__fubon" in trackClick)) {
-          const safeTrackClick = function (this: unknown, ...args: unknown[]) {
-            try {
-              (trackClick as AjaxFn).apply(this, args);
-            } catch {
-              // 只是追蹤。
-            }
-            return true;
+      page.evaluate(
+        (value: string, captchaSelector: string): FubonSubmitDiagnostics => {
+          const result: FubonSubmitDiagnostics = {
+            ready: false,
+            selectedTab: null,
+            validateOk: null,
+            exception: null,
+            loginRequested: false,
+            celebrusSkipped: false,
           };
-          Object.assign(safeTrackClick, { __fubon: true });
-          win.trackClick = safeTrackClick;
-        }
-        // 記錄官方 validate() 的結果（doLogin 以全域名稱呼叫）。
-        const validate = win.validate;
-        if (typeof validate === "function" && !win.__fubonValidateWrapped) {
-          win.validate = function (this: unknown, ...args: unknown[]) {
-            const ok = (validate as AjaxFn).apply(this, args);
-            win.__fubonValidateOk = Boolean(ok);
-            return ok;
+          type AjaxFn = (...args: unknown[]) => unknown;
+          const win = window as unknown as Record<string, unknown> & {
+            $?: { ajax: AjaxFn };
+            __fubonOriginal?: Record<string, unknown>;
+            __fubonTwoFactor?: string;
+            __fubonDeviceKey?: string;
+            __fubonValidateWrapped?: boolean;
+            __fubonValidateOk?: boolean | null;
           };
-          win.__fubonValidateWrapped = true;
-        }
-        win.__fubonValidateOk = null;
-        // Celebrus 行為分析會在登入前同步呼叫 celebrusEncryptUserId；與登入無關，略過。
-        if (win.fuboncsaCelebrusApi) {
-          win.fuboncsaCelebrusApi = undefined;
-          result.celebrusSkipped = true;
-        }
-        const realAjax = jq.ajax;
-        jq.ajax = function (this: unknown, ...args: unknown[]) {
-          const options = (typeof args[0] === "string" ? args[1] : args[0]) as
-            { data?: { action?: unknown } } | undefined;
-          if (options?.data?.action === "login") result.loginRequested = true;
-          return realAjax.apply(this, args);
-        };
-        try {
-          // 同步呼叫：官方 doLogin 的例外不會再被 setTimeout 吞掉。
-          (win.doLogin as () => unknown)();
-        } catch (error) {
-          result.exception = error instanceof Error ? error.name : typeof error;
-        } finally {
-          jq.ajax = realAjax;
-        }
-        result.validateOk =
-          typeof win.__fubonValidateOk === "boolean"
-            ? win.__fubonValidateOk
-            : null;
-        return result;
-      }, captcha),
+          const input =
+            document.querySelector<HTMLInputElement>(captchaSelector);
+          const jq = win.$;
+          if (!input || typeof win.doLogin !== "function" || !jq) return result;
+          result.ready = true;
+          result.selectedTab =
+            document
+              .querySelector("ul.login_m li.active a")
+              ?.getAttribute("class") ?? null;
+          input.value = value;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          // 雙重驗證時官方程式會立即寄送 OTP 或 App 推播；先替換為只記錄的函式，
+          // 是否寄送改由連接器依手動／排程決定。
+          win.__fubonOriginal = win.__fubonOriginal ?? {
+            showOtp: win.showOtp,
+            insertTwoFactorAuth: win.insertTwoFactorAuth,
+          };
+          win.showOtp = () => {
+            win.__fubonTwoFactor = "otp";
+          };
+          win.insertTwoFactorAuth = (deviceKey: unknown) => {
+            win.__fubonTwoFactor = "device";
+            win.__fubonDeviceKey =
+              typeof deviceKey === "string" ? deviceKey : undefined;
+          };
+          win.confirm = () => false;
+          // validate() 開頭的點擊追蹤（/B2C/click）失敗不可影響登入。
+          const trackClick = win.trackClick;
+          if (typeof trackClick === "function" && !("__fubon" in trackClick)) {
+            const safeTrackClick = function (
+              this: unknown,
+              ...args: unknown[]
+            ) {
+              try {
+                (trackClick as AjaxFn).apply(this, args);
+              } catch {
+                // 只是追蹤。
+              }
+              return true;
+            };
+            Object.assign(safeTrackClick, { __fubon: true });
+            win.trackClick = safeTrackClick;
+          }
+          // 記錄官方 validate() 的結果（doLogin 以全域名稱呼叫）。
+          const validate = win.validate;
+          if (typeof validate === "function" && !win.__fubonValidateWrapped) {
+            win.validate = function (this: unknown, ...args: unknown[]) {
+              const ok = (validate as AjaxFn).apply(this, args);
+              win.__fubonValidateOk = Boolean(ok);
+              return ok;
+            };
+            win.__fubonValidateWrapped = true;
+          }
+          win.__fubonValidateOk = null;
+          // Celebrus 行為分析會在登入前同步呼叫 celebrusEncryptUserId；與登入無關，略過。
+          if (win.fuboncsaCelebrusApi) {
+            win.fuboncsaCelebrusApi = undefined;
+            result.celebrusSkipped = true;
+          }
+          const realAjax = jq.ajax;
+          jq.ajax = function (this: unknown, ...args: unknown[]) {
+            const options = (
+              typeof args[0] === "string" ? args[1] : args[0]
+            ) as { data?: { action?: unknown } } | undefined;
+            if (options?.data?.action === "login") result.loginRequested = true;
+            return realAjax.apply(this, args);
+          };
+          try {
+            // 同步呼叫：官方 doLogin 的例外不會再被 setTimeout 吞掉。
+            (win.doLogin as () => unknown)();
+          } catch (error) {
+            result.exception =
+              error instanceof Error ? error.name : typeof error;
+          } finally {
+            jq.ajax = realAjax;
+          }
+          result.validateOk =
+            typeof win.__fubonValidateOk === "boolean"
+              ? win.__fubonValidateOk
+              : null;
+          return result;
+        },
+        captcha,
+        profile.captchaInput,
+      ),
     ).catch((error: unknown) => {
       // 無法確認是否已送出：視為已送出，結束前仍會嘗試登出。
       const state = pageContexts.get(page)?.session;
@@ -1165,7 +1253,7 @@ async function submitLogin(
     }
     const validation = diagnostics.loginRequested
       ? []
-      : await readValidationMessages(page);
+      : await readValidationMessages(page, profile.messages);
     logFubonEvent("fubon_login_submit", {
       selectedTab: diagnostics.selectedTab,
       validateOk: diagnostics.validateOk,
@@ -1212,21 +1300,19 @@ export function describeUnsentLogin(
   return `${prefix}，原因不明。`;
 }
 
-async function readValidationMessages(page: Page) {
+async function readValidationMessages(page: Page, selector: string) {
   return withActionTimeout(
-    page.evaluate(() => {
+    page.evaluate((messagesSelector: string) => {
       const seen = new Set<string>();
       for (const element of Array.from(
-        document.querySelectorAll<HTMLElement>(
-          "#tab1 .warning_s, #tab1 [id$='_msg'], #loginError_m1 .error_msg",
-        ),
+        document.querySelectorAll<HTMLElement>(messagesSelector),
       )) {
         if (element.offsetParent === null) continue;
         const text = element.innerText.replace(/[！!]\s*/g, " ").trim();
         if (text) seen.add(text.slice(0, 60));
       }
       return Array.from(seen).slice(0, 5);
-    }),
+    }, selector),
   )
     .then((messages) => messages.map((message) => safeBankMessage(message)))
     .catch(() => [] as string[]);
@@ -1770,17 +1856,25 @@ export class FubonStepRunner {
   }
 }
 
-async function fetchFubonPayloads(
+/** 僅供測試匯出。 */
+export async function fetchFubonPayloads(
   page: Page,
   report: FubonSyncReport,
+  config: FubonConfig,
 ): Promise<FubonPayloads> {
   const steps = new FubonStepRunner(report, () => assertStillLoggedIn(page));
-  const overview = await steps.run("twdDeposits", "fetch", async () => {
-    const frame = await openContentPage(page, PAGES.depositOverview);
-    const html = await frameHtml(frame);
-    return { html, parsed: parseFubonDepositOverview(html) };
-  });
-  if (!overview) {
+  // 信用卡網路會員帳號沒有存款權限：完全不進入存款頁，也不記為步驟失敗。
+  const cardOnly = config.loginMode === "card_member";
+  const overview = cardOnly
+    ? undefined
+    : await steps.run("twdDeposits", "fetch", async () => {
+        const frame = await openContentPage(page, PAGES.depositOverview);
+        const html = await frameHtml(frame);
+        return { html, parsed: parseFubonDepositOverview(html) };
+      });
+  if (cardOnly) {
+    // 不處理存款。
+  } else if (!overview) {
     // 總覽失敗時外幣存款同樣無法取得。
     report.fail(
       "foreignDeposits",
@@ -1798,7 +1892,7 @@ async function fetchFubonPayloads(
   const twdAccounts = (overview?.parsed.accounts ?? []).filter(
     (account) => account.currency === "TWD",
   );
-  if (twdAccounts.length > 0) {
+  if (!cardOnly && twdAccounts.length > 0) {
     const range = fubonTransactionRange(new Date());
     let frame: Frame | undefined;
     const selection = await steps.run(

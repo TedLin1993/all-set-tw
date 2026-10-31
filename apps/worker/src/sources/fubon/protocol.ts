@@ -20,6 +20,8 @@ export const fubonConfigSchema = z.object({
   userId: z.string().min(1).optional(),
   account: z.string().min(1).optional(),
   password: z.string().min(1).optional(),
+  // 登入方式：general＝一般登入（預設）；card_member＝信用卡網路會員（僅信用卡資料，不取存款）。
+  loginMode: z.enum(["general", "card_member"]).optional(),
   // 人工驗證碼：一次性 Browser session reference，成功或失敗後都清除。
   browserSessionId: z.string().optional(),
   browserSessionExpiresAt: z.string().optional(),

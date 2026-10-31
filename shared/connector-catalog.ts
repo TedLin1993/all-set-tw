@@ -22,7 +22,9 @@ export type ConnectorCapability =
 export interface ConnectorCredentialField {
   key: string;
   label: string;
-  type: "text" | "password";
+  type: "text" | "password" | "select";
+  /** type 為 select 時必填；第一個選項為預設值，欄位未設定時視同第一個選項。 */
+  options?: readonly { value: string; label: string }[];
 }
 
 export interface ConnectorCatalogEntry {
@@ -488,6 +490,15 @@ export const connectorCatalog = {
     ],
     publicFields: [],
     credentialFields: [
+      {
+        key: "loginMode",
+        label: "登入方式",
+        type: "select",
+        options: [
+          { value: "general", label: "一般登入" },
+          { value: "card_member", label: "信用卡網路會員" },
+        ],
+      },
       { key: "userId", label: "身分證字號", type: "text" },
       { key: "account", label: "使用者代碼", type: "text" },
       { key: "password", label: "使用者密碼", type: "password" },
