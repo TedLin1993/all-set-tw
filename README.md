@@ -19,6 +19,7 @@
 - **排程同步**：定時自動同步，並查看每次新增的紀錄與資產變化。
 - **繳款提醒**：總覽與推播提醒 5 天內要繳的信用卡與貸款；可設定扣款帳戶，餘額足夠時不提醒，不足時優先提醒。
 - **手機與推播**：可加入手機主畫面，推播同步結果、信用卡與貸款繳款提醒，以及當天到期的定存。
+- **AI 助理查詢**：透過 MCP 讓 Codex、ChatGPT 等 AI 助理唯讀查詢淨資產、收支、持倉與繳款提醒，設定方式見 [AI 助理連線（MCP）](docs/006-mcp.md)。
 
 ## 目前介面
 
@@ -97,8 +98,6 @@
 <img src="images/deploy-access-on-create.png" alt="部署頁開啟 Cloudflare Access，選擇 All traffic 與 Cloudflare account" width="700">
 
 確認後點擊 **Deploy**，頁面會自動跳轉至 **Builds**。登入驗證設定會自動取得，後續更新也會沿用。
-
-首次部署成功時，build 會下載一次本專案公開的 GitHub Release 小檔案，作為匿名部署計數。這個請求從 Cloudflare 的建置環境發出，不帶任何 ID、帳號、設定或金融資料；維護者只看得到 GitHub 提供的累計下載次數。之後的更新與日常使用不會再發出這個請求。詳情與關閉方式請參考[首次部署計數](docs/005-deployment.md#首次部署計數)。
 
 ### 步驟二：確認部署
 
@@ -188,6 +187,7 @@ npm run build
 ## 安全機制
 
 - Cloudflare Access 是一般模式的登入閘道；Worker 會驗證 JWT 的簽章、issuer、audience 與有效期限。
+- AI 助理透過 MCP 連線時同樣經 Cloudflare Access 登入（Managed OAuth），只能使用唯讀工具；查詢結果會送到該 AI 服務。
 - 連接器帳密以自動產生或自行提供的金鑰進行 AES-GCM 加密，D1 只儲存密文。
 - 目前不支援金鑰輪替；若刪除或更換 Cloudflare 中的金鑰，必須重新設定所有連接器。
 
