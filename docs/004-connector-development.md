@@ -870,14 +870,14 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 
 ### 彰化銀行
 
-> 頁面與 API 結構依 2026-10-31 使用者登入後的偵察紀錄與銀行公開前端程式整理，fixture 與測試資料皆為合成值。尚未以真實帳號完成部署後的完整同步；不確定處在程式中以 `TODO(chb-live)` 標示，並以同步 log 的事件與筆數驗證。目前只同步存款（台幣與外幣活存），信用卡尚未接入。
+> 頁面與 API 結構依 2026-10-31 使用者登入後的偵察紀錄與銀行公開前端程式整理，fixture 與測試資料皆為合成值。2026-10-31 已以真實帳號在本機完成多次完整同步（台幣與外幣明細的餘額勾稽不一致筆數皆為 0）；仍未確認的細節（例如登入失敗訊息分類、工作階段失效回覆代碼）在程式中以 `TODO(chb-live)` 標示。目前只同步存款（台幣與外幣活存），信用卡尚未接入。
 
 #### 登入
 
 - 開啟 `https://www.chb.com.tw/chbnib`，先關閉「銀行公告」彈窗（Magnific Popup：優先點 `.mfp-close`，再呼叫 `$.magnificPopup.close()`，仍殘留才按 Escape；關不掉不中止）。以鍵盤事件填入 `input[name=uid_show]`（身分證字號，轉大寫）、`input[name=uuid]`（使用者代號）、`input[name=pwd]`（密碼）、`input[name=captcha]`，對 `#pb-login` 做 DOM click。密碼由頁面自己加密，連接器不組裝登入請求。
 - 驗證碼讀 `img.cimg` 的 `data:image/png;base64` 來源（元素截圖會被公告彈窗蓋住），6 位數字，使用共用 Workers AI 辨識；辨識結果不是 6 位數字時在同一頁以 `a.btn-refresh` 換圖，不送出帳密。
 - 登入 POST 為 `/chbnib/faces/login/CHBiBDispatcher`（302），轉到 `/chbnib/faces/common/CHBiBMain` 即成功。失敗時依原生對話框與頁面文字在記憶體內分類，log 只記分類結果：只有明確的驗證碼錯誤會換圖重試（自動辨識最多三輪）；帳密錯誤、鎖定、重複登入與結果不明一律停止並標記 `needs_user_action`，不重送帳密。自動辨識耗盡時回 `MANUAL_CAPTCHA_REQUIRED`，可經 `/api/connectors/chb/captcha` 改用人工輸入。
-- 不復用網銀 session：每次同步重新登入，結束時（成功或失敗）只要曾送出登入就導覽 `/chbnib/faces/common/Logout`。`browserSessionId`、`captcha` 為一次性人工驗證狀態，只存於 `encrypted_config`。
+- 不復用網銀 session：每次同步重新登入，結束時（成功或失敗）只要曾送出登入就導覽 `/chbnib/faces/common/Logout`。主頁會跳出 `beforeunload` 離開提示，連接器確認它（取消會擋下登出導覽）；`alert` 確認，`confirm`／`prompt` 一律取消。`browserSessionId`、`captcha` 為一次性人工驗證狀態，只存於 `encrypted_config`。
 
 #### 查詢
 
@@ -886,21 +886,21 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 回應為 `{ isSuccess, data, returnCode, returnMessage }`，只有 `S001` 視為成功；其餘以 `chb_api_error`（`api`、`httpStatus`、`returnCode`）記錄，不記回覆內文。HTTP 401／403 或回覆代碼含 session／timeout／login／expire 視為工作階段結束。
 - 每個功能先呼叫 View（`GET`）再呼叫 Action（`POST`）：
 
-| 用途     | View／Action                        | taskID    | 備註                                                                                                                 |
-| -------- | ----------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------- |
-| 台幣餘額 | `TW01001/tw01001_1_View`／`_Action` | `tw01001` | Action 帶 View `accountItems` 的「全部帳號」value 與 `mgFlag: false`；`surplus` 為帳面餘額、`autoBalance` 為可用餘額 |
-| 台幣明細 | `TW01002/tw01002_1_View`／`_Action` | `tw01002` | 每個帳號各查一次；`inqType: "2"`、`range: "0"`（指定區間）                                                           |
-| 外幣餘額 | `FC01001/fc01001_1_View`／`_Action` | `fc01001` | 有「全部」選項時一次查，否則逐項查詢並合併（log `chb_fc_balance_mode`）                                              |
-| 外幣明細 | `FC01002/fc01002_1_View`／`_Action` | `fc01002` | 每個帳號×幣別各查一次；選單 value 為 `<帳號>$$$<幣別>`                                                               |
+| 用途     | View／Action                        | taskID    | 備註                                                                                                                         |
+| -------- | ----------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 台幣餘額 | `TW01001/tw01001_1_View`／`_Action` | `tw01001` | Action 帶 View `accountItems` 的「全部帳號」value 與 `mgFlag: false`；`surplus` 為帳面餘額、`autoBalance` 為可用餘額         |
+| 台幣明細 | `TW01002/tw01002_1_View`／`_Action` | `tw01002` | View 帶 `accountData: "none"`（與銀行前端相同，空物件回 `E000`）；每個帳號各查一次；`inqType: "2"`、`range: "0"`（指定區間） |
+| 外幣餘額 | `FC01001/fc01001_1_View`／`_Action` | `fc01001` | 有「全部」選項時一次查，否則逐項查詢並合併（log `chb_fc_balance_mode`）                                                      |
+| 外幣明細 | `FC01002/fc01002_1_View`／`_Action` | `fc01002` | 每個帳號×幣別各查一次；選單 value 為 `<帳號>$$$<幣別>`                                                                       |
 
 - 日期格式與區間：Action 的起迄日格式一律照 View 回應的迄日（台幣 `queryEndDate`、外幣 `endDate`）：3 位數年份為民國年，沿用相同分隔符（`/`、`-`、`.` 或無）；起日為迄日往前 3 個月（上游固定政策）。View 沒有可解析的迄日時該功能失敗，不猜格式。回應日期接受西元／民國與 7、8 碼數字。
-- 台幣明細的支出 `expenseBetr`、存入 `depositedBetr` 分欄，須恰有一欄有非零金額；`hcode == "1"` 為更正交易（保留於 `raw.adjustment`）。外幣明細以 `expense` 旗標決定 `txAmt` 的方向：銀行前端表格在 `expense == 1` 時把 `txAmt` 放進第一個金額欄（台幣第一欄為支出），因此 `expense == 1` 視為支出，其餘為存入。此假設以「上一筆餘額＋本筆金額＝本筆餘額」不一致筆數驗證：同步結束的 `chb_sync_result` 記錄 `twBalanceMismatch`／`fcBalanceMismatch`（與 `…Checked` 檢查筆數，只記筆數）；回應排序未知，兩種順序各算一次取較少者。回應 `totalCount` 大於解析筆數時累計 `truncationSuspected`。
+- 台幣明細的支出 `expenseBetr`、存入 `depositedBetr` 分欄，須恰有一欄有非零金額；`hcode == "1"` 為更正交易（保留於 `raw.adjustment`）：更正列沿用原交易的欄位但沖回原交易，方向與所在欄位相反（實機：支出欄的轉提更正讓餘額增加）。外幣明細以 `expense` 旗標決定 `txAmt` 的方向：銀行前端表格在 `expense == 1` 時把 `txAmt` 放進第一個金額欄（台幣第一欄為支出），因此 `expense == 1` 視為支出，其餘為存入。此假設以「上一筆餘額＋本筆金額＝本筆餘額」不一致筆數驗證：同步結束的 `chb_sync_result` 記錄 `twBalanceMismatch`／`fcBalanceMismatch`（與 `…Checked` 檢查筆數，只記筆數）；回應排序未知，兩種順序各算一次取較少者。回應 `totalCount` 大於解析筆數時累計 `truncationSuspected`。
 - 金額為字串，接受千分位、小數、括號負數、後置負號，空字串與 `-` 視為無值，其他一律拒絕；明細金額取絕對值後依欄位／旗標決定方向，餘額保留原符號。
 
 #### 資料
 
 - 存款帳戶 sourceId 為 `bank:chb:<末四碼>:<完整帳號 SHA-256 前 16 碼>`，外幣帳戶再加 `:<幣別>`；銀行代碼 `009`，已加入直接存款來源。不保存完整帳號。餘額快照依台灣日期每天一筆。
-- 交易 sourceId 為 `chb:deposit:tx:v1:<hash>:<序號>`，hash 由帳號、幣別、交易日、記帳日、交易時間、帶正負號金額、交易後餘額與摘要組成，序號為同一次查詢回應內相同識別的出現次數。交易時間可解析時以 `+08:00` 保存為 `authorizedAt`，否則只保存日期；記帳日為 `postedDate`。
+- 交易 sourceId 為 `chb:deposit:tx:v1:<hash>:<序號>`，hash 由帳號、幣別、交易日、記帳日、交易時間、帶正負號金額（更正列取反轉前、依銀行欄位的方向，方向修正不改 sourceId）、交易後餘額與摘要組成，序號為同一次查詢回應內相同識別的出現次數。交易時間可解析時以 `+08:00` 保存為 `authorizedAt`，否則只保存日期；記帳日為 `postedDate`。
 - 部分失敗容錯與台北富邦、遠東商銀相同：登入、工作階段結束與瀏覽器斷線使整次同步失敗；登入後單一查詢失敗只略過該項，連續三項失敗即停止，結束時記錄 `chb_sync_summary` 與 `chb_sync_result`。明細只寫入餘額回應中已出現的帳戶。Log 只記事件、分類、回覆代碼與筆數，不記帳密、帳號、姓名、餘額或頁面文字。
 - 信用卡（帳單 `CA01002`、未出帳明細）尚未接入。
 
