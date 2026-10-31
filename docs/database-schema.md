@@ -11,7 +11,7 @@
 - Tables：35
 - Explicit indexes：47
 - Other objects：0
-- Migrations：66
+- Migrations：67
 
 ## Tables
 
@@ -1920,6 +1920,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0066_crypto_asset_type.sql`](../apps/worker/migrations/0066_crypto_asset_type.sql)
 - [`0067_binance_max_sync_jobs.sql`](../apps/worker/migrations/0067_binance_max_sync_jobs.sql)
 - [`0068_invoice_calculation_exclusion.sql`](../apps/worker/migrations/0068_invoice_calculation_exclusion.sql)
+- [`0069_chb_sync_job.sql`](../apps/worker/migrations/0069_chb_sync_job.sql)
 
 ## 程式碼導覽
 

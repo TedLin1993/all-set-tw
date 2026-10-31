@@ -605,6 +605,27 @@ export const connectorCatalog = {
     secretStateFields: [],
     resetOnCredentialChangeFields: [],
   },
+  chb: {
+    id: "chb",
+    title: "彰化銀行",
+    bankCode: "009",
+    connectionMode: "browser_captcha_session",
+    scopes: ["all"],
+    capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
+    publicFields: [],
+    credentialFields: [
+      { key: "nationalId", label: "身分證字號", type: "text" },
+      { key: "userId", label: "使用者代號", type: "text" },
+      { key: "password", label: "密碼", type: "password" },
+    ],
+    secretStateFields: ["browserSessionId", "captcha"],
+    resetOnCredentialChangeFields: [
+      "browserSessionId",
+      "browserSessionExpiresAt",
+      "captchaDigitCount",
+      "captcha",
+    ],
+  },
 } as const satisfies Record<string, ConnectorCatalogEntry>;
 
 export type ConnectorId = keyof typeof connectorCatalog;

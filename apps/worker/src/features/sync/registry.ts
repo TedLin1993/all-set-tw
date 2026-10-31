@@ -57,6 +57,11 @@ import {
   type FeibSyncOverrides,
 } from "../../sources/feib/sync";
 import {
+  prepareChbCaptchaSession,
+  syncChb,
+  type ChbSyncOverrides,
+} from "../../sources/chb/sync";
+import {
   syncCathaybk,
   type CathaySyncOverrides,
 } from "../../sources/cathaybk/sync";
@@ -162,6 +167,13 @@ const fubonSyncBodySchema = z
   .refine((value) => !(value.captcha && value.otp));
 
 const feibSyncBodySchema = z.object({
+  captcha: z
+    .string()
+    .regex(/^\d{6}$/)
+    .optional(),
+});
+
+const chbSyncBodySchema = z.object({
   captcha: z
     .string()
     .regex(/^\d{6}$/)
@@ -383,6 +395,18 @@ export const connectorRuntimeRegistry: Record<
   },
   max: {
     run: (env, trigger) => syncMax(env, trigger),
+  },
+  chb: {
+    run: (env, trigger, _scope, overrides) =>
+      syncChb(env, trigger, overrides as ChbSyncOverrides),
+    syncBody: {
+      schema: chbSyncBodySchema,
+      invalidMessage: "彰化銀行同步選項格式錯誤。",
+    },
+    challenge: {
+      prepare: prepareChbCaptchaSession,
+      failureCode: "CHB_CAPTCHA_FAILED",
+    },
   },
 };
 
