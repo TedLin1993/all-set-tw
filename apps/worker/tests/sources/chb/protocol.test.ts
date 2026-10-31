@@ -203,7 +203,6 @@ describe("彰化銀行交易方向", () => {
         depositedBetr: "2,500.50",
         depositedSurplus: "11,500.50",
         summary: "薪資",
-        hcode: "1",
       },
       {
         transactionDate: "115/10/31",
@@ -223,10 +222,33 @@ describe("彰化銀行交易方向", () => {
     });
     expect(page.rows[1]).toMatchObject({
       transactionTime: "10:15:00",
-      adjustment: true,
+      adjustment: false,
     });
     expect(page.rejected).toHaveLength(3);
     expect(page.totalCount).toBe(5);
+  });
+
+  it("台幣：更正列（hcode 1）沖回原交易，方向與所在欄位相反", () => {
+    // 實機：支出欄的轉提更正讓餘額增加；虛構金額。
+    const page = tw([
+      {
+        transactionDate: "115/10/29",
+        expenseBetr: "1,000",
+        depositedSurplus: "9,000",
+        transKind: "轉提",
+        summary: "轉帳給隼翔",
+      },
+      {
+        transactionDate: "115/10/29",
+        expenseBetr: "1,000",
+        depositedSurplus: "10,000",
+        transKind: "轉提",
+        summary: "更正",
+        hcode: "1",
+      },
+    ]);
+    expect(page.rows.map((row) => row.amount)).toEqual([-1000, 1000]);
+    expect(page.rows[1]?.adjustment).toBe(true);
   });
 
   it("外幣：expense == 1 為支出，其餘為存入；缺旗標或金額的列被拒絕", () => {

@@ -765,7 +765,8 @@ function rowDates(row: Record<string, unknown>) {
 
 /**
  * 台幣明細 `depositDatas[]`：`expenseBetr` 為支出、`depositedBetr` 為存入（銀行表格依此兩欄分列），
- * 兩欄須恰有一欄有非零金額。`hcode == "1"` 為更正交易（銀行表格在金額後標示「更正」）。
+ * 兩欄須恰有一欄有非零金額。`hcode == "1"` 為更正交易（銀行表格在金額後標示「更正」）：
+ * 更正列沿用原交易的欄位，但沖回原交易，所以方向相反（實機：支出欄的轉提更正讓餘額增加）。
  */
 export function parseChbTwTransactions(data: unknown): ChbTransactionPage {
   const record = asRecord(data);
@@ -779,17 +780,17 @@ export function parseChbTwTransactions(data: unknown): ChbTransactionPage {
         throw new ChbRowRejectedError("支出與存入必須恰有一欄有金額。");
       }
       const dates = rowDates(row);
+      const adjustment = text(row.hcode) === "1";
+      const signed = expense !== 0 ? -Math.abs(expense) : Math.abs(deposit);
       rows.push({
-        amount: roundCurrency(
-          expense !== 0 ? -Math.abs(expense) : Math.abs(deposit),
-        ),
+        amount: roundCurrency(adjustment ? -signed : signed),
         balanceAfter: parseChbAmount(row.depositedSurplus),
         ...dates,
         transactionTime: parseChbTime(row.transactionTime),
         summary: text(row.summary),
         memo: text(row.memo) || text(row.annotation),
         kind: text(row.transKind),
-        adjustment: text(row.hcode) === "1",
+        adjustment,
       });
     } catch (error) {
       rejected.push(error instanceof Error ? error.message : "列格式不符。");
@@ -891,7 +892,8 @@ export function chbDepositTransactions(
       row.transactionDate ?? "",
       row.bookingDate ?? "",
       row.transactionTime ?? "",
-      row.amount.toFixed(2),
+      // 識別用銀行欄位的方向（更正列反轉前），更正列方向修正後 sourceId 不變、同步時就地更新金額。
+      (row.adjustment ? -row.amount : row.amount).toFixed(2),
       row.balanceAfter === undefined ? "" : row.balanceAfter.toFixed(2),
       row.summary.replace(/\s+/g, " ").trim(),
     ].join("|");
