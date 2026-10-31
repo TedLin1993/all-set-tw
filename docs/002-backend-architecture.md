@@ -783,6 +783,9 @@ API 驗證星期不可重複、至少一天，並按 0 至 6 排序；舊版單�
 `nextSyncRunAt` 從勾選星期找出嚴格晚於目前時間的最近執行時間，
 一般同步及電子發票／集保結案皆使用相同計算。更新預設排程只重算繼承來源；
 Cron、Queue 與預設批次的執行方式維持既有流程。
+繼承來源（`schedule_mode = inherit`）的頻率、時間與星期在 `syncJobSelection` 一律讀取
+`sync_schedule_settings`，工作列上保存的排程欄位只作為切回自訂排程的初始值；
+因此新 connector migration 使用欄位預設值建立 job、首次成功後自動啟用時，也不會偏離預設排程。
 
 同一個 connector 的不同同步 scope 共用 canonical connector lock，避免以下工作重疊：
 

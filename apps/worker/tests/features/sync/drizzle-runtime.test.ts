@@ -193,6 +193,18 @@ describe("同步鎖與原子寫入（隔離 D1）", () => {
       expect(await findSyncJob(db, "esun", "all")).toMatchObject({
         preferred_weekdays: [0, 1, 3, 5],
       });
+      // 舊 migration 建立的繼承工作可能保留過時排程；計算下次執行仍須以預設排程為準。
+      await db
+        .prepare(
+          `UPDATE sync_jobs SET interval_minutes = 1440, preferred_time = '05:00',
+           preferred_weekday = 2, preferred_weekdays = '[2]' WHERE id = 'esun:all'`,
+        )
+        .run();
+      expect(await findSyncJob(db, "esun", "all")).toMatchObject({
+        interval_minutes: 10080,
+        preferred_time: "06:00",
+        preferred_weekdays: [0, 1, 3, 5],
+      });
     } finally {
       vi.useRealTimers();
     }

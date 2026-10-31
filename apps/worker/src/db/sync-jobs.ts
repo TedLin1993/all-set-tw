@@ -10,11 +10,12 @@ import {
   ne,
   or,
   sql,
+  type SQLWrapper,
 } from "drizzle-orm";
 import type { SyncErrorCode } from "@taiwan-fin-hub/shared";
 import { createDrizzle } from "./client";
 import { sanitizeDatabaseError } from "./errors";
-import { syncJobs, connectorSettings } from "./schema";
+import { syncJobs, connectorSettings, syncScheduleSettings } from "./schema";
 
 export type SyncTrigger = "manual" | "scheduled";
 export type SyncStatus = "success" | "failed" | "needs_user_action";
@@ -103,20 +104,39 @@ export function hasConnectorSettings(db: ReturnType<typeof createDrizzle>) {
   );
 }
 
+/**
+ * 繼承工作一律以預設排程計算；工作列上的排程欄位可能是建立時的舊預設值。
+ */
+function effectiveScheduleValue(own: SQLWrapper, inherited: SQLWrapper) {
+  return sql`CASE WHEN ${syncJobs.scheduleMode} = 'inherit' THEN COALESCE((
+    SELECT ${inherited} FROM ${syncScheduleSettings}
+    WHERE ${syncScheduleSettings.id} = 'default'
+  ), ${own}) ELSE ${own} END`;
+}
+
 export const syncJobSelection = {
   id: syncJobs.id,
   connector_id: syncJobs.connectorId,
   scope: syncJobs.scope,
   enabled: syncJobs.enabled,
-  interval_minutes: syncJobs.intervalMinutes,
+  interval_minutes: effectiveScheduleValue(
+    syncJobs.intervalMinutes,
+    syncScheduleSettings.intervalMinutes,
+  ).mapWith(syncJobs.intervalMinutes),
   next_run_at: syncJobs.nextRunAt,
   schedule_mode: sql<SyncJobRow["schedule_mode"]>`${syncJobs.scheduleMode}`,
-  preferred_time: syncJobs.preferredTime,
-  preferred_weekday: syncJobs.preferredWeekday,
-  preferred_weekdays:
-    sql`COALESCE(${syncJobs.preferredWeekdays}, json_array(${syncJobs.preferredWeekday}))`.mapWith(
-      syncJobs.preferredWeekdays,
-    ),
+  preferred_time: effectiveScheduleValue(
+    syncJobs.preferredTime,
+    syncScheduleSettings.preferredTime,
+  ).mapWith(syncJobs.preferredTime),
+  preferred_weekday: effectiveScheduleValue(
+    syncJobs.preferredWeekday,
+    syncScheduleSettings.preferredWeekday,
+  ).mapWith(syncJobs.preferredWeekday),
+  preferred_weekdays: effectiveScheduleValue(
+    sql`COALESCE(${syncJobs.preferredWeekdays}, json_array(${syncJobs.preferredWeekday}))`,
+    sql`COALESCE(${syncScheduleSettings.preferredWeekdays}, json_array(${syncScheduleSettings.preferredWeekday}))`,
+  ).mapWith(syncJobs.preferredWeekdays),
   locked_until: syncJobs.lockedUntil,
   locked_by: syncJobs.lockedBy,
   lock_trigger: sql<SyncJobRow["lock_trigger"]>`${syncJobs.lockTrigger}`,
