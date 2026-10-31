@@ -514,7 +514,7 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 }
 ```
 
-臺幣 `txnamtOut` 非 `-` 是支出、`txnamtIn` 非 `-` 是存入；`sysdate` 為交易日／時刻，`dateNew` 為帳務日。`inNo + outNo` 必須與清單筆數一致，截斷時拆分不重疊期間重查；單日仍不完整即失敗。外幣 `DRWAMT` 是支出、`DEPAMT` 是存入，`ACCT_BAL` 是交易後餘額；交易日／時刻採官方顯示的 `TRANSACTION_DATE_TIME_DSC`，`TX_DATE` 為帳務日。前端表格在本機分頁，外幣查詢未見伺服器 continuation 或筆數欄位，要求完整 `TRANS_DETAILS`，不猜測分頁端點。
+臺幣 `txnamtOut` 非 `-` 是支出、`txnamtIn` 非 `-` 是存入；`sysdate` 為交易日／時刻，`dateNew` 為帳務日。`inNo + outNo` 必須與清單筆數一致，截斷時拆分不重疊期間重查；單日仍不完整即失敗。外幣 `DRWAMT` 是支出、`DEPAMT` 是存入，`ACCT_BAL` 是交易後餘額；零元存款息可能兩欄皆為 `-`，記為 0 元存入，臺幣兩欄皆為 `-` 仍失敗；交易日／時刻採官方顯示的 `TRANSACTION_DATE_TIME_DSC`，`TX_DATE` 為帳務日。前端表格在本機分頁，外幣查詢未見伺服器 continuation 或筆數欄位，要求完整 `TRANS_DETAILS`，不猜測分頁端點。
 
 每個帳號與幣別使用 `bank:taishin:{last4}:{sha256(accountIdentity)}:{currency}`，完整帳號只用於當次請求。交易 ID 依帳戶、消費日期、正負金額、交易後餘額及臺幣 `procSeq` 摘要，再按完整候選集合分配 occurrence；排序、備註或時間精度不影響 ID。快照按台灣日期每天更新，原幣小數與零餘額均保留。末四碼、銀行代碼 `812`、幣別沿用共用 canonical linking，集保同帳戶不重複計入資產。
 
