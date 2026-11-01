@@ -147,7 +147,7 @@ export async function startTdccSyncRun(
   );
   const config = parseTdccConfig({
     ...storedConfig,
-    ...(input.overrides ?? {}),
+    ...input.overrides,
     requestOtp: input.trigger === "manual",
   });
   requireTdccCredentials(config);
@@ -560,7 +560,7 @@ async function processTradePage(
 
   const next = tradeTaskAfterPage(task, transactions, page.returnCode);
   const cursorKey = `${task.brokerNo}:${task.brokerAccount}`;
-  const tradeCursors = { ...(sessionState.tradeCursors ?? {}) };
+  const tradeCursors = { ...sessionState.tradeCursors };
   tradeCursors[cursorKey] = {
     newest: next.newest,
     oldest: next.oldest,

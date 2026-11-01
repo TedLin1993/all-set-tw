@@ -1,8 +1,29 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  // 目前只檢查架構相依方向；oxlint 預設規則待清理既有警告後再逐步開啟。
+  // 啟用 correctness 類規則（含需要型別資訊的 type-aware 規則）與架構相依方向檢查。
   // 同一檔案符合多個 override 時，後者會取代前者的同名規則，因此較細的區塊須帶上外層限制。
-  "categories": { "correctness": "off" },
+  "options": { "typeAware": true },
+  "categories": { "correctness": "error" },
+  "rules": {
+    // 來源 parser 需要比對或清除控制字元。
+    "no-control-regex": "off",
+    // 外部 JSON 以 String(unknown) 正規化是刻意寫法。
+    "typescript/no-base-to-string": "off",
+    // vitest mock 斷言與瀏覽器端原型替換會誤報。
+    "typescript/unbound-method": "off",
+    "typescript/require-array-sort-compare": [
+      "error",
+      { "ignoreStringArrays": true }
+    ],
+    "typescript/no-floating-promises": [
+      "error",
+      {
+        "allowForKnownSafeCalls": [
+          { "from": "package", "package": "node:test", "name": "test" }
+        ]
+      }
+    ]
+  },
   "overrides": [
     {
       "files": ["apps/web/**"],

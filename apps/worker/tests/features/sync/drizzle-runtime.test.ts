@@ -250,8 +250,8 @@ describe("同步鎖與原子寫入（隔離 D1）", () => {
   it("中信沿用預設或自訂每小時排程，同日再次到期仍可加入預設批次", async () => {
     const db = harness.binding;
     const current = "2026-10-12T00:00:00.000Z";
-    await db.batch([
-      ...["ctbc", "esun"].flatMap((connector) => [
+    await db.batch(
+      ["ctbc", "esun"].flatMap((connector) => [
         db
           .prepare(
             `INSERT INTO sync_jobs (id, connector_id, scope, enabled, schedule_mode, interval_minutes, preferred_time, next_run_at, created_at, updated_at)
@@ -264,7 +264,7 @@ describe("同步鎖與原子寫入（隔離 D1）", () => {
           )
           .bind(connector, connector, now, now),
       ]),
-    ]);
+    );
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(current));
     let batchId: string | null = null;

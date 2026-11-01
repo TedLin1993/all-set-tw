@@ -1256,7 +1256,7 @@ function extractAccountIdentity(value: unknown) {
   const token = candidate.replace(/\s+/g, "");
   const nickname = text
     .replace(candidate, " ")
-    .replace(/[()（）【】\[\]：:|]/g, " ")
+    .replace(/[()（）【】[\]：:|]/g, " ")
     .replace(
       /帳號與暱稱|帳號|暱稱|account\s*and\s*nickname|account\s*\/?\s*nickname|nickname|account(?:\s*(?:no\.?|number))?/gi,
       " ",
@@ -1315,7 +1315,7 @@ function numberValue(value: unknown): number | undefined {
     negative = true;
     text = text.slice(1, -1);
   }
-  if (/-$/.test(text)) {
+  if (text.endsWith("-")) {
     negative = true;
     text = text.slice(0, -1);
   }
@@ -1506,7 +1506,7 @@ function isNoDataText(value: string) {
 }
 
 function isDash(value: unknown) {
-  return /^[\-—–－﹣]+$/.test(stripTags(String(value ?? "")).trim());
+  return /^[-—–－﹣]+$/.test(stripTags(String(value ?? "")).trim());
 }
 
 function stripTags(value: string) {

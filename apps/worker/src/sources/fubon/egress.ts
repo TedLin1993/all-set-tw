@@ -49,7 +49,7 @@ export class FubonExchangeLog {
     const entry = { ...exchange, seq: this.seq };
     this.entries.push(entry);
     if (this.entries.length > EXCHANGE_LOG_LIMIT) this.entries.shift();
-    for (const listener of [...this.listeners]) listener(entry);
+    for (const listener of Array.from(this.listeners)) listener(entry);
   }
 
   find(predicate: (exchange: FubonExchange) => boolean, since: number) {

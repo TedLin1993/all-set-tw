@@ -247,7 +247,7 @@ function createBinanceClient(options: BinanceClientOptions) {
  * 回應格式異常時讓同步失敗並保留前一次快照，避免把錢包當成空的、
  * 或整批持倉寫成未估值而覆蓋當天快照。
  */
-function requireArray<T>(value: T[] | unknown, endpoint: string): T[] {
+function requireArray<T>(value: unknown, endpoint: string): T[] {
   if (!Array.isArray(value)) {
     throw new Error(
       `Binance ${cryptoEndpointLabel(endpoint)} 回應格式異常，無法同步`,

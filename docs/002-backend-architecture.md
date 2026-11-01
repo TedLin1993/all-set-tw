@@ -150,7 +150,9 @@ flowchart TD
 - 來源的 `*protocol.ts`、`*client.ts` 不引用 Hono、Drizzle、Puppeteer、DB、`platform`（含 Worker `Env`）、feature、browser adapter，或同一來源的 `connector.ts`、`sync.ts` 與 repository。
 - 根目錄 `shared/` 不引用 Hono、Drizzle、`@cloudflare/*`、Zod 或 `apps/`。
 
-循環相依、repository 是否處理 Hono `Context` 等無法由 import 路徑判斷的約定仍靠 review。oxlint 遇到同一檔案符合多個 override 時，後者會取代前者的同名規則；新增較細的區塊須帶上外層限制。目前未啟用 oxlint 預設規則。
+循環相依、repository 是否處理 Hono `Context` 等無法由 import 路徑判斷的約定仍靠 review。oxlint 遇到同一檔案符合多個 override 時，後者會取代前者的同名規則；新增較細的區塊須帶上外層限制。
+
+同一份設定也以 error 啟用 oxlint 的 `correctness` 類規則，並透過 `oxlint-tsgolint` 執行需要型別資訊的 type-aware 規則（例如 `no-floating-promises`）。型別資訊取自各檔案最近的 `tsconfig.json`，涵蓋 Worker、根目錄 `shared/` 與前端 `.ts`；`.svelte` 檔只套用不需型別資訊的規則。與既有刻意寫法衝突的 `no-control-regex`、`no-base-to-string`、`unbound-method` 已關閉；`no-floating-promises` 允許 `node:test` 的頂層 `test()`。個別刻意寫法以 `// oxlint-disable-next-line <rule> -- 原因` 標註，不放寬整條規則。
 
 ## Feature 內部結構
 

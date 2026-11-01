@@ -264,7 +264,7 @@ export function createFeibConnector(
                 isRetryable: (error) =>
                   error instanceof FeibActionTimeoutError ||
                   (error instanceof FeibConnectionError &&
-                    /^遠東商銀登入頁沒有在期限內/.test(error.message)),
+                    error.message.startsWith("遠東商銀登入頁沒有在期限內")),
                 prepare: async (
                   browser,
                   observePage,

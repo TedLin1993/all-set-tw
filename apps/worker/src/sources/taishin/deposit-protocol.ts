@@ -84,6 +84,7 @@ export function normalizeTaishinCurrency(value: string): string | undefined {
 /** 不含實際值的字元形狀，例如 "AAA_"（大寫、小寫 a、數字 9、空白 _、中文 C、其他 ?）。 */
 function currencyShape(value: unknown) {
   if (typeof value !== "string") return undefined;
+  // oxlint-disable-next-line typescript/no-misused-spread -- 幣別欄位依 code point 判斷字元形狀。
   const shape = [...value]
     .slice(0, 12)
     .map((char) =>

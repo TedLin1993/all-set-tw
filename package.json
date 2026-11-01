@@ -54,6 +54,7 @@
     "@typescript/native": "npm:typescript@~7.0.2",
     "esbuild": "^0.28.1",
     "oxlint": "^1.90.0",
+    "oxlint-tsgolint": "^7.0.2005",
     "prettier": "^3.9.5",
     "prettier-plugin-svelte": "^4.1.1",
     "typescript": "~6.0.3",

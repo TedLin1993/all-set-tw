@@ -2096,7 +2096,7 @@ export function parseCathayCardOverview(text: string) {
   const limitMatch = text.match(/永久信用額度\s*(?:TWD\s*)?([\d,]+)/);
   const availMatch = text.match(/剩餘可用額度[\s\S]{0,20}?(?:TWD\s*)?([\d,]+)/);
   const dueDateMatch = text.match(
-    /繳款截止日[\s\S]{0,10}?(\d{4}[\/\-]\d{2}[\/\-]\d{2})/,
+    /繳款截止日[\s\S]{0,10}?(\d{4}[/-]\d{2}[/-]\d{2})/,
   );
   const noPaymentNeeded = text.includes("無需繳費");
   // The current overview shows the latest statement as "臺幣帳單 TWD 12,345"

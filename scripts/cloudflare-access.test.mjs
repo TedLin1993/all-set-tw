@@ -191,6 +191,27 @@ test("unverified Access metadata is never deployed as runtime credentials", asyn
       signedMetadata({ auth_domain: "attacker.example" }),
     ],
   ];
+  for (const [name, metadata] of cases) {
+    await t.test(name, async () => {
+      const api = cloudflare();
+      const publicApi = publicAccess({ metadata });
+      const runner = deploymentRunner({ initialSecrets: vapidSecrets });
+      await assert.rejects(
+        deploy(
+          [],
+          options(api, runner, {
+            fetchPublic: publicApi.fetchPublic,
+          }),
+        ),
+        /metadata could not be verified/,
+      );
+      assert.equal(runner.uploads.length, 1);
+      assert.equal(runner.runtimeSecrets.TEAM_DOMAIN, undefined);
+      assert.equal(runner.runtimeSecrets.POLICY_AUD, undefined);
+      if (name === "untrusted auth domain")
+        assert.deepEqual(publicApi.calls, [workerUrl]);
+    });
+  }
 });
 
 test("subdomain permission errors do not expose response bodies or write verification secrets", async () => {

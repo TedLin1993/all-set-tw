@@ -58,7 +58,7 @@
 
 - 全部格式化：`npm run format`
 - 全部格式檢查：`npm run format:check`
-- 架構相依檢查：`npm run lint`
+- Lint（oxlint correctness、type-aware 與架構相依）：`npm run lint`
 - 全部型別檢查：`npm run typecheck`
 - 前端驗證：`npm run verify:web`
 - 後端測試：`npm run test:backend`

@@ -126,10 +126,9 @@ describe("AI 自動分類（隔離 D1、假 Workers AI）", () => {
     expect(await runScan()).toBe("done");
 
     // Older unclassified records in the same months wait for a backfill.
-    expect(requests.map((request) => request.state.交易摘要).sort()).toEqual([
-      "範例烘焙坊",
-      "範例甜甜圈",
-    ]);
+    expect(
+      requests.map((request) => request.state.交易摘要 ?? "").sort(),
+    ).toEqual(["範例烘焙坊", "範例甜甜圈"]);
     requests.length = 0;
   });
 
@@ -141,11 +140,9 @@ describe("AI 自動分類（隔離 D1、假 Workers AI）", () => {
     await startAiClassificationBackfill(env(), now);
     expect(await runScan()).toBe("done");
 
-    expect(requests.map((request) => request.state.交易摘要).sort()).toEqual([
-      "LINEPAY*範例商行",
-      "XQZ-0001",
-      "範例小館",
-    ]);
+    expect(
+      requests.map((request) => request.state.交易摘要 ?? "").sort(),
+    ).toEqual(["LINEPAY*範例商行", "XQZ-0001", "範例小館"]);
     const walletRequest = requests.find(
       (request) => request.state.交易摘要 === "LINEPAY*範例商行",
     );

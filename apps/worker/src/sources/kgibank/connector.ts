@@ -206,7 +206,7 @@ export function createKgibankConnector(
             isRetryable: (error) =>
               error instanceof KgibankActionTimeoutError ||
               (error instanceof KgibankConnectionError &&
-                /^凱基登入頁沒有在期限內/.test(error.message)),
+                error.message.startsWith("凱基登入頁沒有在期限內")),
             prepare: async (
               browser,
               observePage,

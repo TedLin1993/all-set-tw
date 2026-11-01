@@ -1065,34 +1065,32 @@ describe("同步資料完整性（隔離 D1）", () => {
         };
         if (connectorId === "firstbank")
           return parseFirstbankData(
-            {
-              ...(status === "pending"
-                ? {
-                    cardUnbilled: {
-                      HEAD: { MSGID: "CMSQRY0008", RETURNCODE: "0000" },
-                      CONTENT: { Records: [tx, tx] },
+            status === "pending"
+              ? {
+                  cardUnbilled: {
+                    HEAD: { MSGID: "CMSQRY0008", RETURNCODE: "0000" },
+                    CONTENT: { Records: [tx, tx] },
+                  },
+                }
+              : {
+                  cardBill: {
+                    HEAD: { MSGID: "CMSQRY0014", RETURNCODE: "0000" },
+                    CONTENT: {
+                      BillRecords: [
+                        {
+                          CardNo: "99991234",
+                          BillingPeriod: "2026-10",
+                          BillDate: "2026/10/07",
+                          TotalAmount: "504",
+                          Records: [
+                            { ...tx, AcctDate: "2026/10/06" },
+                            { ...tx, AcctDate: "2026/10/06" },
+                          ],
+                        },
+                      ],
                     },
-                  }
-                : {
-                    cardBill: {
-                      HEAD: { MSGID: "CMSQRY0014", RETURNCODE: "0000" },
-                      CONTENT: {
-                        BillRecords: [
-                          {
-                            CardNo: "99991234",
-                            BillingPeriod: "2026-10",
-                            BillDate: "2026/10/07",
-                            TotalAmount: "504",
-                            Records: [
-                              { ...tx, AcctDate: "2026/10/06" },
-                              { ...tx, AcctDate: "2026/10/06" },
-                            ],
-                          },
-                        ],
-                      },
-                    },
-                  }),
-            },
+                  },
+                },
             date,
           );
         if (connectorId === "hncb") {

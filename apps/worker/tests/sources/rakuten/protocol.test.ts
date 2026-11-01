@@ -142,10 +142,12 @@ describe("Rakuten loan parser", () => {
     });
 
     expect(
-      result.bankAccounts.map((account) => account.accountType).sort(),
+      result.bankAccounts.map((account) => account.accountType ?? "").sort(),
     ).toEqual(["loan", "savings"]);
     expect(
-      result.bankBalanceSnapshots.map((snapshot) => snapshot.balance).sort(),
+      result.bankBalanceSnapshots
+        .map((snapshot) => snapshot.balance)
+        .sort((a, b) => a - b),
     ).toEqual([-456_789, 52_345]);
   });
 
@@ -158,10 +160,12 @@ describe("Rakuten loan parser", () => {
     });
 
     expect(
-      result.bankAccounts.map((account) => account.accountType).sort(),
+      result.bankAccounts.map((account) => account.accountType ?? "").sort(),
     ).toEqual(["loan", "savings"]);
     expect(
-      result.bankBalanceSnapshots.map((snapshot) => snapshot.balance).sort(),
+      result.bankBalanceSnapshots
+        .map((snapshot) => snapshot.balance)
+        .sort((a, b) => a - b),
     ).toEqual([-150_000, 52_345]);
   });
 
@@ -206,7 +210,7 @@ describe("Rakuten loan parser", () => {
       loanPageText: singleLoanPageText,
     });
     expect(result.bankAccounts).toHaveLength(2);
-    expect(result.bankAccounts.map((a) => a.accountType).sort()).toEqual([
+    expect(result.bankAccounts.map((a) => a.accountType ?? "").sort()).toEqual([
       "loan",
       "savings",
     ]);
