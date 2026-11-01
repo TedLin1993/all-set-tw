@@ -142,6 +142,16 @@ flowchart TD
 - 不為了符合形式而建立空的 Service 或 Repository。
 - 不建立通用 `BaseRepository` 或過度抽象的資料存取層。
 
+可由 import 路徑判斷的邊界由根目錄 `.oxlintrc.json` 以 oxlint `no-restricted-imports` 檢查，並在 CI 執行 `npm run lint`：
+
+- `platform` 不引用 `features`。
+- feature 不引用其他 feature 的 `route.ts`。
+- `sources/<connectorId>/` 不引用其他來源目錄；`connector.ts` 不引用 DB、Drizzle、feature，或同一來源的 `sync.ts` 與 repository。
+- 來源的 `*protocol.ts`、`*client.ts` 不引用 Hono、Drizzle、Puppeteer、DB、`platform`（含 Worker `Env`）、feature、browser adapter，或同一來源的 `connector.ts`、`sync.ts` 與 repository。
+- 根目錄 `shared/` 不引用 Hono、Drizzle、`@cloudflare/*`、Zod 或 `apps/`。
+
+循環相依、repository 是否處理 Hono `Context` 等無法由 import 路徑判斷的約定仍靠 review。oxlint 遇到同一檔案符合多個 override 時，後者會取代前者的同名規則；新增較細的區塊須帶上外層限制。目前未啟用 oxlint 預設規則。
+
 ## Feature 內部結構
 
 複雜 feature 通常採用以下結構：
@@ -1060,6 +1070,7 @@ Connector 回傳的 `raw` 資料只供診斷與未來 migration 使用，不得�
 
 ```bash
 npm run format:check
+npm run lint
 npm run typecheck
 npm run test:backend
 npm run test:unit

@@ -91,6 +91,8 @@ Schema 需要涵蓋同步期間會持久化的 secret state，否則 Zod parse �
 
 Protocol／client 不得依賴 Hono、D1、Worker `Env`、adapter 或 `sync.ts`，也不得直接寫入資料庫；adapter 不直接讀寫 D1。`sync.ts` 負責呼叫它們，並組合共用 persistence 與來源 repository。來源不引用另一來源的內部實作。Connector 測試與 fixtures 放在 `apps/worker/tests/sources/<connectorId>/`，由 `npm run test:backend` 執行；跨來源的同步完整性測試留在 `tests/features/sync`。
 
+上述 import 邊界由 `npm run lint` 檢查，對象為 `sources/<connectorId>/` 下的 `*protocol.ts`、`*client.ts` 與 `connector.ts`；新增其他命名的 protocol／client 檔案時，須同步調整根目錄的 `.oxlintrc.json`。
+
 電子發票的 config、同步 primitive 與正規化實作位於 `sources/einvoice/protocol.ts`，API client 位於同一目錄；各來源的 config 註冊集中於 `sources/config-registry.ts`。Worker 與測試直接引用需要的來源檔案，不使用跨來源的實作匯出入口。
 
 所有 Browser adapter 建立新瀏覽器時，統一呼叫
@@ -265,6 +267,7 @@ promotion 放在同一 D1 batch，沿用來源的 lock 與設定版本 guard。�
 
 ```bash
 npm run format:check
+npm run lint
 npm run typecheck
 npm run test:backend
 npm run verify:web
