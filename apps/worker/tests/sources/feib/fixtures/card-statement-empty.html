@@ -1,0 +1,100 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>FEIB</title>
+</head>
+<body onunload="">
+        <div class="wrapper">
+            <div class="header-wrapper">
+                <div class="header-container">
+                    <div class="right">
+                        <div class="right-left">
+                            <p>親愛的測試用戶貴賓，您好，上次登入時間為 2026-10-01 09:00:00</p>
+                        </div>
+                        <div class="right-right">
+                            <a href="/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Logout&state=logout">登 出</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="anchorlist" class="navigation">
+                <ul>
+                    <li class="j"><a href="#"><span></span>存款/繳費稅</a>
+                        <ul>
+                            <li id="2-1-1"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.Login&state=loginAFT&lgstatus=saving&menu_id=2-1-1'; openLoading('goAhref')">我的存款</a></li>
+                            <li id="2-1-3"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.SavAcctTxDtlInq&state=prompt&menu_id=2-1-3&default_acc_submit=1'; openLoading('goAhref')">存款交易明細查詢</a></li>
+                        </ul>
+                    </li>
+                    <li class="e"><a href="#"><span></span>信用卡</a>
+                        <ul>
+                            <li id="5-1-4"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMember&state=qCardAdj&menu_id=5-1-4'; openLoading('goAhref')">信用卡可用額度查詢</a></li>
+                            <li id="5-1-1"><a id="goAhref" href="#" onclick="location.href='/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMember&state=eStatementQry&menu_id=5-1-1'; openLoading('goAhref')">帳單明細查詢</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+			<div class="main-wrapper">
+				<div class="main-container">
+<form name="mainForm" id="mainForm" method="post" action="/netbank/servlet/TrxDispatcher">
+	<input type="HIDDEN" name="trx" value="com.lb.wibc.trx.CCMember">
+	<input type="HIDDEN" name="state" value="eStatementQry">
+	<input type="hidden" name="token" value="">
+<div class="page">
+    <div class="breadcrumb"></div>
+    <h1 class="page-title">
+        <span class="b"></span>帳單明細查詢
+    </h1>
+    <div class="content">
+        <div class="title">
+            <div class="title-links">
+                <a class="action-btn" href="/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMemberApply&state=loanCalculation&menu_id=5-5-5" id="GoCal">產品試算GO</a>
+				<a class="action-btn" href="/netbank/servlet/TrxDispatcher?trx=com.lb.wibc.trx.CCMemberApply&state=StatementDispatch&cmd=prompt&menu_id=5-4-1" id="GoApply">立即申請電子帳單GO</a>
+            </div>
+        </div>
+        <div class="std-table white">
+            <table class="red-arrow">
+                <tr>
+                    <th>請選擇您欲查詢的帳單年月</th>
+                    <td class="hide">:</td>
+                    <td>
+                        <select name="yyyyMm" id="yyyyMm">
+
+                        </select>
+                    </td>
+                </tr>
+            </table>
+            <div class="action tar">
+                <a href="#" name="btnQuery" id="btnQuery" onclick="doSubmit(); return false;">查詢</a>
+                <div class="lightbox-content" id="loading">
+                    查詢中，請稍候
+                </div>
+            </div>
+        </div>
+
+        <div class="std-table">
+            <div class="title">
+                <h2>查詢結果</h2>
+            </div>
+            <div class="std-table white">
+	        	<div class="message-box ">
+                        <label id="dateMessage" style="color:Red">查無帳單資料訊息</label>
+                </div>
+            </div>
+        </div>
+
+
+
+    </div>
+</div>
+</form>
+				</div>
+			</div>
+                <div class="footer">
+                    <p>遠東商業銀行 版權所有 © 2014  Far Eastern International Bank. All rights reserved.</p>
+                </div>
+            </div>
+        <input type="hidden" name="trx" value="" />
+        <input type="hidden" name="state" value="" />
+    </body>
+</html>
