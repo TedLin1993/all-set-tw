@@ -12,6 +12,7 @@
     "build": "npm run build --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "lint": "oxlint",
     "typecheck": "npm run typecheck --workspaces",
     "test:unit": "npm run test:unit -w @taiwan-fin-hub/web",
     "test:backend": "npm test -w @taiwan-fin-hub/worker && npm run test:deploy",
@@ -52,6 +53,8 @@
   "devDependencies": {
     "@typescript/native": "npm:typescript@~7.0.2",
     "esbuild": "^0.28.1",
+    "oxlint": "^1.90.0",
+    "oxlint-tsgolint": "^7.0.2005",
     "prettier": "^3.9.5",
     "prettier-plugin-svelte": "^4.1.1",
     "typescript": "~6.0.3",

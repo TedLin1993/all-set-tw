@@ -163,6 +163,7 @@ async function encryptLoginDataWithContext(data: Record<string, unknown>) {
   const json = JSON.stringify(data);
   const a = randomAlphaNumeric(16);
   const b = randomAlphaNumeric(16);
+  // oxlint-disable-next-line typescript/no-misused-spread -- seed 片段為英數字串，依協定逐字反轉。
   const seed = `${swapPairs(b)}${swapPairs(a)}${[...a].reverse().join("")}${[...b].reverse().join("")}`;
   const key = await sha256(seed);
   const iv = utf8(`${a.slice(-6)}${b.slice(-6)}`);
@@ -204,6 +205,7 @@ export async function decryptLoginData(value: string) {
     throw new Error("新版電子發票登入回應的 ldata 格式無效。");
   }
   const [a, encoded, b] = parts;
+  // oxlint-disable-next-line typescript/no-misused-spread -- seed 片段為英數字串，依協定逐字反轉。
   const seed = `${swapPairs(b)}${swapPairs(a)}${[...a].reverse().join("")}${[...b].reverse().join("")}`;
   const key = await sha256(seed);
   const iv = utf8(`${a.slice(-6)}${b.slice(-6)}`);

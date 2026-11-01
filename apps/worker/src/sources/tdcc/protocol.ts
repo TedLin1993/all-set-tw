@@ -452,7 +452,7 @@ export async function initializeTdccSnapshot(
     const fresh = createTdccClient(
       { ...config, session: undefined },
       JSON.stringify({
-        ...(state.previous ?? {}),
+        ...state.previous,
         deviceId: state.identity.deviceId,
         devType: state.identity.devType,
         devModel: state.identity.devModel,
@@ -744,7 +744,7 @@ async function runTdccTradeHistory(
 
   const positionsPayload = await client.getPositions();
   const accounts = stockAccountsFromPayload(positionsPayload);
-  const tradeCursors = { ...(previous?.tradeCursors ?? {}) };
+  const tradeCursors = { ...previous?.tradeCursors };
   const investmentTransactions: Array<
     Omit<InvestmentTransaction, "id" | "connectorId">
   > = [];

@@ -1152,19 +1152,17 @@ class EsunHttpClient implements EsunPortalApi {
     path: string,
     init: RequestInit,
   ): Promise<EsunApiResponse<T>> {
+    const headers = new Headers({
+      accept: "application/json, text/javascript, */*; q=0.01",
+      "content-type": "application/json",
+      referer: "https://ebank.esunbank.com.tw/indexMobile.jsp",
+      txnduptoken: this.txnDupToken ?? "",
+      "x-requested-with": "XMLHttpRequest",
+    });
+    new Headers(init.headers).forEach((value, key) => headers.set(key, value));
     return this.requestJson<EsunApiResponse<T>>(
       new URL(path, HOME_URL).toString(),
-      {
-        ...init,
-        headers: {
-          accept: "application/json, text/javascript, */*; q=0.01",
-          "content-type": "application/json",
-          referer: "https://ebank.esunbank.com.tw/indexMobile.jsp",
-          txnduptoken: this.txnDupToken ?? "",
-          "x-requested-with": "XMLHttpRequest",
-          ...init.headers,
-        },
-      },
+      { ...init, headers },
     );
   }
 

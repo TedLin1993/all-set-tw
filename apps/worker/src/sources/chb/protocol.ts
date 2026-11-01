@@ -484,7 +484,7 @@ function matchChbDate(
   value: string,
 ): { parts: ChbDateParts; style: ChbDateStyle } | undefined {
   const raw = toHalfWidth(value).trim();
-  const separated = raw.match(/^(\d{3,4})([/.\-])(\d{1,2})\2(\d{1,2})(?!\d)/);
+  const separated = raw.match(/^(\d{3,4})([/.-])(\d{1,2})\2(\d{1,2})(?!\d)/);
   if (separated) {
     const yearText = separated[1]!;
     return {

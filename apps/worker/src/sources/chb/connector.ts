@@ -267,7 +267,7 @@ export function createChbConnector(
                 isRetryable: (error) =>
                   error instanceof ChbActionTimeoutError ||
                   (error instanceof ChbConnectionError &&
-                    /^彰化銀行登入頁沒有在期限內/.test(error.message)),
+                    error.message.startsWith("彰化銀行登入頁沒有在期限內")),
                 prepare: async (
                   browser,
                   observePage,
@@ -620,7 +620,7 @@ async function refreshCaptcha(page: Page): Promise<CaptchaImage> {
         return Boolean(
           image &&
           src !== oldSource &&
-          /^data:image\//.test(src) &&
+          src.startsWith("data:image/") &&
           image.complete &&
           image.naturalWidth > 0,
         );

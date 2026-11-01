@@ -40,10 +40,9 @@ export function createApiClient(): ApiClient {
     path: string,
     init: RequestInit = {},
   ): Promise<{ data: T; headers: Headers }> {
-    const headers =
-      init.body === undefined
-        ? init.headers
-        : { "Content-Type": "application/json", ...init.headers };
+    const headers = new Headers(init.headers);
+    if (init.body !== undefined && !headers.has("Content-Type"))
+      headers.set("Content-Type", "application/json");
     const response = await fetch(path, { ...init, headers });
     const text = await response.text();
     let data: T | ApiErrorResponse;

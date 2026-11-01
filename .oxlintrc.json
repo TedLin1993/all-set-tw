@@ -1,0 +1,218 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // 啟用 correctness 類規則（含需要型別資訊的 type-aware 規則）與架構相依方向檢查。
+  // 同一檔案符合多個 override 時，後者會取代前者的同名規則，因此較細的區塊須帶上外層限制。
+  "options": { "typeAware": true },
+  "categories": { "correctness": "error" },
+  "rules": {
+    // 來源 parser 需要比對或清除控制字元。
+    "no-control-regex": "off",
+    // 外部 JSON 以 String(unknown) 正規化是刻意寫法。
+    "typescript/no-base-to-string": "off",
+    // vitest mock 斷言與瀏覽器端原型替換會誤報。
+    "typescript/unbound-method": "off",
+    "typescript/require-array-sort-compare": [
+      "error",
+      { "ignoreStringArrays": true }
+    ],
+    "typescript/no-floating-promises": [
+      "error",
+      {
+        "allowForKnownSafeCalls": [
+          { "from": "package", "package": "node:test", "name": "test" }
+        ]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["apps/web/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/worker", "**/worker/**"],
+                "message": "前端不得引用 Worker 內部模組；前後端共用的內容放在根目錄 shared/。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/web/src/data/**", "apps/web/src/shared/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/worker", "**/worker/**"],
+                "message": "前端不得引用 Worker 內部模組；前後端共用的內容放在根目錄 shared/。"
+              },
+              {
+                "group": [
+                  "@/features",
+                  "@/features/**",
+                  "**/features",
+                  "**/features/**"
+                ],
+                "message": "data、shared 不得反向依賴 features；只被單一 feature 使用的程式應放回該 feature。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["shared/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "hono",
+                  "hono/**",
+                  "drizzle-orm",
+                  "drizzle-orm/**",
+                  "@cloudflare/**",
+                  "zod",
+                  "zod/**"
+                ],
+                "message": "根目錄 shared/ 只放前後端共用的穩定型別、契約與純邏輯，不得引用 Hono、Drizzle、Cloudflare 執行環境或 Zod schema。"
+              },
+              {
+                "group": [
+                  "**/apps/**",
+                  "@taiwan-fin-hub/web",
+                  "@taiwan-fin-hub/worker"
+                ],
+                "message": "根目錄 shared/ 不得引用 apps/web 或 apps/worker。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/worker/src/platform/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/features", "**/features/**"],
+                "message": "platform 不得依賴任何具體 feature。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/worker/src/features/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["../**/route", "../**/route.js"],
+                "message": "feature 不得依賴其他 feature 的 route.ts；請改用對方的 service。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/worker/src/sources/*/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["../[!.]*/**"],
+                "message": "來源之間不得引用彼此的內部實作；跨來源共用的能力放在 sources 根目錄。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["apps/worker/src/sources/*/connector.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["../[!.]*/**"],
+                "message": "來源之間不得引用彼此的內部實作；跨來源共用的能力放在 sources 根目錄。"
+              },
+              {
+                "group": [
+                  "drizzle-orm",
+                  "drizzle-orm/**",
+                  "**/db",
+                  "**/db/**",
+                  "**/features/**",
+                  "./sync",
+                  "./repository",
+                  "./run-repository"
+                ],
+                "message": "connector 不直接讀寫 D1，也不依賴同步流程；資料寫入由 sync.ts 組合 persistence 與 repository。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "apps/worker/src/sources/*/*protocol.ts",
+        "apps/worker/src/sources/*/*client.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["../[!.]*/**"],
+                "message": "來源之間不得引用彼此的內部實作；跨來源共用的能力放在 sources 根目錄。"
+              },
+              {
+                "group": [
+                  "hono",
+                  "hono/**",
+                  "drizzle-orm",
+                  "drizzle-orm/**",
+                  "@cloudflare/puppeteer",
+                  "**/db",
+                  "**/db/**",
+                  "**/platform/**",
+                  "**/features/**",
+                  "../browser",
+                  "../browser.js",
+                  "./connector",
+                  "./sync",
+                  "./repository",
+                  "./run-repository"
+                ],
+                "message": "protocol／client 不得依賴 Hono、D1、Worker Env、adapter 或同步流程，也不得直接寫入資料庫。"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

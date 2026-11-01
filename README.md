@@ -165,6 +165,7 @@ npm run dev
 
 ```bash
 npm run format:check
+npm run lint
 npm run typecheck
 npm run verify:web
 npm run test:backend

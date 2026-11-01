@@ -40,6 +40,6 @@ export function collectMaturityReminders(
     else groups.set(institution, { institution, count: 1 });
   }
   return [...groups.values()].sort((a, b) =>
-    a.institution.localeCompare(b.institution),
+    a.institution.localeCompare(b.institution, "zh-TW"),
   );
 }

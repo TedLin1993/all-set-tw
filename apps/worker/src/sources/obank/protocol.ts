@@ -497,7 +497,7 @@ function normalizeCurrency(value: string) {
 }
 
 function normalizeDate(value: string) {
-  const match = value.match(/(\d{2,4})[/.\-](\d{1,2})[/.\-](\d{1,2})/);
+  const match = value.match(/(\d{2,4})[/.-](\d{1,2})[/.-](\d{1,2})/);
   if (!match) return undefined;
   const rawYear = Number(match[1]);
   const year = rawYear < 1911 ? rawYear + 1911 : rawYear;

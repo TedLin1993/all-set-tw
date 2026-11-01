@@ -605,7 +605,7 @@ export function normalizeMerchantName(value: string | undefined) {
 
 function responseValue(value: unknown): JsonRecord | undefined {
   if (!isRecord(value)) return undefined;
-  if (Boolean(value.error)) {
+  if (value.error) {
     throw new Error("台新信用卡 API 回傳錯誤。");
   }
   return isRecord(value.value) ? value.value : undefined;

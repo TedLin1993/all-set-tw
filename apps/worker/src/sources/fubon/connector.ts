@@ -445,7 +445,7 @@ export function createFubonConnector(
                 isRetryable: (error) =>
                   error instanceof FubonActionTimeoutError ||
                   (error instanceof FubonConnectionError &&
-                    /^台北富邦登入頁沒有在期限內/.test(error.message)),
+                    error.message.startsWith("台北富邦登入頁沒有在期限內")),
                 prepare: async (
                   browser,
                   observePage,

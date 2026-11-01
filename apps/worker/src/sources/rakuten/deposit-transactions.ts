@@ -130,6 +130,7 @@ function stableHash(input: string): string {
 
 /** 32 位元雜湊在同一批明細裡撞號的機率極低，仍以正反兩向各算一次串成 64 位元。 */
 function wideHash(input: string): string {
+  // oxlint-disable-next-line typescript/no-misused-spread -- 既有明細 ID 依 code point 反轉計算，改寫會改變雜湊值。
   return stableHash(input) + stableHash([...input].reverse().join(""));
 }
 

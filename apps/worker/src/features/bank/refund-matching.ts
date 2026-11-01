@@ -33,9 +33,9 @@ function merchantKey(transaction: TransferMatchTransaction) {
 
 function longestCommonSubstringLength(left: string, right: string) {
   let longest = 0;
-  let previous = new Array<number>(right.length + 1).fill(0);
+  let previous = Array.from({ length: right.length + 1 }, () => 0);
   for (let i = 1; i <= left.length; i++) {
-    const current = new Array<number>(right.length + 1).fill(0);
+    const current = Array.from({ length: right.length + 1 }, () => 0);
     for (let j = 1; j <= right.length; j++) {
       if (left[i - 1] !== right[j - 1]) continue;
       current[j] = previous[j - 1] + 1;

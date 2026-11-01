@@ -457,7 +457,7 @@ async function readIescRealtime(page: Page) {
     const element = Array.from(document.querySelectorAll<HTMLElement>("*"))
       .filter(
         (item) =>
-          /^未入帳/.test(item.textContent?.trim() ?? "") &&
+          (item.textContent?.trim() ?? "").startsWith("未入帳") &&
           (item.textContent?.length ?? 0) < 15,
       )
       .sort(

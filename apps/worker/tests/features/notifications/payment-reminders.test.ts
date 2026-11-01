@@ -549,8 +549,8 @@ describe("collectMaturityReminders", () => {
     );
 
     expect(reminders).toEqual([
-      { institution: "將來銀行", count: 1 },
       { institution: "王道銀行", count: 2 },
+      { institution: "將來銀行", count: 1 },
     ]);
   });
 });

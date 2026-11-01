@@ -94,7 +94,7 @@ export function parseSkbankData(
 ): SkbankData;
 export function parseSkbankData(
   payload: unknown,
-  second: Date | SkbankParseOptions | unknown = new Date(),
+  second: unknown = new Date(),
   third: SkbankTransactionPayload[] = [],
   fourth?: Date,
 ): SkbankData {

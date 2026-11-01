@@ -25,6 +25,8 @@ apps/web/src/
 - 前後端都使用且穩定的 API contract 應逐步移到根目錄的 `shared/`；只用於前端組合畫面的 view model 可留在 `apps/web/src/data`。
 - 根目錄的 `shared/` 是唯一跨前後端共用的 workspace 套件；資料庫與連接器由 `apps/worker` 管理，前端不得引用 Worker 內部模組。
 
+其中 `data`、`shared` 不引用 `features`，以及前端不引用 Worker 內部模組，由根目錄 `.oxlintrc.json` 以 oxlint 檢查（`npm run lint`，涵蓋 `.svelte` 的 `<script>` 與動態 `import()`）；feature 之間的內部元件引用仍靠 review。
+
 銀行與信用卡帳單 API 的 response 契約定義於 `shared/api/bank.ts`，前端 `data/bank/types.ts` 僅提供既有名稱的 type re-export。Worker 在銀行 route 的 JSON 回傳處以 `satisfies` 檢查相同契約；欄位保留現有回應的 `null` 與帳單數值 flag，不將 connector 正規化資料或 ORM row 當作 API response 型別。資料來源 ID 保持現有回應的 string，catalog 的 `ConnectorId` 用於已驗證的 connector 註冊與操作。
 
 同步排程、連接器設定狀態與分類規則的 response 契約分別定義於 `shared/api/` 的 `sync.ts`、`connectors.ts` 與 `classification.ts`，`data/connectors/types.ts` 與 `data/classification/types.ts` 同樣以既有名稱 re-export；發票配對偏好 `InvoiceTransactionPreference` 由 `data/invoices/types.ts` re-export。

@@ -251,7 +251,8 @@
       return;
     }
     formError = "";
-    editing ? update.mutate() : add.mutate();
+    if (editing) update.mutate();
+    else add.mutate();
   }
   function invalidateHistory() {
     qc.invalidateQueries({ queryKey: queryKeys.manualAssets });

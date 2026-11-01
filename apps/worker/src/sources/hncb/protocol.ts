@@ -350,7 +350,7 @@ function monthAnchorFromTimestamp(timestamp?: string): MonthAnchor {
 
 // 華南信用卡明細只給 MM/DD，年份要從帳單年月推回；消費月份大於帳單月份代表跨年。
 function resolveCardTxDate(dateStr: string, anchor: MonthAnchor) {
-  const normalized = dateStr.replace(/[\/.]/g, "-");
+  const normalized = dateStr.replace(/[/.]/g, "-");
   const month = Number(normalized.slice(0, 2));
   const year =
     Number.isFinite(month) && month > anchor.month
@@ -368,19 +368,19 @@ function parseSingleBillHtml(
   const text = stripTags(normalized);
 
   const periodMatch =
-    text.match(/帳單年月[：:\s]*([0-9]{4})\s*[\/年.-]\s*([0-9]{1,2})/) ||
+    text.match(/帳單年月[：:\s]*([0-9]{4})\s*[/年.-]\s*([0-9]{1,2})/) ||
     text.match(/帳單年月[：:\s]*([0-9]{6})/) ||
-    text.match(/帳單年月[：:\s]*([0-9]{3})\s*[\/年.-]\s*([0-9]{1,2})/);
+    text.match(/帳單年月[：:\s]*([0-9]{3})\s*[/年.-]\s*([0-9]{1,2})/);
   const limitMatch = text.match(/信用額度[：:\s]*([0-9,]+)/);
   const dueAmtMatch = text.match(
     /(?:累積應繳金額|本期應繳總額|本期應繳金額|應繳總額|應繳金額)[：:\s]*([0-9,]+)/,
   );
   const minPayMatch = text.match(/最低應繳金額[：:\s]*([0-9,]+)/);
   const stmtDateMatch = text.match(
-    /帳單結帳日[：:\s]*([0-9]{4}[\/.-][0-9]{1,2}[\/.-][0-9]{1,2})/,
+    /帳單結帳日[：:\s]*([0-9]{4}[/.-][0-9]{1,2}[/.-][0-9]{1,2})/,
   );
   const dueDateMatch = text.match(
-    /繳款截止日[：:\s]*([0-9]{4}[\/.-][0-9]{1,2}[\/.-][0-9]{1,2})/,
+    /繳款截止日[：:\s]*([0-9]{4}[/.-][0-9]{1,2}[/.-][0-9]{1,2})/,
   );
   let billingPeriod = "";
   if (periodMatch) {
@@ -445,7 +445,7 @@ function parseSingleBillHtml(
 
     const authorizedAt = resolveCardTxDate(parsedRow.txDateStr, anchor);
     const postedDate =
-      parsedRow.postDateStr && /^\d{2}[\/.-]\d{2}$/.test(parsedRow.postDateStr)
+      parsedRow.postDateStr && /^\d{2}[/.-]\d{2}$/.test(parsedRow.postDateStr)
         ? resolveCardTxDate(parsedRow.postDateStr, anchor)
         : undefined;
     const status = isUnbilled ? "pending" : "posted";
@@ -484,7 +484,7 @@ function extractCardLast4(text: string): string | undefined {
 function parseCreditTxRow(cells: string[]) {
   if (cells[0] === "No." || cells[1] === "消費日") return null;
   const compact = cells.map((cell) => cell.trim());
-  if (compact.length >= 8 && /^\d{2}[\/.-]\d{2}$/.test(compact[1] ?? "")) {
+  if (compact.length >= 8 && /^\d{2}[/.-]\d{2}$/.test(compact[1] ?? "")) {
     const extraCardStr = compact[8] ?? "";
     const extraCardLast4 = extraCardStr.includes("/")
       ? extraCardStr.split("/").at(-1)?.trim()
@@ -507,7 +507,7 @@ function parseCreditTxRow(cells: string[]) {
   }
 
   const dateIndexes = compact
-    .map((cell, index) => (/^\d{2}[\/.-]\d{2}$/.test(cell) ? index : -1))
+    .map((cell, index) => (/^\d{2}[/.-]\d{2}$/.test(cell) ? index : -1))
     .filter((index) => index >= 0);
   if (dateIndexes.length === 0) return null;
   const txDateIdx = dateIndexes[0] ?? 0;
@@ -584,7 +584,7 @@ function parseAmount(val: string): number {
 
 function normalizeDateStr(val: string): string {
   if (!val) return "";
-  const parts = val.split(/[\/.-]/);
+  const parts = val.split(/[/.-]/);
   if (parts.length === 3) {
     let year = Number(parts[0]);
     if (year < 1900) year += 1911;

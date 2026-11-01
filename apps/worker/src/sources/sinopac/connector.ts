@@ -2023,9 +2023,7 @@ function absoluteOrUndefined(value?: number) {
 function parsePeriod(value: string | undefined) {
   if (!value) return undefined;
   const text = value.trim();
-  const separated = text.match(
-    /(\d{2,4})\s*(?:年|[\/-])\s*(\d{1,2})(?:\s*月)?/,
-  );
+  const separated = text.match(/(\d{2,4})\s*(?:年|[/-])\s*(\d{1,2})(?:\s*月)?/);
   if (separated)
     return normalizePeriod(Number(separated[1]), Number(separated[2]));
   const compact = text.match(/(?:^|\D)(20\d{2}|1\d{2})(0[1-9]|1[0-2])(?:\D|$)/);
@@ -2059,7 +2057,7 @@ export function parseDate(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const text = value.trim();
   const separated = text.match(
-    /(\d{3,4})\s*(?:年|[\/-])\s*(\d{1,2})\s*(?:月|[\/-])\s*(\d{1,2})(?:\s*日)?/,
+    /(\d{3,4})\s*(?:年|[/-])\s*(\d{1,2})\s*(?:月|[/-])\s*(\d{1,2})(?:\s*日)?/,
   );
   if (separated)
     return normalizeDateParts(
