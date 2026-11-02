@@ -1,3 +1,4 @@
+import { loanAccountName } from "../loan-account-name";
 import forge from "node-forge";
 import { z } from "zod";
 import type { BankAccount, BankBalanceSnapshot } from "../financial-types";
@@ -289,18 +290,10 @@ export function parseSinopacLoanInfo(
   const loanRate = parseNumber(info.LoanRate);
 
   const category = loanCategory(info.LoanKind);
-  const categoryLabel =
-    category === "housing"
-      ? "房屋貸款"
-      : category === "personal"
-        ? "信用貸款"
-        : category === "other"
-          ? "其他貸款"
-          : "貸款帳戶";
   const accountRecord: SinopacLoanAccount = {
     sourceId: account.sourceId,
     institutionName: "永豐銀行",
-    accountName: `${categoryLabel} · 末四碼 ${account.accountSuffix}`,
+    accountName: loanAccountName(category, account.accountSuffix),
     accountType: "loan",
     ...(category ? { loanCategory: category } : {}),
     ...(loanRate != null ? { loanInterestRate: loanRate } : {}),

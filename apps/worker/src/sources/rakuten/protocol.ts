@@ -1,3 +1,4 @@
+import { loanAccountName } from "../loan-account-name";
 import type {
   BankAccount,
   BankBalanceSnapshot,
@@ -372,7 +373,7 @@ function loanAccounts(loans: RakutenLoan[], asOfAt: string): ParsedAccount[] {
       account: {
         sourceId,
         institutionName: "樂天國際銀行",
-        accountName: loan.title,
+        accountName: loanAccountName("personal", loan.loanNo),
         accountType: "loan",
         // 樂天國際銀行的貸款產品為個人信用貸款。
         loanCategory: "personal",
@@ -381,6 +382,7 @@ function loanAccounts(loans: RakutenLoan[], asOfAt: string): ParsedAccount[] {
           : {}),
         currency: "TWD",
         raw: {
+          productName: loan.title,
           initialAmount: loan.initialAmount,
           remainingPeriods: loan.remainingPeriods,
           totalPeriods: loan.totalPeriods,

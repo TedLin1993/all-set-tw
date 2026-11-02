@@ -1,3 +1,4 @@
+import { loanAccountName } from "../loan-account-name";
 import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type {
   AutopayAccountHint,
@@ -961,9 +962,7 @@ export function parseUbotLoanData(
     bankAccounts.push({
       sourceId,
       institutionName: UBOT_INSTITUTION_NAME,
-      accountName: creditLast4
-        ? `聯邦銀行貸款 · 末四碼 ${creditLast4}`
-        : "聯邦銀行貸款",
+      accountName: loanAccountName("personal", creditLast4),
       accountType: "loan",
       loanCategory: "personal",
       currency: "TWD",

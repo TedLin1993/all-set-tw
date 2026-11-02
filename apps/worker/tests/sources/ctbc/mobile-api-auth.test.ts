@@ -38,6 +38,12 @@ function bankApi(
     const resource = JSON.parse(String(init?.body || "{}")).resource;
     if (foreignResponse && resource?.startsWith("/twrbm-fx/"))
       return foreignResponse(resource);
+    // Synthetic no-loan response, independent of login/logout fixtures.
+    if (String(init?.body).includes('"/twrbm-invest/qu010/010"'))
+      return Response.json({
+        code: "0000",
+        rsData: { ebLoanAcctSummaryP: [], ebLoanAcctSummaryH: [] },
+      });
     // Synthetic no-FX-account response, independent of login/logout fixtures.
     if (String(init?.body).includes('"/twrbm-fx/qu001/010"'))
       return Response.json({
@@ -94,7 +100,7 @@ function expectPrivateValuesAbsent(logged: string) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("中信登入診斷的憑證保護", () => {
-  it("依公開 App 5.2.26 協定送出加密登入，無待驗證訊號時完成同步", async () => {
+  it("依公開 App 5.2.28 協定送出加密登入，無待驗證訊號時完成同步", async () => {
     const fetcher = bankApi([
       loginResponse({ code: "0000", rsData: { isTwoStageLogin: false } }),
       Response.json({
@@ -121,11 +127,11 @@ describe("中信登入診斷的憑證保護", () => {
     const request = JSON.parse(String(loginInit?.body));
     expect(request).toMatchObject({
       resource: "/twrbm-general/ot001/010",
-      appVer: "5.2.26",
-      webVer: "(0812)",
+      appVer: "5.2.28",
+      webVer: "(1020)",
       rqData: {
         loginType: "PW",
-        version: "5.2.26",
+        version: "5.2.28",
         twoStageVerify: true,
         userAgent: expect.stringContaining("Android 15; Pixel 8"),
         checkDeviceShare: "Y",
@@ -140,7 +146,7 @@ describe("中信登入診斷的憑證保護", () => {
     }
     expect(String(loginInit?.body)).not.toContain(credentials.account);
     expect(String(loginInit?.body)).not.toContain(credentials.password);
-    expect(calls).toHaveLength(8);
+    expect(calls).toHaveLength(9);
     expect(JSON.parse(String(calls.at(-1)?.[1]?.body)).resource).toBe(
       "/twrbm-general/ot002/010",
     );
@@ -242,7 +248,7 @@ describe("中信登入診斷的憑證保護", () => {
         .mock.calls.slice(3)
         .map(([, init]) => JSON.parse(String(init?.body)));
       expect(initial.rqData).toMatchObject({
-        version: "5.2.26",
+        version: "5.2.28",
         twoStageVerify: true,
         checkDeviceShare: "Y",
       });
@@ -348,6 +354,7 @@ describe("中信登入診斷的憑證保護", () => {
       "/twrbm-deposit/qu001/010",
       "/twrbm-card/qu002/010",
       "/twrbm-fx/qu001/010",
+      "/twrbm-invest/qu010/010",
       "/twrbm-general/ot002/010",
     ]);
     expect(new Set(requests.map((request) => request.deviceIxd))).toEqual(
@@ -506,6 +513,7 @@ describe("中信登入診斷的憑證保護", () => {
         "/twrbm-deposit/qu001/010",
         "/twrbm-card/qu002/010",
         "/twrbm-fx/qu001/010",
+        "/twrbm-invest/qu010/010",
         "/twrbm-general/ot002/010",
       ]);
       expect(requests[2].rqData).toEqual({
@@ -809,6 +817,8 @@ describe("外幣查詢的重新驗證與失敗隔離", () => {
           "/twrbm-deposit/qu001/010",
           "/twrbm-card/qu002/010",
           ...stages.slice(0, stages.indexOf(failedResource) + 1),
+          // Verification aborts the sync before the supplementary loan query.
+          ...(verificationRequired ? [] : ["/twrbm-invest/qu010/010"]),
           "/twrbm-general/ot002/010",
         ]);
         const logged = warn.mock.calls.flat().join("\n");

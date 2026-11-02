@@ -166,6 +166,7 @@ Puppeteer `TimeoutError` 與暫時性 `net::ERR_*` 網路錯誤；被登出、�
 - `BankBalanceSnapshot.accountId`、`BankTransaction.accountId` 與 `CreditCardBill.accountId` 必須等於對應 `BankAccount.sourceId`。
 - 日期使用 ISO 8601；帳單期間使用 `YYYY-MM`；幣別使用大寫代碼。
 - 存款帳戶名稱：銀行提供帳戶種類、別名或暱稱時，以 `sources/deposit-account-name.ts` 的 `depositAccountName` 組成「名稱 末四碼 xxxx」，方便分辨同銀行的多個帳戶；沒有名稱時沿用各來源的預設名稱。API 顯示層（`features/bank/display.ts`）只保留名稱與末碼以空格分隔、且末碼與 sourceId 帳號結尾一致的名稱（定存也不再重複附加末碼），其他名稱改顯示 sourceId 推得的「末四碼／末五碼 xxxx」。目前使用的欄位：台新 `accountTypeName`／`ACCT_TYPE_NAME`、永豐 `AcctText`、國泰 `accountTypeName`、玉山 `alias`、中信 `accountNickName`、兆豐 `NAME`、華南帳戶類別、第一銀行暱稱、新光暱稱或產品名、凱基暱稱或帳戶類別、王道 `aliasName`／`accountName`／`productName`（名稱可能帶完整帳號，先移除 6 碼以上數字再組合）；富邦、遠東商銀沿用既有「類別 末四碼」名稱；彰化銀行為固定的「新臺幣活存／外幣活存 幣別 末四碼」。
+- 貸款帳戶名稱：各來源一律以 `sources/loan-account-name.ts` 的 `loanAccountName` 依 `loanCategory` 組成「信用貸款／房屋貸款／其他貸款 末四碼 xxxx」（分類未知為「貸款」，缺末四碼時只顯示分類），不使用銀行自帶的產品名稱；銀行產品名稱如需保留，寫入 `raw.productName`。
 - `BankTransaction.authorizedAt` 與 `Invoice.invoiceDate`：來源只有日期時使用 `YYYY-MM-DD`；來源確實提供時間時使用含明確時區的 ISO timestamp。不得以補上的午夜或同步時間假造交易時間；台灣來源未標時區的交易時間以 `+08:00` 解讀。
 - 補充交易時間時須保留既有 `sourceId` 算法；`postedDate` 維持入帳日期用途。未入帳轉已入帳或重新同步只提供日期時，須保留同筆交易原有的可靠時間。
 - 多張卡共用一個信用卡帳戶時，以 `BankTransaction.cardLast4` 標示實際刷卡的末四碼；只有能唯一對應到具名卡片時才填 `cardName`，無法確定就留空，不猜測。兩者只供顯示（交易帳戶名稱顯示為「卡名 · 末四碼」，缺卡名時為「帳戶名稱 · 末四碼」），不得納入 `sourceId`、配對或負債計算，也不改變帳戶與帳單的拆分方式。
@@ -538,26 +539,26 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 外幣先沿用總覽的 `fxAcctSummaryResponse`，缺少時查 `/twrbm-fx/qu001/010`，再用 `/twrbm-fx/qu002/010`、`/011` 取得原幣餘額與近三個月交易。
 外幣帳戶 `sourceId` 為 `bank:ctbc:<末四碼或unknown>:<完整帳號SHA-256>:<幣別>`，`raw` 僅保存末四碼與幣別。
 明確無活存狀態 `9002`／`9004` 視為空清單；外幣查詢要求重新驗證時，原樣傳遞 `CtbcVerificationRequiredError` 並中止本次同步，讓使用者收到驗證提示。其他外幣失敗記固定警告並略過整個外幣區塊，保留舊資料，臺幣與信用卡仍可更新。
+貸款在外幣存款之後查詢「我的貸款」（`TWRBMInvestQU010`）初始化資源 `/twrbm-invest/qu010/010`（body `{}`），讀取 `rsData.ebLoanAcctSummaryP`／`H`／`LA`／`O`：實機回應以 `loanType` 代碼為鍵包裝陣列（例如 `{ "00": [...] }`），沒有貸款時為 `{}` 或 `[]`，因此以數字為鍵的物件與巢狀一層陣列都攤平處理；P 為信用貸款（`loanCategory` = `personal`）、H 為房屋貸款（`housing`），其餘為 `other`。每筆輸出 `loan:ctbc:<loanAcctId SHA-256>` 貸款帳戶（名稱依共用的 `loanAccountName` 規則，`prodType` 寫入 `raw.productName`，`intrstRate` 寫入 `loanInterestRate`）與每日一筆剩餘本金快照：`loanBalAmt` 以負值保存，`pmtAmt` 為 `loanPaymentAmount`，`repayDt` 為 `paymentDueDate`，`loanTerm` 為總期數，已繳期數為總期數減 `remTerm`（缺 `remTerm` 時用 `period`）。raw 只留末四碼、`approveBal`（核貸金額）、總／剩餘期數、利率、`repayDay`、下次應繳日與金額、撥貸日 `loanDt` 與到期日 `expDt`。扣款帳號欄位（`pmtAcctId`／`sordAcctNo`）語意尚未確認，不寫 `autopayAccount`。貸款是附加資料：查詢失敗或任一筆缺帳號／餘額時略過全部貸款並記 `ctbc_loans_skipped`（只含原因代碼），保留舊資料，存款與信用卡照常；要求重新驗證的錯誤照常中止同步。
 信用卡補查帳期與完整分頁；缺日期／金額或分頁資料不完整時失敗。每個幣別一個共用信用卡帳戶，名稱固定為「中國信託信用卡」，帳單與負債維持一份。交易的 `cardLast4` 取自 `cardNoSuffixFour`、`cardNo`、`fullCardNo`，先移除尾端 `_…` 標記，欄位互相矛盾時留空；`cardName` 只在 `cardDataList` 中該末四碼唯一且有卡名時填入。
 帳單 `pmtAmt` 是該結帳區間入帳的繳款，金額對應前一期（`prevBal`），不是本期帳單的已繳金額。較早期別的已繳金額取下一期的 `pmtAmt`，且下一期 `prevBal` 須等於該期 `billAmt`，對不上時繳款狀態為未知；最新一期以 `qu006` 未出帳明細中摘要含「繳款」「扣繳」「自扣」的貸方合計為已繳金額，未取得未出帳明細時為未知。已繳金額達 `billAmt` 即為已繳。
 信用卡負債依共用規則為最新一期帳單應繳（`currPmtAmt`，缺少時用 `billAmt`）扣除上述未出帳繳款後的剩餘應繳，加上 `qu006` 已入帳未結帳明細的淨額；中信未提供已對應的官方總額，因此加總本次完整分頁明細，淨額排除上述繳款貸方，即時授權不計入。剩餘應繳不大於 0 時標記無需繳款。尚無帳單的幣別只計未出帳淨額。
 
-連接器的 `appVer` 使用 `5.2.26`；2026-10-10 核對
+連接器的 `appVer` 使用 `5.2.28`；2026-11-02 核對
 [Google Play 台灣版](https://play.google.com/store/apps/details?id=com.chinatrust.mobilebank&hl=zh_TW&gl=TW)
-與 [App Store 台灣版](https://apps.apple.com/tw/app/id417698185) 的公開最新版均為此版本。
-2026-10-11 靜態核對 [APKMirror 公開分發的 Android 套件](https://www.apkmirror.com/apk/ctbc-bank/china-trust-action-bank/)
-`5.2.26`（build `2026081201`）：`webVer` 使用 `UtilsService.getWebVersion()` 回傳的
-`(0812)`，不以商店更新日期或推測的時間戳代替。
+公開 Android 套件 `AndroidManifest` 為此版本，`webVer` 使用 `UtilsService.getWebVersion()` 回傳的
+`(1020)`，不以商店更新日期或推測的時間戳代替。舊版 `5.2.26`／`(0812)` 查詢「我的貸款」時，
+銀行回 `SVC` `0131`（提醒訊息「請更新至最新版本使用」），因此版本落後會使部分功能失效。
 
 新版 OT044 登入仍使用 `/twrbm-general/ot001/010`，但 `rqData` 除既有欄位外，
-必須傳入 `version: "5.2.26"`、`twoStageVerify: true`、`userAgent` 與
+必須傳入 `version`（與 `appVer` 相同）、`twoStageVerify: true`、`userAgent` 與
 `checkDeviceShare: "Y"`；envelope 的 `appVer` 不能代替登入資料中的 `version`。
 `userAgent` 與 HTTP `User-Agent` 使用符合連接器既有 Android 裝置資訊的 WebView 值。
 
 首次同步在任何銀行請求前產生並以設定版本 CAS 保存 `deviceCode` UUID，
 之後初始化、HTTP header 與 envelope 的 `deviceIxd` 都沿用此識別。
 首次握手後、登入前以相同 CAS 保存銀行發出的 `deviceSeed`，之後握手與所有請求的
-`seed` 皆沿用已保存值，不以新握手或其他回應的 seed 覆蓋。這符合 `5.2.26` 公開套件
+`seed` 皆沿用已保存值，不以新握手或其他回應的 seed 覆蓋。這符合 `5.2.26` 起公開套件
 `main` 的啟動流程：握手前還原本機 seed，只有本機沒有 seed 時才保存 `rsData.seed`。
 保留 seed 可沿用原行銀識別，但不會替未綁定的連接器取得正式 App 的設備認證。
 舊版待核准登入已有 seed 時，接續前搬入 `deviceSeed`，保留這次核准所使用的識別。
