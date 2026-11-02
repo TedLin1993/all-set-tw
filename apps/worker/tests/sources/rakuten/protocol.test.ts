@@ -76,12 +76,13 @@ describe("Rakuten loan parser", () => {
     const loan = result.bankAccounts[0];
     expect(loan).toMatchObject({
       institutionName: "樂天國際銀行",
-      accountName: "樂天測試信貸",
+      accountName: "信用貸款",
       accountType: "loan",
       loanCategory: "personal",
       currency: "TWD",
     });
     expect(loan?.raw).toMatchObject({
+      productName: "樂天測試信貸",
       initialAmount: 500_000,
       remainingPeriods: 88,
       totalPeriods: 96,
@@ -113,10 +114,18 @@ describe("Rakuten loan parser", () => {
 
     expect(result.bankAccounts).toHaveLength(2);
     const [first, second] = result.bankAccounts;
-    expect(first).toMatchObject({ accountName: "樂天測試信貸" });
-    expect(first?.raw).toMatchObject({ totalPeriods: 96, paymentDay: 9 });
-    expect(second).toMatchObject({ accountName: "樂天生活貸" });
-    expect(second?.raw).toMatchObject({ totalPeriods: 60, paymentDay: 5 });
+    expect(first).toMatchObject({ accountName: "信用貸款" });
+    expect(first?.raw).toMatchObject({
+      productName: "樂天測試信貸",
+      totalPeriods: 96,
+      paymentDay: 9,
+    });
+    expect(second).toMatchObject({ accountName: "信用貸款" });
+    expect(second?.raw).toMatchObject({
+      productName: "樂天生活貸",
+      totalPeriods: 60,
+      paymentDay: 5,
+    });
     expect(first?.sourceId).not.toBe(second?.sourceId);
 
     expect(result.bankBalanceSnapshots).toHaveLength(2);
@@ -179,7 +188,10 @@ describe("Rakuten loan parser", () => {
     expect(result.bankAccounts).toHaveLength(1);
     expect(result.bankAccounts[0]).toMatchObject({
       accountType: "loan",
-      accountName: "樂天測試信貸",
+      accountName: "信用貸款",
+    });
+    expect(result.bankAccounts[0]?.raw).toMatchObject({
+      productName: "樂天測試信貸",
     });
     expect(result.bankBalanceSnapshots[0]?.balance).toBe(-456_789);
   });
@@ -475,7 +487,9 @@ describe("Rakuten loan identity", () => {
     });
 
     expect(result.bankAccounts).toHaveLength(1);
+    expect(result.bankAccounts[0]?.accountName).toBe("信用貸款 末四碼 0001");
     expect(result.bankAccounts[0]?.raw).toEqual({
+      productName: "樂天測試信貸",
       initialAmount: 500000,
       remainingPeriods: 88,
       totalPeriods: 96,

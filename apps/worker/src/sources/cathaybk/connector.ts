@@ -1,3 +1,4 @@
+import { loanAccountName } from "../loan-account-name";
 import { depositAccountName } from "../deposit-account-name";
 import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import type { SyncResult } from "../types";
@@ -2620,12 +2621,7 @@ export async function scrapeLoans(page: Page): Promise<LoanScraped> {
       bankAccounts.push({
         sourceId,
         institutionName: "國泰世華銀行",
-        accountName:
-          loan.loanCategory === "housing"
-            ? "房屋貸款"
-            : loan.loanCategory === "other"
-              ? "其他貸款"
-              : "國泰世華貸款",
+        accountName: loanAccountName(loan.loanCategory, loan.accountNumber),
         accountType: "loan",
         ...(loan.loanCategory ? { loanCategory: loan.loanCategory } : {}),
         ...(loan.interestRate !== undefined

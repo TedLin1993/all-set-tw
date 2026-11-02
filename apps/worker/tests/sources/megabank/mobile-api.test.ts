@@ -232,9 +232,10 @@ describe("兆豐貸款同步", () => {
     )!;
     expect(mortgage).toBeDefined();
     expect(personalLoan).toBeDefined();
-    expect(mortgage.accountName).toMatch(/長擔購置住宅放款 末四碼 1111/);
+    expect(mortgage.accountName).toBe("房屋貸款 末四碼 1111");
     expect(mortgage.raw).toEqual({
       last4: "1111",
+      productName: "長擔購置住宅放款",
       initialAmount: 10_000_000,
       totalPeriods: 480,
       remainingPeriods: 466,

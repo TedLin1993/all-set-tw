@@ -251,6 +251,7 @@ export const connectorCatalog = {
       "bank_balance_snapshot",
       "bank_transaction",
       "credit_card_bill",
+      "loan",
     ],
     publicFields: [],
     credentialFields: [

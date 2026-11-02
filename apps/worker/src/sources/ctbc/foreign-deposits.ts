@@ -45,7 +45,7 @@ export class CtbcForeignDepositError extends Error {
 const invalid = (reason: FailureReason = "format_unconfirmed") =>
   new CtbcForeignDepositError(reason);
 
-/** Verified against public Android 5.2.26 fx-qu001/qu002 assets. No wire payload is persisted. */
+/** Verified against public Android 5.2.26+ fx-qu001/qu002 assets. No wire payload is persisted. */
 export async function fetchCtbcForeignDeposits(
   request: Request,
   existingOverview: unknown,

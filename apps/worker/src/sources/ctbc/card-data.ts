@@ -85,7 +85,7 @@ function pagination(
   return { pages, total };
 }
 
-/** Mobile 5.2.26 qu002: statement details are lazy-loaded per currency/month. */
+/** Mobile 5.2.26+ qu002: statement details are lazy-loaded per currency/month. */
 export async function fetchCtbcCardStatements(
   request: Request,
   overview: Json,

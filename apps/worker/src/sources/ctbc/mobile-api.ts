@@ -2,6 +2,7 @@ import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 import { CtbcVerificationRequiredError } from "./errors";
 export { CtbcVerificationRequiredError } from "./errors";
 import { fetchCtbcForeignDeposits } from "./foreign-deposits";
+import { fetchCtbcLoans } from "./loans";
 import type { SyncResult } from "../types";
 import { reportSyncProgress } from "../sync-progress";
 
@@ -19,10 +20,10 @@ import { isNoCreditCardMessage } from "../credit-card-status";
 const CTBC_IMP_ORIGIN = "https://eb.ctbcbank.com/IMP";
 const CTBC_APPLICATION = "EBMW_Adapter";
 const CTBC_RESOURCE_ENDPOINT = `${CTBC_IMP_ORIGIN}/api/adapters/${CTBC_APPLICATION}/resource/ebmwResource`;
-// Google Play Taiwan latest version, verified on 2026-10-10.
-const CTBC_APP_VERSION = "5.2.26";
-// UtilsService.getWebVersion() in the public Android 5.2.26 package.
-const CTBC_WEB_VERSION = "(0812)";
+// Google Play Taiwan latest version, verified on 2026-11-02.
+const CTBC_APP_VERSION = "5.2.28";
+// UtilsService.getWebVersion() in the public Android 5.2.28 package.
+const CTBC_WEB_VERSION = "(1020)";
 const CTBC_USER_AGENT =
   "Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP3A.241005.015; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.6723.58 Mobile Safari/537.36";
 // MobileFirst client-credential value shipped in the public Android package.
@@ -142,7 +143,7 @@ export function requireCtbcCredentials(
 }
 
 /**
- * Reproduces the App 5.2.26 `makeEncryptPINClear` format. Plaintext exists only
+ * Reproduces the App 5.2.26+ `makeEncryptPINClear` format. Plaintext exists only
  * for the duration of this call and is never returned or included in errors.
  */
 export function encryptCtbcPin(
@@ -310,6 +311,21 @@ export function createCtbcConnector(
             "[ctbc] foreign_deposits_skipped: foreign deposit sync incomplete; previous foreign data retained",
           );
         }
+        // Loans are supplementary: a failed query or unknown shape skips only
+        // loans, and persistence keeps the previous loan rows untouched.
+        const loans = await fetchCtbcLoans(
+          (resource, data) => session.resource(resource, data),
+          now,
+        );
+        if (loans.issue)
+          console.warn(
+            JSON.stringify({
+              event: "ctbc_loans_skipped",
+              reason: loans.issue,
+            }),
+          );
+        parsed.bankAccounts.push(...loans.bankAccounts);
+        parsed.bankBalanceSnapshots.push(...loans.bankBalanceSnapshots);
         return {
           records: [],
           ...parsed,

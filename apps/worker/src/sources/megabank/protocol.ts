@@ -1,3 +1,4 @@
+import { loanAccountName } from "../loan-account-name";
 import { depositAccountName } from "../deposit-account-name";
 import type {
   BankAccount,
@@ -435,7 +436,7 @@ export function parseMegabankLoans(
     bankAccounts.push({
       sourceId,
       institutionName: "兆豐銀行",
-      accountName: `${loanType} 末四碼 ${last4(loanNo)}`,
+      accountName: loanAccountName(housing ? "housing" : "other", loanNo),
       accountType: "loan",
       loanCategory: housing ? "housing" : "other",
       ...(annualRatePct !== undefined
@@ -444,6 +445,7 @@ export function parseMegabankLoans(
       currency,
       raw: {
         last4: last4(loanNo),
+        productName: loanType,
         initialAmount,
         totalPeriods: totalPeriods > 0 ? totalPeriods : undefined,
         remainingPeriods,
