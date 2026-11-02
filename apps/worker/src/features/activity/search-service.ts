@@ -16,6 +16,7 @@ import { getInvoicesRange } from "../invoices/service";
 import { getInvestmentTransactionsRange } from "../investments/service";
 import { encodePageCursor } from "../../platform/http";
 import { listInvoiceTransactionPreferences } from "./repository";
+import { loadLinkedCounterparts } from "./service";
 import {
   findActivitySearchDays,
   type ActivitySearchInput,
@@ -72,15 +73,30 @@ export async function searchActivity(
       getInvoicesRange(db, range, days),
       getInvestmentTransactionsRange(db, range, days),
     ]);
-    const transactions = deduplicateBankTransactions(bank.transactions);
+    // 跨日手動配對的另一端只補讀來配對；它的活動屬於另一個日期，由該日期呈現。
+    const linked = await loadLinkedCounterparts(
+      db,
+      bank.transactions,
+      invoiceBatch,
+      preferences,
+    );
+    const linkedTransactionIds = new Set(
+      linked.transactions.map(({ id }) => id),
+    );
+    const linkedInvoiceIds = new Set(linked.invoices.map(({ id }) => id));
+    const transactions = deduplicateBankTransactions([
+      ...bank.transactions,
+      ...linked.transactions,
+    ]);
+    const batchInvoices = [...invoiceBatch, ...linked.invoices];
     const invoiceMatches = matchInvoicesToTransactions(
       transactions,
-      invoiceBatch,
+      batchInvoices,
       preferences,
     );
     const items = buildActivityItems(
       transactions,
-      invoiceBatch,
+      batchInvoices,
       tradeBatch,
       accountMap,
       invoiceMatches,
@@ -95,10 +111,17 @@ export async function searchActivity(
         flow: input.flow ?? "all",
         categoryId: input.category,
         category: null,
-      }).filter((item) => !cursor || compareActivityItems(item, cursor) > 0),
+      }).filter(
+        (item) =>
+          !(
+            item.transactionId && linkedTransactionIds.has(item.transactionId)
+          ) &&
+          !(item.source === "invoice" && linkedInvoiceIds.has(item.id)) &&
+          (!cursor || compareActivityItems(item, cursor) > 0),
+      ),
     );
     bankTransactions.push(...transactions);
-    invoices.push(...invoiceBatch);
+    invoices.push(...batchInvoices);
     trades.push(...tradeBatch);
     if (candidates.length <= DAY_BATCH_SIZE) break;
     beforeDay = days.at(-1);
@@ -108,24 +131,30 @@ export async function searchActivity(
   const items = matches.slice(0, PAGE_SIZE);
   const last = items.at(-1);
   const selectedDays = new Set(items.map(activityDateKey));
+  const itemTransactionIds = new Set(items.map((item) => item.transactionId));
+  const itemInvoiceIds = new Set(items.map((item) => item.invoiceId));
   return {
     items,
     bank: {
       accounts,
-      transactions: bankTransactions.filter((t) =>
-        selectedDays.has(
-          activityDateKey({
-            date: t.authorizedAt ?? t.postedDate ?? "",
-            dateHasTime: isActivityDateTime(t.authorizedAt ?? undefined),
-            source: "bank",
-          }),
-        ),
+      transactions: bankTransactions.filter(
+        (t) =>
+          itemTransactionIds.has(t.id) ||
+          selectedDays.has(
+            activityDateKey({
+              date: t.authorizedAt ?? t.postedDate ?? "",
+              dateHasTime: isActivityDateTime(t.authorizedAt ?? undefined),
+              source: "bank",
+            }),
+          ),
       ),
     },
-    invoices: invoices.filter((i) =>
-      selectedDays.has(
-        activityDateKey({ date: i.invoiceDate, source: "invoice" }),
-      ),
+    invoices: invoices.filter(
+      (i) =>
+        itemInvoiceIds.has(i.id) ||
+        selectedDays.has(
+          activityDateKey({ date: i.invoiceDate, source: "invoice" }),
+        ),
     ),
     trades: trades.filter((t) =>
       selectedDays.has(

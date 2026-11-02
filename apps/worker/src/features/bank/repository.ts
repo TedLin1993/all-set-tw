@@ -7,7 +7,7 @@ import {
   bankTransactions,
   creditCardBills,
 } from "../../db";
-import { and, asc, desc, eq, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { TransactionPageCursor } from "../investments/repository";
 import type { MonthDateRange } from "../../platform/month-range";
@@ -232,6 +232,13 @@ export async function listBankTransactionsInRange(
             ),
       ),
     )
+    .orderBy(desc(txn.effectiveDate), desc(txn.updatedAt), desc(txn.id))
+    .all();
+}
+
+export async function listBankTransactionsByIds(db: D1Database, ids: string[]) {
+  return bankTransactionQuery(db)
+    .where(and(visibleBankTransactionFilter, inArray(txn.id, ids)))
     .orderBy(desc(txn.effectiveDate), desc(txn.updatedAt), desc(txn.id))
     .all();
 }

@@ -1,6 +1,6 @@
 import type { ConnectorId } from "@taiwan-fin-hub/shared";
 import { createDrizzle, invoiceLineItems, invoices } from "../../db";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { MonthDateRange } from "../../platform/month-range";
 
 // Taipei calendar day for precise timestamps; date-only TEXT stays unchanged.
@@ -109,6 +109,17 @@ export async function listInvoicesInRange(
       desc(invoices.updatedAt),
       desc(invoices.id),
     )
+    .all();
+}
+
+export async function listInvoicesByIds(db: D1Database, ids: string[]) {
+  return createDrizzle(db)
+    .select({
+      ...invoiceSummaryColumns,
+      updatedAt: invoices.updatedAt,
+    })
+    .from(invoices)
+    .where(inArray(invoices.id, ids))
     .all();
 }
 

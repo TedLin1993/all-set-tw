@@ -99,11 +99,11 @@ function isCashFlowItem(item: ActivityItem) {
 /** 與活動頁相同的月收支與分類計算；月份預設為台北時間本月。 */
 export async function getMonthlyCashFlow(db: D1Database, month?: string) {
   const selectedMonth = month ?? taipeiDateKey(new Date()).slice(0, 7);
-  // 活動頁一次載入多個月份；手動配對的扣款最多晚發票 45 天，前後各多讀兩個月，
-  // 讓跨月的發票與交易仍能配對，避免同一筆消費被重複計入支出。
+  // 活動頁一次載入多個月份；前後各多讀一個月，讓跨月的發票與刷卡仍能配對，
+  // 避免同一筆消費被重複計入支出。
   const range = resolveMonthDateRange({
-    from: shiftMonth(selectedMonth, -2),
-    to: shiftMonth(selectedMonth, 2),
+    from: shiftMonth(selectedMonth, -1),
+    to: shiftMonth(selectedMonth, 1),
   })!;
   const [allItems, rateRows] = await Promise.all([
     getActivityItemsInRange(db, range),
