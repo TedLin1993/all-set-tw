@@ -1281,11 +1281,11 @@
                       {#if time || item.category}<div
                           class="mt-1 flex items-center gap-2 text-xs font-medium tabular-nums text-subtle"
                         >
-                          {#if time}<span>{time}</span>{/if}
+                          {#if time}<span class="shrink-0">{time}</span>{/if}
                           {#if item.category}<CategoryBadge
                               label={item.category}
                               categoryId={item.categoryId}
-                              class="shrink-0 py-0 pr-2 font-medium"
+                              class="py-0 pr-2 font-medium"
                             />{/if}
                         </div>{/if}
                       <p class="mt-1 truncate text-xs text-subtle">
