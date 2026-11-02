@@ -293,7 +293,7 @@ test("manually maps, manages, and separates a same-day invoice transaction on mo
   await expect(page.getByText("尚未找到銀行／信用卡交易")).toBeVisible();
   await page.getByRole("button", { name: "配對交易" }).click();
   await expect(
-    page.getByRole("heading", { name: "選擇同日候選交易" }),
+    page.getByRole("heading", { name: "選擇候選交易" }),
   ).toBeVisible();
   await page
     .getByRole("button", {

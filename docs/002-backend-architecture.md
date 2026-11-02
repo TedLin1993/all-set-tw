@@ -625,7 +625,8 @@ X-Next-Cursor: <opaque-cursor>
 
 - 只需帳戶與餘額的頁面使用 `GET /api/bank/accounts`，不載入交易、轉帳配對與分類。
 - 資料來源卡片的設定狀態沿用 `/api/sync-jobs` 的 `configured`；開啟連接器詳情時才讀取 `/api/connectors/:connectorId/settings`。
-- `GET /api/activity/invoice-mappings` 接受與其他區間 API 相同的 `from`／`to` 月份。發票與交易必須同一個台北日才能連結，因此頁面只讀取區間內發票的決定；未帶區間時回傳全部。
+- `GET /api/activity/invoice-mappings` 接受與其他區間 API 相同的 `from`／`to` 月份。連結的交易一定在發票當天或之後，跨日配對的活動以交易日期呈現，因此頁面只讀取區間內發票的決定；未帶區間時回傳全部。
+- 自動配對只在同一天；跨日配對一定是手動建立並存於 `invoice_transaction_preferences`。活動搜尋與 `getActivityItemsInRange` 依日期讀取後，以 `loadLinkedCounterparts` 依 linked 紀錄補讀不在本批的另一端，不以放寬日期範圍處理。補讀的資料只供配對；搜尋以發票命中時一併回傳其連結交易的日期，活動仍只在交易日期呈現一次。
 - 銀行交易分類時，分類規則與第一輪查詢並行，當頁交易的分類覆寫、轉帳候選與退費原消費候選並行；只有頁面外的候選需要再查一次覆寫。退費候選依信用卡帳戶走 `idx_bank_transactions_account_posted_date`，只在當頁有信用卡正數交易時查詢。
 - 各 connector／asset type 的最新持倉統一使用 `db/investment-positions.ts`，以一次 GROUP BY 取得最新日期，不逐列執行 MAX 子查詢。
 - Cloudflare Access 公鑰只在 isolate 記憶體快取；Access 後方的 Worker 無法使用 Cache API。同一 isolate 的並行請求共用同一次下載與匯入後的金鑰。

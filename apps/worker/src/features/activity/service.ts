@@ -1,11 +1,12 @@
 import {
   buildActivityItems,
   deduplicateBankTransactions,
+  isManualInvoiceMatchCandidate,
   matchInvoicesToTransactions,
 } from "@taiwan-fin-hub/shared";
-import { getBankRange } from "../bank/service";
+import { getBankRange, getBankTransactionsByIds } from "../bank/service";
 import { getInvestmentTransactionsRange } from "../investments/service";
-import { getInvoicesRange } from "../invoices/service";
+import { getInvoicesByIds, getInvoicesRange } from "../invoices/service";
 import type { MonthDateRange } from "../../platform/month-range";
 import {
   findLinkedInvoiceId,
@@ -21,6 +22,42 @@ export class MappingTransactionUnavailableError extends Error {}
 export class MappingDateMismatchError extends Error {}
 export class MappingTransactionNotExpenseError extends Error {}
 
+type LinkPreference = {
+  invoiceId: string;
+  transactionId: string | null;
+  decision: "linked" | "separate";
+};
+
+/**
+ * 自動配對只在同一天，跨日的配對一定是手動建立並存於配對表；
+ * 依 linked 紀錄補讀不在本批資料中的另一端，讓配對結果不受讀取日期範圍影響。
+ * 補讀的資料只供配對，呼叫端仍須依自己的範圍篩選要呈現的活動。
+ */
+export async function loadLinkedCounterparts(
+  db: D1Database,
+  transactions: ReadonlyArray<{ id: string }>,
+  invoices: ReadonlyArray<{ id: string }>,
+  preferences: ReadonlyArray<LinkPreference>,
+) {
+  const transactionIds = new Set(transactions.map(({ id }) => id));
+  const invoiceIds = new Set(invoices.map(({ id }) => id));
+  const missingTransactionIds: string[] = [];
+  const missingInvoiceIds: string[] = [];
+  for (const { invoiceId, transactionId, decision } of preferences) {
+    if (decision !== "linked" || !transactionId) continue;
+    const hasTransaction = transactionIds.has(transactionId);
+    const hasInvoice = invoiceIds.has(invoiceId);
+    if (hasTransaction && !hasInvoice) missingInvoiceIds.push(invoiceId);
+    if (hasInvoice && !hasTransaction)
+      missingTransactionIds.push(transactionId);
+  }
+  const [linkedTransactions, linkedInvoices] = await Promise.all([
+    getBankTransactionsByIds(db, missingTransactionIds),
+    getInvoicesByIds(db, missingInvoiceIds),
+  ]);
+  return { transactions: linkedTransactions, invoices: linkedInvoices };
+}
+
 /**
  * 依活動頁相同步驟組出區間內的活動：補帳戶類型、去重、配對發票後建立項目。
  * 呼叫端若只需要部分月份，應自行以活動日期篩選。
@@ -35,6 +72,13 @@ export async function getActivityItemsInRange(
     getInvestmentTransactionsRange(db, range),
     listInvoiceTransactionPreferences(db),
   ]);
+  const linked = await loadLinkedCounterparts(
+    db,
+    bank.transactions,
+    invoiceRows,
+    preferences,
+  );
+  const invoices = [...invoiceRows, ...linked.invoices];
   const accounts = new Map(
     bank.accounts.map((account) => [
       String(account.id),
@@ -42,7 +86,7 @@ export async function getActivityItemsInRange(
     ]),
   );
   const transactions = deduplicateBankTransactions(
-    bank.transactions.map((transaction) => ({
+    [...bank.transactions, ...linked.transactions].map((transaction) => ({
       ...transaction,
       accountType:
         transaction.accountType ??
@@ -51,36 +95,10 @@ export async function getActivityItemsInRange(
   );
   const matches = matchInvoicesToTransactions(
     transactions,
-    invoiceRows,
+    invoices,
     preferences,
   );
-  return buildActivityItems(
-    transactions,
-    invoiceRows,
-    trades,
-    accounts,
-    matches,
-  );
-}
-
-const taipeiDayFormatter = new Intl.DateTimeFormat("en", {
-  timeZone: "Asia/Taipei",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-function financialDay(value?: string | null) {
-  if (!value) return undefined;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime()))
-    return value.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
-  const parts = Object.fromEntries(
-    taipeiDayFormatter
-      .formatToParts(parsed)
-      .map(({ type, value }) => [type, value]),
-  );
-  return `${parts.year}-${parts.month}-${parts.day}`;
+  return buildActivityItems(transactions, invoices, trades, accounts, matches);
 }
 
 export async function linkInvoiceToTransaction(
@@ -95,18 +113,14 @@ export async function linkInvoiceToTransaction(
   if (!invoice) throw new MappingInvoiceNotFoundError();
   if (!transaction) throw new MappingTransactionNotFoundError();
 
-  const invoiceDay = financialDay(invoice.invoiceDate);
-  const transactionDay = financialDay(
-    transaction.authorizedAt ?? transaction.postedDate?.slice(0, 10),
-  );
-  if (!invoiceDay || invoiceDay !== transactionDay)
-    throw new MappingDateMismatchError();
-
   const isExpense =
     transaction.currency === "TWD" &&
     transaction.amount !== 0 &&
     (transaction.accountType === "credit" || transaction.amount < 0);
   if (!isExpense) throw new MappingTransactionNotExpenseError();
+
+  if (!isManualInvoiceMatchCandidate(transaction, invoice))
+    throw new MappingDateMismatchError();
 
   const linkedInvoiceId = await findLinkedInvoiceId(db, transactionId);
   if (linkedInvoiceId && linkedInvoiceId !== invoiceId)

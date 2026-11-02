@@ -236,6 +236,18 @@ export async function listBankTransactionsInRange(
     .all();
 }
 
+export async function listBankTransactionsByIds(db: D1Database, ids: string[]) {
+  return bankTransactionQuery(db)
+    .where(
+      and(
+        visibleBankTransactionFilter,
+        sql`${txn.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`,
+      ),
+    )
+    .orderBy(desc(txn.effectiveDate), desc(txn.updatedAt), desc(txn.id))
+    .all();
+}
+
 export async function listBankTransactionsForTransferMatching(
   db: D1Database,
   transactions: Array<Pick<BankTransactionPageRow, "amount" | "currency">>,

@@ -2,6 +2,7 @@ import {
   findInvoice,
   listInvoiceItems,
   listInvoices,
+  listInvoicesByIds,
   listInvoicesInRange,
   updateInvoiceCalculationExclusion,
   type InvoicePageCursor,
@@ -32,6 +33,12 @@ export async function getInvoicesRange(
   days?: string[],
 ) {
   const rows = await listInvoicesInRange(db, range, days);
+  return rows.map(presentInvoiceSummary);
+}
+
+export async function getInvoicesByIds(db: D1Database, ids: string[]) {
+  if (ids.length === 0) return [];
+  const rows = await listInvoicesByIds(db, ids);
   return rows.map(presentInvoiceSummary);
 }
 

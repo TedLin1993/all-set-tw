@@ -2,6 +2,7 @@ import {
   deletePaymentAccountOverride,
   listBankAccounts,
   listBankTransactions,
+  listBankTransactionsByIds,
   listBankTransactionsForRefundMatching,
   listBankTransactionsForTransferMatching,
   listBankTransactionsInRange,
@@ -135,6 +136,16 @@ export async function getBankRange(
     accounts: await presentBankAccounts(db, accounts),
     transactions: await presentBankTransactions(db, transactions, rules),
   };
+}
+
+/** 依 ID 讀取可見交易，呈現與分類方式與區間讀取相同。 */
+export async function getBankTransactionsByIds(db: D1Database, ids: string[]) {
+  if (ids.length === 0) return [];
+  return presentBankTransactions(
+    db,
+    await listBankTransactionsByIds(db, ids),
+    loadClassificationRules(db),
+  );
 }
 
 function loadClassificationOverrides(

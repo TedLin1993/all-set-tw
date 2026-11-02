@@ -112,6 +112,19 @@ export async function listInvoicesInRange(
     .all();
 }
 
+export async function listInvoicesByIds(db: D1Database, ids: string[]) {
+  return createDrizzle(db)
+    .select({
+      ...invoiceSummaryColumns,
+      updatedAt: invoices.updatedAt,
+    })
+    .from(invoices)
+    .where(
+      sql`${invoices.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`,
+    )
+    .all();
+}
+
 export async function listInvoiceItems(db: D1Database, invoiceIds: string[]) {
   if (invoiceIds.length === 0) return [];
   return createDrizzle(db)
