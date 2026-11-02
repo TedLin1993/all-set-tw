@@ -35,6 +35,14 @@ const transactionsHtml = fixture("deposit-transactions.html");
 const emptyTransactionsHtml = fixture("deposit-transactions-empty.html");
 const cardLimitHtml = fixture("card-limit.html");
 const noCardHtml = fixture("card-limit-no-card.html");
+// 實機無卡帳號（2026-11-01）的額度頁與帳單頁；頁首為合成值，內容區保留實際結構。
+const cardLimitUnavailableHtml = fixture("card-limit-unavailable.html");
+const emptyStatementHtml = fixture("card-statement-empty.html");
+// 選單有其他期別、但本期查無帳單的帳單頁。
+const optionStatementHtml = emptyStatementHtml.replace(
+  /(<select name="yyyyMm" id="yyyyMm">)/,
+  '$1<option value="202609" selected>202610</option>',
+);
 const octStatementHtml = fixture("card-statement-202610.html");
 const sepStatementHtml = fixture("card-statement-202609.html");
 
@@ -478,6 +486,102 @@ describe("遠東商銀信用卡", () => {
       data.bankAccounts.some((account) => account.accountType === "credit"),
     ).toBe(false);
     expect(data.bankAccounts).toHaveLength(2);
+  });
+
+  it("額度頁請洽客服且帳單頁查無帳單時不記失敗，也不斷言無卡", () => {
+    const report = new FeibSyncReport();
+    const data = parseFeibData(
+      payloads({
+        card: {
+          hasCreditCard: true,
+          statusHtml: cardLimitUnavailableHtml,
+          statementHtmls: [emptyStatementHtml],
+        },
+      }),
+      NOW,
+      report,
+    );
+    expect(report.failedCount).toBe(0);
+    expect(data.hasCreditCard).toBeUndefined();
+    expect(
+      data.bankAccounts.some((account) => account.accountType === "credit"),
+    ).toBe(false);
+  });
+
+  it("額度頁請洽客服且無法確認沒有帳單時記錄額度頁失敗", () => {
+    const failures = (statementHtmls: string[]) => {
+      const report = new FeibSyncReport();
+      const data = parseFeibData(
+        payloads({
+          card: {
+            hasCreditCard: true,
+            statusHtml: cardLimitUnavailableHtml,
+            statementHtmls,
+          },
+        }),
+        NOW,
+        report,
+      );
+      return { failures: report.failures, bills: data.creditCardBills.length };
+    };
+    // 有帳單：缺少額度就無法建立負債快照，帳單仍照常建立。
+    const withBills = failures([octStatementHtml]);
+    expect(withBills.failures).toEqual([
+      expect.objectContaining({ category: "cardStatus", stage: "unavailable" }),
+    ]);
+    expect(withBills.bills).toBeGreaterThan(0);
+    // 帳單頁抓取失敗，或選單有其他期別：都不能確認沒有帳單。
+    expect(failures([]).failures.map((f) => f.category)).toEqual([
+      "cardStatus",
+    ]);
+    expect(
+      failures([optionStatementHtml]).failures.map((f) => f.category),
+    ).toEqual(["cardStatus"]);
+    // 帳單頁格式不明、選單也沒有期別：不是查無帳單，額度頁照樣記失敗。
+    expect(failures([overviewHtml]).failures.map((f) => f.category)).toEqual([
+      "cardBills",
+      "cardStatus",
+    ]);
+  });
+
+  it("帳單查詢頁明確回覆查無帳單時才記為 0 期帳單", () => {
+    const parse = (statementHtml: string) => {
+      const report = new FeibSyncReport();
+      const data = parseFeibData(
+        payloads({
+          card: {
+            hasCreditCard: true,
+            statusHtml: cardLimitHtml,
+            statementHtmls: [statementHtml],
+          },
+        }),
+        NOW,
+        report,
+      );
+      return { report, data };
+    };
+    // 選單有其他期別、本期查無帳單時也一樣。
+    for (const statementHtml of [emptyStatementHtml, optionStatementHtml]) {
+      const { report, data } = parse(statementHtml);
+      expect(report.failedCount).toBe(0);
+      expect(data.hasCreditCard).toBe(true);
+      expect(data.creditCardBills).toEqual([]);
+    }
+    // 以下都記失敗：不是帳單查詢頁（沒有帳單年月選單）、查詢結果是其他訊息、
+    // 選單有期別卻沒有標明目前期別。
+    const notEmptyPages = [
+      emptyStatementHtml.replace(
+        /<select name="yyyyMm" id="yyyyMm">[\s\S]*?<\/select>/,
+        "",
+      ),
+      emptyStatementHtml.replace("查無帳單資料訊息", "系統忙碌中"),
+      optionStatementHtml.replace(" selected>", ">"),
+    ];
+    for (const html of notEmptyPages) {
+      expect(html).not.toBe(emptyStatementHtml);
+      expect(html).not.toBe(optionStatementHtml);
+      expect(parse(html).report.counts.cardBills.failed).toBe(1);
+    }
   });
 });
 

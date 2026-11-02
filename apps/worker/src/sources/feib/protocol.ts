@@ -49,6 +49,22 @@ export class FeibProtocolError extends Error {
   }
 }
 
+/** 額度頁沒有額度表，只請客戶洽客服。這代表網銀不提供額度，不代表無卡。 */
+class FeibCardLimitUnavailableError extends FeibProtocolError {
+  constructor() {
+    super("遠東商銀信用卡額度頁未提供額度，只請客戶洽客服。");
+    this.name = "FeibCardLimitUnavailableError";
+  }
+}
+
+/** 帳單查詢頁明確回覆查無帳單。這是 0 期帳單，不是解析失敗。 */
+class FeibStatementEmptyError extends FeibProtocolError {
+  constructor() {
+    super("遠東商銀帳單明細查無帳單資料。");
+    this.name = "FeibStatementEmptyError";
+  }
+}
+
 /** 單一資料列或欄位值不符預期；只略過該筆，不中止同步。 */
 export class FeibRowRejectedError extends FeibProtocolError {
   constructor(message: string) {
@@ -884,7 +900,10 @@ export type FeibCardStatus =
 /**
  * 只有明確的「未持本行有效卡片」提示才視為無卡（官方頁面以註解保留同一段文字，
  * 解析前先移除 HTML 註解）。缺少額度表且沒有無卡提示時拋出錯誤，不當成無卡。
- * TODO(feib-live): 無卡提示僅依頁面註解中的文案以合成 fixture 驗證。
+ * TODO(feib-live): 無卡提示僅依頁面註解中的文案以合成 fixture 驗證。2026-11-01 的
+ * 實機無卡帳號不顯示這段提示，目前沒有已知會走到 `hasCreditCard: false` 的實機頁面。
+ * 實機無卡帳號只請客戶洽客服：拋出 `FeibCardLimitUnavailableError`，由
+ * `parseCreditCard` 依帳單頁決定是否記錄失敗。
  */
 export function parseFeibCardStatus(html: string): FeibCardStatus {
   const content = pageContent(stripFeibNonContent(html));
@@ -897,6 +916,9 @@ export function parseFeibCardStatus(html: string): FeibCardStatus {
       )
     ) {
       return { hasCreditCard: false };
+    }
+    if (/若您欲查詢信用卡可用額度\s*[，,]?\s*請洽本行客服中心/.test(text)) {
+      throw new FeibCardLimitUnavailableError();
     }
     throw new FeibProtocolError("遠東商銀信用卡額度頁面格式不符。");
   }
@@ -1015,6 +1037,19 @@ export function parseFeibStatement(html: string): FeibStatement {
   const content = pageContent(stripFeibNonContent(html));
   const summary = tableContaining(content, /<th[^>]*>\s*結帳日\s*<\/th>/);
   if (!summary) {
+    // 帳單查詢頁（有帳單年月選單）的查詢結果訊息是「查無帳單資料」。選單有期別時須標明
+    // 目前期別，否則 connector 會把第一個期別當成已顯示的期別而不再查詢。
+    // TODO(feib-live): 實機空帳單頁的選單沒有期別；有期別的空帳單頁只以合成 fixture 驗證。
+    const options = parseFeibStatementOptions(content);
+    if (
+      /<select\b[^>]*\bid=["']yyyyMm["']/i.test(content) &&
+      /<label\b[^>]*\bid=["']dateMessage["'][^>]*>\s*查無帳單資料/.test(
+        content,
+      ) &&
+      (options.length === 0 || options.some((option) => option.selected))
+    ) {
+      throw new FeibStatementEmptyError();
+    }
     throw new FeibProtocolError("遠東商銀帳單明細缺少帳單摘要。");
   }
   const keyValues = (tableHtml: string) => {
@@ -1486,6 +1521,7 @@ function parseCreditCard(
   report: FeibSyncReport,
 ): FeibCardParseResult {
   let status: Extract<FeibCardStatus, { hasCreditCard: true }> | undefined;
+  let limitUnavailable: FeibCardLimitUnavailableError | undefined;
   if (payload.statusHtml !== undefined) {
     try {
       const parsed = parseFeibCardStatus(payload.statusHtml);
@@ -1493,11 +1529,16 @@ function parseCreditCard(
       status = parsed;
       report.ok("cardStatus");
     } catch (error) {
-      report.fail("cardStatus", "parse", error);
+      if (error instanceof FeibCardLimitUnavailableError) {
+        limitUnavailable = error;
+      } else {
+        report.fail("cardStatus", "parse", error);
+      }
     }
   }
 
   const parsedStatements: FeibStatement[] = [];
+  let emptyStatements = 0;
   for (const html of payload.statementHtmls) {
     try {
       const statement = parseFeibStatement(html);
@@ -1508,8 +1549,25 @@ function parseCreditCard(
       parsedStatements.push(statement);
       report.ok("cardBills");
     } catch (error) {
-      report.fail("cardBills", "parse", error);
+      // 銀行明確回覆查無帳單時是 0 期帳單，與存款明細查無交易視為 0 筆相同。
+      if (error instanceof FeibStatementEmptyError) {
+        emptyStatements += 1;
+        report.ok("cardBills");
+      } else {
+        report.fail("cardBills", "parse", error);
+      }
     }
+  }
+  // 額度頁只請客戶洽客服時，網銀不提供額度。帳單選單沒有任何期別、帳單頁也查無帳單時，
+  // 沒有可同步的信用卡資料，不記失敗，也不斷言無卡。其他情況缺少額度就無法建立負債快照，
+  // 記錄失敗；stage 為 unavailable，與格式變更的 parse 分開。
+  const [firstStatement] = payload.statementHtmls;
+  const nothingToSync =
+    firstStatement !== undefined &&
+    emptyStatements === payload.statementHtmls.length &&
+    parseFeibStatementOptions(firstStatement).length === 0;
+  if (limitUnavailable && !nothingToSync) {
+    report.fail("cardStatus", "unavailable", limitUnavailable);
   }
   const statements = Array.from(
     new Map(parsedStatements.map((bill) => [bill.period, bill])).values(),
