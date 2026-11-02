@@ -6,6 +6,8 @@ import {
   MappingDateMismatchError,
 } from "../../../src/features/activity/service";
 import { searchActivity } from "../../../src/features/activity/search-service";
+import { getBankTransactionsByIds } from "../../../src/features/bank/service";
+import { getInvoicesByIds } from "../../../src/features/invoices/service";
 import { getMonthlyCashFlow } from "../../../src/features/mcp/service";
 
 describe("跨日手動配對的發票（隔離 D1）", () => {
@@ -55,6 +57,20 @@ describe("跨日手動配對的發票（隔離 D1）", () => {
   it("月收支只在扣款月份計入一次", async () => {
     expect((await getMonthlyCashFlow(db, "2026-08")).expense).toBe(0);
     expect((await getMonthlyCashFlow(db, "2026-10")).expense).toBe(980);
+  });
+
+  it("補讀另一端時，超過 D1 綁定參數上限的 ID 數量仍可查詢", async () => {
+    const missing = Array.from(
+      { length: 150 },
+      (_, index) => `missing-${index}`,
+    );
+    const transactions = await getBankTransactionsByIds(db, [
+      ...missing,
+      "delayed-debit",
+    ]);
+    const invoices = await getInvoicesByIds(db, [...missing, "invoice-1"]);
+    expect(transactions.map(({ id }) => id)).toEqual(["delayed-debit"]);
+    expect(invoices.map(({ id }) => id)).toEqual(["invoice-1"]);
   });
 
   it("以發票或交易名稱搜尋，都只在扣款日期顯示一筆已配對活動", async () => {
