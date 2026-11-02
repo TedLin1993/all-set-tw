@@ -156,6 +156,7 @@ export function buildActivityItems(
         amount: t.price === 1 ? undefined : (t.amount ?? undefined),
         currency: t.currency,
         category: "投資",
+        categoryId: "investment",
         status: "已完成",
       };
     }),

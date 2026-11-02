@@ -53,6 +53,7 @@ describe("activity category chart", () => {
       source: "card",
       amount: 63,
       category: "購物",
+      categoryId: "shopping",
       title: "信用卡消費折抵_樂購蝦皮－daniel0329",
     });
 
@@ -65,7 +66,7 @@ describe("activity category chart", () => {
         category: "購物",
         amount: 63,
         percentage: 100,
-        color: "#3e6f7c",
+        color: "#a45c78",
       },
     ]);
   });

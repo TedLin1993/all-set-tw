@@ -32,6 +32,7 @@
   } from "@/data/activity/queries";
   import ActivitySearchFilters from "./components/ActivitySearchFilters.svelte";
   import SearchHighlight from "./components/SearchHighlight.svelte";
+  import CategoryBadge from "./components/CategoryBadge.svelte";
   import ActivityAmount from "./components/ActivityAmount.svelte";
   import ActivityCategoryChart from "./components/ActivityCategoryChart.svelte";
   import CalculationUpdateDialog from "./components/CalculationUpdateDialog.svelte";
@@ -1277,20 +1278,20 @@
                           />
                         </p>
                       {/if}
-                      {#if time}<p
-                          class="mt-0.5 text-xs font-medium tabular-nums text-subtle"
+                      {#if time || item.category}<div
+                          class="mt-1 flex items-center gap-2 text-xs font-medium tabular-nums text-subtle"
                         >
-                          {time}
-                        </p>{/if}
-                      <p
-                        class="mt-0.5 truncate text-caption font-medium text-subtle"
-                      >
-                        {item.institutionName ?? sourceLabel(item)}
-                      </p>
-                      <p class="mt-0.5 truncate text-xs text-subtle">
-                        {[item.accountName, item.category]
-                          .filter(Boolean)
-                          .join(" · ")}
+                          {#if time}<span class="shrink-0">{time}</span>{/if}
+                          {#if item.category}<CategoryBadge
+                              label={item.category}
+                              categoryId={item.categoryId}
+                              class="py-0 pr-2 font-medium"
+                            />{/if}
+                        </div>{/if}
+                      <p class="mt-1 truncate text-xs text-subtle">
+                        <span class="font-medium"
+                          >{item.institutionName ?? sourceLabel(item)}</span
+                        >{item.accountName ? ` · ${item.accountName}` : ""}
                       </p>
                     </div>
                     <div class="flex shrink-0 items-center gap-1.5">
@@ -1414,7 +1415,10 @@
                             {item.accountName}
                           </p>{/if}</td
                       ><td class="px-4 py-3.5"
-                        ><Badge variant="secondary">{item.category}</Badge></td
+                        ><CategoryBadge
+                          label={item.category}
+                          categoryId={item.categoryId}
+                        /></td
                       ><td class="py-3.5 pl-4"
                         ><div class="flex items-center justify-end gap-2">
                           <div class="min-w-0 text-right">
@@ -1542,9 +1546,11 @@
                   />
                 </p>
               </div>
-              <Badge variant="secondary" class="mt-3"
-                >{detailItem.category}</Badge
-              >
+              <CategoryBadge
+                label={detailItem.category}
+                categoryId={detailItem.categoryId}
+                class="mt-3"
+              />
               {#if detailItem.excludedFromCalculation}<Badge
                   variant="secondary"
                   class="ml-2 mt-3">已排除計算</Badge
@@ -1681,9 +1687,10 @@
                       >{#each categoryOptions as category (category.id)}<option
                           value={category.id}>{category.label}</option
                         >{/each}</Select
-                    >{:else}<Badge variant="secondary"
-                      >{detailItem.category}</Badge
-                    >{/if}
+                    >{:else}<CategoryBadge
+                      label={detailItem.category}
+                      categoryId={detailItem.categoryId}
+                    />{/if}
                 </div>
 
                 {#if detailItem.transactionId || detailItem.source === "invoice"}<label
