@@ -128,7 +128,7 @@ function mappingError(error: unknown) {
   if (error instanceof MappingDateMismatchError)
     return jsonError(
       "MAPPING_DATE_MISMATCH",
-      "Invoice and bank transaction must be on the same day.",
+      "Bank transaction must be on the invoice date, or within 45 days after it with the same amount.",
       400,
     );
   if (error instanceof MappingTransactionNotExpenseError)

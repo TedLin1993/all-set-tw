@@ -1,6 +1,7 @@
 import {
   buildActivityItems,
   deduplicateBankTransactions,
+  isManualInvoiceMatchCandidate,
   matchInvoicesToTransactions,
 } from "@taiwan-fin-hub/shared";
 import { getBankRange } from "../bank/service";
@@ -63,26 +64,6 @@ export async function getActivityItemsInRange(
   );
 }
 
-const taipeiDayFormatter = new Intl.DateTimeFormat("en", {
-  timeZone: "Asia/Taipei",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-function financialDay(value?: string | null) {
-  if (!value) return undefined;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime()))
-    return value.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
-  const parts = Object.fromEntries(
-    taipeiDayFormatter
-      .formatToParts(parsed)
-      .map(({ type, value }) => [type, value]),
-  );
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
 export async function linkInvoiceToTransaction(
   db: D1Database,
   invoiceId: string,
@@ -95,18 +76,14 @@ export async function linkInvoiceToTransaction(
   if (!invoice) throw new MappingInvoiceNotFoundError();
   if (!transaction) throw new MappingTransactionNotFoundError();
 
-  const invoiceDay = financialDay(invoice.invoiceDate);
-  const transactionDay = financialDay(
-    transaction.authorizedAt ?? transaction.postedDate?.slice(0, 10),
-  );
-  if (!invoiceDay || invoiceDay !== transactionDay)
-    throw new MappingDateMismatchError();
-
   const isExpense =
     transaction.currency === "TWD" &&
     transaction.amount !== 0 &&
     (transaction.accountType === "credit" || transaction.amount < 0);
   if (!isExpense) throw new MappingTransactionNotExpenseError();
+
+  if (!isManualInvoiceMatchCandidate(transaction, invoice))
+    throw new MappingDateMismatchError();
 
   const linkedInvoiceId = await findLinkedInvoiceId(db, transactionId);
   if (linkedInvoiceId && linkedInvoiceId !== invoiceId)

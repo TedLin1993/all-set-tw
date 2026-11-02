@@ -19,6 +19,9 @@ export {
   deduplicateBankTransactions,
   matchInvoicesToTransactions,
   invoiceTransactionCandidates,
+  invoiceTransactionDayGap,
+  isManualInvoiceMatchCandidate,
+  MANUAL_INVOICE_MATCH_MAX_DAYS,
   type InvoiceTransactionMatches,
   type InvoiceTransactionPreference,
 } from "./activity/matching";

@@ -65,8 +65,8 @@ export async function listInvoiceTransactionPreferences(
     .from(invoiceTransactionPreferences)
     .where(
       and(
-        // Linking requires the same Taipei day, so a page only needs the
-        // decisions for invoices inside its range.
+        // A linked transaction is on or after its invoice date, so a page
+        // only needs the decisions for invoices inside its range.
         range
           ? inArray(
               invoiceTransactionPreferences.invoiceId,
@@ -103,6 +103,7 @@ export async function findMappingInvoice(db: D1Database, invoiceId: string) {
       .select({
         id: invoices.id,
         invoiceDate: invoices.invoiceDate,
+        amount: invoices.amount,
       })
       .from(invoices)
       .where(eq(invoices.id, invoiceId))

@@ -21,6 +21,12 @@ export interface InvoiceTransactionPreference {
   transactionId: string | null;
   decision: "linked" | "separate";
 }
+type ExpenseDayTransaction = Pick<
+  MatchingTransaction,
+  "amount" | "currency" | "accountType" | "authorizedAt" | "postedDate"
+>;
+/** 手動配對時，扣款可晚於發票日的最多天數（金融卡等可能延後扣款）。 */
+export const MANUAL_INVOICE_MATCH_MAX_DAYS = 45;
 const TAIPEI_DAY_FORMATTER = new Intl.DateTimeFormat("en", {
   timeZone: "Asia/Taipei",
   year: "numeric",
@@ -118,12 +124,14 @@ export function invoiceTransactionCandidates<T extends MatchingTransaction>(
     .filter(
       (transaction) =>
         !unavailableTransactionIds.has(transaction.id) &&
-        isSameDayTwdExpense(transaction, invoice),
+        isManualInvoiceMatchCandidate(transaction, invoice),
     )
     .sort((left, right) => {
       const leftDifference = Math.abs(invoice.amount - Math.abs(left.amount));
       const rightDifference = Math.abs(invoice.amount - Math.abs(right.amount));
       return (
+        invoiceTransactionDayGap(left, invoice)! -
+          invoiceTransactionDayGap(right, invoice)! ||
         leftDifference - rightDifference ||
         (left.counterparty ?? left.description ?? left.id).localeCompare(
           right.counterparty ?? right.description ?? right.id,
@@ -131,6 +139,38 @@ export function invoiceTransactionCandidates<T extends MatchingTransaction>(
         )
       );
     });
+}
+
+/**
+ * 台幣支出交易晚於發票日的天數（台北日期）；非台幣支出或日期不明時為 undefined。
+ */
+export function invoiceTransactionDayGap(
+  transaction: ExpenseDayTransaction,
+  invoice: Pick<MatchingInvoice, "invoiceDate">,
+) {
+  const transactionDay = expenseDay(transaction);
+  const invoiceDay = dayNumber(invoice.invoiceDate);
+  return transactionDay == null || invoiceDay == null
+    ? undefined
+    : transactionDay - invoiceDay;
+}
+
+/**
+ * 手動配對接受發票日當天的台幣支出（金額可因折抵不同），
+ * 或其後 MANUAL_INVOICE_MATCH_MAX_DAYS 天內金額完全相同的台幣支出。
+ */
+export function isManualInvoiceMatchCandidate(
+  transaction: ExpenseDayTransaction,
+  invoice: Pick<MatchingInvoice, "invoiceDate" | "amount">,
+) {
+  const gap = invoiceTransactionDayGap(transaction, invoice);
+  if (gap === 0) return true;
+  return (
+    gap != null &&
+    gap > 0 &&
+    gap <= MANUAL_INVOICE_MATCH_MAX_DAYS &&
+    Math.abs(transaction.amount) === invoice.amount
+  );
 }
 
 function addAutomaticMatches<I extends MatchingInvoice>(
@@ -168,16 +208,7 @@ function addAutomaticMatches<I extends MatchingInvoice>(
   }
 }
 
-function isSameDayTwdExpense(
-  transaction: MatchingTransaction,
-  invoice: MatchingInvoice,
-) {
-  const transactionDate = expenseDay(transaction);
-  const invoiceDate = dayNumber(invoice.invoiceDate);
-  return invoiceDate != null && transactionDate === invoiceDate;
-}
-
-function expenseDay(transaction: MatchingTransaction) {
+function expenseDay(transaction: ExpenseDayTransaction) {
   if (
     transaction.amount === 0 ||
     (transaction.accountType !== "credit" && transaction.amount > 0) ||

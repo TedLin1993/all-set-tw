@@ -84,7 +84,9 @@
   import {
     deduplicateBankTransactions,
     invoiceTransactionCandidates,
+    invoiceTransactionDayGap,
     matchInvoicesToTransactions,
+    MANUAL_INVOICE_MATCH_MAX_DAYS,
   } from "@/data/activity/matching";
   import { getActivityDataStatus } from "./model/load-status";
   import { createCategorySheet } from "./model/category-sheet.svelte";
@@ -1783,7 +1785,7 @@
                   ? "管理配對"
                   : mappingDialog.step === "confirm"
                     ? "確認合併這兩筆？"
-                    : "選擇同日候選交易"}
+                    : "選擇候選交易"}
               </h2>
               {#if mappingDialog.step === "candidates"}<p
                   class="mt-1 truncate text-sm text-subtle"
@@ -1854,15 +1856,19 @@
               {#if mappingCandidates.length === 0}<div
                   class="rounded-xl border border-dashed border-ink/15 bg-paper p-6 text-center"
                 >
-                  <p class="font-semibold">同一天沒有可配對的支出</p>
+                  <p class="font-semibold">沒有可配對的支出</p>
                   <p class="mt-1 text-caption text-subtle">
-                    只有同一天的 TWD 銀行或信用卡支出會列在這裡。
+                    只列出發票日當天，或 {MANUAL_INVOICE_MATCH_MAX_DAYS} 天內金額相同、尚未配對的
+                    TWD 銀行或信用卡支出。
                   </p>
                 </div>{:else}{#each mappingCandidates as transaction (transaction.id)}{@const difference =
                     mappingDifference(
                       mappingDialog.invoice,
                       transaction,
-                    )}<button
+                    )}{@const dayGap = invoiceTransactionDayGap(
+                    transaction,
+                    mappingDialog.invoice,
+                  )}<button
                     aria-pressed={mappingDialog.transactionId ===
                       transaction.id}
                     class={`min-h-24 rounded-xl border p-4 text-left transition ${mappingDialog.transactionId === transaction.id ? "border-steel bg-steel/10 ring-2 ring-steel/15" : "border-ink/10 hover:border-steel/40 hover:bg-paper"}`}
@@ -1888,7 +1894,7 @@
                     </span>
                     <span class="mt-3 flex flex-wrap items-center gap-2">
                       <Badge variant="secondary" class="bg-moss/10 text-moss"
-                        >同一天</Badge
+                        >{dayGap ? `晚 ${dayGap} 天` : "同一天"}</Badge
                       >
                       {#if difference > 0}<Badge
                           variant="secondary"
@@ -1899,7 +1905,7 @@
                   </button>{/each}{/if}
             </div>
             <p class="mt-4 text-caption text-subtle">
-              依同一天與金額接近排序；商家名稱可能因支付工具而不同，最後由你決定。
+              依日期與金額接近排序；商家名稱可能因支付工具而不同，最後由你決定。
             </p>
             <div class="mt-5 grid grid-cols-[7rem_1fr] gap-3">
               <Button
