@@ -8,7 +8,7 @@ import { exchangeRateRoutes } from "./features/exchange-rates/route";
 import { investmentRoutes } from "./features/investments/route";
 import { invoiceRoutes } from "./features/invoices/route";
 import { manualAssetRoutes } from "./features/manual-assets/route";
-import { mcpRoutes } from "./features/mcp/route";
+import { createMcpRoutes } from "./features/mcp/route";
 import { netWorthRoutes } from "./features/net-worth/route";
 import { notificationRoutes } from "./features/notifications/route";
 import { ocrRoutes } from "./features/ocr/route";
@@ -61,7 +61,7 @@ api.route("/", syncRoutes);
 api.onError(apiErrorResponse);
 app.route("/api", api);
 app.use("/mcp", accessMiddleware);
-app.route("/mcp", mcpRoutes);
+app.route("/mcp", createMcpRoutes(api));
 app.get("*", async (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {

@@ -10,7 +10,7 @@ import {
   vi,
 } from "vitest";
 import { accessMiddleware } from "../../src/middleware/access";
-import { mcpRoutes } from "../../src/features/mcp/route";
+import { createMcpRoutes } from "../../src/features/mcp/route";
 import type { AppBindings, Env } from "../../src/platform/env";
 
 const issuer = "https://test-access.cloudflareaccess.com";
@@ -127,12 +127,17 @@ describe("外部請求的授權邊界", () => {
 });
 
 describe("MCP 端點的授權邊界", () => {
-  async function callWhoami(headers: Record<string, string>) {
+  async function callTool(
+    headers: Record<string, string>,
+    name = "whoami",
+    args: Record<string, unknown> = {},
+  ) {
+    const { api, mutation } = app();
     // 與 src/index.ts 相同的掛載方式。
     const workerApp = new Hono<AppBindings>();
     workerApp.use("/mcp", accessMiddleware);
-    workerApp.route("/mcp", mcpRoutes);
-    return workerApp.request(
+    workerApp.route("/mcp", createMcpRoutes(api));
+    const response = await workerApp.request(
       "https://example.com/mcp",
       {
         method: "POST",
@@ -145,17 +150,18 @@ describe("MCP 端點的授權邊界", () => {
           jsonrpc: "2.0",
           id: 1,
           method: "tools/call",
-          params: { name: "whoami", arguments: {} },
+          params: { name, arguments: args },
         }),
       },
       { ...env, LOCAL_DEV_MODE: "false" },
     );
+    return { response, mutation };
   }
 
   it.each(["missing", "expired", "wrong-audience", "forged"])(
     "%s JWT 無法呼叫 MCP 工具",
     async (state) => {
-      const response = await callWhoami(
+      const { response } = await callTool(
         state === "missing"
           ? {}
           : { "Cf-Access-Jwt-Assertion": await token(state) },
@@ -165,10 +171,32 @@ describe("MCP 端點的授權邊界", () => {
   );
 
   it("有效 JWT 可以呼叫 whoami 並取得登入 email", async () => {
-    const response = await callWhoami({
+    const { response } = await callTool({
       "Cf-Access-Jwt-Assertion": await token("valid"),
     });
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("owner@example.com");
+  });
+
+  it("call_api 轉送 Access JWT，經 /api 再次驗證後執行寫入", async () => {
+    const { response, mutation } = await callTool(
+      { "Cf-Access-Jwt-Assertion": await token("valid") },
+      "call_api",
+      { method: "POST", path: "/resource", body: {} },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('\\"status\\":200');
+    expect(mutation).toHaveBeenCalledTimes(1);
+  });
+
+  it("query_api 只送出 GET，無法觸發寫入", async () => {
+    const { response, mutation } = await callTool(
+      { "Cf-Access-Jwt-Assertion": await token("valid") },
+      "query_api",
+      { method: "POST", path: "/resource", body: {} },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('\\"status\\":404');
+    expect(mutation).not.toHaveBeenCalled();
   });
 });

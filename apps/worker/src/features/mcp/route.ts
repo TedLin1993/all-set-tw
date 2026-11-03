@@ -5,8 +5,17 @@ import {
 } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { sanitizeDatabaseError } from "../../db";
+import type { Env } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
 import { isDemoMode } from "../../platform/http";
+import {
+  WRITE_API_METHODS,
+  callApi,
+  listApiEndpoints,
+  type ApiApp,
+  type ApiCallInput,
+  type ApiExecutionContext,
+} from "./api";
 import {
   getFinancialOverview,
   getMonthlyCashFlow,
@@ -18,6 +27,13 @@ import {
 
 const isoDate = z.iso.date();
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
+
+type ApiContext = {
+  api: ApiApp;
+  request: Request;
+  env: Env;
+  executionCtx: ApiExecutionContext;
+};
 
 /** 以 JSON 文字回傳；錯誤只回通用訊息，細節消毒後寫入 log。 */
 async function jsonResult(tool: string, load: () => Promise<unknown>) {
@@ -42,9 +58,14 @@ async function jsonResult(tool: string, load: () => Promise<unknown>) {
   }
 }
 
-// 身分驗證由 Composition Root 掛在 /mcp 的 accessMiddleware 負責；
-// 這裡只註冊唯讀工具，不提供任何寫入能力。
-function createServer(db: D1Database, accessEmail: string | undefined) {
+// 身分驗證由 Composition Root 掛在 /mcp 的 accessMiddleware 負責。
+// 查詢工具直接讀取資料；其餘讀取經 query_api、編輯與同步經 call_api 走 /api，
+// 由同一套 Access 驗證、Zod 驗證與錯誤處理把關。
+function createServer(
+  db: D1Database,
+  accessEmail: string | undefined,
+  apiContext: ApiContext,
+) {
   const server = new McpServer({ name: "all-set-tw", version: "0.1.0" });
 
   server.registerTool(
@@ -154,23 +175,129 @@ function createServer(db: D1Database, accessEmail: string | undefined) {
     () => jsonResult("get_upcoming_payments", () => getUpcomingPayments(db)),
   );
 
+  server.registerTool(
+    "list_api_endpoints",
+    {
+      description:
+        "列出 query_api 與 call_api 可呼叫的全部網頁版 API 端點、用途與 body 格式，以及資料來源 ID 與帳密欄位。",
+      annotations: READ_ONLY,
+    },
+    () =>
+      jsonResult("list_api_endpoints", async () =>
+        listApiEndpoints(apiContext.api),
+      ),
+  );
+
+  const pathSchema = z
+    .string()
+    .regex(/^\/[^?#]*$/, "path 須以 / 開頭，query 改用 query 參數。")
+    .max(500)
+    .describe("不含 /api 前綴，例如 /classification/rules。");
+  const querySchema = z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .optional();
+
+  // 讀取與寫入分成兩個工具：query_api 只能 GET，標示唯讀讓 AI 助理不必逐次確認；
+  // call_api 只接受寫入方法，標示 destructiveHint 讓 AI 助理執行前詢問使用者。
+  server.registerTool(
+    "query_api",
+    {
+      description:
+        "以 GET 讀取網頁版 API（例如交易、發票、帳單、分類規則、排程與同步狀態），只讀不寫；端點與 query 格式見 list_api_endpoints。回傳 status、分頁 headers 與 JSON body。",
+      inputSchema: z.object({ path: pathSchema, query: querySchema }),
+      annotations: READ_ONLY,
+    },
+    (input) => apiResult("query_api", { method: "GET", ...input }),
+  );
+
+  server.registerTool(
+    "call_api",
+    {
+      description:
+        "以 POST、PUT、PATCH、DELETE 呼叫網頁版 API，編輯資料（分類、規則、手動資產、扣款帳戶、排程、通知、資料來源設定等）或觸發同步；端點與 body 格式見 list_api_endpoints。會直接變更資料，執行前請向使用者確認；讀取請改用 query_api。回傳 status、分頁 headers 與 JSON body。",
+      inputSchema: z.object({
+        method: z.enum(WRITE_API_METHODS),
+        path: pathSchema,
+        query: querySchema,
+        body: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe("JSON body。"),
+      }),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        openWorldHint: true,
+      },
+    },
+    (input) => apiResult("call_api", input),
+  );
+
+  async function apiResult(tool: string, input: ApiCallInput) {
+    try {
+      const result = await callApi(
+        apiContext.api,
+        apiContext.request,
+        apiContext.env,
+        apiContext.executionCtx,
+        input,
+      );
+      return {
+        isError: result.status >= 400,
+        content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      };
+    } catch (error) {
+      const safeError = sanitizeDatabaseError(error);
+      console.error(
+        JSON.stringify({
+          event: "mcp_tool_failed",
+          tool,
+          message:
+            safeError instanceof Error ? safeError.message : String(safeError),
+        }),
+      );
+      return {
+        isError: true,
+        content: [
+          { type: "text" as const, text: "呼叫 API 失敗，請稍後再試。" },
+        ],
+      };
+    }
+  }
+
   return server;
 }
 
-export const mcpRoutes = honoFactory.createApp();
+/** api 為 Composition Root 組裝好的 /api app，query_api 與 call_api 在同一個 Worker 內呼叫它。 */
+export function createMcpRoutes(api: ApiApp) {
+  const mcpRoutes = honoFactory.createApp();
 
-mcpRoutes.all("/", (c) => {
-  // Demo 站不開放 MCP，避免公開可被任意呼叫的端點。
-  if (isDemoMode(c.env)) return c.notFound();
+  mcpRoutes.all("/", (c) => {
+    // Demo 站不開放 MCP，避免公開可被任意呼叫的端點。
+    if (isDemoMode(c.env)) return c.notFound();
 
-  const request = c.req.raw;
-  const rejected = originValidationResponse(request, [
-    new URL(request.url).hostname,
-  ]);
-  if (rejected) return rejected;
+    const request = c.req.raw;
+    const rejected = originValidationResponse(request, [
+      new URL(request.url).hostname,
+    ]);
+    if (rejected) return rejected;
 
-  const accessEmail = c.get("accessEmail");
-  return createMcpHandler(() => createServer(c.env.DB, accessEmail)).fetch(
-    request,
-  );
-});
+    let executionCtx: ApiExecutionContext;
+    try {
+      executionCtx = c.executionCtx;
+    } catch {
+      // 測試環境沒有 ExecutionContext。
+    }
+    const accessEmail = c.get("accessEmail");
+    return createMcpHandler(() =>
+      createServer(c.env.DB, accessEmail, {
+        api,
+        request,
+        env: c.env,
+        executionCtx,
+      }),
+    ).fetch(request);
+  });
+
+  return mcpRoutes;
+}
