@@ -197,7 +197,7 @@ function parseCreditCards(
 
   const parsedBills: Array<{
     period: string;
-    statementAmount: number;
+    statementAmount?: number;
     minimumPayment: number;
     statementClosingDate?: string;
     paymentDueDate?: string;
@@ -245,8 +245,8 @@ function parseCreditCards(
   const mainAccountId = `credit:hncb:${primaryCardLast4}`;
 
   for (const b of limitedBills) {
-    const txSum = absTransactionSum(b.transactions);
-    const statementAmount = b.statementAmount || txSum;
+    // 頁面顯示「-」代表本期無須繳款（0），只有缺少應繳欄位時才以明細推算。
+    const statementAmount = b.statementAmount ?? netSpendSum(b.transactions);
     if (b.period) {
       bills.push({
         accountId: mainAccountId,
@@ -265,7 +265,8 @@ function parseCreditCards(
     );
   }
 
-  if (unbilled && isUsefulBillParse(unbilled)) {
+  const hasUnbilled = Boolean(unbilled && isUsefulBillParse(unbilled));
+  if (unbilled && hasUnbilled) {
     transactions.push(
       ...unbilled.transactions.map((t) => ({
         ...t,
@@ -286,15 +287,16 @@ function parseCreditCards(
   ];
 
   const currentBill = limitedBills[0];
-  const pendingSum = absTransactionSum(
+  const pendingSum = netSpendSum(
     transactions.filter((transaction) => transaction.status === "pending"),
   );
   const statementAmount = currentBill
-    ? currentBill.statementAmount || absTransactionSum(currentBill.transactions)
+    ? (currentBill.statementAmount ?? netSpendSum(currentBill.transactions))
     : 0;
   // 華南帳單頁沒有已繳金額，以帳單應繳總額作為剩餘應繳。
   const liability = statementAmount + pendingSum;
-  if (currentBill || pendingSum > 0 || liability > 0) {
+  // 未出帳只有退款或繳款時淨額為 0，仍需寫入 0 元快照更新餘額。
+  if (currentBill || hasUnbilled || liability > 0) {
     snapshots.push({
       accountId: mainAccountId,
       sourceId: `snapshot:hncb:credit:${primaryCardLast4}`,
@@ -319,25 +321,25 @@ function parseCreditCards(
 
 function isUsefulBillParse(parsed: {
   period: string;
-  statementAmount: number;
+  statementAmount?: number;
   creditLimit?: number;
   transactions: unknown[];
 }) {
   return Boolean(
     parsed.period ||
-    parsed.statementAmount > 0 ||
+    (parsed.statementAmount ?? 0) > 0 ||
     parsed.creditLimit !== undefined ||
     parsed.transactions.length > 0,
   );
 }
 
-function absTransactionSum(
-  transactions: Array<Pick<BankTransaction, "amount">>,
-) {
-  return transactions.reduce(
-    (sum, transaction) => sum + Math.abs(transaction.amount),
+/** 消費存為負數、繳款／退款存為正數；回傳扣除繳款與退款後的淨消費，最低為 0。 */
+function netSpendSum(transactions: Array<Pick<BankTransaction, "amount">>) {
+  const net = transactions.reduce(
+    (sum, transaction) => sum - transaction.amount,
     0,
   );
+  return net > 0 ? net : 0;
 }
 
 type MonthAnchor = { year: number; month: number };
@@ -372,10 +374,6 @@ function parseSingleBillHtml(
     text.match(/帳單年月[：:\s]*([0-9]{6})/) ||
     text.match(/帳單年月[：:\s]*([0-9]{3})\s*[/年.-]\s*([0-9]{1,2})/);
   const limitMatch = text.match(/信用額度[：:\s]*([0-9,]+)/);
-  const dueAmtMatch = text.match(
-    /(?:累積應繳金額|本期應繳總額|本期應繳金額|應繳總額|應繳金額)[：:\s]*([0-9,]+)/,
-  );
-  const minPayMatch = text.match(/最低應繳金額[：:\s]*([0-9,]+)/);
   const stmtDateMatch = text.match(
     /帳單結帳日[：:\s]*([0-9]{4}[/.-][0-9]{1,2}[/.-][0-9]{1,2})/,
   );
@@ -395,8 +393,13 @@ function parseSingleBillHtml(
   }
 
   const creditLimit = limitMatch ? parseAmount(limitMatch[1] ?? "") : undefined;
-  const statementAmount = dueAmtMatch ? parseAmount(dueAmtMatch[1] ?? "") : 0;
-  const minimumPayment = minPayMatch ? parseAmount(minPayMatch[1] ?? "") : 0;
+  // 「上期應繳總額」是明細表第一列，不可當成本期應繳。
+  const statementAmount = parseLabeledAmount(text, [
+    "累積應繳金額",
+    "本期應繳總額",
+    "本期應繳金額",
+  ]);
+  const minimumPayment = parseLabeledAmount(text, ["最低應繳金額"]) ?? 0;
   const statementClosingDate = stmtDateMatch
     ? normalizeDateStr(stmtDateMatch[1] ?? "")
     : undefined;
@@ -465,6 +468,8 @@ function parseSingleBillHtml(
     });
   }
 
+  distinguishUnnumberedCredits(transactions);
+
   return {
     period: billingPeriod,
     statementAmount,
@@ -475,6 +480,29 @@ function parseSingleBillHtml(
     cardLast4,
     transactions,
   };
+}
+
+/**
+ * sourceId 以金額絕對值組成；沒有序號時，同卡同日等額的消費與退款會撞號。
+ * 消費沿用原 ID，只有與消費撞號的退款／繳款加上 `:credit`，既有 ID 不變。
+ */
+function distinguishUnnumberedCredits(
+  transactions: Array<Omit<BankTransaction, "id" | "connectorId">>,
+) {
+  const spendIds = new Set(
+    transactions
+      .filter((transaction) => transaction.amount < 0)
+      .map((transaction) => transaction.sourceId),
+  );
+  for (const transaction of transactions) {
+    if (
+      transaction.amount > 0 &&
+      transaction.sourceId.endsWith(":0") &&
+      spendIds.has(transaction.sourceId)
+    ) {
+      transaction.sourceId = `${transaction.sourceId}:credit`;
+    }
+  }
 }
 
 function extractCardLast4(text: string): string | undefined {
@@ -502,7 +530,7 @@ function parseCreditTxRow(cells: string[]) {
         extraCardLast4 && /^\d{4}$/.test(extraCardLast4)
           ? extraCardLast4
           : undefined,
-      amount: -Math.abs(parseAmount(compact[7] ?? "")),
+      amount: signedCardAmount(compact[7] ?? ""),
     };
   }
 
@@ -534,7 +562,7 @@ function parseCreditTxRow(cells: string[]) {
     foreignAmtStr: "",
     twdAmtStr: compact[amountIdx] ?? "",
     extraCardLast4: extraCardLast4?.match(/(\d{4})$/)?.[1],
-    amount: -Math.abs(parseAmount(compact[amountIdx] ?? "")),
+    amount: signedCardAmount(compact[amountIdx] ?? ""),
   };
 }
 
@@ -573,6 +601,29 @@ function normalizeHncbHtml(html: string): string {
     .replace(/\u00a0/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&#160;/g, " ");
+}
+
+/**
+ * 帳單欄位值為「-」表示 0（例如本期無須繳款）；找不到欄位回傳 undefined。
+ * 依 labels 順序取第一個出現的欄位。
+ */
+function parseLabeledAmount(
+  text: string,
+  labels: string[],
+): number | undefined {
+  for (const label of labels) {
+    const match = text.match(
+      new RegExp(`(?<!上期)${label}[：:\\s]*(-(?![0-9])|[0-9][0-9,]*)`),
+    );
+    if (match) return match[1] === "-" ? 0 : parseAmount(match[1] ?? "");
+  }
+  return undefined;
+}
+
+/** 銀行新臺幣金額正數為消費（存為負數），負數為繳款／退款（存為正數）。 */
+function signedCardAmount(val: string): number {
+  const amount = parseAmount(val);
+  return amount === 0 ? 0 : -amount;
 }
 
 function parseAmount(val: string): number {
