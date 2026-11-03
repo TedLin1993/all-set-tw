@@ -265,7 +265,8 @@ function parseCreditCards(
     );
   }
 
-  if (unbilled && isUsefulBillParse(unbilled)) {
+  const hasUnbilled = Boolean(unbilled && isUsefulBillParse(unbilled));
+  if (unbilled && hasUnbilled) {
     transactions.push(
       ...unbilled.transactions.map((t) => ({
         ...t,
@@ -294,7 +295,8 @@ function parseCreditCards(
     : 0;
   // 華南帳單頁沒有已繳金額，以帳單應繳總額作為剩餘應繳。
   const liability = statementAmount + pendingSum;
-  if (currentBill || pendingSum > 0 || liability > 0) {
+  // 未出帳只有退款或繳款時淨額為 0，仍需寫入 0 元快照更新餘額。
+  if (currentBill || hasUnbilled || liability > 0) {
     snapshots.push({
       accountId: mainAccountId,
       sourceId: `snapshot:hncb:credit:${primaryCardLast4}`,
@@ -466,6 +468,8 @@ function parseSingleBillHtml(
     });
   }
 
+  distinguishUnnumberedCredits(transactions);
+
   return {
     period: billingPeriod,
     statementAmount,
@@ -476,6 +480,29 @@ function parseSingleBillHtml(
     cardLast4,
     transactions,
   };
+}
+
+/**
+ * sourceId 以金額絕對值組成；沒有序號時，同卡同日等額的消費與退款會撞號。
+ * 消費沿用原 ID，只有與消費撞號的退款／繳款加上 `:credit`，既有 ID 不變。
+ */
+function distinguishUnnumberedCredits(
+  transactions: Array<Omit<BankTransaction, "id" | "connectorId">>,
+) {
+  const spendIds = new Set(
+    transactions
+      .filter((transaction) => transaction.amount < 0)
+      .map((transaction) => transaction.sourceId),
+  );
+  for (const transaction of transactions) {
+    if (
+      transaction.amount > 0 &&
+      transaction.sourceId.endsWith(":0") &&
+      spendIds.has(transaction.sourceId)
+    ) {
+      transaction.sourceId = `${transaction.sourceId}:credit`;
+    }
+  }
 }
 
 function extractCardLast4(text: string): string | undefined {

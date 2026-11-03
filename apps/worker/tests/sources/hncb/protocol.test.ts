@@ -133,4 +133,37 @@ describe("華南信用卡帳單解析", () => {
 
     expect(data.creditCardBills[0]?.statementAmount).toBe(500);
   });
+
+  it("未出帳只有退款時仍產生 0 元快照", () => {
+    const data = parseHncbData(
+      {
+        unbilledHtml: billHtml({
+          period: "",
+          rows: [["1", "10/20", "測試商店退款", "-300"]],
+        }),
+      },
+      now,
+    );
+
+    expect(data.bankTransactions.map((tx) => tx.amount)).toEqual([300]);
+    expect(data.bankBalanceSnapshots).toEqual([
+      expect.objectContaining({ balance: 0, noPaymentNeeded: true }),
+    ]);
+  });
+
+  it("無序號的同日等額消費與退款都保留，消費沿用原 sourceId", () => {
+    const html = `<html><body><table>
+      <tr><td>帳單年月：</td><td>202610</td><td>累積應繳金額：</td><td>0</td></tr>
+      <tr><td>10/05</td><td>10/05</td><td>測試商店</td><td>500</td></tr>
+      <tr><td>10/05</td><td>10/05</td><td>測試商店退款</td><td>-500</td></tr>
+    </table></body></html>`;
+    const data = parseHncbData({ billsHtml: [html] }, now);
+
+    expect(data.bankTransactions.map((tx) => [tx.amount, tx.sourceId])).toEqual(
+      [
+        [-500, "hncb:card:tx:v2:main:2026-10-05:500:0"],
+        [500, "hncb:card:tx:v2:main:2026-10-05:500:0:credit"],
+      ],
+    );
+  });
 });
