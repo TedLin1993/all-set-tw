@@ -16,6 +16,7 @@ import puppeteer, {
   TimeoutError,
 } from "@cloudflare/puppeteer";
 import type {
+  AutopayAccountHint,
   BankAccount,
   BankBalanceSnapshot,
   BankTransaction,
@@ -1906,6 +1907,31 @@ function normalizeCathayBillDate(value: unknown): string | undefined {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+/**
+ * `C_BILL_Q_RecentBillInfo` 的自動扣繳狀態（官方前端列舉：Enable／Disable／
+ * NotApply／Close）。Enable 且有銀行代碼與末四碼時回傳扣繳帳戶；NotApply 與
+ * Disable（官方顯示未設定／扣繳帳號失效）為 null；Close、缺欄或未知值為
+ * undefined，保留既有資料。
+ */
+export function parseCathayAutopayAccount(
+  summary: Record<string, unknown>,
+): AutopayAccountHint | null | undefined {
+  const status = summary.autoDebitStatus;
+  if (status === "NotApply" || status === "Disable") return null;
+  if (status !== "Enable") return undefined;
+  const bankCode =
+    typeof summary.autoDebitBankId === "string" &&
+    /^\d{3}$/.test(summary.autoDebitBankId)
+      ? summary.autoDebitBankId
+      : undefined;
+  const last4 =
+    typeof summary.autoDebitAccountLast4 === "string" &&
+    /^\d{4}$/.test(summary.autoDebitAccountLast4)
+      ? summary.autoDebitAccountLast4
+      : undefined;
+  return bankCode && last4 ? { bankCode, last4 } : undefined;
+}
+
 export function parseCathayCurrentBills(
   recentBillInfoValue: unknown,
   billInfoValue: unknown,
@@ -1949,6 +1975,7 @@ export function parseCathayCurrentBills(
 
   const bankAccounts: Scraped["bankAccounts"] = [];
   const creditCardBills: Scraped["creditCardBills"] = [];
+  const autopayAccounts = new Map<string, AutopayAccountHint | null>();
   for (const { currency, summary } of summaries) {
     const matchingRows = currencyRows.filter(
       (row) => row.currency === currency && row.currencyDataType === currency,
@@ -1968,6 +1995,30 @@ export function parseCathayCurrentBills(
       currentInfo?.currentMinPaymentAmount,
     );
     const accountId = currency === "TWD" ? sourceId : `${sourceId}:${currency}`;
+    const autopayAccount = parseCathayAutopayAccount(summary);
+    const autoDebitStatus = summary.autoDebitStatus;
+    console.log(
+      JSON.stringify({
+        event: "cathaybk_card_autopay",
+        currency,
+        status: ["Close", "NotApply", "Disable", "Enable"].includes(
+          String(autoDebitStatus),
+        )
+          ? autoDebitStatus
+          : autoDebitStatus === undefined
+            ? "missing"
+            : "other",
+        result:
+          autopayAccount === undefined
+            ? "unknown"
+            : autopayAccount === null
+              ? "unset"
+              : "found",
+      }),
+    );
+    if (autopayAccount !== undefined) {
+      autopayAccounts.set(accountId, autopayAccount);
+    }
     const isPaid =
       currency === "TWD" && twdPayStatus === "Payed"
         ? unpaidAmount !== undefined && unpaidAmount > 0
@@ -1984,6 +2035,7 @@ export function parseCathayCurrentBills(
         accountName: `國泰信用卡外幣帳單（${currency}）`,
         accountType: "credit",
         currency,
+        ...(autopayAccount !== undefined ? { autopayAccount } : {}),
         raw: { parentSourceId: sourceId, currency, purpose: "currency_bill" },
       });
     }
@@ -2015,7 +2067,7 @@ export function parseCathayCurrentBills(
     });
   }
 
-  return { bankAccounts, creditCardBills };
+  return { bankAccounts, creditCardBills, autopayAccounts };
 }
 
 export function parseCathayHistoryBills(
@@ -2332,6 +2384,20 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
             : null,
         currency:
           typeof summary.currency === "string" ? summary.currency : null,
+        // 自動扣繳帳號只在頁面內取末四碼，完整帳號不離開瀏覽器。
+        autoDebitStatus:
+          typeof summary.autoDebitStatus === "string"
+            ? summary.autoDebitStatus
+            : null,
+        autoDebitBankId:
+          typeof summary.bankId === "string" && /^\d{3}$/.test(summary.bankId)
+            ? summary.bankId
+            : null,
+        autoDebitAccountLast4:
+          typeof summary.account === "string" &&
+          /^\d{4,}$/.test(summary.account.trim())
+            ? summary.account.trim().slice(-4)
+            : null,
       };
     }
     const recentBillResponse = successfulContent(
@@ -2444,6 +2510,13 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
     latestBillContent,
     sourceId,
   );
+  const mainAutopay = currentBills.autopayAccounts.get(sourceId);
+  if (mainAutopay !== undefined) {
+    const mainAccount = bankAccounts.find(
+      (account) => account.sourceId === sourceId,
+    );
+    if (mainAccount) mainAccount.autopayAccount = mainAutopay;
+  }
   bankAccounts.push(...currentBills.bankAccounts);
   creditCardBills.push(
     ...mergeCathayCurrentBills(historyBills, currentBills.creditCardBills),

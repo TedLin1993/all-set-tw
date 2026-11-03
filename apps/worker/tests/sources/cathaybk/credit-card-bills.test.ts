@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   mergeCathayCurrentBills,
+  parseCathayAutopayAccount,
   parseCathayCurrentBills,
   parseCathayHistoryBills,
 } from "../../../src/sources/cathaybk/connector";
@@ -353,5 +354,75 @@ describe("國泰世華信用卡帳單解析", () => {
     });
     expect(merged[1].isPaid).toBeUndefined();
     expect(merged[1].paymentDueDate).toBeUndefined();
+  });
+});
+
+describe("國泰世華信用卡自動扣繳帳戶", () => {
+  it("依官方列舉判斷扣繳狀態，只保留銀行代碼與末四碼", () => {
+    expect(
+      parseCathayAutopayAccount({
+        autoDebitStatus: "Enable",
+        autoDebitBankId: "013",
+        autoDebitAccountLast4: "1234",
+      }),
+    ).toEqual({ bankCode: "013", last4: "1234" });
+    expect(parseCathayAutopayAccount({ autoDebitStatus: "NotApply" })).toBe(
+      null,
+    );
+    expect(parseCathayAutopayAccount({ autoDebitStatus: "Disable" })).toBe(
+      null,
+    );
+    expect(
+      parseCathayAutopayAccount({ autoDebitStatus: "Close" }),
+    ).toBeUndefined();
+    expect(parseCathayAutopayAccount({ autoDebitStatus: 0 })).toBeUndefined();
+    expect(
+      parseCathayAutopayAccount({
+        autoDebitStatus: "Enable",
+        autoDebitBankId: null,
+        autoDebitAccountLast4: "1234",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("臺幣與外幣帳單各自回報扣繳帳戶", () => {
+    const parsed = parseCathayCurrentBills(
+      api({
+        recentBillDate: "2026-09-21T00:00:00",
+        twBillInfo: {
+          unPaidAmount: 0,
+          paidAmount: 900,
+          autoDebitStatus: "Enable",
+          autoDebitBankId: "013",
+          autoDebitAccountLast4: "1234",
+        },
+        foreignBillInfo: {
+          currency: "USD",
+          unPaidAmount: 30,
+          paidAmount: 0,
+          autoDebitStatus: "NotApply",
+        },
+      }),
+      api({
+        currencyBillInfoList: [
+          { currency: "TWD", currencyDataType: "TWD" },
+          { currency: "USD", currencyDataType: "USD" },
+        ],
+      }),
+      api({ dueDate: "2026-10-12T00:00:00" }),
+      sourceId,
+    );
+
+    expect(parsed.autopayAccounts.get(sourceId)).toEqual({
+      bankCode: "013",
+      last4: "1234",
+    });
+    expect(parsed.autopayAccounts.get(`${sourceId}:USD`)).toBe(null);
+    expect(parsed.bankAccounts).toEqual([
+      expect.objectContaining({
+        sourceId: `${sourceId}:USD`,
+        autopayAccount: null,
+      }),
+    ]);
   });
 });

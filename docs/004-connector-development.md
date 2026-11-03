@@ -393,6 +393,8 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 
 OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒頁並停在 `/MyBank/Quicklinks/Home`，擋住信任裝置設定。同步會點選「暫不變更」略過提醒，不變更使用者的密碼；該頁也視為 OTP 驗證成功。信任裝置是否完成，除頁面上的成功訊息外，也以 `CUB.eBank.DeviceId` cookie 輔助確認；該 cookie 可能是 HttpOnly，須由瀏覽器端（CDP）讀取，`document.cookie` 看不到。兩者都偵測不到時記錄不含個資的 `cathaybk_trusted_device_not_detected` 並回報未完成。
 
+信用卡自動扣繳帳戶取自 `C_BILL_Q_RecentBillInfo` 的 `twBillInfo`／`foreignBillInfo`（`autoDebitStatus`、`bankId`、`account`），分別寫入臺幣主帳戶與外幣帳單帳戶的 `autopayAccount`。帳號在頁面內即只取末四碼，完整帳號不回傳 Worker、不保存；以銀行代碼與末四碼對應存款帳戶。狀態依官方 C0102 前端列舉：`Enable` 且有三碼銀行代碼與末四碼時寫入；`NotApply`（未申請）與 `Disable`（官方顯示扣繳帳號失效）為 `null`；`Close`、缺欄或未知值為 `undefined`，保留既有資料。貸款總覽頁未揭露扣款帳號，貸款不寫 `autopayAccount`。
+
 國泰當期與歷史帳單於單次同步內按帳戶、期別及幣別合併，當期資料優先；若當期應繳總額無法解析，則保留同一期歷史總額（包含 0 及負值），當期明確提供的 0 仍優先。不同幣別使用不同帳戶 ID。跨次同步仍以既有 `(connector_id, account_id, billing_period)` 原位更新，不另建歷史副本。`HistoryBillList` 僅在提供有限數值的 `twdAmount` 時更新應繳總額（包含 0 及負值）；缺漏或無效金額依共用缺欄保留規則處理，source、raw 與更新時間仍反映最新來源。國泰本次明確回報為未繳的當期帳單，由 `sync.ts` 以 `creditCardBillRecord(...).recordKey` 取得 ID，交給來源 `repository.ts` 的 `reconcileCathayUnpaidCurrentBillStatements`，在 `afterPromoteStatements` 僅將指定 ID、`connector_id = 'cathaybk'` 且 `is_paid = 1` 的帳單修正為 0，亦可修復舊版誤判已繳資料；歷史帳單與未知狀態不觸發此修正。這不變更使用者繳款 override，也不加入查詢失敗時的 fail-soft。
 
 ### 永豐銀行
