@@ -1,3 +1,17 @@
+/** Upsert tail for copying a preference row onto another transaction.
+ * The target's calculation choice wins and a missing one is filled. Notes are
+ * compared as whole text: differing notes are kept together, neither is dropped.
+ */
+export const PREFERENCE_COPY_ON_CONFLICT = `ON CONFLICT(transaction_id) DO UPDATE SET
+  excluded_from_calculation = COALESCE(bank_transaction_preferences.excluded_from_calculation, excluded.excluded_from_calculation),
+  note = CASE
+    WHEN bank_transaction_preferences.note IS NULL THEN excluded.note
+    WHEN excluded.note IS NULL OR excluded.note = bank_transaction_preferences.note THEN bank_transaction_preferences.note
+    ELSE bank_transaction_preferences.note || char(10) || excluded.note END,
+  updated_at = max(bank_transaction_preferences.updated_at, excluded.updated_at)
+  WHERE (bank_transaction_preferences.excluded_from_calculation IS NULL AND excluded.excluded_from_calculation IS NOT NULL)
+    OR (excluded.note IS NOT NULL AND excluded.note IS NOT bank_transaction_preferences.note)`;
+
 /** Internal SQL supplied by the bank-specific matchers, never user input.
  * Execute the returned statements together in the promotion batch.
  */
@@ -27,7 +41,7 @@ export function mergeLegacyTransactionStatements(
       LEFT JOIN invoice_transaction_preferences new_invoice
         ON new_invoice.transaction_id = c.new_id AND new_invoice.decision = 'linked'
       WHERE c.old_count = 1 AND c.new_count = 1 AND c.old_id <> c.new_id
-        AND (old_pref.transaction_id IS NULL OR new_pref.transaction_id IS NULL
+        AND (old_pref.excluded_from_calculation IS NULL OR new_pref.excluded_from_calculation IS NULL
           OR old_pref.excluded_from_calculation = new_pref.excluded_from_calculation)
         AND (old_category.id IS NULL OR new_category.id IS NULL
           OR old_category.category_id = new_category.category_id)
@@ -35,10 +49,10 @@ export function mergeLegacyTransactionStatements(
     )`;
   return [
     `INSERT INTO bank_transaction_preferences
-      (transaction_id, excluded_from_calculation, created_at, updated_at)
-      SELECT m.new_id, p.excluded_from_calculation, p.created_at, p.updated_at
+      (transaction_id, excluded_from_calculation, note, created_at, updated_at)
+      SELECT m.new_id, p.excluded_from_calculation, p.note, p.created_at, p.updated_at
       FROM merges m JOIN bank_transaction_preferences p ON p.transaction_id = m.old_id
-      WHERE true ON CONFLICT(transaction_id) DO NOTHING`,
+      WHERE true ${PREFERENCE_COPY_ON_CONFLICT}`,
     `INSERT INTO classification_overrides
       (id, target_type, target_id, category_id, created_at, updated_at)
       SELECT 'override:bank_transaction:' || m.new_id, 'bank_transaction', m.new_id,

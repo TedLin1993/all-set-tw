@@ -34,10 +34,11 @@ export async function findActivitySearchDays(
         ELSE substr(COALESCE(txn.authorized_at, txn.posted_date), 1, 10) END AS day
       FROM bank_transactions txn
       JOIN bank_accounts account ON account.id = txn.account_id
+      LEFT JOIN bank_transaction_preferences preference ON preference.transaction_id = txn.id
       WHERE account.canonical_account_id IS NULL AND (txn.status <> 'pending' OR txn.matched_transaction_id IS NULL) AND (
         instr(lower(COALESCE(txn.description, '') || ' ' || COALESCE(txn.counterparty, '') || ' ' ||
           COALESCE(account.institution_name, '') || ' ' || COALESCE(account.account_name, '') || ' ' ||
-          COALESCE(account.account_last4, '') || ' 銀行 信用卡'), ${q}) > 0
+          COALESCE(account.account_last4, '') || ' ' || COALESCE(preference.note, '') || ' 銀行 信用卡'), ${q}) > 0
         OR account.id IN (SELECT value FROM json_each(${matchingIds}))
         OR EXISTS (SELECT 1 FROM classification_categories WHERE instr(lower(label), ${q}) > 0)
       )

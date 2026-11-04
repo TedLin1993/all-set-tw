@@ -139,7 +139,7 @@ function createServer(
     "search_activity",
     {
       description:
-        "以關鍵字搜尋銀行交易、刷卡與電子發票（含品項），由新到舊最多回傳 30 筆；truncated 為 true 表示還有更多結果，可縮小日期範圍再查。金額負數為支出。",
+        "以關鍵字搜尋銀行交易、刷卡與電子發票（含品項），關鍵字也會比對使用者寫的交易備註；由新到舊最多回傳 30 筆，note 為備註，truncated 為 true 表示還有更多結果，可縮小日期範圍再查。金額負數為支出。",
       inputSchema: z
         .object({
           query: z
@@ -147,7 +147,7 @@ function createServer(
             .trim()
             .min(1)
             .max(200)
-            .describe("關鍵字，例如商家、品項或帳戶名稱。"),
+            .describe("關鍵字，例如商家、品項、帳戶名稱或備註內容。"),
           from: isoDate.optional().describe("起始日期 YYYY-MM-DD（含）。"),
           to: isoDate.optional().describe("結束日期 YYYY-MM-DD（含）。"),
           source: z

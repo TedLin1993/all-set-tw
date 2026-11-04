@@ -61,6 +61,7 @@ const bankTransactionColumns = {
   calculationPreference: sql<
     number | null
   >`${preference.excludedFromCalculation}`.as("calculationPreference"),
+  note: sql<string | null>`${preference.note}`.as("note"),
 };
 
 const creditCardBillColumns = {
@@ -110,6 +111,7 @@ export type BankTransactionPageRow = {
   effectiveDate: string;
   updatedAt: string;
   calculationPreference: number | null;
+  note?: string | null;
   transferPeerId?: string | null;
 };
 

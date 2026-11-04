@@ -20,6 +20,7 @@ export interface ActivityTransaction extends MatchingTransaction {
   accountLast4?: string | null;
   status: string;
   excludedFromCalculation?: boolean;
+  note?: string | null;
   classification?: {
     label: string;
     categoryId: string;
@@ -116,6 +117,7 @@ export function buildActivityItems(
         classificationRuleId: t.classification?.ruleId,
         refund: t.classification?.refund,
         transactionId: t.id,
+        note: t.note ?? undefined,
         invoiceId: matchedInvoice?.id,
         invoiceAmount: matchedInvoice?.amount,
         excludedFromCalculation: t.excludedFromCalculation,

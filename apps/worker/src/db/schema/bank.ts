@@ -203,11 +203,11 @@ export const bankTransactionPreferences = sqliteTable(
   "bank_transaction_preferences",
   {
     transactionId: text("transaction_id").notNull(),
-    excludedFromCalculation: integer("excluded_from_calculation")
-      .notNull()
-      .default(sql`0`),
+    // NULL means the user has not chosen to include or exclude this transaction.
+    excludedFromCalculation: integer("excluded_from_calculation"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
+    note: text("note"),
   },
   (table) => [
     primaryKey({ columns: [table.transactionId] }),
@@ -221,6 +221,10 @@ export const bankTransactionPreferences = sqliteTable(
     check(
       "bank_transaction_preferences_check_1",
       sql`excluded_from_calculation IN (0, 1)`,
+    ),
+    check(
+      "bank_transaction_preferences_check_2",
+      sql`note IS NULL OR length(trim(note)) > 0`,
     ),
   ],
 );

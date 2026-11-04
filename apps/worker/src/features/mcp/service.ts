@@ -173,6 +173,7 @@ export async function searchActivities(
       amount: activityDisplayAmount(item) ?? null,
       currency: item.currency,
       category: item.category,
+      note: item.note ?? null,
       excludedFromCalculation: item.excludedFromCalculation ?? false,
       status: item.status,
     })),

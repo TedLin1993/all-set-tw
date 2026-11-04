@@ -782,7 +782,7 @@ describe("同步資料完整性（隔離 D1）", () => {
       await db.batch([
         db
           .prepare(
-            "INSERT INTO bank_transaction_preferences VALUES (?, 1, 'created', 'updated')",
+            "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES (?, 1, 'created', 'updated')",
           )
           .bind(pendingId),
         db
@@ -976,7 +976,7 @@ describe("同步資料完整性（隔離 D1）", () => {
       await db.batch([
         db
           .prepare(
-            "INSERT INTO bank_transaction_preferences VALUES (?, 1, 't', 't')",
+            "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES (?, 1, 't', 't')",
           )
           .bind(authorizations[0].recordKey),
         db
@@ -1213,12 +1213,17 @@ describe("同步資料完整性（隔離 D1）", () => {
     await db.batch([
       db
         .prepare(
-          "INSERT INTO bank_transaction_preferences VALUES (?, 1, 't', 't')",
+          "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES (?, 1, 't', 't')",
         )
         .bind(pending.recordKey),
       db
         .prepare(
           "INSERT INTO classification_overrides VALUES ('esun-category', 'bank_transaction', ?, 'food', 't', 't')",
+        )
+        .bind(pending.recordKey),
+      db
+        .prepare(
+          "UPDATE bank_transaction_preferences SET note = '代墊同事午餐' WHERE transaction_id = ?",
         )
         .bind(pending.recordKey),
       db.prepare(
@@ -1258,7 +1263,27 @@ describe("同步資料完整性（隔離 D1）", () => {
         amount: -252,
         authorizedAt: "2026-10-04T16:30:00Z",
         calculationPreference: 1,
+        note: "代墊同事午餐",
       },
+    ]);
+    // 備註搬到入帳交易；之後重送同一組配對不會把舊內容再附加回使用者改過的備註。
+    await db
+      .prepare(
+        "UPDATE bank_transaction_preferences SET note = '代墊同事午餐，已收回' WHERE transaction_id = ?",
+      )
+      .bind(posted.recordKey)
+      .run();
+    await write([pending, history, posted]);
+    expect(
+      (
+        await db
+          .prepare(
+            "SELECT transaction_id, note FROM bank_transaction_preferences WHERE note IS NOT NULL",
+          )
+          .all()
+      ).results,
+    ).toEqual([
+      { transaction_id: posted.recordKey, note: "代墊同事午餐，已收回" },
     ]);
     expect(
       await db
@@ -1343,7 +1368,12 @@ describe("同步資料完整性（隔離 D1）", () => {
           .bind(p.recordKey),
         db
           .prepare(
-            "INSERT INTO bank_transaction_preferences VALUES (?, 1, 't', 't')",
+            "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES (?, 1, 't', 't')",
+          )
+          .bind(p.recordKey),
+        db
+          .prepare(
+            "UPDATE bank_transaction_preferences SET note = '房租' WHERE transaction_id = ?",
           )
           .bind(p.recordKey),
         db.prepare(
@@ -1390,6 +1420,15 @@ describe("同步資料完整性（隔離 D1）", () => {
           )
           .first("transaction_id"),
       ).toBe(target);
+      expect(
+        (
+          await db
+            .prepare(
+              "SELECT transaction_id, note FROM bank_transaction_preferences WHERE note IS NOT NULL",
+            )
+            .all()
+        ).results,
+      ).toEqual([{ transaction_id: target, note: "房租" }]);
       expect(await listBankTransactions(db, 20)).toHaveLength(
         scenario === "授權碼不同" ? 3 : 2,
       );
@@ -1549,7 +1588,7 @@ describe("同步資料完整性（隔離 D1）", () => {
       await db.batch([
         db
           .prepare(
-            "INSERT INTO bank_transaction_preferences VALUES (?, ?, 't', 't')",
+            "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES (?, ?, 't', 't')",
           )
           .bind(id, excluded),
         db
@@ -1660,7 +1699,7 @@ describe("同步資料完整性（隔離 D1）", () => {
         finalizeStatements: [
           finalize,
           db.prepare(
-            "INSERT INTO bank_transaction_preferences VALUES ('missing', 1, 't', 't')",
+            "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES ('missing', 1, 't', 't')",
           ),
         ],
       }),
@@ -1830,7 +1869,7 @@ describe("同步資料完整性（隔離 D1）", () => {
     ).toBe(1);
     await db
       .prepare(
-        "INSERT INTO bank_transaction_preferences VALUES ('sinopac:purchase', 1, 'created', 'updated')",
+        "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES ('sinopac:purchase', 1, 'created', 'updated')",
       )
       .run();
     for (const records of [
@@ -1867,6 +1906,7 @@ describe("同步資料完整性（隔離 D1）", () => {
       excluded_from_calculation: 1,
       created_at: "created",
       updated_at: "updated",
+      note: null,
     });
   });
 

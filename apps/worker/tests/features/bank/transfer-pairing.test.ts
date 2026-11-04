@@ -64,6 +64,13 @@ describe("自動互轉配對（隔離 D1）", () => {
           )
           .bind(id, categoryId, pattern, excluded, now, now),
       ),
+      // 只寫備註的偏好沒有計算選擇，不得像「手動計入」一樣擋下互轉配對。
+      db
+        .prepare(
+          `INSERT INTO bank_transaction_preferences (transaction_id, note, created_at, updated_at)
+           VALUES ('own-in', '範例備註', ?, ?)`,
+        )
+        .bind(now, now),
     ]);
   }, 60_000);
 
@@ -86,6 +93,7 @@ describe("自動互轉配對（隔離 D1）", () => {
 
     expect(byId.get("own-in")).toMatchObject({
       excludedFromCalculation: true,
+      note: "範例備註",
       classification: { source: "auto_transfer" },
     });
     expect(byId.get("own-out")).toMatchObject({

@@ -47,6 +47,18 @@ export interface PaymentAccountInput {
   paymentAccountId: string | null;
 }
 
+/** 單筆交易備註的長度上限（去除前後空白後計算）。 */
+export const BANK_TRANSACTION_NOTE_MAX_LENGTH = 500;
+
+/** `PUT /api/bank/transactions/:transactionId/note`；空白內容表示清除備註。 */
+export interface BankTransactionNoteInput {
+  note: string;
+}
+
+export interface BankTransactionNoteResponse {
+  note: string | null;
+}
+
 export interface BankTransactionResponse {
   id: string;
   connectorId: string;
@@ -68,6 +80,8 @@ export interface BankTransactionResponse {
   status: BankTransactionStatus;
   calculationPreference?: number | null;
   excludedFromCalculation: boolean;
+  /** 使用者為這筆交易寫的備註；沒有備註時為 null。 */
+  note?: string | null;
   classification?: {
     categoryId: string;
     label: string;

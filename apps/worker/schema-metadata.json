@@ -65,13 +65,14 @@
       }
     },
     "bank_transaction_preferences": {
-      "description": "使用者對銀行交易計算方式的個別偏好。",
-      "notes": "目前主要用來記錄交易是否排除於資產或支出計算之外；沒有偏好的交易不會建立記錄。 transaction_id 以 FK 參照 bank_transactions；NO ACTION 禁止刪除仍有偏好引用的交易，合併時須先移轉偏好。",
+      "description": "使用者對銀行交易的個別偏好：是否排除計算，以及交易備註。",
+      "notes": "沒有任何偏好的交易不會建立記錄；計算選擇與備註都清空時刪除整筆。 excluded_from_calculation 為 NULL 表示使用者沒有選擇計入或排除，只寫備註不改變預設計算。 transaction_id 以 FK 參照 bank_transactions；NO ACTION 禁止刪除仍有偏好引用的交易，合併時須先移轉偏好。",
       "columns": {
         "transaction_id": "套用偏好的 bank_transactions 記錄識別碼。",
-        "excluded_from_calculation": "是否將此交易排除於計算，0 表示納入、1 表示排除。",
+        "excluded_from_calculation": "是否將此交易排除於計算，0 表示納入、1 表示排除；NULL 表示沒有選擇，依預設規則計算。",
         "created_at": "偏好首次建立的時間。",
-        "updated_at": "偏好最後更新的時間。"
+        "updated_at": "偏好最後更新的時間。",
+        "note": "使用者寫的交易備註，已去除前後空白；沒有備註時為 NULL。"
       }
     },
     "bank_transactions": {
