@@ -4,6 +4,7 @@ import { TimeoutError } from "@cloudflare/puppeteer";
 import type { Page } from "@cloudflare/puppeteer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { scrapeLoans } from "../../../src/sources/cathaybk/connector";
+import { extractCathayLoanOverviewDom } from "../../../src/sources/cathaybk/loan-overview";
 
 const overviewUrl =
   "https://www.cathaybk.com.tw/OnlineBanking/LoanInq/L0101_LoanInq";
@@ -83,19 +84,31 @@ describe("Cathay loan scraping completeness", () => {
     const dom = new JSDOM(tableHtml, { url: overviewUrl });
     const page = fakePage(dom.window.document);
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.spyOn(page, "evaluate").mockRejectedValueOnce(
-      new Error("PRIVATE_PAGE_CONTENT_SENTINEL"),
-    );
+    const evaluate = page.evaluate.bind(page);
+    vi.spyOn(page, "evaluate").mockImplementation((async (
+      callback: unknown,
+      ...args: unknown[]
+    ) => {
+      if (callback === extractCathayLoanOverviewDom) {
+        throw new Error("PRIVATE_PAGE_CONTENT_SENTINEL");
+      }
+      return (evaluate as (...input: unknown[]) => unknown)(callback, ...args);
+    }) as Page["evaluate"]);
 
     await expect(scrapeLoans(page)).rejects.toThrow(
       "PRIVATE_PAGE_CONTENT_SENTINEL",
     );
 
-    const serializedLogs = log.mock.calls
-      .map(([message]) => String(message))
-      .join("\n");
-    expect(serializedLogs).toBe("");
-    expect(serializedLogs).not.toContain("PRIVATE_PAGE_CONTENT_SENTINEL");
+    const logLines = log.mock.calls.map(([message]) => String(message));
+    // 只有不含個資的貸款總覽來源事件：API 取不到 session，改走 DOM 後失敗。
+    expect(logLines).toHaveLength(1);
+    expect(JSON.parse(logLines[0]!)).toMatchObject({
+      event: "cathaybk_loan_overview",
+      method: "page",
+      count: null,
+      fallbackReason: "no_session",
+    });
+    expect(logLines.join("\n")).not.toContain("PRIVATE_PAGE_CONTENT_SENTINEL");
   });
 
   it("treats the official empty state as complete without a displayed total", async () => {
