@@ -4,6 +4,7 @@ import {
   type CardAuthorizationLink,
 } from "./card-authorization-matching";
 import type { SyncWriteRecord } from "./persistence";
+import { PREFERENCE_COPY_ON_CONFLICT } from "./transaction-merge";
 
 export type CardTransactionRow = Record<string, unknown> & {
   id: string;
@@ -69,10 +70,27 @@ export function cardTransactionPreferenceStatements(
       );
   return [
     bind(
-      `INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at)
-      SELECT json_extract(link.value, '$.posted'), preference.excluded_from_calculation, preference.created_at, preference.updated_at
+      `INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, note, created_at, updated_at)
+      SELECT json_extract(link.value, '$.posted'), preference.excluded_from_calculation, preference.note, preference.created_at, preference.updated_at
       FROM json_each(?) link JOIN bank_transaction_preferences preference ON preference.transaction_id = json_extract(link.value, '$.id')
-      WHERE true /* settings guard */ ON CONFLICT(transaction_id) DO NOTHING`,
+      WHERE true /* settings guard */ ${PREFERENCE_COPY_ON_CONFLICT}`,
+      json,
+    ),
+    // The note moves instead of being copied: established links are replayed on
+    // later syncs, and a copy would re-append text the user removed from the
+    // target. The calculation choice stays on the hidden source as before.
+    bind(
+      `UPDATE bank_transaction_preferences SET note = NULL
+      WHERE note IS NOT NULL
+        AND transaction_id IN (SELECT json_extract(value, '$.id') FROM json_each(?))
+        AND transaction_id NOT IN (SELECT json_extract(value, '$.posted') FROM json_each(?)) /* settings guard */`,
+      json,
+      json,
+    ),
+    bind(
+      `DELETE FROM bank_transaction_preferences
+      WHERE excluded_from_calculation IS NULL AND note IS NULL
+        AND transaction_id IN (SELECT json_extract(value, '$.id') FROM json_each(?)) /* settings guard */`,
       json,
     ),
     bind(
@@ -90,27 +108,6 @@ export function cardTransactionPreferenceStatements(
       AND NOT EXISTS (SELECT 1 FROM invoice_transaction_preferences existing JOIN json_each(?) link ON existing.transaction_id = json_extract(link.value, '$.posted')
         WHERE existing.decision = 'linked' AND json_extract(link.value, '$.id') = invoice_transaction_preferences.transaction_id) /* settings guard */`,
       json,
-      json,
-      json,
-    ),
-    // Notes move instead of copy: established links are replayed on later
-    // syncs, and a copy would re-append text the user removed from the target.
-    // Different notes on both sides are kept together rather than dropped.
-    bind(
-      `INSERT INTO bank_transaction_notes (transaction_id, note, created_at, updated_at)
-      SELECT json_extract(link.value, '$.posted'), source_note.note, source_note.created_at, source_note.updated_at
-      FROM json_each(?) link JOIN bank_transaction_notes source_note ON source_note.transaction_id = json_extract(link.value, '$.id')
-      WHERE true /* settings guard */
-      ON CONFLICT(transaction_id) DO UPDATE SET
-        note = bank_transaction_notes.note || char(10) || excluded.note,
-        updated_at = max(bank_transaction_notes.updated_at, excluded.updated_at)
-      WHERE instr(bank_transaction_notes.note, excluded.note) = 0`,
-      json,
-    ),
-    bind(
-      `DELETE FROM bank_transaction_notes
-      WHERE transaction_id IN (SELECT json_extract(value, '$.id') FROM json_each(?))
-        AND transaction_id NOT IN (SELECT json_extract(value, '$.posted') FROM json_each(?)) /* settings guard */`,
       json,
       json,
     ),

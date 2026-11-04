@@ -19,7 +19,6 @@ describe("legacy transaction merges on D1", () => {
       [
         "invoice_transaction_preferences",
         "bank_transaction_preferences",
-        "bank_transaction_notes",
         "classification_overrides",
         "bank_transactions",
         "invoices",
@@ -73,13 +72,13 @@ describe("legacy transaction merges on D1", () => {
     await invoice("invoice", "old");
     await db.batch([
       db.prepare(
-        "INSERT INTO bank_transaction_preferences VALUES ('old', 1, 'created', 'updated')",
+        "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES ('old', 1, 'created', 'updated')",
       ),
       db.prepare(
         "INSERT INTO classification_overrides VALUES ('category', 'bank_transaction', 'old', 'shopping', 'created', 'updated')",
       ),
       db.prepare(
-        "INSERT INTO bank_transaction_notes VALUES ('old', '代墊午餐', 'created', 'updated')",
+        "UPDATE bank_transaction_preferences SET note = '已還100' WHERE transaction_id = 'old'",
       ),
     ]);
   }
@@ -89,7 +88,6 @@ describe("legacy transaction merges on D1", () => {
       "invoice_transaction_preferences",
       "bank_transaction_preferences",
       "classification_overrides",
-      "bank_transaction_notes",
     ];
     return Promise.all(
       tables.map(
@@ -126,7 +124,7 @@ describe("legacy transaction merges on D1", () => {
         .run();
       await db
         .prepare(
-          "INSERT INTO bank_transaction_notes VALUES ('new', '已收回', 'created', 'later')",
+          "INSERT INTO bank_transaction_preferences (transaction_id, note, created_at, updated_at) VALUES ('new', '已還1000', 'created', 'later')",
         )
         .run();
       await db.batch(reconcile(db));
@@ -162,6 +160,8 @@ describe("legacy transaction merges on D1", () => {
           )
           .first(),
       ).toEqual({ transaction_id: "new", decision: "separate" });
+      // 只有備註的列沒有計算選擇，不阻擋合併並補上舊交易的排除設定；
+      // 備註以完整內容比對，一段是另一段的子字串時也都保留。
       expect(
         await db.prepare("SELECT * FROM bank_transaction_preferences").first(),
       ).toEqual({
@@ -169,6 +169,7 @@ describe("legacy transaction merges on D1", () => {
         excluded_from_calculation: 1,
         created_at: "created",
         updated_at: "updated",
+        note: "已還1000\n已還100",
       });
       expect(
         await db
@@ -182,18 +183,6 @@ describe("legacy transaction merges on D1", () => {
         created_at: "created",
         updated_at: "updated",
       });
-      // 備註不阻擋合併；兩端內容不同時合併保留，不丟掉任何一段。
-      expect(
-        (await db.prepare("SELECT * FROM bank_transaction_notes").all())
-          .results,
-      ).toEqual([
-        {
-          transaction_id: "new",
-          note: "已收回\n代墊午餐",
-          created_at: "created",
-          updated_at: "updated",
-        },
-      ]);
       expect(
         await db
           .prepare(
@@ -221,7 +210,7 @@ describe("legacy transaction merges on D1", () => {
       if (conflict === "calculation")
         await db
           .prepare(
-            "INSERT INTO bank_transaction_preferences VALUES ('new', 0, 'other', 'other')",
+            "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES ('new', 0, 'other', 'other')",
           )
           .run();
       if (conflict === "category")
@@ -242,7 +231,7 @@ describe("legacy transaction merges on D1", () => {
       db.batch([
         ...reconcileSinopacLegacyTransactionStatements(db),
         db.prepare(
-          "INSERT INTO bank_transaction_preferences VALUES ('missing', 0, 't', 't')",
+          "INSERT INTO bank_transaction_preferences (transaction_id, excluded_from_calculation, created_at, updated_at) VALUES ('missing', 0, 't', 't')",
         ),
       ]),
     ).rejects.toThrow();

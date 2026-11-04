@@ -3,7 +3,6 @@ import {
   bankAccountPaymentAccounts,
   bankAccounts,
   bankBalanceSnapshots,
-  bankTransactionNotes,
   bankTransactionPreferences,
   bankTransactions,
   creditCardBills,
@@ -16,7 +15,6 @@ import type { MonthDateRange } from "../../platform/month-range";
 const txn = alias(bankTransactions, "txn");
 const account = alias(bankAccounts, "account");
 const preference = alias(bankTransactionPreferences, "preference");
-const transactionNote = alias(bankTransactionNotes, "transaction_note");
 const balance = alias(bankBalanceSnapshots, "balance");
 const bill = alias(creditCardBills, "b");
 const billAccount = alias(bankAccounts, "a");
@@ -63,7 +61,7 @@ const bankTransactionColumns = {
   calculationPreference: sql<
     number | null
   >`${preference.excludedFromCalculation}`.as("calculationPreference"),
-  note: sql<string | null>`${transactionNote.note}`.as("note"),
+  note: sql<string | null>`${preference.note}`.as("note"),
 };
 
 const creditCardBillColumns = {
@@ -144,8 +142,7 @@ function bankTransactionQuery(db: D1Database) {
     .select(bankTransactionColumns)
     .from(txn)
     .innerJoin(account, eq(account.id, txn.accountId))
-    .leftJoin(preference, eq(preference.transactionId, txn.id))
-    .leftJoin(transactionNote, eq(transactionNote.transactionId, txn.id));
+    .leftJoin(preference, eq(preference.transactionId, txn.id));
 }
 
 export async function listBankAccounts(db: D1Database) {
