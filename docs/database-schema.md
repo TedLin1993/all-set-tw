@@ -8,10 +8,10 @@
 
 ## 目錄
 
-- Tables：35
+- Tables：36
 - Explicit indexes：47
 - Other objects：0
-- Migrations：67
+- Migrations：69
 
 ## Tables
 
@@ -22,6 +22,7 @@
 | [`bank_account_payment_accounts`](#bank_account_payment_accounts) | 使用者手動指定的信用卡或貸款扣款帳戶，優先於銀行提供的自動扣繳帳戶。 | 4 | 0 | 0 |
 | [`bank_accounts`](#bank_accounts) | 各銀行與信用卡連接器同步回來的帳戶主檔；同一個實體帳戶可能同時存在多個來源記錄。 | 23 | 1 | 1 |
 | [`bank_balance_snapshots`](#bank_balance_snapshots) | 帳戶在特定時間點的餘額快照，供資產總值與歷史圖表計算。 | 19 | 1 | 2 |
+| [`bank_transaction_notes`](#bank_transaction_notes) | 使用者對銀行與信用卡交易寫的自由文字備註。 | 4 | 1 | 0 |
 | [`bank_transaction_preferences`](#bank_transaction_preferences) | 使用者對銀行交易計算方式的個別偏好。 | 4 | 1 | 1 |
 | [`bank_transactions`](#bank_transactions) | 銀行帳戶、信用卡與其他存款型連接器同步回來的交易明細。 | 19 | 3 | 7 |
 | [`classification_categories`](#classification_categories) | 交易與發票使用的分類字典，包含系統預設分類與使用者分類。 | 6 | 0 | 1 |
@@ -328,6 +329,41 @@ CREATE TABLE "bank_balance_snapshots" (
   no_payment_needed INTEGER,
   statement_closing_date TEXT, loan_payment_amount INTEGER, loan_payment_status TEXT CHECK (loan_payment_status IS NULL OR loan_payment_status IN ('scheduled', 'collection_incomplete')), loan_installments_paid INTEGER, loan_installments_total INTEGER,
   UNIQUE (connector_id, account_id, source_id)
+)
+```
+
+### `bank_transaction_notes`
+
+> 用途：使用者對銀行與信用卡交易寫的自由文字備註。
+> 注意：與 bank_transaction_preferences 分開保存，只寫備註不會改變計算偏好；沒有備註的交易不會建立記錄。 transaction_id 以 FK 參照 bank_transactions；NO ACTION 禁止刪除仍有備註的交易，合併或授權入帳時須先移轉備註，兩端內容不同時合併保留。
+
+#### Columns
+
+| 順序 | 欄位 | 意義 | SQLite type | 可為 NULL | 預設值 | PK 順序 | Generated |
+| ---: | --- | --- | --- | :---: | --- | ---: | --- |
+| 1 | `transaction_id` | 備註所屬的 bank_transactions 記錄識別碼。 | TEXT | NO | — | 1 | — |
+| 2 | `note` | 備註內容；已去除前後空白且不可為空，清除備註時刪除整筆記錄。 | TEXT | NO | — | — | — |
+| 3 | `created_at` | 備註首次建立的時間。 | TEXT | NO | — | — | — |
+| 4 | `updated_at` | 備註最後更新的時間。 | TEXT | NO | — | — | — |
+
+#### Foreign keys
+
+| 欄位 | 參照表 | 參照欄位 | ON UPDATE | ON DELETE |
+| --- | --- | --- | --- | --- |
+| `transaction_id` | `bank_transactions` | `id` | NO ACTION | NO ACTION |
+
+#### Indexes
+
+—
+
+#### DDL
+
+```sql
+CREATE TABLE bank_transaction_notes (
+  transaction_id TEXT NOT NULL PRIMARY KEY REFERENCES bank_transactions (id),
+  note TEXT NOT NULL CHECK (length(trim(note)) > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 )
 ```
 
@@ -1921,6 +1957,8 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0067_binance_max_sync_jobs.sql`](../apps/worker/migrations/0067_binance_max_sync_jobs.sql)
 - [`0068_invoice_calculation_exclusion.sql`](../apps/worker/migrations/0068_invoice_calculation_exclusion.sql)
 - [`0069_chb_sync_job.sql`](../apps/worker/migrations/0069_chb_sync_job.sql)
+- [`0070_align_inherited_sync_schedules.sql`](../apps/worker/migrations/0070_align_inherited_sync_schedules.sql)
+- [`0071_bank_transaction_notes.sql`](../apps/worker/migrations/0071_bank_transaction_notes.sql)
 
 ## 程式碼導覽
 

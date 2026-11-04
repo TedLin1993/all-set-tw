@@ -36,7 +36,7 @@ export function filterActivities(
       (filters.source === "invoice" && Boolean(item.invoiceId));
     const matchesSearch =
       !normalizedSearch ||
-      `${item.title} ${item.subtitle} ${item.institutionName ?? ""} ${item.accountName ?? ""} ${item.category} ${item.searchText ?? ""}`
+      `${item.title} ${item.subtitle} ${item.institutionName ?? ""} ${item.accountName ?? ""} ${item.category} ${item.searchText ?? ""} ${item.note ?? ""}`
         .toLowerCase()
         .includes(normalizedSearch);
     const matchesCategory =

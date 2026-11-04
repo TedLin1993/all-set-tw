@@ -25,6 +25,8 @@ export interface ActivityItem {
     | "fallback";
   classificationRuleId?: string;
   transactionId?: string;
+  /** 使用者為銀行／信用卡交易寫的備註。 */
+  note?: string;
   excludedFromCalculation?: boolean;
   /** A merchant refund that reduces its category's expense. */
   refund?: boolean;

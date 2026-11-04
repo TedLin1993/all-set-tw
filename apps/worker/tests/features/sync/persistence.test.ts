@@ -134,6 +134,7 @@ describe("同步資料完整性（隔離 D1）", () => {
     await db.batch([
       ...[
         "bank_transaction_preferences",
+        "bank_transaction_notes",
         "invoice_transaction_preferences",
         "classification_overrides",
         "invoices",
@@ -1221,6 +1222,11 @@ describe("同步資料完整性（隔離 D1）", () => {
           "INSERT INTO classification_overrides VALUES ('esun-category', 'bank_transaction', ?, 'food', 't', 't')",
         )
         .bind(pending.recordKey),
+      db
+        .prepare(
+          "INSERT INTO bank_transaction_notes VALUES (?, '代墊同事午餐', 't', 't')",
+        )
+        .bind(pending.recordKey),
       db.prepare(
         "INSERT INTO invoices (id, connector_id, source_id, invoice_date, amount, created_at, updated_at) VALUES ('esun-invoice', 'einvoice', 'esun-invoice', '2026-10-05', 252, 't', 't')",
       ),
@@ -1258,7 +1264,25 @@ describe("同步資料完整性（隔離 D1）", () => {
         amount: -252,
         authorizedAt: "2026-10-04T16:30:00Z",
         calculationPreference: 1,
+        note: "代墊同事午餐",
       },
+    ]);
+    // 備註搬到入帳交易；之後重送同一組配對不會把舊內容再附加回使用者改過的備註。
+    await db
+      .prepare(
+        "UPDATE bank_transaction_notes SET note = '代墊同事午餐，已收回' WHERE transaction_id = ?",
+      )
+      .bind(posted.recordKey)
+      .run();
+    await write([pending, history, posted]);
+    expect(
+      (
+        await db
+          .prepare("SELECT transaction_id, note FROM bank_transaction_notes")
+          .all()
+      ).results,
+    ).toEqual([
+      { transaction_id: posted.recordKey, note: "代墊同事午餐，已收回" },
     ]);
     expect(
       await db
@@ -1346,6 +1370,11 @@ describe("同步資料完整性（隔離 D1）", () => {
             "INSERT INTO bank_transaction_preferences VALUES (?, 1, 't', 't')",
           )
           .bind(p.recordKey),
+        db
+          .prepare(
+            "INSERT INTO bank_transaction_notes VALUES (?, '房租', 't', 't')",
+          )
+          .bind(p.recordKey),
         db.prepare(
           "INSERT INTO invoices (id, connector_id, source_id, invoice_date, amount, created_at, updated_at) VALUES ('ctbc-invoice', 'einvoice', 'ctbc-invoice', '2026-10-05', 252, 't', 't')",
         ),
@@ -1390,6 +1419,13 @@ describe("同步資料完整性（隔離 D1）", () => {
           )
           .first("transaction_id"),
       ).toBe(target);
+      expect(
+        (
+          await db
+            .prepare("SELECT transaction_id, note FROM bank_transaction_notes")
+            .all()
+        ).results,
+      ).toEqual([{ transaction_id: target, note: "房租" }]);
       expect(await listBankTransactions(db, 20)).toHaveLength(
         scenario === "授權碼不同" ? 3 : 2,
       );

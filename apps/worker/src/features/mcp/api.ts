@@ -92,6 +92,8 @@ const ENDPOINT_NOTES: Record<string, string> = {
   "GET /bank/bills": `信用卡帳單。${MONTH_RANGE}`,
   "PATCH /bank/transactions/:transactionId/calculation":
     "設定交易是否排除統計。body：excludedFromCalculation（boolean）。",
+  "PUT /bank/transactions/:transactionId/note":
+    "設定交易備註，會覆寫原有內容。body：note（字串，最多 500 字；空字串清除備註）。",
   "GET /investments": `最新投資持倉。${PAGINATION}`,
   "GET /investment-transactions": `投資交易紀錄。${MONTH_RANGE}`,
   "GET /history/net-worth/chart": "淨資產歷史圖表資料。",

@@ -357,6 +357,12 @@ Drizzle repository 整合測試使用 `apps/worker/tests/helpers/d1.ts` 的 Mini
 兩端相同的計算／分類偏好保留新版既有資料。無對應、配對歧義或偏好衝突時，
 保留原交易及設定；華南亦不再直接清除沒有對應的 legacy 資料。
 
+交易備註存於 `bank_transaction_notes`，同樣以 `NO ACTION` FK 參照交易；不放進
+`bank_transaction_preferences`，因為偏好只要有列就代表使用者明確選擇計入或排除。
+備註不阻擋合併：`transaction-merge.ts` 在刪除舊交易前移轉備註；
+授權入帳（含中信保留授權、刪除正式副本）由 `card-authorization-write.ts` 將備註搬到目標交易並刪除來源備註，
+因為既有配對會在之後的同步重送，複製會把使用者刪掉的舊內容再附加回去。兩端都有且內容不同時以換行合併保留。
+
 0045 套用前須唯讀查核以下三種孤兒引用（包含 separate 的非 NULL transaction_id）：
 
 ```sql

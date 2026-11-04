@@ -16,6 +16,7 @@
     Unlink2,
     ArrowLeft,
     ChevronRight,
+    StickyNote,
     X,
   } from "@lucide/svelte";
   import Button from "@/shared/ui/Button.svelte";
@@ -35,6 +36,7 @@
   import CategoryBadge from "./components/CategoryBadge.svelte";
   import ActivityAmount from "./components/ActivityAmount.svelte";
   import ActivityCategoryChart from "./components/ActivityCategoryChart.svelte";
+  import ActivityNoteEditor from "./components/ActivityNoteEditor.svelte";
   import CalculationUpdateDialog from "./components/CalculationUpdateDialog.svelte";
   import CategoryUpdateDialog from "./components/CategoryUpdateDialog.svelte";
   import CategoryDetailSheet from "./components/CategoryDetailSheet.svelte";
@@ -651,6 +653,15 @@
       qc.invalidateQueries({ queryKey: queryKeys.bank });
       qc.invalidateQueries({ queryKey: queryKeys.classificationRules });
     },
+  }));
+  const noteMutation = createMutation(() => ({
+    mutationFn: (payload: { transactionId: string; note: string }) =>
+      api.put(
+        `/api/bank/transactions/${encodeURIComponent(payload.transactionId)}/note`,
+        { note: payload.note },
+      ),
+    // 月份與搜尋快取都以 bank 開頭；等重新載入後才結束儲存，避免顯示舊備註。
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bank }),
   }));
   const invoiceCalculationMutation = createMutation(() => ({
     mutationFn: (payload: {
@@ -1280,6 +1291,19 @@
                           />
                         </p>
                       {/if}
+                      {#if item.note}<p
+                          class="mt-1 flex min-w-0 items-center gap-1 text-caption text-subtle"
+                        >
+                          <StickyNote
+                            aria-label="備註"
+                            class="size-3.5 shrink-0"
+                          /><span class="truncate"
+                            ><SearchHighlight
+                              text={item.note}
+                              query={submittedSearch}
+                            /></span
+                          >
+                        </p>{/if}
                       {#if time || item.category}<div
                           class="mt-1 flex items-center gap-2 text-xs font-medium tabular-nums text-subtle"
                         >
@@ -1395,6 +1419,19 @@
                             />
                           </p>
                         {/if}
+                        {#if item.note}<p
+                            class="mt-1 flex min-w-0 items-center gap-1 text-caption text-subtle"
+                          >
+                            <StickyNote
+                              aria-label="備註"
+                              class="size-3.5 shrink-0"
+                            /><span class="truncate"
+                              ><SearchHighlight
+                                text={item.note}
+                                query={submittedSearch}
+                              /></span
+                            >
+                          </p>{/if}
                         {#if time}<p
                             class="mt-1 text-caption font-medium tabular-nums text-subtle"
                           >
@@ -1565,6 +1602,20 @@
                   )}</Badge
                 >{/if}
             </section>
+
+            {#if detailItem.transactionId}
+              {@const transactionId = detailItem.transactionId}
+              {#key activityKey(detailItem)}<ActivityNoteEditor
+                  note={detailItem.note}
+                  title={detailItem.title}
+                  submitting={noteMutation.isPending &&
+                    noteMutation.variables?.transactionId === transactionId}
+                  failed={noteMutation.isError &&
+                    noteMutation.variables?.transactionId === transactionId}
+                  onSave={(note) =>
+                    noteMutation.mutateAsync({ transactionId, note })}
+                />{/key}
+            {/if}
 
             <section class="border-b border-ink/10 py-5">
               <h3 class="text-base font-semibold">來源名稱</h3>

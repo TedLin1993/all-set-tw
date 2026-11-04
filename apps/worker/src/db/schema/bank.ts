@@ -225,6 +225,24 @@ export const bankTransactionPreferences = sqliteTable(
   ],
 );
 
+export const bankTransactionNotes = sqliteTable(
+  "bank_transaction_notes",
+  {
+    transactionId: text("transaction_id").notNull(),
+    note: text("note").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.transactionId] }),
+    foreignKey({
+      columns: [table.transactionId],
+      foreignColumns: [bankTransactions.id],
+    }),
+    check("bank_transaction_notes_check_1", sql`length(trim(note)) > 0`),
+  ],
+);
+
 export const creditCardBills = sqliteTable(
   "credit_card_bills",
   {

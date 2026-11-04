@@ -19,6 +19,7 @@ describe("legacy transaction merges on D1", () => {
       [
         "invoice_transaction_preferences",
         "bank_transaction_preferences",
+        "bank_transaction_notes",
         "classification_overrides",
         "bank_transactions",
         "invoices",
@@ -77,6 +78,9 @@ describe("legacy transaction merges on D1", () => {
       db.prepare(
         "INSERT INTO classification_overrides VALUES ('category', 'bank_transaction', 'old', 'shopping', 'created', 'updated')",
       ),
+      db.prepare(
+        "INSERT INTO bank_transaction_notes VALUES ('old', '代墊午餐', 'created', 'updated')",
+      ),
     ]);
   }
   async function snapshot() {
@@ -85,6 +89,7 @@ describe("legacy transaction merges on D1", () => {
       "invoice_transaction_preferences",
       "bank_transaction_preferences",
       "classification_overrides",
+      "bank_transaction_notes",
     ];
     return Promise.all(
       tables.map(
@@ -117,6 +122,11 @@ describe("legacy transaction merges on D1", () => {
       await db
         .prepare(
           "UPDATE bank_transactions SET matched_transaction_id = 'old', transfer_peer_id = 'old' WHERE id = 'peer'",
+        )
+        .run();
+      await db
+        .prepare(
+          "INSERT INTO bank_transaction_notes VALUES ('new', '已收回', 'created', 'later')",
         )
         .run();
       await db.batch(reconcile(db));
@@ -172,6 +182,18 @@ describe("legacy transaction merges on D1", () => {
         created_at: "created",
         updated_at: "updated",
       });
+      // 備註不阻擋合併；兩端內容不同時合併保留，不丟掉任何一段。
+      expect(
+        (await db.prepare("SELECT * FROM bank_transaction_notes").all())
+          .results,
+      ).toEqual([
+        {
+          transaction_id: "new",
+          note: "已收回\n代墊午餐",
+          created_at: "created",
+          updated_at: "updated",
+        },
+      ]);
       expect(
         await db
           .prepare(

@@ -46,6 +46,14 @@ export function mergeLegacyTransactionStatements(
       FROM merges m JOIN classification_overrides p
         ON p.target_type = 'bank_transaction' AND p.target_id = m.old_id
       WHERE true ON CONFLICT(target_type, target_id) DO NOTHING`,
+    // Notes never block a merge; differing notes on both sides are kept together.
+    `INSERT INTO bank_transaction_notes (transaction_id, note, created_at, updated_at)
+      SELECT m.new_id, n.note, n.created_at, n.updated_at
+      FROM merges m JOIN bank_transaction_notes n ON n.transaction_id = m.old_id
+      WHERE true ON CONFLICT(transaction_id) DO UPDATE SET
+        note = bank_transaction_notes.note || char(10) || excluded.note,
+        updated_at = max(bank_transaction_notes.updated_at, excluded.updated_at)
+      WHERE instr(bank_transaction_notes.note, excluded.note) = 0`,
     `UPDATE invoice_transaction_preferences
       SET transaction_id = m.new_id FROM merges m WHERE transaction_id = m.old_id`,
     `UPDATE bank_transactions SET
@@ -56,6 +64,7 @@ export function mergeLegacyTransactionStatements(
     `DELETE FROM bank_transaction_preferences WHERE transaction_id IN (SELECT old_id FROM merges)`,
     `DELETE FROM classification_overrides
       WHERE target_type = 'bank_transaction' AND target_id IN (SELECT old_id FROM merges)`,
+    `DELETE FROM bank_transaction_notes WHERE transaction_id IN (SELECT old_id FROM merges)`,
     `DELETE FROM bank_transactions WHERE id IN (SELECT old_id FROM merges)`,
   ].map((statement) => db.prepare(`${mapping} ${statement}`));
 }
