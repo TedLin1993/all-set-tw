@@ -49,7 +49,14 @@ import {
   logCathayLoanDomDiagnostics,
   logCathayLoanStage,
   parseCathayLoanOverviewForSync,
+  type CathayLoanRecord,
 } from "./loan-overview";
+import {
+  parseCathayLoanOverviewApi,
+  queryCathayLoanOverviewApi,
+  type CathayLoanOverviewApiParseResult,
+  type CathayLoanOverviewApiResponse,
+} from "./loan-overview-api";
 
 const LOGIN_URL = "https://www.cathaybk.com.tw/MyBank/";
 const DEPOSIT_OVERVIEW_URL =
@@ -2580,6 +2587,187 @@ export async function scrapeCreditCards(page: Page): Promise<Scraped> {
 }
 
 export async function scrapeLoans(page: Page): Promise<LoanScraped> {
+  // 主要方式：在已登入的 OnlineBanking 頁面內呼叫 L_ACCT_Q_OverView，不開啟
+  // 貸款總覽頁；API 失敗時才改走總覽頁 DOM 解析，避免同步退化。
+  const api = await readCathayLoanOverviewFromApi(page);
+  let loanOverview: { loanRecords: CathayLoanRecord[]; complete: boolean };
+  if (api.parsed?.ok) {
+    loanOverview = api.parsed;
+    logCathayLoanOverview({
+      method: "api",
+      count: loanOverview.loanRecords.length,
+      complete: loanOverview.complete,
+      returnCode: api.returnCode,
+      status: api.status,
+      fallbackReason: null,
+      sessionResult: api.sessionResult,
+    });
+  } else {
+    const fallbackReason =
+      api.parsed && !api.parsed.ok ? api.parsed.reason : api.failure;
+    let count: number | null = null;
+    let complete: boolean | null = null;
+    try {
+      loanOverview = await readCathayLoanOverviewFromPage(page);
+      count = loanOverview.loanRecords.length;
+      complete = loanOverview.complete;
+    } finally {
+      logCathayLoanOverview({
+        method: "page",
+        count,
+        complete,
+        returnCode: api.returnCode,
+        status: api.status,
+        fallbackReason: fallbackReason ?? "unknown",
+        sessionResult: api.sessionResult,
+      });
+    }
+  }
+
+  const { bankAccounts, bankBalanceSnapshots } = mapCathayLoanRecords(
+    loanOverview.loanRecords,
+  );
+
+  // 同一個 session（GetJWT + UserProfile idType）沿用到扣款帳戶 API；取不到
+  // session 時由扣款帳戶流程在貸款總覽頁上自行再取一次。
+  await attachCathayLoanAutopayAccounts(
+    page,
+    bankAccounts,
+    api.sessionResult?.session ? api.sessionResult : undefined,
+  );
+
+  return {
+    bankAccounts,
+    bankBalanceSnapshots,
+    bankTransactions: [],
+    creditCardBills: [],
+    loanOverviewComplete: loanOverview.complete,
+  };
+}
+
+type CathayLoanOverviewApiAttempt = {
+  sessionResult: CathayApiSessionResult | undefined;
+  parsed: CathayLoanOverviewApiParseResult | undefined;
+  /** 未取得 API 回應前就失敗的原因。 */
+  failure:
+    "no_page_context" | "logout" | "no_session" | "evaluate_failed" | null;
+  returnCode: string;
+  status: string | null;
+};
+
+function isCathayOnlineBankingUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.protocol === "https:" &&
+      parsed.hostname === "www.cathaybk.com.tw" &&
+      parsed.pathname.startsWith("/OnlineBanking/") &&
+      !/\/logout\//i.test(parsed.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 取得 API session 並呼叫 `L_ACCT_Q_OverView`。目前頁面已在 OnlineBanking 時
+ * 直接使用（同源 XHR）；否則以 `domcontentloaded` 開啟存款總覽作為輕量頁面，
+ * 不開啟貸款總覽頁。永不拋錯；失敗時由呼叫端改走 DOM。
+ */
+async function readCathayLoanOverviewFromApi(
+  page: Page,
+): Promise<CathayLoanOverviewApiAttempt> {
+  const attempt: CathayLoanOverviewApiAttempt = {
+    sessionResult: undefined,
+    parsed: undefined,
+    failure: null,
+    returnCode: "not_called",
+    status: null,
+  };
+  if (!isCathayOnlineBankingUrl(page.url())) {
+    try {
+      await page.goto(DEPOSIT_OVERVIEW_URL, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+    } catch {
+      attempt.failure = "no_page_context";
+      return attempt;
+    }
+    if (/\/logout\//i.test(page.url())) {
+      attempt.failure = "logout";
+      return attempt;
+    }
+    if (!isCathayOnlineBankingUrl(page.url())) {
+      attempt.failure = "no_page_context";
+      return attempt;
+    }
+  }
+
+  attempt.sessionResult = await getCathayApiSessionSafely(page);
+  const session = attempt.sessionResult?.session ?? null;
+  if (!session) {
+    attempt.failure = "no_session";
+    return attempt;
+  }
+  let response: CathayLoanOverviewApiResponse | undefined;
+  try {
+    response = await page.evaluate(queryCathayLoanOverviewApi, { session });
+  } catch {
+    attempt.failure = "evaluate_failed";
+    return attempt;
+  }
+  if (!response || typeof response !== "object") {
+    attempt.failure = "evaluate_failed";
+    return attempt;
+  }
+  attempt.returnCode =
+    typeof response.returnCode === "string" &&
+    /^[A-Za-z0-9_]{1,12}$/.test(response.returnCode)
+      ? response.returnCode
+      : "invalid";
+  attempt.status =
+    typeof response.status === "string" &&
+    /^[A-Za-z_]{1,20}$/.test(response.status)
+      ? response.status
+      : null;
+  try {
+    attempt.parsed = parseCathayLoanOverviewApi(response);
+  } catch {
+    attempt.parsed = { ok: false, reason: "schema_mismatch" };
+  }
+  return attempt;
+}
+
+/** 記錄貸款總覽來源；不含帳號、金額、token、customerId 或 idType。 */
+function logCathayLoanOverview(fields: {
+  method: "api" | "page";
+  count: number | null;
+  complete: boolean | null;
+  returnCode: string;
+  status: string | null;
+  fallbackReason: string | null;
+  sessionResult: CathayApiSessionResult | undefined;
+}) {
+  console.log(
+    JSON.stringify({
+      event: "cathaybk_loan_overview",
+      method: fields.method,
+      count: fields.count,
+      complete: fields.complete,
+      returnCode: fields.returnCode,
+      status: fields.status,
+      fallbackReason: fields.fallbackReason,
+      apiJwtAvailable: fields.sessionResult?.diagnostics.jwtAvailable === true,
+      userProfileReturnCode: cathayUserProfileReturnCode(fields.sessionResult),
+    }),
+  );
+}
+
+/** 後備方式：開啟貸款總覽頁並解析 DOM。 */
+async function readCathayLoanOverviewFromPage(
+  page: Page,
+): Promise<{ loanRecords: CathayLoanRecord[]; complete: boolean }> {
   logCathayLoanStage("navigation", "started", {
     navigationCompleted: false,
     logoutDetected: false,
@@ -2670,6 +2858,11 @@ export async function scrapeLoans(page: Page): Promise<LoanScraped> {
       overviewComplete: loanOverview.complete,
     },
   );
+  return loanOverview;
+}
+
+/** API 與 DOM 兩種來源共用的帳戶／餘額快照對應，確保兩者輸出完全相同。 */
+function mapCathayLoanRecords(loanRecords: CathayLoanRecord[]) {
   const asOfAt = new Date().toISOString();
   const bankAccounts: Scraped["bankAccounts"] = [];
   const bankBalanceSnapshots: Scraped["bankBalanceSnapshots"] = [];
@@ -2747,15 +2940,7 @@ export async function scrapeLoans(page: Page): Promise<LoanScraped> {
     mappedSnapshotCount: bankBalanceSnapshots.length,
   });
 
-  await attachCathayLoanAutopayAccounts(page, bankAccounts);
-
-  return {
-    bankAccounts,
-    bankBalanceSnapshots,
-    bankTransactions: [],
-    creditCardBills: [],
-    loanOverviewComplete: loanOverview.complete,
-  };
+  return { bankAccounts, bankBalanceSnapshots };
 }
 
 class CathayForcedLogoutError extends Error {
@@ -2776,13 +2961,15 @@ class CathayForcedLogoutError extends Error {
 async function attachCathayLoanAutopayAccounts(
   page: Page,
   loanAccounts: Scraped["bankAccounts"],
+  existingSession?: CathayApiSessionResult,
 ) {
   if (loanAccounts.length === 0) return;
   const loanAccountNumbers = loanAccounts.map((account) =>
     account.sourceId.replace(/^loan:cathaybk:/, ""),
   );
 
-  const sessionResult = await getCathayApiSessionSafely(page);
+  const sessionResult =
+    existingSession ?? (await getCathayApiSessionSafely(page));
   // session 只在兩次 page.evaluate 之間傳遞，不可寫入 log。
   const session = sessionResult?.session ?? null;
   const sessionLog = {
