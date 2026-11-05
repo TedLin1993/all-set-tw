@@ -809,11 +809,18 @@ async function loginWithDeviceVerification(
   config: TdccConfig,
 ) {
   let needsOtp = false;
+  // AU015 的回應不含 isMobileValid，手機是否驗證過要看 AU001 登入回應；
+  // 欄位缺席也視為未驗證。Email 與手機都驗證過，集保才會綁定裝置，
+  // 之後的排程登入才不會再被要求換機驗證。
+  let needsMobileOtp = false;
+  let emailVerified = false;
 
   try {
     const loginResult = await client.login(config.userId!, config.password!);
     needsOtp =
       loginResult.isDiffDevice === "Y" || loginResult.isEmailValid === "N";
+    needsMobileOtp = loginResult.isMobileValid !== "Y";
+    emailVerified = loginResult.isEmailValid === "Y";
   } catch (error) {
     if (
       !(error instanceof EPassbookError) ||
@@ -826,6 +833,11 @@ async function loginWithDeviceVerification(
   if (!needsOtp) return;
 
   if (!config.otp) {
+    // Email 已驗證、只差手機時，和官方 App 一樣直接走簡訊 OTP。
+    if (emailVerified && needsMobileOtp) {
+      if (config.requestOtp) await client.requestMobileOtp(config.userId!);
+      throw new TdccVerificationRequiredError("sms", config.requestOtp);
+    }
     if (config.requestOtp) await client.requestEmailOtp(config.userId!);
     throw new TdccVerificationRequiredError("email", config.requestOtp);
   }
@@ -835,7 +847,10 @@ async function loginWithDeviceVerification(
     config.otp,
     config.otpChannel ?? "email",
   );
-  if (otpResult.isMobileValid === "N" && config.otpChannel !== "sms") {
+  if (
+    (otpResult.isMobileValid === "N" || needsMobileOtp) &&
+    config.otpChannel !== "sms"
+  ) {
     if (config.requestOtp) await client.requestMobileOtp(config.userId!);
     throw new TdccVerificationRequiredError("sms", config.requestOtp);
   }
