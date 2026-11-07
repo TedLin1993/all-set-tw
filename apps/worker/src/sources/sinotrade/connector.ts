@@ -93,6 +93,11 @@ async function restoreOrigin(
   preserveSharedCookies = false,
 ) {
   const origin = SINOTRADE_ORIGINS[platform];
+  // 官方 API 防火牆拒絕 Browser Run 的 HeadlessChrome UA，回應沒有 CORS 標頭，頁面只顯示
+  // 「Network Error」。換成同版本的一般 Chrome UA，與 sec-ch-ua 的版本保持一致。
+  await page.setUserAgent(
+    (await page.browser().userAgent()).replace("HeadlessChrome/", "Chrome/"),
+  );
   if (state) {
     const cookies = state.cookies.filter(
       (cookie) =>
