@@ -171,6 +171,16 @@
     if (job.lastStatus === "needs_user_action") return "需要處理";
     return "尚未同步";
   });
+  // 只在確認尚未設定時隱藏；設定查詢失敗或載入中不算。
+  // 進行中、本次錯誤、中斷提示與保存的失敗原因仍需顯示。
+  const hideUnconfiguredSyncStatus = $derived(
+    settings.data?.configured === false &&
+      !job?.running &&
+      !error &&
+      !interruptedSync &&
+      job?.lastStatus !== "failed" &&
+      job?.lastStatus !== "needs_user_action",
+  );
   const syncBusyLabel = $derived(
     !syncBusy
       ? null
@@ -1574,7 +1584,7 @@
     </div>
   {/if}
   <div
-    class={`mt-3 rounded-xl border border-ink/10 bg-paper p-3 text-sm ${(!settings.data?.configured && !job?.running && !error) || (connectorId === "tdcc" && !tdccConnectionReady && !job?.running) || (connectorId === "cathaybk" && !cathayConnectionReady && cathayVerificationStep !== "complete") || sinotradeSetup ? "hidden" : ""}`}
+    class={`mt-3 rounded-xl border border-ink/10 bg-paper p-3 text-sm ${hideUnconfiguredSyncStatus || (connectorId === "tdcc" && !tdccConnectionReady && !job?.running) || (connectorId === "cathaybk" && !cathayConnectionReady && cathayVerificationStep !== "complete") || sinotradeSetup ? "hidden" : ""}`}
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
