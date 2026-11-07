@@ -28,6 +28,14 @@ import {
 import { enqueueManualSyncRun, enqueueTdccSyncChunk } from "./scheduling/queue";
 import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
 import type { TdccRunScope } from "../../sources/tdcc/run-repository";
+import {
+  startSinotradeConnection,
+  finishSinotradeConnection,
+  cancelSinotradeConnection,
+  readSinotradeConnectionStatus,
+  verifySinotradeConnection,
+} from "../../sources/sinotrade/sync";
+import { sinotradeVerificationInputSchema } from "../../sources/sinotrade/session-protocol";
 
 const tdccSyncBodySchema = z.object({
   otp: z.string().min(1).optional(),
@@ -38,6 +46,66 @@ export const syncRoutes = honoFactory.createApp();
 registerSyncRoutes(syncRoutes);
 
 function registerSyncRoutes(api: Hono<AppBindings>) {
+  api.use("/connectors/sinotrade/*", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    c.header("Referrer-Policy", "no-referrer");
+    await next();
+  });
+  api.post(
+    "/connectors/sinotrade/connect",
+    zValidator(
+      "json",
+      z.object({ platform: z.enum(["newweb", "savings"]).default("newweb") }),
+      validationHook("INVALID_REQUEST", "請選擇官方登入平台。"),
+    ),
+    async (c) => {
+      try {
+        return c.json(
+          await startSinotradeConnection(c.env, c.req.valid("json").platform),
+        );
+      } catch (error) {
+        return classifiedErrorResponse(classifySyncError(error));
+      }
+    },
+  );
+  api.post("/connectors/sinotrade/connect/complete", async (c) => {
+    try {
+      return c.json(await finishSinotradeConnection(c.env));
+    } catch (error) {
+      return classifiedErrorResponse(classifySyncError(error));
+    }
+  });
+  api.post("/connectors/sinotrade/connect/cancel", async (c) => {
+    try {
+      return c.json(await cancelSinotradeConnection(c.env));
+    } catch (error) {
+      return classifiedErrorResponse(classifySyncError(error));
+    }
+  });
+  api.post("/connectors/sinotrade/connect/status", async (c) => {
+    try {
+      return c.json(await readSinotradeConnectionStatus(c.env));
+    } catch (error) {
+      return classifiedErrorResponse(classifySyncError(error));
+    }
+  });
+  api.post(
+    "/connectors/sinotrade/connect/verify",
+    zValidator(
+      "json",
+      sinotradeVerificationInputSchema,
+      validationHook("INVALID_REQUEST", "驗證資料格式錯誤，請檢查後再試。"),
+    ),
+    async (c) => {
+      try {
+        return c.json(
+          await verifySinotradeConnection(c.env, c.req.valid("json")),
+        );
+      } catch (error) {
+        return classifiedErrorResponse(classifySyncError(error));
+      }
+    },
+  );
   for (const connectorId of challengeConnectorIds) {
     api.post(`/connectors/${connectorId}/captcha`, (c) =>
       challengeRouteResponse(c, connectorId),

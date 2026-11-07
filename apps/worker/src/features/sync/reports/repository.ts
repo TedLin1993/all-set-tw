@@ -2,7 +2,7 @@ import { publishActivityRunStatement } from "./activity-detail-repository";
 import { safelyMaterializeActivityReport } from "./activity-detail-service";
 import {
   createDrizzle,
-  LATEST_INVESTMENT_POSITION_SCOPES_SQL,
+  LATEST_INVESTMENT_POSITION_IDS_SQL,
   sanitizeDatabaseError,
   scheduledSyncBatches,
   scheduledSyncBatchResults,
@@ -270,8 +270,7 @@ export async function calculateCurrentFinancialSnapshot(
            COALESCE(position.market_value, 0) + COALESCE(position.cash_balance, 0) AS amount,
            position.currency AS currency
          FROM investment_positions position
-         WHERE (position.connector_id, position.asset_type, position.as_of_date)
-           IN (${LATEST_INVESTMENT_POSITION_SCOPES_SQL})
+         WHERE position.id IN (${LATEST_INVESTMENT_POSITION_IDS_SQL})
        ), latest_manual_assets AS (
          SELECT
            history.net_worth AS amount,

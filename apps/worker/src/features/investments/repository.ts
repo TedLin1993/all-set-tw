@@ -25,6 +25,7 @@ const investmentTransactionColumns = {
   quantity: investmentTransactions.quantity,
   price: investmentTransactions.price,
   amount: investmentTransactions.amount,
+  realizedPnl: investmentTransactions.realizedPnl,
   currency: investmentTransactions.currency,
   effectiveDate: sql<string>`${investmentTransactions.effectiveDate}`,
   updatedAt: investmentTransactions.updatedAt,
@@ -50,9 +51,14 @@ export type InvestmentPositionRow = {
   assetType: string;
   symbol: string | null;
   name: string;
+  brokerNo: string | null;
+  brokerAccount: string | null;
+  market: string | null;
   quantity: number | null;
   marketValue: number | null;
   cashBalance: number | null;
+  costBasis: number | null;
+  unrealizedPnl: number | null;
   currency: string;
   asOfDate: string;
 };
@@ -70,16 +76,21 @@ export async function listLatestInvestmentPositions(
       assetType: investmentPositions.assetType,
       symbol: investmentPositions.symbol,
       name: investmentPositions.name,
+      brokerNo: investmentPositions.brokerNo,
+      brokerAccount: investmentPositions.brokerAccount,
+      market: investmentPositions.market,
       quantity: investmentPositions.quantity,
       marketValue: investmentPositions.marketValue,
       cashBalance: investmentPositions.cashBalance,
+      costBasis: investmentPositions.costBasis,
+      unrealizedPnl: investmentPositions.unrealizedPnl,
       currency: investmentPositions.currency,
       asOfDate: investmentPositions.asOfDate,
     })
     .from(investmentPositions)
     .where(
       and(
-        // Latest as_of_date is per connector + asset type, not a global max.
+        // The shared scope query also removes known cross-connector duplicates.
         isLatestInvestmentPosition(),
         cursor
           ? sql`(

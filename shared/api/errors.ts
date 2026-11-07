@@ -60,7 +60,8 @@ export type SyncErrorCode =
   | "UBOT_CONNECTION_FAILED"
   | "CHB_BROWSER_BUSY"
   | "CHB_CAPTCHA_FAILED"
-  | "CHB_CONNECTION_FAILED";
+  | "CHB_CONNECTION_FAILED"
+  | "SINOTRADE_CONNECTION_REQUIRED";
 
 /** 與同步無關的一般 API 錯誤代碼。 */
 export type GeneralApiErrorCode =

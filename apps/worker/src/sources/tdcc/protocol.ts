@@ -1194,30 +1194,46 @@ function toInvestmentPosition(
   holding: TdccConfig["holdings"][number],
 ): Omit<InvestmentPosition, "id" | "connectorId"> {
   const asOfDate = normalizeTdccDate(holding.asOfDate);
+  const accountId =
+    holding.accountId ||
+    [holding.brokerNo, holding.brokerAccount].filter(Boolean).join(":") ||
+    undefined;
+  const assetType =
+    holding.securityType === "etf" || holding.securityType === "fund"
+      ? holding.securityType
+      : "stock";
+  const currency = (holding.currency || "TWD").toUpperCase();
+  // TDCC's stock/ETF inventory is a Taiwan TWD market position. Fund rows or
+  // foreign-currency rows do not carry a guessed market identity.
+  const market =
+    holding.brokerNo &&
+    holding.brokerAccount &&
+    currency === "TWD" &&
+    (holding.securityType === undefined ||
+      holding.securityType === "stock" ||
+      holding.securityType === "etf")
+      ? "TW"
+      : undefined;
   return {
-    sourceId: [
-      holding.accountId,
-      holding.symbol || holding.securityName,
-      asOfDate,
-    ]
+    sourceId: [accountId, holding.symbol || holding.securityName, asOfDate]
       .filter(Boolean)
       .join(":"),
-    assetType:
-      holding.securityType === "etf" || holding.securityType === "fund"
-        ? holding.securityType
-        : "stock",
+    assetType,
     symbol: holding.symbol,
     name: holding.securityName,
+    brokerNo: holding.brokerNo,
+    brokerAccount: holding.brokerAccount,
+    market,
     quantity: parseTdccNumber(holding.quantity),
     marketValue:
       holding.marketValue !== undefined
-        ? Math.max(0, Math.trunc(parseTdccNumber(holding.marketValue)))
+        ? Math.max(0, parseTdccNumber(holding.marketValue))
         : undefined,
     cashBalance:
       holding.cashBalance !== undefined
-        ? Math.max(0, Math.trunc(parseTdccNumber(holding.cashBalance)))
+        ? Math.max(0, parseTdccNumber(holding.cashBalance))
         : undefined,
-    currency: holding.currency || "TWD",
+    currency,
     asOfDate,
     raw: holding.raw ?? holding,
   };

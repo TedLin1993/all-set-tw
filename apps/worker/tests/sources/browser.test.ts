@@ -19,6 +19,16 @@ function browserSession(id: string) {
   } as unknown as Browser;
 }
 
+function bareBrowserBinding<T extends object>(target: T) {
+  return new Proxy(target, {
+    get(current, property, receiver) {
+      if (Reflect.has(current, property))
+        return Reflect.get(current, property, receiver);
+      return vi.fn();
+    },
+  });
+}
+
 function diagnosticPage(maintenance = false) {
   const listeners = new Map<string, (value: unknown) => void>();
   const send = vi.fn(async (method: string) =>
@@ -117,6 +127,21 @@ describe("Browser Run 登入前復原與用量限制", () => {
     expect(prepare).toHaveBeenCalledOnce();
     expect(result.browser.close).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("裸 Browser binding 的未知屬性不當成取消訊號", async () => {
+    const bareBinding = bareBrowserBinding({ fetch }) as typeof binding;
+    const prepare = vi.fn().mockResolvedValue("ready");
+
+    const result = await prepareBrowserLoginWithRetry({
+      binding: bareBinding,
+      connectorId: "bank",
+      prepare,
+    });
+    expect(result.value).toBe("ready");
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(puppeteer.limits).toHaveBeenCalledOnce();
+    expect(puppeteer.launch).toHaveBeenCalledOnce();
   });
 
   it("準備花四十秒仍可成功，不會在十五秒時重開", async () => {

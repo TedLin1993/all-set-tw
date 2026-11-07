@@ -34,6 +34,10 @@ import { ubotConfigSchema } from "./ubot/protocol";
 import { binanceConfigSchema } from "./binance/protocol";
 import { maxConfigSchema } from "./max/protocol";
 import { chbConfigSchema } from "./chb/protocol";
+import {
+  sinotradeConfigSchema,
+  describeSinotradeSession,
+} from "./sinotrade/session-protocol";
 
 export const connectorConfigSchemas = {
   einvoice: invoiceConfigSchema,
@@ -57,6 +61,7 @@ export const connectorConfigSchemas = {
   binance: binanceConfigSchema,
   max: maxConfigSchema,
   chb: chbConfigSchema,
+  sinotrade: sinotradeConfigSchema,
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export function parseConnectorConfig(
@@ -103,6 +108,7 @@ const connectorSessionDescriptors = {
   binance: noSession,
   max: noSession,
   chb: noSession,
+  sinotrade: describeSinotradeSession,
 } satisfies Record<ConnectorId, SessionDescriptor>;
 
 /** 由解密後的設定判斷設定頁顯示的 session 與待驗證狀態，不回傳任何 secret。 */

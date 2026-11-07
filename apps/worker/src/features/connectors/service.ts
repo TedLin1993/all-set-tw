@@ -66,7 +66,8 @@ export async function updateConnectorSettings(
   const now = new Date().toISOString();
   const encryptionKey = configEncryptionKey(env);
   const existing = await findConnectorSettings(env.DB, connectorId);
-  if (!hasSensitive && !existing) throw new ConnectorConfigMissingError();
+  if (!hasSensitive && !existing && credentialKeys.length > 0)
+    throw new ConnectorConfigMissingError();
 
   let encryptedConfig: Record<string, unknown>;
   let mergedPublic: Record<string, unknown>;

@@ -69,7 +69,12 @@ export function groupInvestmentPositions(
     const key = row.connectorId ?? "unknown";
     const holdings = institutions.get(key) ?? [];
     institutions.set(key, holdings);
-    if (row.sourceId === EMPTY_INVESTMENT_SOURCE_ID) continue;
+    // 零庫存快照 marker（含帳戶範圍的 `empty:*`）不是持倉。
+    if (
+      row.sourceId === EMPTY_INVESTMENT_SOURCE_ID ||
+      row.sourceId.startsWith(`${EMPTY_INVESTMENT_SOURCE_ID}:`)
+    )
+      continue;
     holdings.push({ row, valueTwd: holdingValueTwd(row, rates) });
   }
 
