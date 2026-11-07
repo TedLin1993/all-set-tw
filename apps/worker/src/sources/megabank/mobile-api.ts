@@ -487,7 +487,7 @@ async function fetchMegabankData(
   const startDate = localDate(start);
   const endDate = localDate(new Date());
   const cardNumbers = arrayAt(dataAt(cardHome), "cardNumbers");
-  const cardTransactions =
+  const cardTransactionResponse =
     cardNumbers.length > 0
       ? await session.resource(
           "megapmb",
@@ -497,6 +497,12 @@ async function fetchMegabankData(
           "query",
         )
       : { rsData: { detailList: [] } };
+  // 有卡但查詢期間沒有任何消費時，銀行回 1120（查無資料）且不帶 detailList；
+  // 只有這個代碼視為 0 筆，0000 卻缺少清單仍當作格式變更。
+  const cardTransactions =
+    safeBankCode(cardTransactionResponse) === "1120"
+      ? { rsData: { detailList: [] } }
+      : cardTransactionResponse;
   const cardTransactionData = dataAt(cardTransactions);
   if (!Array.isArray(cardTransactionData.detailList)) {
     throw new MegabankProtocolError(

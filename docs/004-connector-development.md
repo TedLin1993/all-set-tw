@@ -786,7 +786,7 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 驗證碼準備及同步後的設定寫入會比對當初讀取的加密設定；promotion batch 也先檢查同一版本，期間若憑證已更新，不寫入舊帳務、舊憑證或同步游標。
 - 兆豐同步工作建立時停用；首次成功同步後依所有來源共用規則自動啟用。若使用者之後手動停用，再次手動同步不會重新啟用。
 - 存款清單取 `/fco/fco10001/home`；臺幣交易按帳戶查 `/fao/fao01001/query`，最多回溯三個月並處理 `tsqName` 分頁。外幣帳戶與餘額會同步，不查詢外幣交易。
-- 信用卡總覽與餘額取 `/fco/fco10007/home`，近三期帳單取 `/fao/fao01009/home`，消費取 `/fao/fao01010/home` 與 `query`。總覽 `creditCardBillInfoList` 為空時視為沒有信用卡，不查帳單與卡片清單、只同步存款；總覽有卡但帳單或卡片清單缺少預期欄位時仍整次失敗。
+- 信用卡總覽與餘額取 `/fco/fco10007/home`，近三期帳單取 `/fao/fao01009/home`，消費取 `/fao/fao01010/home` 與 `query`。總覽 `creditCardBillInfoList` 為空時視為沒有信用卡，不查帳單與卡片清單、只同步存款；總覽有卡但帳單或卡片清單缺少預期欄位時仍整次失敗。有卡但近三個月沒有消費時，消費 `query` 回代碼 `1120`（查無資料）且不帶 `detailList`，視為 0 筆消費並照常同步；回 `0000` 卻缺少 `detailList` 仍視為格式變更並整次失敗。
 - 總覽 `creditCardBillInfoList` 依 `ACCT_TYPE` 與 `CURR_CODE` 區分；`ACCT_MON=999912` 是未出帳，其餘僅取各組最新一期計算目前應繳，不累加歷史帳單。消費的 `acctMon=999912` 表示未入帳。
 - 貸款：剩餘本金來自同一個 `/fco/fco10001/home` 回應的 `loanInfoList`（`loanBal`），貸款清單與條件來自「我的貸款」`/fln/fln01001/home`（`loanNo`、`loanType`、`loanAmt`、`intRate`、`loanStartDate`／`loanEndDate`、`payPeriod`、`payAmt`、`payDate`、`deductionDate`，以貸款帳號對應）。所有貸款都輸出 `loan:megabank:<hash>` 帳戶與每日一筆的剩餘本金快照（含 `loanPaymentAmount`、已繳／總期數）；貸款種類含住宅、購屋、房屋或房貸者 `loanCategory` 為 `housing`，其他為 `other`，並寫入 `loanInterestRate`。raw 只留末四碼與條件。總覽 `loanInfoList` 為空陣列時不查；貸款是附加資料，查詢或解析失敗只略過貸款、不讓存款與信用卡同步失敗（連線錯誤除外），並記 `megabank_loans_skipped`（只含原因代碼）。
 - 信用卡消費由 `sync.ts` 提供 `raw.cardLast4`，使用共用 preparation 銜接待入帳與已入帳。同次回應兩個階段的 occurrence 不同時保留原授權列並隱藏；之後舊 sourceId 改以已入帳回傳時更新既有配對目標，避免重複顯示。配對與偏好移轉受同一加密設定版本保護。
