@@ -47,6 +47,7 @@
   } from "@/data/connectors/queries";
   import type {
     ConnectorId,
+    ConnectorSettings,
     QueuedSyncResponse,
     SyncJobRow,
     SyncTarget,
@@ -171,10 +172,12 @@
     if (job.lastStatus === "needs_user_action") return "需要處理";
     return "尚未同步";
   });
-  // 只在確認尚未設定時隱藏；設定查詢失敗或載入中不算。
+  // 只在確認尚未設定時隱藏；設定查詢失敗或載入中不算，
+  // 重新查詢失敗時保留的舊快取也不算。
   // 進行中、本次錯誤、中斷提示與保存的失敗原因仍需顯示。
   const hideUnconfiguredSyncStatus = $derived(
-    settings.data?.configured === false &&
+    settings.isSuccess &&
+      settings.data.configured === false &&
       !job?.running &&
       !error &&
       !interruptedSync &&
@@ -379,6 +382,11 @@
         sinotradeSyncAfterConnect = false;
       }
       for (const field of fields) values[field.key] = "";
+      // 儲存成功即已設定；先更新快取，避免重新查詢完成前沿用舊的未設定狀態。
+      qc.setQueryData<ConnectorSettings>(
+        queryKeys.connectorSettings(connectorId),
+        (old) => old && { ...old, configured: true },
+      );
       qc.invalidateQueries({
         queryKey: queryKeys.connectorSettings(connectorId),
       });
@@ -1518,34 +1526,36 @@
             </Button>
           </div>
         {/if}
-        <p class="mt-3 border-t border-border pt-3 text-sm">
-          最近同步結果：{bankOperation === "success"
-            ? "成功"
-            : bankOperation === "sync" && error
-              ? "失敗"
-              : job?.lastStatus === "success"
-                ? "成功"
-                : job?.lastStatus === "failed"
-                  ? "失敗"
-                  : job?.lastStatus === "needs_user_action"
-                    ? "未完成，需要驗證"
-                    : "尚未同步"}
-        </p>
-        {#if job?.lastRunAt}<p class="mt-1 text-sm text-muted-foreground">
-            最近嘗試：{formatDateTime(job.lastRunAt)}
-          </p>{/if}
-        <p class="mt-1 text-sm text-muted-foreground">
-          最近成功更新：{job?.lastSuccessAt
-            ? formatDateTime(job.lastSuccessAt)
-            : "尚無成功紀錄"}
-        </p>
-        {#if !error && bankOperation === "idle" && job?.lastStatus !== "success" && job?.lastError}<p
-            class="mt-1 text-sm text-coral"
+        {#if !hideUnconfiguredSyncStatus}<p
+            class="mt-3 border-t border-border pt-3 text-sm"
           >
-            最近失敗原因：{job.lastError.includes("transport")
-              ? "無法連線到銀行，請稍後再試。"
-              : job.lastError}
-          </p>{/if}
+            最近同步結果：{bankOperation === "success"
+              ? "成功"
+              : bankOperation === "sync" && error
+                ? "失敗"
+                : job?.lastStatus === "success"
+                  ? "成功"
+                  : job?.lastStatus === "failed"
+                    ? "失敗"
+                    : job?.lastStatus === "needs_user_action"
+                      ? "未完成，需要驗證"
+                      : "尚未同步"}
+          </p>
+          {#if job?.lastRunAt}<p class="mt-1 text-sm text-muted-foreground">
+              最近嘗試：{formatDateTime(job.lastRunAt)}
+            </p>{/if}
+          <p class="mt-1 text-sm text-muted-foreground">
+            最近成功更新：{job?.lastSuccessAt
+              ? formatDateTime(job.lastSuccessAt)
+              : "尚無成功紀錄"}
+          </p>
+          {#if !error && bankOperation === "idle" && job?.lastStatus !== "success" && job?.lastError}<p
+              class="mt-1 text-sm text-coral"
+            >
+              最近失敗原因：{job.lastError.includes("transport")
+                ? "無法連線到銀行，請稍後再試。"
+                : job.lastError}
+            </p>{/if}{/if}
       </section>
     {/if}
     <CaptchaBankConnectionHelp
