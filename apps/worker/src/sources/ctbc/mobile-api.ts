@@ -770,6 +770,16 @@ class CtbcMobileSession {
       isNoCreditCardMessage(response.message)
     )
       return;
+    // 只有信用卡、沒有臺幣存款帳戶的使用者，存款總覽回 SVC 9993。
+    // 視為無存款並繼續同步信用卡；只記錄固定事件，不記錄銀行訊息。
+    if (
+      resource === DEPOSIT_OVERVIEW_RESOURCE &&
+      system === "SVC" &&
+      code === "9993"
+    ) {
+      console.warn("[ctbc] deposit_overview_empty: no TWD deposit account");
+      return;
+    }
     if (
       !isLogin &&
       !isTwoStage &&

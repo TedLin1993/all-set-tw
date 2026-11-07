@@ -732,6 +732,71 @@ describe("中信登入診斷的憑證保護", () => {
   );
 });
 
+describe("只有信用卡的使用者", () => {
+  it("存款總覽回 SVC 9993 時視為無存款，繼續同步信用卡且不外洩銀行訊息", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetcher = bankApi([
+      loginResponse({ code: "0000", rsData: { isTwoStageLogin: false } }),
+      Response.json({
+        sys: "SVC",
+        code: "9993",
+        message: privateValue,
+        rsData: privateFields,
+      }),
+      Response.json({
+        code: "0000",
+        rsData: { cardDataList: [], billData: {} },
+      }),
+      Response.json({ code: "0000" }),
+    ]);
+
+    await expect(
+      createCtbcConnector(fetcher).sync(credentials),
+    ).resolves.toMatchObject({
+      bankAccounts: [],
+      bankBalanceSnapshots: [],
+      bankTransactions: [],
+    });
+
+    const resources = vi
+      .mocked(fetcher)
+      .mock.calls.slice(3)
+      .map(([, init]) => JSON.parse(String(init?.body)).resource);
+    expect(resources.slice(0, 3)).toEqual([
+      "/twrbm-general/ot001/010",
+      "/twrbm-deposit/qu001/010",
+      "/twrbm-card/qu002/010",
+    ]);
+    expect(resources.at(-1)).toBe("/twrbm-general/ot002/010");
+    expect(warn).toHaveBeenCalledWith(
+      "[ctbc] deposit_overview_empty: no TWD deposit account",
+    );
+    expectPrivateValuesAbsent(warn.mock.calls.flat().join("\n"));
+  });
+
+  it.each([
+    { sys: "SVC", code: "9994" },
+    { sys: "ESB", code: "9993" },
+  ])("存款總覽其他錯誤 $sys $code 仍視為失敗", async (failure) => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetcher = bankApi([
+      loginResponse({ code: "0000", rsData: { isTwoStageLogin: false } }),
+      Response.json({ ...failure, message: privateValue }),
+      Response.json({ code: "0000" }),
+    ]);
+
+    await expect(
+      createCtbcConnector(fetcher).sync(credentials),
+    ).rejects.toThrow();
+    const resources = vi
+      .mocked(fetcher)
+      .mock.calls.slice(3)
+      .map(([, init]) => JSON.parse(String(init?.body)).resource);
+    expect(resources).not.toContain("/twrbm-card/qu002/010");
+  });
+});
+
 describe("外幣查詢的重新驗證與失敗隔離", () => {
   const stages = [
     "/twrbm-fx/qu001/010",
