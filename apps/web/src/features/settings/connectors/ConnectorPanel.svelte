@@ -1574,7 +1574,7 @@
     </div>
   {/if}
   <div
-    class={`mt-3 rounded-xl border border-ink/10 bg-paper p-3 text-sm ${(connectorId === "tdcc" && !tdccConnectionReady && !job?.running) || (connectorId === "cathaybk" && !cathayConnectionReady && cathayVerificationStep !== "complete") || sinotradeSetup ? "hidden" : ""}`}
+    class={`mt-3 rounded-xl border border-ink/10 bg-paper p-3 text-sm ${(!settings.data?.configured && !job?.running && !error) || (connectorId === "tdcc" && !tdccConnectionReady && !job?.running) || (connectorId === "cathaybk" && !cathayConnectionReady && cathayVerificationStep !== "complete") || sinotradeSetup ? "hidden" : ""}`}
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
