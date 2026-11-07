@@ -81,12 +81,30 @@ const cardStatusResponseSchema = z.object({
   }),
 });
 
+// 官方 C0101 前端把 returnCode 結尾為 702 的狀態查詢錯誤，顯示成與 Invalid 相同的無卡畫面。
+const noCardStatusResponseSchema = z.object({
+  returnCode: z.string().endsWith("702"),
+});
+
 export function parseCathayCardStatus(value: unknown) {
   const parsed = cardStatusResponseSchema.safeParse(value);
-  if (!parsed.success) {
-    throw new Error("國泰世華信用卡狀態回應無法辨識，未更新資料。");
-  }
-  return parsed.data.content.cardStatus;
+  if (parsed.success) return parsed.data.content.cardStatus;
+  if (noCardStatusResponseSchema.safeParse(value).success) return "Invalid";
+  const returnCode =
+    typeof value === "object" && value !== null && "returnCode" in value
+      ? value.returnCode
+      : undefined;
+  console.warn(
+    JSON.stringify({
+      event: "cathaybk_card_status_unrecognized",
+      returnCode:
+        typeof returnCode === "string" &&
+        /^[A-Za-z0-9_-]{1,20}$/.test(returnCode)
+          ? returnCode
+          : typeof returnCode,
+    }),
+  );
+  throw new Error("國泰世華信用卡狀態回應無法辨識，未更新資料。");
 }
 
 const foreignDepositResponseSchema = z.object({
