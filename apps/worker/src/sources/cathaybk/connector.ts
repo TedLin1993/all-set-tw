@@ -1056,9 +1056,47 @@ async function dismissInterstitialIfPresent(
   return hasWarning as boolean;
 }
 
+/** 登入頁的系統公告在 DOMContentLoaded 後才淡入；最多等這麼久。 */
+const CATHAY_SYSTEM_MESSAGE_SHOW_TIMEOUT_MS = 3_000;
+
 export async function dismissCathaySystemMessageIfPresent(
-  page: Pick<CathayLoginPage, "$" | "waitForSelector">,
+  page: Pick<
+    CathayLoginPage,
+    "$" | "evaluate" | "waitForFunction" | "waitForSelector"
+  >,
 ): Promise<boolean> {
+  // 公告先以 `modal fade` 掛在頁面上，之後才加上 `show` 開始動畫：背景淡入 0.15 秒、對話框
+  // 下滑 0.3 秒。Bootstrap 4 在動畫結束前會忽略關閉（`_isTransitioning`）。不能靠指令往返延遲
+  // 剛好蓋過這段時間：延遲短時（例如同機的瀏覽器）會在公告出現前就判定沒有公告，或在動畫中
+  // 按下「我知道了」而關不掉。所以等對話框動畫結束（transform 回到 none）再操作。
+  const shown = await page
+    .waitForFunction(
+      () => {
+        const modal = document.querySelector<HTMLElement>(
+          "#divSystemLoginMsgList",
+        );
+        const dismissed = (
+          window as typeof window & { __cathaySystemMessageDismissed?: boolean }
+        ).__cathaySystemMessageDismissed;
+        if (!modal?.querySelector("button.btn-fill") || dismissed) {
+          return "absent";
+        }
+        const dialog = modal.querySelector<HTMLElement>(".modal-dialog");
+        return modal.classList.contains("show") &&
+          getComputedStyle(modal).opacity === "1" &&
+          (!dialog || getComputedStyle(dialog).transform === "none")
+          ? "shown"
+          : false;
+      },
+      { timeout: CATHAY_SYSTEM_MESSAGE_SHOW_TIMEOUT_MS },
+    )
+    .then(async (handle) => (await handle.jsonValue()) === "shown")
+    .catch((error: unknown) => {
+      if (error instanceof TimeoutError) return false;
+      throw error;
+    });
+  if (!shown) return false;
+
   const selector = "#divSystemLoginMsgList.show button.btn-fill";
   let dismissButton = await page.$(selector);
   if (!dismissButton) return false;
@@ -1078,6 +1116,12 @@ export async function dismissCathaySystemMessageIfPresent(
       await page.waitForSelector("#divSystemLoginMsgList.show", {
         hidden: true,
         timeout: 5000,
+      });
+      // 同一頁再次檢查時不必再等公告淡入；重新載入頁面後旗標就會消失。
+      await page.evaluate(() => {
+        (
+          window as typeof window & { __cathaySystemMessageDismissed?: boolean }
+        ).__cathaySystemMessageDismissed = true;
       });
       return true;
     }
