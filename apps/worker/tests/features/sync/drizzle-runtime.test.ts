@@ -16,6 +16,7 @@ import {
   failSyncJob,
   nextSyncRunAt,
   findNextDueSyncJob,
+  markManualSyncFailure,
 } from "../../../src/db";
 import * as dbApi from "../../../src/db";
 import { findSyncJob } from "../../../src/features/sync/scheduling/repository";
@@ -26,6 +27,7 @@ import {
 } from "../../../src/features/sync/scheduling/batch-repository";
 import { syncScheduleRoutes } from "../../../src/features/sync/scheduling/route";
 import { recoverStalledSyncRuns } from "../../../src/features/sync/scheduling/recovery";
+import { runSchedulerTick } from "../../../src/features/sync/scheduling/scheduler";
 import {
   createSyncExecution,
   guardSyncDatabase,
@@ -348,6 +350,120 @@ describe("同步鎖與原子寫入（隔離 D1）", () => {
     }
   });
 
+  it("需使用者處理的工作手動失敗或中斷後，過期到期時間不會觸發新的預設批次", async () => {
+    const db = harness.binding;
+    // 2026-11-07 08:30（台北）預設批次後，兆豐停在 needs_user_action；
+    // 19:13 手動同步失敗，下一次 tick 不應因殘留的 08:30 到期時間重跑整輪。
+    const scheduledAt = "2026-11-07T00:30:00.000Z";
+    const manualAt = "2026-11-07T11:13:00.000Z";
+    const nextSlot = "2026-11-08T00:30:00.000Z";
+    await db.batch([
+      db.prepare(
+        `UPDATE sync_schedule_settings SET interval_minutes = 1440,
+         preferred_time = '08:30', preferred_weekday = 1, preferred_weekdays = NULL`,
+      ),
+      db.prepare("DELETE FROM scheduled_sync_batch_results"),
+      db.prepare("DELETE FROM scheduled_sync_batches"),
+      ...(
+        [
+          ["megabank", "needs_user_action", scheduledAt],
+          ["hncb", "needs_user_action", scheduledAt],
+          ["esun", "success", nextSlot],
+        ] as const
+      ).flatMap(([connector, status, nextRunAt]) => [
+        db
+          .prepare(
+            `INSERT INTO sync_jobs (id, connector_id, scope, enabled, schedule_mode, interval_minutes, preferred_time, next_run_at, last_status, created_at, updated_at)
+             VALUES (?, ?, 'all', 1, 'inherit', 1440, '08:30', ?, ?, ?, ?)`,
+          )
+          .bind(`${connector}:all`, connector, nextRunAt, status, now, now),
+        db
+          .prepare(
+            "INSERT INTO connector_settings (id, connector_id, encrypted_config, created_at, updated_at) VALUES (?, ?, 'config', ?, ?)",
+          )
+          .bind(connector, connector, now, now),
+      ]),
+    ]);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(manualAt));
+    try {
+      expect(
+        await acquireSyncJobLock(db, {
+          lockRowId: "megabank:all",
+          scope: "all",
+          trigger: "manual",
+          runId: "manual-run",
+          leaseMs: 60_000,
+        }),
+      ).toBe(true);
+      await markManualSyncFailure(
+        db,
+        "megabank",
+        "all",
+        { status: "failed", errorMessage: "登入失敗" },
+        "manual-run",
+      );
+      await releaseSyncJobLock(db, "megabank:all", "manual-run");
+      expect(await findSyncJob(db, "megabank", "all")).toMatchObject({
+        last_status: "failed",
+        next_run_at: nextSlot,
+      });
+
+      // 中斷的手動同步由 recovery 結案為 failed，同樣推進過期到期時間。
+      await acquireSyncJobLock(db, {
+        lockRowId: "hncb:all",
+        scope: "all",
+        trigger: "manual",
+        runId: "interrupted-run",
+        leaseMs: 1,
+      });
+      vi.setSystemTime(new Date(Date.parse(manualAt) + 60_000));
+      await recoverStalledSyncRuns({ DB: db } as Env);
+      expect(await findSyncJob(db, "hncb", "all")).toMatchObject({
+        last_status: "failed",
+        locked_by: null,
+        next_run_at: nextSlot,
+      });
+
+      expect(await findNextDueSyncJob(db)).toBeNull();
+      expect(
+        await runSchedulerTick(
+          { DB: db } as Env,
+          {
+            cron: "*/10 * * * *",
+          } as ScheduledController,
+        ),
+      ).toBe(false);
+      expect(
+        await db
+          .prepare("SELECT COUNT(*) AS count FROM scheduled_sync_batches")
+          .first("count"),
+      ).toBe(0);
+
+      // 未過期的到期時間不因手動失敗而延後。
+      await acquireSyncJobLock(db, {
+        lockRowId: "esun:all",
+        scope: "all",
+        trigger: "manual",
+        runId: "esun-run",
+        leaseMs: 60_000,
+      });
+      await markManualSyncFailure(
+        db,
+        "esun",
+        "all",
+        { status: "failed", errorMessage: "連線逾時" },
+        "esun-run",
+      );
+      expect(await findSyncJob(db, "esun", "all")).toMatchObject({
+        last_status: "failed",
+        next_run_at: nextSlot,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("鎖被接管後，舊同步不能寫入金融資料、cursor 或新工作的結果", async () => {
     const db = harness.binding;
     await db
@@ -620,6 +736,10 @@ describe("同步鎖與原子寫入（隔離 D1）", () => {
       lastStatus: "failed",
       lockedBy: null,
     });
+    // 手動 run 逾時失敗時，過期的到期時間推進到下一個時段，不立刻觸發排程。
+    expect(
+      Date.parse((await findSyncJob(db, "einvoice", "all"))!.next_run_at),
+    ).toBeGreaterThan(current);
     expect(
       (
         await createOrGetActiveEinvoiceRun(db, {

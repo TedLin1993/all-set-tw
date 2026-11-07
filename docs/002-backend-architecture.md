@@ -959,8 +959,9 @@ connector lock 保留到報告結果寫入及 run 成功結案；失敗的 run t
 - 最多處理 1 個到期工作，讓每個 connector 使用獨立的 Worker invocation 與 subrequest 額度。
 - 每個工作使用獨立 run ID。
 - 成功後更新下次執行時間。
-- 需要 OTP、CAPTCHA 或重新登入時記錄為 `needs_user_action`。
-- 其他錯誤記錄為 `failed`。
+- 需要 OTP、CAPTCHA 或重新登入時記錄為 `needs_user_action`，保留原本的下次執行時間；此狀態不會被挑選，所以時間可能停在過去。
+- 其他錯誤記錄為 `failed`，並更新下次執行時間。
+- 手動同步失敗（含中斷後由 recovery 結案）時，若下次執行時間已過，會推進到下一個排程時段；未過期的時間保留，不延後原排程。這樣工作離開 `needs_user_action` 時，殘留的過期時間不會讓下一次 tick 在非排程時段觸發整輪預設排程。
 - Log 使用結構化 JSON，包含 connector、scope、trigger、status 與 duration。
 
 ## 同步資料寫入

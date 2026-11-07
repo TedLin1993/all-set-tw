@@ -12,7 +12,11 @@ import {
 } from "./protocol";
 import { EInvoiceV2Client, type EInvoiceV2Session } from "./v2-client";
 import type { SyncNotificationStatus } from "@taiwan-fin-hub/shared";
-import { getConnectorSettings, nextSyncRunAt } from "../../db";
+import {
+  getConnectorSettings,
+  nextRunAtAfterManualFailure,
+  nextSyncRunAt,
+} from "../../db";
 import { configEncryptionKey } from "../../platform/config";
 import { decryptJson, encryptJson } from "../../platform/crypto";
 import type { Env } from "../../platform/env";
@@ -528,7 +532,7 @@ async function finalizeEinvoiceRun(
           job.next_run_at,
           job.preferred_weekdays,
         )
-      : job.next_run_at;
+      : nextRunAtAfterManualFailure(job, status, now);
   const activeGuard = `EXISTS (
     SELECT 1 FROM einvoice_sync_runs
     WHERE id = ? AND status IN ('queued', 'initializing', 'processing')
