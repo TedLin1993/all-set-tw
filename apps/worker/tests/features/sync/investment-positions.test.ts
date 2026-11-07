@@ -360,6 +360,40 @@ describe("投資持倉欄位與跨來源 scope 去重（隔離 D1）", () => {
     expect(rows.find(({ symbol }) => symbol === "OLD")).toBeUndefined();
   });
 
+  it("同一集保帳戶的股票與 ETF 最新日期不同時，兩種資產類型都保留", async () => {
+    await write(
+      db,
+      {
+        connectorId: "tdcc",
+        sourceId: "fixture:tdcc-stock",
+        date: "2026-10-20",
+        symbol: "STK1",
+        assetType: "stock",
+        brokerNo: "807",
+        brokerAccount: "A001",
+        market: "TW",
+        marketValue: 100,
+      },
+      {
+        connectorId: "tdcc",
+        sourceId: "fixture:tdcc-etf",
+        date: "2026-10-21",
+        symbol: "ETF1",
+        assetType: "etf",
+        brokerNo: "807",
+        brokerAccount: "A001",
+        market: "TW",
+        marketValue: 110,
+      },
+    );
+
+    const rows = await listLatestInvestmentPositions(db, 20);
+    expect(rows.map(({ symbol }) => symbol)).toEqual(
+      expect.arrayContaining(["ETF1", "STK1"]),
+    );
+    expect(rows).toHaveLength(2);
+  });
+
   it("先取 sinotrade 每種資產類型的最新完整 snapshot，再做帳戶 scope 去重", async () => {
     await write(
       db,

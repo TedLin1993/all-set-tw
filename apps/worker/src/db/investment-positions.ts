@@ -4,8 +4,10 @@ import { investmentPositions } from "./schema";
 /**
  * Select the complete latest snapshot for each safe holding scope.
  *
- * Known broker/account/market rows are grouped across connectors so a direct
- * broker snapshot can supersede TDCC for the same account and market. Rows
+ * Known broker/account/market/asset-type rows are grouped across connectors so
+ * a direct broker snapshot can supersede TDCC for the same account, market and
+ * asset type. Keeping the asset type in the scope also stops one asset type's
+ * newer snapshot from hiding another's within a single connector. Rows
  * without a complete identity stay scoped to their connector and asset type;
  * they must never be guessed into another account or market. The first CTE
  * keeps the existing connector + asset type latest-snapshot boundary before
@@ -34,7 +36,8 @@ export const LATEST_INVESTMENT_POSITION_IDS_SQL = `WITH latest_connector_asset A
        AND NULLIF(TRIM(position.broker_account), '') IS NOT NULL
        AND NULLIF(TRIM(position.market), '') IS NOT NULL
       THEN 'identity|' || TRIM(position.broker_no) || '|' ||
-           TRIM(position.broker_account) || '|' || UPPER(TRIM(position.market))
+           TRIM(position.broker_account) || '|' || UPPER(TRIM(position.market)) ||
+           '|' || position.asset_type
       ELSE 'connector|' || position.connector_id || '|' ||
            position.asset_type || '|' || COALESCE(UPPER(TRIM(position.market)), '')
     END AS scope_key

@@ -633,7 +633,7 @@ export const connectorCatalog = {
     bankCode: null,
     connectionMode: "browser_per_sync",
     scopes: ["all"],
-    capabilities: ["investment_position"],
+    capabilities: ["investment_position", "investment_transaction"],
     publicFields: [],
     credentialFields: [
       { key: "userId", label: "身分證字號", type: "text" },

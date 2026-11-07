@@ -3,6 +3,7 @@ import {
   investmentPositions,
   investmentTransactions,
   isLatestInvestmentPosition,
+  isNotSupersededInvestmentTransaction,
 } from "../../db";
 import { and, asc, desc, sql } from "drizzle-orm";
 import type { MonthDateRange } from "../../platform/month-range";
@@ -123,9 +124,12 @@ export async function listInvestmentTransactions(
     .select(investmentTransactionColumns)
     .from(investmentTransactions)
     .where(
-      cursor
-        ? sql`(${investmentTransactions.effectiveDate}, ${investmentTransactions.updatedAt}, ${investmentTransactions.id}) < (${cursor.effectiveDate}, ${cursor.updatedAt}, ${cursor.id})`
-        : undefined,
+      and(
+        isNotSupersededInvestmentTransaction(),
+        cursor
+          ? sql`(${investmentTransactions.effectiveDate}, ${investmentTransactions.updatedAt}, ${investmentTransactions.id}) < (${cursor.effectiveDate}, ${cursor.updatedAt}, ${cursor.id})`
+          : undefined,
+      ),
     )
     .orderBy(
       desc(investmentTransactions.effectiveDate),
@@ -145,12 +149,15 @@ export async function listInvestmentTransactionsInRange(
     .select(investmentTransactionColumns)
     .from(investmentTransactions)
     .where(
-      days
-        ? sql`substr(${investmentTransactions.effectiveDate}, 1, 10) IN (SELECT value FROM json_each(${JSON.stringify(days)}))`
-        : and(
-            sql`${investmentTransactions.effectiveDate} >= ${range.from}`,
-            sql`${investmentTransactions.effectiveDate} < ${range.to}`,
-          ),
+      and(
+        isNotSupersededInvestmentTransaction(),
+        days
+          ? sql`substr(${investmentTransactions.effectiveDate}, 1, 10) IN (SELECT value FROM json_each(${JSON.stringify(days)}))`
+          : and(
+              sql`${investmentTransactions.effectiveDate} >= ${range.from}`,
+              sql`${investmentTransactions.effectiveDate} < ${range.to}`,
+            ),
+      ),
     )
     .orderBy(
       desc(investmentTransactions.effectiveDate),

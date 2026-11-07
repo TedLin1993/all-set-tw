@@ -96,6 +96,8 @@ const CERTIFICATE_RECORD_RETRY_DELAYS_MS = [
   4_000, 8_000, 12_000, 16_000, 20_000,
 ];
 const CERTIFICATE_FINISH_BUDGET_MS = 85_000;
+// 每次重試送出後，最多還會等官方回應 waitForVerification 的 12 秒；預算要把這段留給最後一次。
+const CERTIFICATE_SUBMIT_RESERVE_MS = 12_000;
 const CERTIFICATE_RECORD_MISSING =
   "官方系統尚未登記剛簽發的憑證（rcode 8040），已自動重試仍未完成。請取消後重新連線。";
 
@@ -805,7 +807,7 @@ async function signInWithIssuedCertificate(
   for (const delay of CERTIFICATE_RECORD_RETRY_DELAYS_MS) {
     if (
       challenge.message !== CERTIFICATE_RECORD_MISSING ||
-      Date.now() + delay > giveUpAt ||
+      Date.now() + delay + CERTIFICATE_SUBMIT_RESERVE_MS > giveUpAt ||
       !(await dismissMissingCertificateRecord(browser, platform))
     )
       break;
