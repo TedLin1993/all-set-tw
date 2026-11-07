@@ -418,6 +418,34 @@ export async function failSyncJob(
   return result.meta.changes === 1;
 }
 
+/**
+ * 手動同步以 `failed` 結案時，將已過期的 `next_run_at` 推進到下一個排程時段。
+ *
+ * `needs_user_action` 期間 scheduler 不挑選此工作，`next_run_at` 會停在過去；
+ * 手動失敗或中斷把狀態改成 `failed` 後，若保留過期時間，下一次 tick 會立刻視為到期，
+ * 並觸發整輪預設排程。未過期的到期時間保留，手動失敗不延後原本的排程；
+ * `needs_user_action` 仍不被挑選，維持原值。
+ */
+export function nextRunAtAfterManualFailure(
+  job: Pick<
+    SyncJobRow,
+    "interval_minutes" | "preferred_time" | "next_run_at" | "preferred_weekdays"
+  >,
+  status: SyncStatus,
+  now = new Date(),
+) {
+  if (status !== "failed" || Date.parse(job.next_run_at) > now.getTime()) {
+    return job.next_run_at;
+  }
+  return nextSyncRunAt(
+    job.interval_minutes,
+    job.preferred_time,
+    now,
+    job.next_run_at,
+    job.preferred_weekdays,
+  );
+}
+
 export async function markManualSyncSuccess(
   db: D1Database,
   connectorId: string,
@@ -446,20 +474,39 @@ export async function markManualSyncFailure(
   input: SyncFailureInput,
   runId: string,
 ) {
-  const now = new Date().toISOString();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const jobId = `${connectorId}:${scope}`;
+  const job = await createDrizzle(db)
+    .select(syncJobSelection)
+    .from(syncJobs)
+    .where(eq(syncJobs.id, jobId))
+    .limit(1)
+    .get()
+    .catch((error) => {
+      throw sanitizeDatabaseError(error);
+    });
+  const nextRunAt = job
+    ? nextRunAtAfterManualFailure(job, input.status, now)
+    : undefined;
   await createDrizzle(db)
     .update(syncJobs)
     .set({
       lastStatus: input.status,
       lastError: input.errorMessage,
       lastErrorCode: input.errorCode ?? null,
-      lastRunAt: now,
-      updatedAt: now,
+      lastRunAt: nowIso,
+      // 讀取後排程可能被改成未來時間；只覆寫仍過期的值。
+      ...(nextRunAt && nextRunAt !== job?.next_run_at
+        ? {
+            nextRunAt: sql`CASE WHEN ${syncJobs.nextRunAt} <= ${nowIso} THEN ${nextRunAt} ELSE ${syncJobs.nextRunAt} END`,
+          }
+        : {}),
+      updatedAt: nowIso,
     })
     .where(
       and(
-        eq(syncJobs.connectorId, connectorId),
-        eq(syncJobs.scope, scope),
+        eq(syncJobs.id, jobId),
         sql`EXISTS (SELECT 1 FROM sync_jobs AS owner WHERE owner.id = ${`${connectorId}:all`} AND owner.locked_by = ${runId})`,
       ),
     )

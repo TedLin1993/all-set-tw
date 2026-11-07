@@ -130,6 +130,7 @@ export {
   findNextDueSyncJob,
   markManualSyncFailure,
   markManualSyncSuccess,
+  nextRunAtAfterManualFailure,
   nextSyncRunAt,
   releaseSyncJobLock,
   renewSyncJobLock,
