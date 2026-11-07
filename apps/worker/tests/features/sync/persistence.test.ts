@@ -12,6 +12,7 @@ import {
   linkCanonicalBankAccountsStatement,
 } from "../../../src/features/sync/connector-repository";
 import { deactivateMissingCathayLoanAccountsStatement } from "../../../src/sources/cathaybk/repository";
+import { reconcileHncbSingleCardSummaryAccountStatements } from "../../../src/sources/hncb/repository";
 import {
   bankAccountRecord,
   bankBalanceSnapshotRecord,
@@ -1177,6 +1178,109 @@ describe("同步資料完整性（隔離 D1）", () => {
       ).toEqual([]);
     },
   );
+
+  it("摘要卡帳戶併回實體卡後，來源再次退回摘要卡仍更新同一筆快照、帳單與交易", async () => {
+    const write = (
+      cardLast4: "main" | "1234",
+      balance: number,
+      asOfAt: string,
+    ) => {
+      const accountId = `credit:hncb:${cardLast4}`;
+      const activity =
+        cardLast4 === "main"
+          ? [
+              creditCardBillRecord(
+                "hncb",
+                {
+                  accountId,
+                  sourceId: "hncb:card:bill:2026-10",
+                  billingPeriod: "2026-10",
+                  statementAmount: -balance,
+                  currency: "TWD",
+                },
+                now,
+              ),
+              bankTransactionRecord(
+                "hncb",
+                {
+                  accountId,
+                  sourceId: "hncb:card:tx:v2:main:2026-10-05:252:1",
+                  authorizedAt: "2026-10-05",
+                  postedDate: "2026-10-06",
+                  description: "合成商店",
+                  amount: -252,
+                  currency: "TWD",
+                  status: "posted",
+                },
+                now,
+              ),
+            ]
+          : [];
+      return persistStagedSyncWrite(db, {
+        records: [
+          bankAccountRecord(
+            "hncb",
+            { sourceId: accountId, accountType: "credit", currency: "TWD" },
+            now,
+          ),
+          bankBalanceSnapshotRecord(
+            "hncb",
+            {
+              accountId,
+              sourceId: `snapshot:hncb:credit:${cardLast4}`,
+              balance,
+              currency: "TWD",
+              asOfAt,
+            },
+            now,
+          ),
+          ...activity,
+        ],
+        afterPromoteStatements:
+          reconcileHncbSingleCardSummaryAccountStatements(db),
+      });
+    };
+    const rows = async (table: string, columns: string) =>
+      (
+        await db
+          .prepare(
+            `SELECT ${columns} FROM ${table} WHERE connector_id = 'hncb' ORDER BY id`,
+          )
+          .all()
+      ).results;
+    const card = "hncb:credit:hncb:1234";
+
+    await write("main", -100, "2026-10-01T00:00:00Z");
+    await write("1234", -200, "2026-10-02T00:00:00Z");
+    expect(await write("main", -300, "2026-10-03T00:00:00Z")).toMatchObject({
+      bankTransactions: 0,
+    });
+
+    expect(await rows("bank_accounts", "id")).toEqual([{ id: card }]);
+    expect(
+      await rows("bank_balance_snapshots", "account_id, source_id, balance"),
+    ).toEqual([
+      {
+        account_id: card,
+        source_id: "snapshot:hncb:credit:1234",
+        balance: -200,
+      },
+      {
+        account_id: card,
+        source_id: "snapshot:hncb:credit:main",
+        balance: -300,
+      },
+    ]);
+    expect(
+      await rows("credit_card_bills", "account_id, statement_amount"),
+    ).toEqual([{ account_id: card, statement_amount: 300 }]);
+    expect(await rows("bank_transactions", "account_id")).toEqual([
+      { account_id: card },
+    ]);
+    expect(
+      (await db.prepare("PRAGMA foreign_key_check").all()).results,
+    ).toEqual([]);
+  });
 
   it("玉山即時授權與未入帳明細接到入帳，跨來源店名不同仍保留單筆及所有使用者設定", async () => {
     const sourceId = "credit:esun:1234";
