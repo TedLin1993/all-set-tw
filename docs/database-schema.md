@@ -9,9 +9,9 @@
 ## 目錄
 
 - Tables：35
-- Explicit indexes：47
+- Explicit indexes：48
 - Other objects：0
-- Migrations：69
+- Migrations：72
 
 ## Tables
 
@@ -32,8 +32,8 @@
 | [`einvoice_sync_run_items`](#einvoice_sync_run_items) | 電子發票持久化同步中，每張發票的明細擷取工作與待寫入資料。 | 17 | 1 | 1 |
 | [`einvoice_sync_runs`](#einvoice_sync_runs) | 電子發票跨 Queue invocation 執行的持久化同步記錄。 | 21 | 2 | 2 |
 | [`exchange_rates`](#exchange_rates) | 將外幣換算為新台幣時使用的最新匯率。 | 3 | 0 | 0 |
-| [`investment_positions`](#investment_positions) | 投資帳戶在特定日期的持倉與資產市值快照。 | 14 | 0 | 4 |
-| [`investment_transactions`](#investment_transactions) | 投資帳戶的買賣、配息或其他證券交易明細。 | 22 | 0 | 3 |
+| [`investment_positions`](#investment_positions) | 投資帳戶在特定日期的持倉、成本、損益與資產市值快照。 | 19 | 0 | 5 |
+| [`investment_transactions`](#investment_transactions) | 投資帳戶的買賣、配息或其他證券交易明細。 | 23 | 0 | 3 |
 | [`invoice_line_items`](#invoice_line_items) | 電子發票底下的商品或服務明細。 | 13 | 1 | 2 |
 | [`invoice_transaction_preferences`](#invoice_transaction_preferences) | 使用者對電子發票與銀行交易是否關聯的決策。 | 5 | 2 | 2 |
 | [`invoices`](#invoices) | 電子發票的抬頭與總額主檔。 | 11 | 0 | 2 |
@@ -855,8 +855,8 @@ CREATE TABLE "exchange_rates" (
 
 ### `investment_positions`
 
-> 用途：投資帳戶在特定日期的持倉與資產市值快照。
-> 注意：同一 connector、source 與日期可有一組持倉；最新持倉與分頁查詢依 as_of_date。
+> 用途：投資帳戶在特定日期的持倉、成本、損益與資產市值快照。
+> 注意：同一 connector、source 與日期可有一組持倉；最新查詢先取各 connector、asset type 的原始最新 snapshot，再以台灣曆日依可辨識的 broker、account、market scope 去重，未知帳戶維持 connector 隔離。
 
 #### Columns
 
@@ -868,14 +868,19 @@ CREATE TABLE "exchange_rates" (
 | 4 | `asset_type` | 資產類型，目前限制為 stock、etf、fund 或 crypto；crypto 為加密貨幣交易所持倉，市值為同步當下換算的台幣。 | TEXT | NO | — | — | — |
 | 5 | `symbol` | 證券、基金或 ETF 的代號；crypto 為大寫幣種代碼，合約權益與錢包總值為 NULL。 | TEXT | YES | — | — | — |
 | 6 | `name` | 投資標的名稱；crypto 的幣種列為交易所名稱，合約權益與錢包總值為帳戶名稱。 | TEXT | NO | — | — | — |
-| 7 | `quantity` | 持有數量。 | REAL | YES | — | — | — |
-| 8 | `market_value` | 持倉的市場價值。 | INTEGER | YES | — | — | — |
-| 9 | `cash_balance` | 此投資帳戶或資產項目中的現金餘額。 | INTEGER | YES | — | — | — |
-| 10 | `currency` | 市值與現金使用的幣別，預設為 TWD。 | TEXT | NO | 'TWD' | — | — |
-| 11 | `as_of_date` | 持倉快照所代表的日期。 | TEXT | NO | — | — | — |
-| 12 | `raw_payload` | 連接器回傳的原始或正規化 JSON。 | TEXT | YES | — | — | — |
-| 13 | `created_at` | 持倉首次寫入的時間。 | TEXT | NO | — | — | — |
-| 14 | `updated_at` | 持倉最後更新的時間。 | TEXT | NO | — | — | — |
+| 7 | `broker_no` | 證券商代碼；來源無法可靠辨識時為 NULL。 | TEXT | YES | — | — | — |
+| 8 | `broker_account` | 證券商帳號；來源無法可靠辨識時為 NULL。 | TEXT | YES | — | — | — |
+| 9 | `market` | 市場代碼，例如 TW 或 US；來源無法可靠辨識時為 NULL。 | TEXT | YES | — | — | — |
+| 10 | `quantity` | 持有數量。 | REAL | YES | — | — | — |
+| 11 | `market_value` | 持倉的市場價值，保留來源提供的原幣小數。 | REAL | YES | — | — | — |
+| 12 | `cash_balance` | 此投資帳戶或資產項目中的現金餘額，保留來源提供的原幣小數。 | REAL | YES | — | — | — |
+| 13 | `cost_basis` | 來源提供的持倉成本；來源未提供時為 NULL，不由市值與損益反推。 | REAL | YES | — | — | — |
+| 14 | `unrealized_pnl` | 來源提供的未實現損益；來源未提供時為 NULL，不由市值與成本反推。 | REAL | YES | — | — | — |
+| 15 | `currency` | 市值與現金使用的幣別，預設為 TWD。 | TEXT | NO | 'TWD' | — | — |
+| 16 | `as_of_date` | 持倉快照所代表的日期。 | TEXT | NO | — | — | — |
+| 17 | `raw_payload` | 連接器回傳的原始或正規化 JSON。 | TEXT | YES | — | — | — |
+| 18 | `created_at` | 持倉首次寫入的時間。 | TEXT | NO | — | — | — |
+| 19 | `updated_at` | 持倉最後更新的時間。 | TEXT | NO | — | — | — |
 
 #### Foreign keys
 
@@ -887,6 +892,7 @@ CREATE TABLE "exchange_rates" (
 | --- | :---: | :---: | --- | --- |
 | `idx_investment_positions_as_of_date` | 否 | 否 | `as_of_date` | `CREATE INDEX idx_investment_positions_as_of_date<br>  ON investment_positions (as_of_date)` |
 | `idx_investment_positions_asset_type` | 否 | 否 | `asset_type` | `CREATE INDEX idx_investment_positions_asset_type<br>  ON investment_positions (asset_type)` |
+| `idx_investment_positions_identity_scope` | 否 | 否 | `broker_no`, `broker_account`, `market`, `as_of_date`, `updated_at` | `CREATE INDEX idx_investment_positions_identity_scope<br>  ON investment_positions (broker_no, broker_account, market, as_of_date DESC, updated_at DESC)` |
 | `idx_investment_positions_latest_scope` | 否 | 否 | `connector_id`, `asset_type`, `as_of_date` | `CREATE INDEX idx_investment_positions_latest_scope<br>  ON investment_positions (connector_id, asset_type, as_of_date DESC)` |
 | `idx_investment_positions_page` | 否 | 否 | `as_of_date`, `asset_type`, `name`, `id` | `CREATE INDEX idx_investment_positions_page<br>  ON investment_positions (as_of_date DESC, asset_type ASC, name ASC, id ASC)` |
 
@@ -900,9 +906,14 @@ CREATE TABLE "investment_positions" (
   asset_type TEXT NOT NULL CHECK (asset_type IN ('stock', 'etf', 'fund', 'crypto')),
   symbol TEXT,
   name TEXT NOT NULL,
+  broker_no TEXT,
+  broker_account TEXT,
+  market TEXT,
   quantity REAL,
-  market_value INTEGER,
-  cash_balance INTEGER,
+  market_value REAL,
+  cash_balance REAL,
+  cost_basis REAL,
+  unrealized_pnl REAL,
   currency TEXT NOT NULL DEFAULT 'TWD',
   as_of_date TEXT NOT NULL,
   raw_payload TEXT,
@@ -943,6 +954,7 @@ CREATE TABLE "investment_positions" (
 | 20 | `created_at` | 交易首次寫入的時間。 | TEXT | NO | — | — | — |
 | 21 | `updated_at` | 交易最後更新的時間。 | TEXT | NO | — | — | — |
 | 22 | `effective_date` | 由 trade_date 優先、posted_date 備援產生的排序日期。 | TEXT | YES | — | — | virtual |
+| 23 | `realized_pnl` | 來源提供的賣出已實現損益（已扣手續費與交易稅）；買進或來源沒有完整成本時為 NULL。 | REAL | YES | — | — | — |
 
 #### Foreign keys
 
@@ -980,7 +992,7 @@ CREATE TABLE "investment_transactions" (
   currency TEXT NOT NULL DEFAULT 'TWD',
   raw_payload TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL, effective_date TEXT AS (COALESCE(trade_date, posted_date, '')),
+  updated_at TEXT NOT NULL, effective_date TEXT AS (COALESCE(trade_date, posted_date, '')), realized_pnl REAL,
   UNIQUE (connector_id, account_id, source_id)
 )
 ```
@@ -1925,6 +1937,9 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0069_chb_sync_job.sql`](../apps/worker/migrations/0069_chb_sync_job.sql)
 - [`0070_align_inherited_sync_schedules.sql`](../apps/worker/migrations/0070_align_inherited_sync_schedules.sql)
 - [`0071_bank_transaction_preference_note.sql`](../apps/worker/migrations/0071_bank_transaction_preference_note.sql)
+- [`0072_investment_position_identity_and_pnl.sql`](../apps/worker/migrations/0072_investment_position_identity_and_pnl.sql)
+- [`0073_sinotrade_sync_job.sql`](../apps/worker/migrations/0073_sinotrade_sync_job.sql)
+- [`0074_investment_transaction_realized_pnl.sql`](../apps/worker/migrations/0074_investment_transaction_realized_pnl.sql)
 
 ## 程式碼導覽
 

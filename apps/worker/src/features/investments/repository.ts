@@ -3,6 +3,7 @@ import {
   investmentPositions,
   investmentTransactions,
   isLatestInvestmentPosition,
+  isNotSupersededInvestmentTransaction,
 } from "../../db";
 import { and, asc, desc, sql } from "drizzle-orm";
 import type { MonthDateRange } from "../../platform/month-range";
@@ -25,6 +26,7 @@ const investmentTransactionColumns = {
   quantity: investmentTransactions.quantity,
   price: investmentTransactions.price,
   amount: investmentTransactions.amount,
+  realizedPnl: investmentTransactions.realizedPnl,
   currency: investmentTransactions.currency,
   effectiveDate: sql<string>`${investmentTransactions.effectiveDate}`,
   updatedAt: investmentTransactions.updatedAt,
@@ -50,9 +52,14 @@ export type InvestmentPositionRow = {
   assetType: string;
   symbol: string | null;
   name: string;
+  brokerNo: string | null;
+  brokerAccount: string | null;
+  market: string | null;
   quantity: number | null;
   marketValue: number | null;
   cashBalance: number | null;
+  costBasis: number | null;
+  unrealizedPnl: number | null;
   currency: string;
   asOfDate: string;
 };
@@ -70,16 +77,21 @@ export async function listLatestInvestmentPositions(
       assetType: investmentPositions.assetType,
       symbol: investmentPositions.symbol,
       name: investmentPositions.name,
+      brokerNo: investmentPositions.brokerNo,
+      brokerAccount: investmentPositions.brokerAccount,
+      market: investmentPositions.market,
       quantity: investmentPositions.quantity,
       marketValue: investmentPositions.marketValue,
       cashBalance: investmentPositions.cashBalance,
+      costBasis: investmentPositions.costBasis,
+      unrealizedPnl: investmentPositions.unrealizedPnl,
       currency: investmentPositions.currency,
       asOfDate: investmentPositions.asOfDate,
     })
     .from(investmentPositions)
     .where(
       and(
-        // Latest as_of_date is per connector + asset type, not a global max.
+        // The shared scope query also removes known cross-connector duplicates.
         isLatestInvestmentPosition(),
         cursor
           ? sql`(
@@ -112,9 +124,12 @@ export async function listInvestmentTransactions(
     .select(investmentTransactionColumns)
     .from(investmentTransactions)
     .where(
-      cursor
-        ? sql`(${investmentTransactions.effectiveDate}, ${investmentTransactions.updatedAt}, ${investmentTransactions.id}) < (${cursor.effectiveDate}, ${cursor.updatedAt}, ${cursor.id})`
-        : undefined,
+      and(
+        isNotSupersededInvestmentTransaction(),
+        cursor
+          ? sql`(${investmentTransactions.effectiveDate}, ${investmentTransactions.updatedAt}, ${investmentTransactions.id}) < (${cursor.effectiveDate}, ${cursor.updatedAt}, ${cursor.id})`
+          : undefined,
+      ),
     )
     .orderBy(
       desc(investmentTransactions.effectiveDate),
@@ -134,12 +149,15 @@ export async function listInvestmentTransactionsInRange(
     .select(investmentTransactionColumns)
     .from(investmentTransactions)
     .where(
-      days
-        ? sql`substr(${investmentTransactions.effectiveDate}, 1, 10) IN (SELECT value FROM json_each(${JSON.stringify(days)}))`
-        : and(
-            sql`${investmentTransactions.effectiveDate} >= ${range.from}`,
-            sql`${investmentTransactions.effectiveDate} < ${range.to}`,
-          ),
+      and(
+        isNotSupersededInvestmentTransaction(),
+        days
+          ? sql`substr(${investmentTransactions.effectiveDate}, 1, 10) IN (SELECT value FROM json_each(${JSON.stringify(days)}))`
+          : and(
+              sql`${investmentTransactions.effectiveDate} >= ${range.from}`,
+              sql`${investmentTransactions.effectiveDate} < ${range.to}`,
+            ),
+      ),
     )
     .orderBy(
       desc(investmentTransactions.effectiveDate),

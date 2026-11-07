@@ -27,6 +27,52 @@ describe("連線設定的憑證安全（隔離 D1）", () => {
   });
 
   // Zod 3 接受所有 8-4-4-4-12 十六進位裝置識別碼；升級不得拒絕既有設定。
+  it("證券來源加密儲存帳密，公開設定不回傳帳密、cookie 或憑證", async () => {
+    const env = { DB: harness.binding, CONFIG_ENCRYPTION_KEY: key } as Env;
+    await updateConnectorSettings(env, "sinotrade", {
+      userId: credentials.userId,
+      password: credentials.password,
+    });
+    const state = {
+      userId: credentials.userId,
+      password: credentials.password,
+      webState: {
+        newweb: {
+          cookies: [
+            {
+              name: "ASP.NET_SessionId",
+              value: "synthetic-cookie",
+              domain: ".sinotrade.com.tw",
+              path: "/",
+            },
+          ],
+          localStorage: {
+            TWCACertIdxRef: '{"TWCA123":{}}',
+            TWCA123: "synthetic-certificate",
+            newweb_token: "synthetic-token",
+          },
+          capturedAt: "2027-01-01T00:00:00.000Z",
+        },
+      },
+    };
+    await env.DB.prepare(
+      "UPDATE connector_settings SET encrypted_config = ? WHERE connector_id = 'sinotrade'",
+    )
+      .bind(await encryptJson(state, key))
+      .run();
+    const view = await getConnectorSettingsView(env, "sinotrade");
+    expect(view).toMatchObject({
+      configured: true,
+      credentialsComplete: true,
+      sessionAvailable: false,
+      publicConfig: null,
+    });
+    expect(JSON.stringify(view)).not.toMatch(
+      /synthetic-cookie|synthetic-certificate|synthetic-token|webState|A123456789|synthetic-password/,
+    );
+    const stored = await getConnectorSettings(env.DB, "sinotrade");
+    expect(stored!.encrypted_config).not.toContain("synthetic-certificate");
+  });
   it("更新新光設定時保留舊版可接受的裝置識別碼與加密憑證", async () => {
     const env = {
       DB: harness.binding,

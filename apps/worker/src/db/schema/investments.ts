@@ -21,9 +21,14 @@ export const investmentPositions = sqliteTable(
     assetType: text("asset_type").notNull(),
     symbol: text("symbol"),
     name: text("name").notNull(),
+    brokerNo: text("broker_no"),
+    brokerAccount: text("broker_account"),
+    market: text("market"),
     quantity: real("quantity"),
-    marketValue: integer("market_value"),
-    cashBalance: integer("cash_balance"),
+    marketValue: real("market_value"),
+    cashBalance: real("cash_balance"),
+    costBasis: real("cost_basis"),
+    unrealizedPnl: real("unrealized_pnl"),
     currency: text("currency")
       .notNull()
       .default(sql`'TWD'`),
@@ -44,6 +49,13 @@ export const investmentPositions = sqliteTable(
       table.connectorId,
       table.assetType,
       sql`as_of_date DESC`,
+    ),
+    index("idx_investment_positions_identity_scope").on(
+      table.brokerNo,
+      table.brokerAccount,
+      table.market,
+      sql`as_of_date DESC`,
+      sql`updated_at DESC`,
     ),
     index("idx_investment_positions_asset_type").on(table.assetType),
     index("idx_investment_positions_as_of_date").on(table.asOfDate),
@@ -75,6 +87,7 @@ export const investmentTransactions = sqliteTable(
     quantity: real("quantity"),
     price: real("price"),
     amount: integer("amount"),
+    realizedPnl: real("realized_pnl"),
     currency: text("currency")
       .notNull()
       .default(sql`'TWD'`),

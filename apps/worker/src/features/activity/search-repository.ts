@@ -1,4 +1,4 @@
-import { createDrizzle } from "../../db";
+import { createDrizzle, isNotSupersededInvestmentTransaction } from "../../db";
 import { sql } from "drizzle-orm";
 
 export interface ActivitySearchInput {
@@ -62,6 +62,7 @@ export async function findActivitySearchDays(
       SELECT substr(effective_date, 1, 10) AS day FROM investment_transactions
       WHERE instr(lower(COALESCE(name, '') || ' ' || COALESCE(symbol, '') || ' ' ||
         COALESCE(transaction_name, '') || ' ' || COALESCE(transaction_code, '') || ' 投資'), ${q}) > 0
+        AND ${isNotSupersededInvestmentTransaction()}
     )
     SELECT DISTINCT day FROM candidates
     WHERE day IS NOT NULL AND day != ''

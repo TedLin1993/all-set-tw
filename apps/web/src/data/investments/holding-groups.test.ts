@@ -172,6 +172,14 @@ describe("投資持倉依機構分組", () => {
           marketValue: 0,
         }),
         row({
+          connectorId: "sinopac",
+          sourceId: "empty:US",
+          assetType: "stock",
+          name: "永豐美股（無持倉）",
+          quantity: 0,
+          marketValue: 0,
+        }),
+        row({
           connectorId: "tdcc",
           sourceId: "F1",
           assetType: "fund",
@@ -184,6 +192,12 @@ describe("投資持倉依機構分組", () => {
     );
     const max = groups.find((group) => group.key === "max")!;
     expect(max).toMatchObject({
+      holdings: [],
+      visibleCount: 0,
+      hiddenCount: 0,
+      totalTwd: 0,
+    });
+    expect(groups.find((group) => group.key === "sinopac")).toMatchObject({
       holdings: [],
       visibleCount: 0,
       hiddenCount: 0,

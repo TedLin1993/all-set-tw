@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount, untrack } from "svelte";
+  import { onDestroy, onMount, tick, untrack } from "svelte";
   import {
     createMutation,
     createQuery,
@@ -16,6 +16,7 @@
   import CaptchaBankConnectionHelp from "./CaptchaBankConnectionHelp.svelte";
   import ConnectionProgress from "./ConnectionProgress.svelte";
   import CtbcVerification from "./CtbcVerification.svelte";
+  import SinotradeConnection from "./SinotradeConnection.svelte";
   import Card from "@/shared/ui/Card.svelte";
   import Button from "@/shared/ui/Button.svelte";
   import Input from "@/shared/ui/Input.svelte";
@@ -92,6 +93,11 @@
   let error = $state("");
   let otp = $state("");
   let ctbcVerificationBusy = $state(false);
+  let sinotradeVerificationBusy = $state(false);
+  let sinotradeCredentialsVersion = $state(0);
+  let sinotradeConnection = $state<{ connect: () => Promise<boolean> }>();
+  let sinotradeStartBusy = $state(false);
+  let sinotradeSyncAfterConnect = false;
   let tdccSetupStep = $state<"credentials" | "email" | "sms" | "complete">(
     "credentials",
   );
@@ -339,6 +345,7 @@
   });
   onDestroy(() => {
     destroyed = true;
+    sinotradeSyncAfterConnect = false;
     stopInterruptedSyncPolling();
     clearTimeout(durableSyncQueuedTimer);
     stopDurableSyncPolling();
@@ -346,12 +353,21 @@
 
   const save = createMutation(() => ({
     mutationFn: (config: Record<string, unknown>) => {
+      if (
+        connectorId === "sinotrade" &&
+        (demoMode || sinotradeVerificationBusy || syncBusy || sync.isPending)
+      )
+        throw new Error("請等待目前的連線或同步操作完成後再儲存憑證。");
       if (!Object.keys(config).length) throw new Error("請先填寫欄位再儲存。");
       return api.put(`/api/connectors/${connectorId}/settings`, { config });
     },
     onSuccess: () => {
       error = "";
       if (connectorId === "cathaybk") resetCathayVerification();
+      if (connectorId === "sinotrade") {
+        sinotradeCredentialsVersion += 1;
+        sinotradeSyncAfterConnect = false;
+      }
       for (const field of fields) values[field.key] = "";
       qc.invalidateQueries({
         queryKey: queryKeys.connectorSettings(connectorId),
@@ -368,6 +384,14 @@
   const sync = createMutation(() => ({
     mutationFn: (target: SyncTarget) => {
       if (demoMode) throw new Error("Demo site 已停用連接器同步。");
+      if (
+        connectorId === "sinotrade" &&
+        (sinotradeVerificationBusy ||
+          save.isPending ||
+          settings.data?.verificationPending ||
+          !settings.data?.credentialsComplete)
+      )
+        throw new Error("請先儲存登入憑證並完成連線驗證。");
       if (captchaBank) {
         if (connectorId === "nextbank") bankOperation = "sync";
         bankCaptchaImage = "";
@@ -869,6 +893,87 @@
   function buildConfig() {
     return buildCredentialConfig(fields, values);
   }
+  const sinotradeHasDraft = $derived(
+    connectorId === "sinotrade" &&
+      fields.some((field) => Boolean(values[field.key])),
+  );
+  const sinotradeConnectionReady = $derived(
+    settings.data?.sinotradePlatforms
+      ? settings.data.sinotradePlatforms.newweb &&
+          settings.data.sinotradePlatforms.savings
+      : Boolean(settings.data?.sessionAvailable),
+  );
+  // 首次連線完成前，同步狀態與自動同步開關只會干擾驗證流程，先收起。
+  const sinotradeSetup = $derived(
+    connectorId === "sinotrade" &&
+      !sinotradeConnectionReady &&
+      !job?.lastSuccessAt &&
+      !job?.running,
+  );
+  async function startSinotradeSync() {
+    if (
+      demoMode ||
+      sinotradeStartBusy ||
+      sinotradeVerificationBusy ||
+      syncBusy ||
+      sync.isPending ||
+      save.isPending ||
+      settings.data?.verificationPending
+    )
+      return;
+    error = "";
+    const config = buildConfig();
+    if (
+      !settings.data?.credentialsComplete &&
+      (!String(config.userId ?? "").trim() ||
+        !String(config.password ?? "").length)
+    ) {
+      error = "請輸入身分證字號與證券網路密碼，再按「連線並同步」。";
+      return;
+    }
+    sinotradeStartBusy = true;
+    try {
+      const hasDraft = Object.keys(config).length > 0;
+      if (hasDraft) {
+        await save.mutateAsync(config);
+        const result = await settings.refetch();
+        if (result.isError) throw result.error;
+        await tick();
+      }
+      if (destroyed) return;
+      if (!settings.data?.credentialsComplete)
+        throw new Error("登入憑證尚未完整儲存，請確認後再試。");
+      if (!hasDraft && sinotradeConnectionReady) {
+        sync.mutate("default");
+        return;
+      }
+      if (!sinotradeConnection)
+        throw new Error("連線驗證尚未就緒，請稍後再試。");
+      sinotradeSyncAfterConnect = true;
+      if (!(await sinotradeConnection.connect()))
+        sinotradeSyncAfterConnect = false;
+    } catch (failure) {
+      sinotradeSyncAfterConnect = false;
+      error =
+        failure instanceof Error ? failure.message : "連線未完成，請稍後再試。";
+    } finally {
+      sinotradeStartBusy = false;
+    }
+  }
+  function syncAfterSinotradeConnection() {
+    if (!sinotradeSyncAfterConnect || destroyed) return;
+    sinotradeSyncAfterConnect = false;
+    sync.mutate("default");
+  }
+  const sinotradeCredentialLocked = $derived(
+    connectorId === "sinotrade" &&
+      (demoMode ||
+        sinotradeStartBusy ||
+        sinotradeVerificationBusy ||
+        syncBusy ||
+        sync.isPending ||
+        save.isPending),
+  );
   function showDurableSyncQueued() {
     durableSyncQueued = true;
     clearTimeout(durableSyncQueuedTimer);
@@ -1063,13 +1168,15 @@
       <p class="text-sm text-ink/65">
         {connectorId === "tdcc" && tdccConnectionReady
           ? "連線已完成；登入狀態會安全保存並供後續同步使用。"
-          : connectorId === "tdcc" &&
-              settings.data?.configured &&
-              !tdccCredentialsComplete
-            ? "舊設定缺少完整的登入資料，請重新輸入身分證字號與 App 密碼。"
-            : settings.data?.configured
-              ? `已設定於 ${formatDateTime(settings.data.updatedAt)}。機密資料不會在此顯示；重新填寫欄位即可覆寫。`
-              : "尚未設定"}
+          : connectorId === "sinotrade" && sinotradeConnectionReady
+            ? "連線已完成；台股、美股與豐存股的登入狀態會安全保存並供後續同步使用。"
+            : connectorId === "tdcc" &&
+                settings.data?.configured &&
+                !tdccCredentialsComplete
+              ? "舊設定缺少完整的登入資料，請重新輸入身分證字號與 App 密碼。"
+              : settings.data?.configured
+                ? `已設定於 ${formatDateTime(settings.data.updatedAt)}。機密資料不會在此顯示；重新填寫欄位即可覆寫。`
+                : "尚未設定"}
       </p>
     </div>
     <div class="flex flex-wrap gap-2">
@@ -1171,6 +1278,33 @@
               : "人工輸入驗證碼"}</Button
           >
         {/if}
+      {:else if connectorId === "sinotrade"}
+        <Button
+          size="sm"
+          disabled={demoMode ||
+            settings.isPending ||
+            sinotradeStartBusy ||
+            sinotradeVerificationBusy ||
+            syncBusy ||
+            sync.isPending ||
+            save.isPending ||
+            Boolean(settings.data?.verificationPending)}
+          onclick={() => void startSinotradeSync()}
+        >
+          <RefreshCw
+            class={sync.isPending ? "size-4 animate-spin" : "size-4"}
+          />
+          {save.isPending
+            ? "儲存中…"
+            : sinotradeStartBusy
+              ? "連線中…"
+              : sync.isPending
+                ? "同步中…"
+                : (syncBusyLabel ??
+                  (sinotradeConnectionReady && !sinotradeHasDraft
+                    ? "同步"
+                    : "連線並同步"))}
+        </Button>
       {:else}
         <Button
           size="sm"
@@ -1211,6 +1345,42 @@
     >
       Demo site 已停用同步；你仍可查看示範資料與介面互動。
     </p>{/if}
+  {#if connectorId === "sinotrade"}
+    {#key sinotradeCredentialsVersion}
+      <SinotradeConnection
+        bind:this={sinotradeConnection}
+        {api}
+        configured={settings.data?.configured ?? false}
+        credentialsComplete={settings.data?.credentialsComplete ?? false}
+        sessionAvailable={settings.data?.sessionAvailable ?? false}
+        verificationPending={settings.data?.verificationPending ?? false}
+        sinotradePlatforms={settings.data?.sinotradePlatforms}
+        synced={Boolean(job?.lastSuccessAt)}
+        syncing={syncBusy || sync.isPending}
+        {demoMode}
+        disabled={syncBusy || sync.isPending || save.isPending}
+        bind:busy={sinotradeVerificationBusy}
+        onConnected={syncAfterSinotradeConnection}
+        onCancelled={() => {
+          sinotradeSyncAfterConnect = false;
+        }}
+        onChanged={async () => {
+          await Promise.all([
+            qc.refetchQueries({
+              queryKey: queryKeys.connectorSettings(connectorId),
+            }),
+            qc.refetchQueries({ queryKey: queryKeys.syncJobs }),
+          ]);
+        }}
+      />
+    {/key}
+    {#if sinotradeSetup && error}<p
+        role="alert"
+        class="mt-3 rounded-lg border border-coral/20 bg-coral/[0.06] px-3 py-2 text-sm font-medium text-coral"
+      >
+        {error}
+      </p>{/if}
+  {/if}
   {#if connectorId === "ctbc"}
     {#key settings.data?.updatedAt}
       <CtbcVerification
@@ -1404,7 +1574,7 @@
     </div>
   {/if}
   <div
-    class={`mt-3 rounded-xl border border-ink/10 bg-paper p-3 text-sm ${(connectorId === "tdcc" && !tdccConnectionReady && !job?.running) || (connectorId === "cathaybk" && !cathayConnectionReady && cathayVerificationStep !== "complete") ? "hidden" : ""}`}
+    class={`mt-3 rounded-xl border border-ink/10 bg-paper p-3 text-sm ${(connectorId === "tdcc" && !tdccConnectionReady && !job?.running) || (connectorId === "cathaybk" && !cathayConnectionReady && cathayVerificationStep !== "complete") || sinotradeSetup ? "hidden" : ""}`}
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
@@ -1554,7 +1724,7 @@
         {/if}
       </div>
     {/if}
-    {#if connectorId !== "nextbank" && (error || ((job?.lastStatus === "failed" || job?.lastStatus === "needs_user_action") && !bankCaptchaImage))}<p
+    {#if connectorId !== "nextbank" && !sinotradeSetup && (error || ((job?.lastStatus === "failed" || job?.lastStatus === "needs_user_action") && !bankCaptchaImage))}<p
         class="mt-2 text-sm text-coral"
       >
         {error
@@ -1572,147 +1742,155 @@
           : "仍無法確認同步結果，請稍後重新整理頁面查看。"}
       </p>{/if}
   </div>
-  <section class="mt-4 overflow-hidden rounded-xl border border-border">
-    <div
-      class="flex flex-wrap items-start justify-between gap-2 border-b border-border bg-muted/45 px-4 py-3"
-    >
-      <div>
-        <h3 class="text-sm font-semibold">
-          {connectorId === "tdcc" ? "集保 App 身分驗證" : "連線憑證"}
-        </h3>
-        <p class="mt-0.5 text-sm text-muted-foreground">
-          {connectorId === "tdcc"
-            ? "請使用集保 e 存摺 App 的登入資料；不是券商網路下單密碼。"
-            : "已儲存的機密欄位不會顯示內容；留白會維持原值。"}
-        </p>
-      </div>
-      {#if save.isSuccess}<span
-          class="rounded-full bg-moss/10 px-2.5 py-1 text-sm font-semibold text-moss"
-          >已安全儲存</span
-        >{/if}
-    </div>
-    <form autocomplete="off" onsubmit={(event) => event.preventDefault()}>
-      <div class="grid gap-3 p-4">
-        {#each fields as field (field.key)}
-          {@const storedCredential = Boolean(
-            settings.data?.configured &&
-            (connectorId !== "tdcc" || tdccCredentialsComplete),
-          )}
-          {@const hasReplacement = Boolean(String(values[field.key] ?? ""))}
-          <label class="grid gap-1.5 text-sm font-medium">
-            <span class="flex flex-wrap items-center gap-2">
-              <span>{field.label}</span>
-              {#if storedCredential}
-                <span
-                  class={`rounded-full px-2 py-0.5 text-sm font-semibold ${hasReplacement ? "bg-steel/10 text-steel" : "bg-moss/10 text-moss"}`}
-                >
-                  {hasReplacement ? "將更新" : "已儲存"}
-                </span>
-              {/if}
-            </span>
-            {#if field.type === "select"}
-              <!-- 設定 API 不回傳憑證內容，已儲存時無法得知目前選項，故提供「維持目前設定」。 -->
-              <Select
-                class={storedCredential && !hasReplacement
-                  ? "bg-moss/[0.035]"
-                  : ""}
-                name={`tfh-${connectorId}-${field.key}`}
-                value={selectDisplayValue(
-                  field,
-                  values[field.key],
-                  storedCredential,
-                )}
-                onchange={(e: Event) =>
-                  (values[field.key] = (
-                    e.currentTarget as HTMLSelectElement
-                  ).value)}
-              >
-                {#if storedCredential}<option value="">維持目前設定</option
-                  >{/if}
-                {#each field.options ?? [] as option (option.value)}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </Select>
-            {:else}
-              <Input
-                class={storedCredential && !hasReplacement
-                  ? "bg-moss/[0.035] placeholder:text-ink/55"
-                  : ""}
-                type={field.type}
-                name={`tfh-${connectorId}-${field.key}`}
-                autocomplete={field.type === "password"
-                  ? "new-password"
-                  : "off"}
-                autocapitalize="none"
-                spellcheck={false}
-                readonly={!focusedCredentialKeys[field.key]}
-                data-1p-ignore
-                data-lpignore="true"
-                data-form-type="other"
-                placeholder={storedCredential && !hasReplacement
-                  ? "••••••••　已安全儲存"
-                  : undefined}
-                value={String(values[field.key] ?? "")}
-                onfocus={() => (focusedCredentialKeys[field.key] = true)}
-                oninput={(e: Event) =>
-                  (values[field.key] = (
-                    e.currentTarget as HTMLInputElement
-                  ).value)}
-              />
-            {/if}
-          </label>
-        {/each}
-      </div>
+  {#if fields.length > 0}
+    <section class="mt-4 overflow-hidden rounded-xl border border-border">
       <div
-        class="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-paper/70 px-4 py-3"
+        class="flex flex-wrap items-start justify-between gap-2 border-b border-border bg-muted/45 px-4 py-3"
       >
-        <p class="text-sm text-muted-foreground">
-          {connectorId === "tdcc"
-            ? tdccConnectionReady
-              ? "重新填寫任一欄位會清除舊的登入狀態並重新驗證。"
-              : "按下後會先登入集保；只有集保要求裝置驗證時才會寄信。"
-            : "儲存完成後，再使用上方的同步按鈕測試連線。"}
-        </p>
-        {#if connectorId === "tdcc"}
-          <Button
-            size="sm"
-            disabled={connectTdcc.isPending ||
-              verifyOtp.isPending ||
-              syncBusy ||
-              durableSyncPolling !== null ||
-              demoMode}
-            onclick={() => {
-              error = "";
-              tdccSetupStep = "credentials";
-              connectTdcc.mutate();
-            }}
-            ><ShieldCheck class="size-4" />{connectTdcc.isPending ||
-            (durableSyncPolling !== null && !tdccConnectionReady)
-              ? "正在連線…"
-              : tdccConnectionReady
-                ? "更新並重新連線"
-                : "連線並取得驗證碼"}</Button
-          >
-        {:else}
-          <Button
-            size="sm"
-            disabled={save.isPending}
-            onclick={() => {
-              error = "";
-              save.reset();
-              save.mutate(buildConfig());
-            }}
-            ><Save class="size-4" />{save.isPending
-              ? "儲存中…"
-              : "儲存憑證"}</Button
-          >
-        {/if}
+        <div>
+          <h3 class="text-sm font-semibold">
+            {connectorId === "tdcc" ? "集保 App 身分驗證" : "連線憑證"}
+          </h3>
+          <p class="mt-0.5 text-sm text-muted-foreground">
+            {connectorId === "tdcc"
+              ? "請使用集保 e 存摺 App 的登入資料；不是券商網路下單密碼。"
+              : "已儲存的機密欄位不會顯示內容；留白會維持原值。"}
+          </p>
+        </div>
+        {#if save.isSuccess}<span
+            class="rounded-full bg-moss/10 px-2.5 py-1 text-sm font-semibold text-moss"
+            >已安全儲存</span
+          >{/if}
       </div>
-    </form>
-  </section>
-  {#if save.isError}<p class="mt-2 text-sm font-medium text-coral">
-      儲存失敗：{error}
-    </p>{/if}
+      <form autocomplete="off" onsubmit={(event) => event.preventDefault()}>
+        <div class="grid gap-3 p-4">
+          {#each fields as field (field.key)}
+            {@const storedCredential = Boolean(
+              settings.data?.configured &&
+              (connectorId === "sinotrade"
+                ? settings.data.credentialsComplete
+                : connectorId !== "tdcc" || tdccCredentialsComplete),
+            )}
+            {@const hasReplacement = Boolean(String(values[field.key] ?? ""))}
+            <label class="grid gap-1.5 text-sm font-medium">
+              <span class="flex flex-wrap items-center gap-2">
+                <span>{field.label}</span>
+                {#if storedCredential}
+                  <span
+                    class={`rounded-full px-2 py-0.5 text-sm font-semibold ${hasReplacement ? "bg-steel/10 text-steel" : "bg-moss/10 text-moss"}`}
+                  >
+                    {hasReplacement ? "將更新" : "已儲存"}
+                  </span>
+                {/if}
+              </span>
+              {#if field.type === "select"}
+                <!-- 設定 API 不回傳憑證內容，已儲存時無法得知目前選項，故提供「維持目前設定」。 -->
+                <Select
+                  class={storedCredential && !hasReplacement
+                    ? "bg-moss/[0.035]"
+                    : ""}
+                  name={`tfh-${connectorId}-${field.key}`}
+                  disabled={sinotradeCredentialLocked}
+                  value={selectDisplayValue(
+                    field,
+                    values[field.key],
+                    storedCredential,
+                  )}
+                  onchange={(e: Event) =>
+                    (values[field.key] = (
+                      e.currentTarget as HTMLSelectElement
+                    ).value)}
+                >
+                  {#if storedCredential}<option value="">維持目前設定</option
+                    >{/if}
+                  {#each field.options ?? [] as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </Select>
+              {:else}
+                <Input
+                  class={storedCredential && !hasReplacement
+                    ? "bg-moss/[0.035] placeholder:text-ink/55"
+                    : ""}
+                  type={field.type}
+                  disabled={sinotradeCredentialLocked}
+                  name={`tfh-${connectorId}-${field.key}`}
+                  autocomplete={field.type === "password"
+                    ? "new-password"
+                    : "off"}
+                  autocapitalize="none"
+                  spellcheck={false}
+                  readonly={!focusedCredentialKeys[field.key]}
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-form-type="other"
+                  placeholder={storedCredential && !hasReplacement
+                    ? "••••••••　已安全儲存"
+                    : undefined}
+                  value={String(values[field.key] ?? "")}
+                  onfocus={() => (focusedCredentialKeys[field.key] = true)}
+                  oninput={(e: Event) =>
+                    (values[field.key] = (
+                      e.currentTarget as HTMLInputElement
+                    ).value)}
+                />
+              {/if}
+            </label>
+          {/each}
+        </div>
+        <div
+          class="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-paper/70 px-4 py-3"
+        >
+          <p class="text-sm text-muted-foreground">
+            {connectorId === "tdcc"
+              ? tdccConnectionReady
+                ? "重新填寫任一欄位會清除舊的登入狀態並重新驗證。"
+                : "按下後會先登入集保；只有集保要求裝置驗證時才會寄信。"
+              : connectorId === "sinotrade"
+                ? "可直接按上方「連線並同步」儲存憑證並接續驗證；留白會維持已儲存的值。"
+                : "儲存完成後，再使用上方的同步按鈕測試連線。"}
+          </p>
+          {#if connectorId === "tdcc"}
+            <Button
+              size="sm"
+              disabled={connectTdcc.isPending ||
+                verifyOtp.isPending ||
+                syncBusy ||
+                durableSyncPolling !== null ||
+                demoMode}
+              onclick={() => {
+                error = "";
+                tdccSetupStep = "credentials";
+                connectTdcc.mutate();
+              }}
+              ><ShieldCheck class="size-4" />{connectTdcc.isPending ||
+              (durableSyncPolling !== null && !tdccConnectionReady)
+                ? "正在連線…"
+                : tdccConnectionReady
+                  ? "更新並重新連線"
+                  : "連線並取得驗證碼"}</Button
+            >
+          {:else}
+            <Button
+              size="sm"
+              disabled={save.isPending || sinotradeCredentialLocked}
+              onclick={() => {
+                error = "";
+                save.reset();
+                save.mutate(buildConfig());
+              }}
+              ><Save class="size-4" />{save.isPending
+                ? "儲存中…"
+                : "儲存憑證"}</Button
+            >
+          {/if}
+        </div>
+      </form>
+    </section>
+    {#if save.isError}<p class="mt-2 text-sm font-medium text-coral">
+        儲存失敗：{error}
+      </p>{/if}
+  {/if}
   {#if connectorId === "tdcc" && (tdccSetupStep === "email" || tdccSetupStep === "sms")}<div
       class="mt-3 overflow-hidden rounded-xl border border-steel/20 bg-steel/[0.055]"
     >
@@ -1948,7 +2126,7 @@
     >
       {error}
     </p>{/if}
-  {#if !captchaBank}
+  {#if !captchaBank && connectorId !== "sinotrade"}
     <p class="mt-3 text-sm text-ink/50">
       {CONNECTOR_NOTES[connectorId] ??
         "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}

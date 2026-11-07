@@ -5,6 +5,31 @@ import {
 } from "../../../src/features/sync/connector-state";
 
 describe("connector state boundaries", () => {
+  it("keeps securities certificates, cookies and handoff references out of public config and cursor", () => {
+    const state = {
+      userId: "A000000000",
+      password: "synthetic-password",
+      webState: {
+        newweb: {
+          cookies: [{ name: "ASP.NET_SessionId", value: "synthetic-cookie" }],
+          localStorage: { TWCA123: "synthetic-certificate" },
+        },
+      },
+      browserSessionId: "synthetic-browser",
+      browserSessionExpiresAt: "2027-01-01T00:00:00.000Z",
+      loginPlatform: "newweb",
+    };
+    expect(serializePublicConnectorConfig("sinotrade", state)).toBeNull();
+    expect(
+      splitConnectorCursorState(
+        "sinotrade",
+        JSON.stringify({ ...state, syncedAt: "fixture-date" }),
+      ),
+    ).toEqual({
+      safeCursor: JSON.stringify({ syncedAt: "fixture-date" }),
+      secretState: state,
+    });
+  });
   it("removes reusable browser sessions from bank cursors", () => {
     expect(
       splitConnectorCursorState(

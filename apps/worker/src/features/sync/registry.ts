@@ -71,6 +71,7 @@ import { syncSkbank } from "../../sources/skbank/sync";
 import { syncUbot } from "../../sources/ubot/sync";
 import { syncBinance } from "../../sources/binance/sync";
 import { syncMax } from "../../sources/max/sync";
+import { syncSinotrade } from "../../sources/sinotrade/sync";
 import { syncEsun } from "../../sources/esun/sync";
 import {
   syncNextbank,
@@ -396,6 +397,7 @@ export const connectorRuntimeRegistry: Record<
   max: {
     run: (env, trigger) => syncMax(env, trigger),
   },
+  sinotrade: { run: (env, trigger) => syncSinotrade(env, trigger) },
   chb: {
     run: (env, trigger, _scope, overrides) =>
       syncChb(env, trigger, overrides as ChbSyncOverrides),

@@ -193,6 +193,38 @@ test.beforeEach(async ({ page }) => {
           quantity: 100,
           currency: "TWD",
         },
+        {
+          id: "trade-2",
+          connectorId: "sinotrade",
+          accountId: "sinotrade:TW:9999:0000001",
+          sourceId: "trade-2",
+          name: "虛構 ETF",
+          assetType: "etf",
+          transactionCode: "S",
+          transactionName: "賣出",
+          tradeDate: "2026-07-15",
+          quantity: 5,
+          price: 120,
+          amount: 597,
+          realizedPnl: 97,
+          currency: "TWD",
+        },
+        {
+          id: "trade-3",
+          connectorId: "sinotrade",
+          accountId: "sinotrade:TW:9999:0000001",
+          sourceId: "trade-3",
+          name: "虛構成長 ETF",
+          assetType: "etf",
+          transactionCode: "S",
+          transactionName: "賣出",
+          tradeDate: "2026-07-01",
+          quantity: 2000,
+          price: 15.11,
+          amount: 30_000,
+          realizedPnl: null,
+          currency: "TWD",
+        },
       ];
     else if (path === "/api/manual-assets" && method === "GET")
       body = manualAssets;
@@ -274,7 +306,12 @@ test("資產清冊區分待繳與未知金額，並可新增手動資產", async
     page.getByRole("heading", { name: "投資組合", exact: true }),
   ).toBeVisible();
   await page.getByRole("tab", { name: "交易紀錄", exact: true }).click();
-  await expect(page.getByText("買進 · 2026/8/1")).toBeVisible();
+  await expect(page.getByText("買進 · 2026/8/1 · 100 股")).toBeVisible();
+  await expect(
+    page.getByText("賣出 · 2026/7/15 · 5 股 · 成交價 120"),
+  ).toBeVisible();
+  await expect(page.getByText("已實現損益 NT$97")).toBeVisible();
+  await expect(page.getByText("損益未提供")).toBeVisible();
 
   // 加密貨幣是獨立大類，依交易所分區且不需展開；投資面板不含加密貨幣。
   await ledger.getByRole("button", { name: /^加密貨幣/ }).click();

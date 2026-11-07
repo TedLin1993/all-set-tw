@@ -9,6 +9,8 @@
   } from "@/data/investments/holding-groups";
   import {
     formatPositionQuantity,
+    formatInvestmentCurrency,
+    hasInvestmentPerformance,
     positionAssetTypeLabel,
   } from "../model/investment-display";
 
@@ -42,6 +44,11 @@
     if (row.quantity == null) return positionAssetTypeLabel(row.assetType);
     return `${positionAssetTypeLabel(row.assetType)} · ${formatPositionQuantity(row)} 單位`;
   }
+
+  function performanceClass(value: number | null | undefined) {
+    if (value == null) return "text-subtle";
+    return value < 0 ? "text-coral" : "text-moss";
+  }
 </script>
 
 {#snippet holdingList(holdings: InvestmentHolding[])}
@@ -57,13 +64,28 @@
           <p class="mt-0.5 text-caption text-subtle">
             {holdingDetail(holding)}
           </p>
+          {#if hasInvestmentPerformance(holding.row)}
+            <p class="mt-1 text-caption text-subtle">
+              成本 {formatInvestmentCurrency(
+                holding.row.costBasis,
+                holding.row.currency,
+              )}
+              <span aria-hidden="true"> · </span>
+              <span class={performanceClass(holding.row.unrealizedPnl)}>
+                未實現損益 {formatInvestmentCurrency(
+                  holding.row.unrealizedPnl,
+                  holding.row.currency,
+                )}
+              </span>
+            </p>
+          {/if}
         </div>
         <p
           class={`text-right text-sm font-medium tabular-nums ${holding.valueTwd !== null && holding.valueTwd < 0 ? "text-coral" : "text-steel"}`}
         >
           {holding.row.marketValue == null && holding.row.cashBalance == null
             ? "無法估值"
-            : formatCurrency(
+            : formatInvestmentCurrency(
                 (holding.row.marketValue ?? 0) + (holding.row.cashBalance ?? 0),
                 holding.row.currency,
               )}
@@ -74,7 +96,11 @@
 {/snippet}
 
 {#if flat}
-  {@render holdingList(flat.holdings)}
+  {#if flat.holdings.length === 0 && flat.hiddenCount === 0}
+    <p class="py-8 text-center text-sm text-subtle">目前沒有持倉。</p>
+  {:else}
+    {@render holdingList(flat.holdings)}
+  {/if}
   {#if flat.hiddenCount}
     <p class="border-t border-ink/8 py-3 text-caption text-subtle">
       另有 {flat.hiddenCount} 筆台幣估值低於 NT$10 的持倉未顯示，仍計入市值。

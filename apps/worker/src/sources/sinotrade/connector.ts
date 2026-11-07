@@ -1,0 +1,873 @@
+import type { Browser, Page } from "@cloudflare/puppeteer";
+import type {
+  SinotradeVerificationChallenge,
+  SinotradeVerificationInput,
+} from "@taiwan-fin-hub/shared";
+import { taipeiDateKey } from "@taiwan-fin-hub/shared";
+import {
+  launchBrowserWithRetry,
+  connectBrowserWithCancellation,
+  closeBrowserSession,
+  BrowserSessionCleanupError,
+} from "../browser";
+import {
+  SINOTRADE_ORIGINS,
+  SinotradeAuthenticationRequiredError,
+  SinotradeConnectionError,
+  SinotradeLoginExpiredError,
+  isSinotradeAuthenticationRequiredError,
+  isSinotradeCookie,
+  parseSinotradeAccounts,
+  parseSavingsAccountIdentities,
+  restorableSinotradeState,
+  selectSinotradeStorage,
+  SINOTRADE_SAVINGS_LOGOUT_SELECTOR,
+  type SinotradeConfig,
+  type SinotradeOriginState,
+  type SinotradePlatform,
+  type SinotradeAccount,
+} from "./session-protocol";
+import {
+  applyRealizedPnl,
+  parseTaiwanUnrealizedResponse,
+  parseForeignUnrealizedResponse,
+  parseSavingsAssetHtml,
+  parseSavingsTransactionTable,
+  parseTaiwanRealizedResponse,
+  parseTaiwanStatementResponse,
+  realizedDateWindows,
+  statementDateRange,
+  taiwanRealizedRequestBody,
+  taiwanStatementRequestBody,
+  taiwanUnrealizedRequestBody,
+  type SavingsTransactionTable,
+  type SinotradeHolding,
+  type SinotradeRealizedRow,
+  type SinotradeTrade,
+} from "./protocol";
+import {
+  acknowledgeOfficialDialogs,
+  readSinotradeVerification,
+  submitSinotradeCredentials,
+  submitSinotradeVerification,
+} from "./login-form";
+
+type Binding = Parameters<typeof launchBrowserWithRetry>[0];
+// First-time certificate verification waits on an OTP and the terms; Browser keep_alive is an
+// inactivity timeout that Cloudflare allows up to 20 minutes.
+const LOGIN_TTL_MS = 10 * 60_000;
+const LOGIN_PATHS = {
+  newweb: "/newweb/SinoTrade_login/",
+  savings: "/Login",
+} as const;
+const SAVINGS_OVERVIEW_URL = `${SINOTRADE_ORIGINS.savings}/Account/Overview`;
+const SAVINGS_ASSET_URL = `${SINOTRADE_ORIGINS.savings}/Account/Asset`;
+const SAVINGS_TRANSACTION_URL = `${SINOTRADE_ORIGINS.savings}/Account/Transaction`;
+
+function savingsPageUrl(page: Page) {
+  let url: URL;
+  try {
+    url = new URL(page.url());
+  } catch {
+    throw new SinotradeConnectionError("豐存股頁面網址無法辨識，請重新連線。");
+  }
+  if (url.origin !== SINOTRADE_ORIGINS.savings)
+    throw new SinotradeConnectionError("豐存股頁面 origin 不符，請重新連線。");
+  return url;
+}
+
+function requireSavingsPage(page: Page) {
+  const url = savingsPageUrl(page);
+  if (
+    /^\/Login\/?$/i.test(url.pathname) ||
+    url.pathname === "/Content/CA/webcaFrm.html"
+  )
+    throw new SinotradeAuthenticationRequiredError();
+  return url;
+}
+
+async function restoreOrigin(
+  page: Page,
+  platform: SinotradePlatform,
+  state?: SinotradeOriginState,
+  preserveSharedCookies = false,
+) {
+  const origin = SINOTRADE_ORIGINS[platform];
+  if (state) {
+    const cookies = state.cookies.filter(
+      (cookie) =>
+        isSinotradeCookie(platform, cookie) &&
+        !(
+          preserveSharedCookies &&
+          cookie.domain.replace(/^\./, "") === "sinotrade.com.tw"
+        ),
+    );
+    if (cookies.length) await page.setCookie(...cookies);
+    const storage = selectSinotradeStorage(platform, state.localStorage);
+    const preload = await page.evaluateOnNewDocument(
+      (expectedOrigin, items) => {
+        if (location.origin !== expectedOrigin) return;
+        for (const [key, value] of Object.entries(items))
+          localStorage.setItem(key, value);
+      },
+      origin,
+      storage,
+    );
+    await page.goto(origin + LOGIN_PATHS[platform], {
+      waitUntil: "domcontentloaded",
+      timeout: 45_000,
+    });
+    await page.removeScriptToEvaluateOnNewDocument(preload.identifier);
+  } else
+    await page.goto(origin + LOGIN_PATHS[platform], {
+      waitUntil: "domcontentloaded",
+      timeout: 45_000,
+    });
+}
+
+async function captureOrigin(
+  page: Page,
+  platform: SinotradePlatform,
+): Promise<SinotradeOriginState> {
+  if (new URL(page.url()).origin !== SINOTRADE_ORIGINS[platform])
+    throw new SinotradeConnectionError();
+  // Only allowlisted keys leave the page; never enumerate/export the full profile.
+  const storage = await page.evaluate((selectedPlatform) => {
+    const result: Record<string, string> = {};
+    const keys =
+      selectedPlatform === "newweb"
+        ? ["newweb_token", "acnts", "userID", "TWCACertIdxRef"]
+        : ["TWCACertIdxRef"];
+    for (const key of keys) {
+      const value = localStorage.getItem(key);
+      if (value) result[key] = value;
+    }
+    if (result.TWCACertIdxRef) {
+      let index: unknown;
+      try {
+        index = JSON.parse(result.TWCACertIdxRef);
+      } catch {
+        return result;
+      }
+      if (index && typeof index === "object" && !Array.isArray(index))
+        for (const key of Object.keys(index)) {
+          if (/^TWCA\d+$/.test(key)) {
+            const value = localStorage.getItem(key);
+            if (value) result[key] = value;
+          }
+        }
+    }
+    return result;
+  }, platform);
+  const urls =
+    platform === "newweb"
+      ? [SINOTRADE_ORIGINS.newweb, "https://service.sinotrade.com.tw"]
+      : [SINOTRADE_ORIGINS.savings];
+  const cookies = (await page.cookies(...urls)).filter((cookie) =>
+    isSinotradeCookie(platform, cookie),
+  );
+  return {
+    authenticated: true,
+    cookies,
+    localStorage: selectSinotradeStorage(platform, storage),
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+export async function prepareSinotradeLogin(
+  binding: Binding,
+  config: SinotradeConfig,
+  platform: SinotradePlatform,
+) {
+  if (
+    config.browserSessionId &&
+    Date.parse(config.browserSessionExpiresAt ?? "") > Date.now()
+  )
+    throw new SinotradeConnectionError(
+      "已有登入驗證等待完成，請先完成或取消。",
+    );
+  const browser = await launchBrowserWithRetry(binding, {
+    keep_alive: LOGIN_TTL_MS,
+  });
+  let retained = false;
+  acknowledgeOfficialDialogs(browser);
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1024, height: 768 });
+    await restoreOrigin(
+      page,
+      platform,
+      restorableSinotradeState(config.webState, platform),
+    );
+    const challenge = await submitSinotradeCredentials(
+      browser,
+      platform,
+      config,
+    );
+    retained = true;
+    return {
+      platform,
+      challenge,
+      expiresAt: new Date(Date.now() + LOGIN_TTL_MS).toISOString(),
+      browserSessionId: browser.sessionId(),
+    };
+  } finally {
+    if (retained) await browser.disconnect();
+    else await closeBrowserSession(binding, browser);
+  }
+}
+
+async function withPendingLogin<T>(
+  binding: Binding,
+  config: SinotradeConfig,
+  task: (browser: Browser, platform: SinotradePlatform) => Promise<T>,
+) {
+  if (
+    !config.browserSessionId ||
+    !config.loginPlatform ||
+    !(Date.parse(config.browserSessionExpiresAt ?? "") > Date.now())
+  )
+    throw new SinotradeLoginExpiredError();
+  const browser = await connectBrowserWithCancellation(
+    binding,
+    config.browserSessionId,
+  ).catch(() => {
+    throw new SinotradeLoginExpiredError();
+  });
+  acknowledgeOfficialDialogs(browser);
+  try {
+    return await task(browser, config.loginPlatform);
+  } finally {
+    await browser.disconnect();
+  }
+}
+
+export function readSinotradeLoginChallenge(
+  binding: Binding,
+  config: SinotradeConfig,
+) {
+  return withPendingLogin(binding, config, readSinotradeVerification);
+}
+
+export function verifySinotradeLogin(
+  binding: Binding,
+  config: SinotradeConfig,
+  input: SinotradeVerificationInput,
+) {
+  return withPendingLogin(binding, config, (browser, platform) =>
+    submitSinotradeVerification(browser, platform, input, config),
+  );
+}
+
+/**
+ * The state of the pending login page once it holds an issued certificate. Issuing one costs
+ * an OTP, so it is kept before anything else can fail; null while no certificate is stored.
+ */
+export function captureSinotradeIssuedState(
+  binding: Binding,
+  config: SinotradeConfig,
+) {
+  return withPendingLogin(binding, config, async (browser, platform) => {
+    const page = (await browser.pages())
+      .filter((page) =>
+        page.url().startsWith(SINOTRADE_ORIGINS[platform] + "/"),
+      )
+      .at(-1);
+    if (!page) return null;
+    const state = await captureOrigin(page, platform);
+    return state.localStorage.TWCACertIdxRef ? state : null;
+  });
+}
+
+export async function closeSinotradeLogin(
+  binding: Binding,
+  config: SinotradeConfig,
+) {
+  if (!config.browserSessionId) return;
+  let browser: Browser;
+  try {
+    browser = await connectBrowserWithCancellation(
+      binding,
+      config.browserSessionId,
+    );
+  } catch {
+    return;
+  }
+  if (!(await closeBrowserSession(binding, browser)))
+    throw new BrowserSessionCleanupError();
+}
+
+export async function completeSinotradeLogin(
+  binding: Binding,
+  config: SinotradeConfig,
+): Promise<{
+  webState: NonNullable<SinotradeConfig["webState"]>;
+  pending?: {
+    platform: SinotradePlatform;
+    browserSessionId: string;
+    challenge: SinotradeVerificationChallenge;
+    expiresAt: string;
+  };
+}> {
+  if (
+    !config.browserSessionId ||
+    !config.loginPlatform ||
+    !(Date.parse(config.browserSessionExpiresAt ?? "") > Date.now())
+  )
+    throw new SinotradeLoginExpiredError();
+  const browser = await connectBrowserWithCancellation(
+    binding,
+    config.browserSessionId,
+  ).catch(() => {
+    throw new SinotradeLoginExpiredError();
+  });
+  acknowledgeOfficialDialogs(browser);
+  let closed = false;
+  try {
+    const platform = config.loginPlatform;
+    const page = (await browser.pages())
+      .filter((page) =>
+        page.url().startsWith(SINOTRADE_ORIGINS[platform] + "/"),
+      )
+      .at(-1);
+    if (!page) throw new SinotradeLoginExpiredError();
+    if (platform === "newweb") await verifyNewwebSession(page);
+    else {
+      await readSinotradeSavingsOverview(page);
+      if (!(await page.$(SINOTRADE_SAVINGS_LOGOUT_SELECTOR)))
+        throw new SinotradeConnectionError(
+          "豐存股尚未登入完成，請在連線表單完成驗證。",
+        );
+    }
+    const state = await captureOrigin(page, platform);
+    const webState = { ...config.webState, [platform]: state };
+    const otherPlatform = platform === "newweb" ? "savings" : "newweb";
+    const otherPage = await browser.newPage();
+    await otherPage.setViewport({ width: 1024, height: 768 });
+    await restoreOrigin(
+      otherPage,
+      otherPlatform,
+      restorableSinotradeState(webState, otherPlatform),
+      true,
+    );
+    try {
+      if (otherPlatform === "newweb") await verifyNewwebSession(otherPage);
+      else await readSinotradeSavingsOverview(otherPage);
+      webState[otherPlatform] = await captureOrigin(otherPage, otherPlatform);
+    } catch (error) {
+      if (!isSinotradeAuthenticationRequiredError(error)) throw error;
+      const previousState = config.webState?.[otherPlatform];
+      if (previousState)
+        webState[otherPlatform] = { ...previousState, authenticated: false };
+      await restoreOrigin(
+        otherPage,
+        otherPlatform,
+        restorableSinotradeState(webState, otherPlatform),
+        true,
+      );
+      const challenge = await submitSinotradeCredentials(
+        browser,
+        otherPlatform,
+        config,
+      );
+      return {
+        webState,
+        pending: {
+          platform: otherPlatform,
+          challenge,
+          expiresAt: new Date(Date.now() + LOGIN_TTL_MS).toISOString(),
+          browserSessionId: browser.sessionId(),
+        },
+      };
+    }
+    closed = await closeBrowserSession(binding, browser);
+    if (!closed) throw new BrowserSessionCleanupError();
+    return { webState };
+  } finally {
+    if (!closed) await browser.disconnect();
+  }
+}
+
+export async function readSinotradeNewwebSession(page: Page) {
+  const session = await page.evaluate(() => ({
+    token: localStorage.getItem("newweb_token"),
+    accounts: localStorage.getItem("acnts"),
+  }));
+  if (!session.token)
+    throw new SinotradeAuthenticationRequiredError(
+      "新理財網登入已失效，請在連線表單重新完成驗證。",
+    );
+  if (!session.accounts)
+    throw new SinotradeConnectionError(
+      "新理財網登入資料格式錯誤，請重新連線。",
+    );
+  let accounts: unknown;
+  try {
+    accounts = JSON.parse(session.accounts);
+  } catch {
+    throw new SinotradeConnectionError();
+  }
+  return { token: session.token, accounts: parseSinotradeAccounts(accounts) };
+}
+
+async function verifyNewwebSession(page: Page) {
+  const session = await readSinotradeNewwebSession(page);
+  const account = session.accounts[0]!;
+  const payload = await requestGeneral(page, account, session.token);
+  const result =
+    typeof payload === "object" && payload !== null
+      ? (payload as Record<string, unknown>)
+      : {};
+  const nested = result.result as
+    { status?: { success?: unknown } } | undefined;
+  const authenticated =
+    account.market === "TW"
+      ? result.success === "True"
+      : result.success === true && nested?.status?.success === true;
+  if (!authenticated)
+    throw new SinotradeConnectionError(
+      "新理財網登入尚未生效，請完成連線驗證。",
+    );
+}
+
+export async function readSinotradeSavingsOverview(page: Page) {
+  const controller = new AbortController();
+  try {
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (response) => {
+          const url = new URL(response.url());
+          return (
+            url.origin === SINOTRADE_ORIGINS.savings &&
+            url.pathname === "/API_Account/GetOverviewData"
+          );
+        },
+        { timeout: 45_000, signal: controller.signal },
+      ),
+      page
+        .goto(SAVINGS_OVERVIEW_URL, {
+          waitUntil: "domcontentloaded",
+          timeout: 45_000,
+        })
+        .then(async (navigation) => {
+          const url = requireSavingsPage(page);
+          if (navigation?.status() === 401)
+            throw new SinotradeAuthenticationRequiredError();
+          if (!/^\/Account\/Overview\/?$/i.test(url.pathname))
+            throw new SinotradeConnectionError(
+              "豐存股總覽頁面網址不符，請重新連線。",
+            );
+          if (!(await page.$(SINOTRADE_SAVINGS_LOGOUT_SELECTOR)))
+            throw new SinotradeConnectionError(
+              "豐存股還需要完成官方登入確認。",
+            );
+        }),
+    ]);
+    requireSavingsPage(page);
+    if (!response.ok())
+      throw response.status() === 401
+        ? new SinotradeAuthenticationRequiredError()
+        : new SinotradeConnectionError("豐存股帳戶總覽查詢失敗，請重新連線。");
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new SinotradeConnectionError(
+        "豐存股帳戶總覽格式錯誤，請重新連線。",
+      );
+    }
+    return parseSavingsAccountIdentities(payload);
+  } finally {
+    controller.abort();
+  }
+}
+
+/** POSTs to the new site's service API as the logged-in page does. `basic` adds its public client header. */
+async function requestNewweb(
+  page: Page,
+  request: { path: string; body: unknown; basic: boolean },
+  label: string,
+): Promise<unknown> {
+  const response = await page.evaluate(
+    async ({ url, body, basic }) => {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      // Public website client identifier from the official CRYL bundle, not user credentials.
+      if (basic) headers.Authorization = "Basic " + btoa("nweb:Nweb123");
+      const response = await fetch(url, {
+        method: "POST",
+        redirect: "error",
+        credentials: basic ? "omit" : "include",
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(45_000),
+      });
+      if (!response.ok) return { httpStatus: response.status, payload: null };
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        return { httpStatus: 502, payload: null };
+      }
+      return {
+        httpStatus: response.status,
+        payload,
+      };
+    },
+    {
+      url: "https://service.sinotrade.com.tw" + request.path,
+      body: request.body,
+      basic: request.basic,
+    },
+  );
+  if (response.httpStatus === 401)
+    throw new SinotradeAuthenticationRequiredError();
+  if (response.httpStatus === 403) throw new SinotradeConnectionError();
+  if (response.httpStatus !== 200)
+    throw new Error(
+      `${label}查詢失敗（HTTP ${response.httpStatus}），未更新持倉。`,
+    );
+  return response.payload;
+}
+
+function requestGeneral(
+  page: Page,
+  account: SinotradeAccount,
+  token: string,
+): Promise<unknown> {
+  return requestNewweb(
+    page,
+    account.market === "TW"
+      ? {
+          path: "/api/v1/Equity/UnRealPrtlos",
+          body: taiwanUnrealizedRequestBody(account, token),
+          basic: true,
+        }
+      : {
+          path: "/divo/api/v1/assets/querySubBrokerageUnrealizedPrtLos",
+          body: {
+            account: account.brokerAccount,
+            branch: account.brokerNo,
+            market: "US",
+            stock_id: "",
+            token,
+          },
+          basic: false,
+        },
+    "證券庫存",
+  );
+}
+
+async function queryGeneral(
+  page: Page,
+  account: SinotradeAccount,
+  token: string,
+): Promise<SinotradeHolding[]> {
+  const payload = await requestGeneral(page, account, token);
+  return account.market === "TW"
+    ? parseTaiwanUnrealizedResponse(payload)
+    : parseForeignUnrealizedResponse(payload);
+}
+
+/**
+ * 新理財網「交易紀錄 → 對帳單」：台股現股的完整買賣、手續費與交易稅，官方只提供近五年；
+ * 賣出再對上「庫存損益 → 已實現」的官方損益。
+ */
+async function queryTaiwanTrades(
+  page: Page,
+  account: SinotradeAccount,
+  token: string,
+  range: { start: string; end: string },
+): Promise<SinotradeTrade[]> {
+  const trades = parseTaiwanStatementResponse(
+    await requestNewweb(
+      page,
+      {
+        path: "/api/v1/Equity/ReconciliationStatement",
+        body: taiwanStatementRequestBody(account, token, range),
+        basic: true,
+      },
+      "證券交易紀錄",
+    ),
+  );
+  const windows = realizedDateWindows(
+    trades
+      .filter((trade) => trade.side === "S")
+      .map((trade) => trade.tradeDate),
+  );
+  if (windows.length === 0) return trades;
+  const realized: SinotradeRealizedRow[] = [];
+  for (const window of windows)
+    realized.push(
+      ...parseTaiwanRealizedResponse(
+        await requestNewweb(
+          page,
+          {
+            path: "/api/v1/Equity/RealPrtlosSum",
+            body: taiwanRealizedRequestBody(account, token, window),
+            basic: true,
+          },
+          "已實現損益",
+        ),
+      ),
+    );
+  return applyRealizedPnl(trades, realized);
+}
+
+/**
+ * 豐存股「成交」頁：新理財網的海外複委託對帳單沒有豐存美股的買進，這裡是唯一來源。
+ * 與總覽卡片相同，以 #form1 的 CSRF token 與帳號 POST，並放寬日期區間。
+ */
+export async function querySinotradeSavingsTrades(
+  page: Page,
+  account: SinotradeAccount,
+  dateRange: string,
+): Promise<SinotradeTrade[]> {
+  requireSavingsPage(page);
+  const result = await page.evaluate(
+    async ({
+      accountValue,
+      expectedOrigin,
+      url,
+      dateRange,
+    }): Promise<{
+      status: number;
+      recognized?: boolean;
+      table?: SavingsTransactionTable | null;
+    }> => {
+      if (location.origin !== expectedOrigin) return { status: 0 };
+      const csrf = (
+        document.querySelector(
+          '#form1 input[name="__RequestVerificationToken"]',
+        ) as HTMLInputElement | null
+      )?.value;
+      if (!csrf) return { status: 0 };
+      const response = await fetch(url, {
+        method: "POST",
+        redirect: "error",
+        credentials: "same-origin",
+        body: new URLSearchParams({
+          __RequestVerificationToken: csrf,
+          SelectAct: accountValue,
+          QueryPage: "1",
+          QueryDateRange: dateRange,
+          ShowCurrency: "False",
+          Stock: "",
+          QueryAssetCategories: "",
+          QueryFilter: "",
+        }),
+        signal: AbortSignal.timeout(45_000),
+      });
+      if (!response.ok) return { status: response.status };
+      const doc = new DOMParser().parseFromString(
+        await response.text(),
+        "text/html",
+      );
+      const clean = (element: Element) =>
+        (element.textContent ?? "").replace(/\s+/g, " ").trim();
+      const table = Array.from(doc.querySelectorAll("table")).find(
+        (candidate) =>
+          /成交日/.test(candidate.textContent ?? "") &&
+          /成交均價/.test(candidate.textContent ?? ""),
+      );
+      return {
+        status: response.status,
+        // 沒有成交時沒有成交表格；查詢表單在，才表示頁面確實是成交頁。
+        recognized: Boolean(doc.querySelector("#QueryDateRange")),
+        table: table
+          ? {
+              headers: Array.from(table.querySelectorAll("thead th"), clean),
+              rows: Array.from(table.querySelectorAll("tbody tr"), (row) =>
+                Array.from(row.children, clean),
+              ),
+            }
+          : null,
+      };
+    },
+    {
+      accountValue: account.brokerAccount,
+      expectedOrigin: SINOTRADE_ORIGINS.savings,
+      url: SAVINGS_TRANSACTION_URL,
+      dateRange,
+    },
+  );
+  requireSavingsPage(page);
+  if (result.status === 401) throw new SinotradeAuthenticationRequiredError();
+  if (result.status !== 200 || !result.recognized)
+    throw new SinotradeConnectionError("豐存股成交紀錄查詢失敗，請重新連線。");
+  return parseSavingsTransactionTable(result.table ?? null, {
+    market: account.market,
+    currency: account.market === "TW" ? "TWD" : "USD",
+  });
+}
+
+export async function querySinotradeSavings(
+  page: Page,
+  account: SinotradeAccount,
+) {
+  requireSavingsPage(page);
+  const result = await page.evaluate(
+    async ({ accountValue, expectedOrigin, url }) => {
+      if (location.origin !== expectedOrigin) return { status: 0, html: null };
+      // The overview's account cards submit this form with the account number.
+      const csrf = (
+        document.querySelector(
+          '#form1 input[name="__RequestVerificationToken"]',
+        ) as HTMLInputElement | null
+      )?.value;
+      if (!csrf) return { status: 0, html: null };
+      const data = new URLSearchParams({
+        __RequestVerificationToken: csrf,
+        SelectAct: accountValue,
+      });
+      const response = await fetch(url, {
+        method: "POST",
+        redirect: "error",
+        credentials: "same-origin",
+        body: data,
+        signal: AbortSignal.timeout(45_000),
+      });
+      if (!response.ok) return { status: response.status, html: null };
+      return { status: response.status, html: await response.text() };
+    },
+    {
+      accountValue: account.brokerAccount,
+      expectedOrigin: SINOTRADE_ORIGINS.savings,
+      url: SAVINGS_ASSET_URL,
+    },
+  );
+  requireSavingsPage(page);
+  if (result.status === 401) throw new SinotradeAuthenticationRequiredError();
+  if (!result.html)
+    throw new SinotradeConnectionError("豐存股庫存查詢失敗，請重新連線。");
+  return parseSavingsAssetHtml(result.html, {
+    market: account.market,
+    currency: account.market === "TW" ? "TWD" : "USD",
+  });
+}
+
+/** One account's snapshots are alternatives; differing quantities must never be guessed or added. */
+export function mergeSinotradeAccountHoldings(
+  general: SinotradeHolding[],
+  savings: SinotradeHolding[],
+) {
+  const positions = new Map<string, SinotradeHolding>();
+  for (const row of general) {
+    const previous = positions.get(row.symbol);
+    if (previous)
+      positions.set(row.symbol, {
+        ...previous,
+        quantity: previous.quantity + row.quantity,
+        marketValue: previous.marketValue + row.marketValue,
+        costBasis:
+          previous.costBasis === undefined || row.costBasis === undefined
+            ? undefined
+            : previous.costBasis + row.costBasis,
+        unrealizedPnl:
+          previous.unrealizedPnl === undefined ||
+          row.unrealizedPnl === undefined
+            ? undefined
+            : previous.unrealizedPnl + row.unrealizedPnl,
+      });
+    else positions.set(row.symbol, row);
+  }
+  for (const row of savings) {
+    const previous = positions.get(row.symbol);
+    if (
+      previous &&
+      (previous.market !== row.market || previous.currency !== row.currency)
+    )
+      throw new Error("兩平台的同一持倉市場或幣別不一致，未更新持倉。");
+    if (previous && Math.abs(previous.quantity - row.quantity) > 1e-8)
+      throw new Error("兩平台的同一持倉數量不一致，請稍後重新同步。");
+    if (
+      previous &&
+      row.market === "US" &&
+      previous.costBasis !== undefined &&
+      row.costBasis !== undefined &&
+      Math.abs(previous.costBasis - row.costBasis) > 0.01
+    )
+      throw new Error(
+        "兩平台的同一美股成本不一致，尚無法確認重疊範圍，未更新持倉。",
+      );
+    if (!previous) positions.set(row.symbol, row);
+  }
+  return [...positions.values()];
+}
+
+export async function fetchSinotradeSnapshot(
+  binding: Binding,
+  config: SinotradeConfig,
+) {
+  if (
+    !config.webState?.newweb ||
+    !config.webState.savings ||
+    config.webState.newweb.authenticated === false ||
+    config.webState.savings.authenticated === false
+  )
+    throw new SinotradeConnectionError();
+  if (
+    config.browserSessionId &&
+    Date.parse(config.browserSessionExpiresAt ?? "") > Date.now()
+  )
+    throw new SinotradeConnectionError(
+      "請先完成或取消目前的登入驗證，再同步。",
+    );
+  const browser = await launchBrowserWithRetry(binding);
+  try {
+    const newweb = await browser.newPage();
+    await restoreOrigin(newweb, "newweb", config.webState.newweb);
+    const { accounts, token } = await readSinotradeNewwebSession(newweb);
+    const savings = await browser.newPage();
+    await restoreOrigin(savings, "savings", config.webState.savings);
+    const savingsAccounts = await readSinotradeSavingsOverview(savings);
+    if (!(await savings.$(SINOTRADE_SAVINGS_LOGOUT_SELECTOR)))
+      throw new SinotradeConnectionError();
+    const accountHoldings: Array<{
+      account: SinotradeAccount;
+      holdings: SinotradeHolding[];
+      trades: SinotradeTrade[];
+    }> = [];
+    const today = taipeiDateKey(new Date());
+    const statementRange = statementDateRange(today);
+    // 豐存股不限查詢年限；從最早的年份起查，取得全部買進紀錄。
+    const savingsDateRange = `2000/01/01 ~ ${today.replaceAll("-", "/")}`;
+    for (const account of accounts) {
+      if (
+        !savingsAccounts.some(
+          (savingsAccount) =>
+            savingsAccount.brokerNo === account.brokerNo &&
+            savingsAccount.brokerAccount === account.brokerAccount &&
+            savingsAccount.market === account.market,
+        )
+      )
+        throw new Error("兩平台的券商分公司與帳戶無法對應，未更新持倉。");
+      const general = await queryGeneral(newweb, account, token);
+      const recurring = await querySinotradeSavings(savings, account);
+      // 台股以對帳單為準（含賣出與費稅）；豐存美股的買進只在豐存股「成交」頁。
+      const trades =
+        account.market === "TW"
+          ? await queryTaiwanTrades(newweb, account, token, statementRange)
+          : await querySinotradeSavingsTrades(
+              savings,
+              account,
+              savingsDateRange,
+            );
+      accountHoldings.push({
+        account,
+        holdings: mergeSinotradeAccountHoldings(general, recurring),
+        trades,
+      });
+    }
+    return {
+      accountHoldings,
+      webState: {
+        newweb: await captureOrigin(newweb, "newweb"),
+        savings: await captureOrigin(savings, "savings"),
+      },
+    };
+  } finally {
+    await closeBrowserSession(binding, browser);
+  }
+}

@@ -3,11 +3,12 @@
     InvestmentRow,
     InvestmentTransactionRow,
   } from "@/data/investments/types";
+  import { formatCurrency } from "@/shared/format/financial";
   import {
-    formatCurrency,
-    formatDate,
-    formatNumber,
-  } from "@/shared/format/financial";
+    tradeAmountText,
+    tradeRealizedPnl,
+    tradeSummary,
+  } from "../model/investment-display";
   import InvestmentHoldings from "./InvestmentHoldings.svelte";
   import { listedHoldingCount } from "@/data/investments/holding-groups";
 
@@ -31,12 +32,11 @@
 
   let tab = $state<"holdings" | "transactions">("holdings");
 
-  function tradeDisplay(trade: InvestmentTransactionRow) {
-    if (trade.amount != null && trade.price != null && trade.price !== 1)
-      return formatCurrency(trade.amount, trade.currency);
-    if (trade.quantity != null) return `${formatNumber(trade.quantity)} 股`;
-    return "金額未提供";
-  }
+  const pnlClass = {
+    gain: "text-moss",
+    loss: "text-coral",
+    unknown: "text-subtle",
+  };
 </script>
 
 <div class={compact ? "grid gap-3" : "flex min-h-full flex-col"}>
@@ -102,6 +102,7 @@
       {:else}
         <div class="divide-y divide-border">
           {#each trades.slice(0, 100) as trade (trade.id)}
+            {@const pnl = tradeRealizedPnl(trade)}
             <div
               class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3"
             >
@@ -110,13 +111,21 @@
                   {trade.name ?? trade.symbol ?? "投資交易"}
                 </p>
                 <p class="mt-1 text-caption text-subtle">
-                  {trade.transactionName ?? trade.transactionCode ?? "交易"} ·
-                  {formatDate(trade.tradeDate ?? trade.postedDate)}
+                  {tradeSummary(trade)}
                 </p>
               </div>
-              <p class="text-right text-sm font-semibold">
-                {tradeDisplay(trade)}
-              </p>
+              <div class="text-right">
+                <p class="text-sm font-semibold tabular-nums">
+                  {tradeAmountText(trade)}
+                </p>
+                {#if pnl}
+                  <p
+                    class={`mt-1 text-caption tabular-nums ${pnlClass[pnl.tone]}`}
+                  >
+                    {pnl.text}
+                  </p>
+                {/if}
+              </div>
             </div>
           {/each}
         </div>
