@@ -1066,8 +1066,8 @@ export async function dismissCathaySystemMessageIfPresent(
   >,
 ): Promise<boolean> {
   // 公告先以 `modal fade` 掛在頁面上，之後才加上 `show` 開始動畫：背景淡入 0.15 秒、對話框
-  // 下滑 0.3 秒。Bootstrap 4 在動畫結束前會忽略關閉（`_isTransitioning`）。Browser Run 每個指令
-  // 的往返延遲剛好蓋過這段時間；同機的瀏覽器沒有延遲，會在公告出現前就判定沒有公告，或在動畫中
+  // 下滑 0.3 秒。Bootstrap 4 在動畫結束前會忽略關閉（`_isTransitioning`）。不能靠指令往返延遲
+  // 剛好蓋過這段時間：延遲短時（例如同機的瀏覽器）會在公告出現前就判定沒有公告，或在動畫中
   // 按下「我知道了」而關不掉。所以等對話框動畫結束（transform 回到 none）再操作。
   const shown = await page
     .waitForFunction(
