@@ -37,6 +37,7 @@ function createFakeBank() {
       success?: boolean;
     },
     noCards: false,
+    cardQueryResponse: undefined as Record<string, unknown> | undefined,
     loanInfo: undefined as unknown[] | undefined,
     loanResponse: { code: "0000", rsData: {} } as Record<string, unknown>,
     requests: [] as string[],
@@ -134,9 +135,10 @@ function createFakeBank() {
             : { code: "0000", ...(payloads.cardHome as object) };
       } else if (resource === "/fao/fao01010/query") {
         response =
-          state.malformedResource === resource
+          state.cardQueryResponse ??
+          (state.malformedResource === resource
             ? { code: "0000", rsData: {} }
-            : { code: "0000", ...(payloads.cardTransactions as object) };
+            : { code: "0000", ...(payloads.cardTransactions as object) });
       } else if (resource === "/fao/fao01001/query") {
         response = {
           code: "0000",
@@ -295,5 +297,52 @@ describe("兆豐貸款同步", () => {
       await freshSyncConfig(bank.fetcher),
     );
     expect(bank.state.requests).not.toContain(LOAN_HOME);
+  });
+});
+
+describe("兆豐信用卡消費查詢", () => {
+  const creditTransactions = (result: {
+    bankAccounts?: Array<{ accountType?: string; sourceId: string }>;
+    bankTransactions?: Array<{ accountId: string }>;
+  }) => {
+    const creditIds = new Set(
+      (result.bankAccounts ?? [])
+        .filter((account) => account.accountType === "credit")
+        .map((account) => account.sourceId),
+    );
+    return (result.bankTransactions ?? []).filter((transaction) =>
+      creditIds.has(transaction.accountId),
+    );
+  };
+
+  it("有卡但查詢期間沒有消費（1120 查無資料）時視為 0 筆，信用卡與存款照常同步", async () => {
+    const baseline = createFakeBank();
+    const expected = await createMegabankConnector(baseline.fetcher).sync(
+      await freshSyncConfig(baseline.fetcher),
+    );
+    expect(creditTransactions(expected).length).toBeGreaterThan(0);
+
+    const bank = createFakeBank();
+    bank.state.cardQueryResponse = { code: "1120", rsData: {} };
+    const result = await createMegabankConnector(bank.fetcher).sync(
+      await freshSyncConfig(bank.fetcher),
+    );
+    expect(creditTransactions(result)).toHaveLength(0);
+    expect(result.bankAccounts).toEqual(expected.bankAccounts);
+    expect(result.creditCardBills).toEqual(expected.creditCardBills);
+    expect(result.bankTransactions).toHaveLength(
+      (expected.bankTransactions ?? []).length -
+        creditTransactions(expected).length,
+    );
+  });
+
+  it("查詢成功（0000）卻缺少 detailList 時仍視為格式變更並整次失敗", async () => {
+    const bank = createFakeBank();
+    bank.state.malformedResource = "/fao/fao01010/query";
+    await expect(
+      createMegabankConnector(bank.fetcher).sync(
+        await freshSyncConfig(bank.fetcher),
+      ),
+    ).rejects.toThrow("兆豐信用卡消費明細格式已變更，未更新資料。");
   });
 });
