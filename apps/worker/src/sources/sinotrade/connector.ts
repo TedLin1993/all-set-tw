@@ -1,4 +1,4 @@
-import type { Browser, Page } from "@cloudflare/puppeteer";
+import type { Browser, Page, Target } from "@cloudflare/puppeteer";
 import type {
   SinotradeVerificationChallenge,
   SinotradeVerificationInput,
@@ -86,6 +86,26 @@ function requireSavingsPage(page: Page) {
   return url;
 }
 
+// 官方 API 防火牆拒絕 Browser Run 的 HeadlessChrome UA，回應沒有 CORS 標頭，頁面只顯示
+// 「Network Error」。換成同版本的一般 Chrome UA，與 sec-ch-ua 的版本保持一致。
+const desktopUserAgent = async (browser: Browser) =>
+  (await browser.userAgent()).replace("HeadlessChrome/", "Chrome/");
+
+/**
+ * UA 覆寫只在設定它的 CDP 連線有效，官方另開的憑證視窗也不會繼承。每次連上 Browser 都對
+ * 現有頁面重新套用，並套用到之後開啟的頁面。
+ */
+async function useDesktopUserAgent(browser: Browser) {
+  const userAgent = await desktopUserAgent(browser);
+  const apply = async (page: Page | null) => {
+    await page?.setUserAgent(userAgent).catch(() => undefined);
+  };
+  browser.on("targetcreated", (target: Target) => {
+    void target.page().then(apply, () => undefined);
+  });
+  await Promise.all((await browser.pages()).map(apply));
+}
+
 async function restoreOrigin(
   page: Page,
   platform: SinotradePlatform,
@@ -93,6 +113,8 @@ async function restoreOrigin(
   preserveSharedCookies = false,
 ) {
   const origin = SINOTRADE_ORIGINS[platform];
+  // 導覽前直接設定，不等待 targetcreated 的非同步套用。
+  await page.setUserAgent(await desktopUserAgent(page.browser()));
   if (state) {
     const cookies = state.cookies.filter(
       (cookie) =>
@@ -192,6 +214,7 @@ export async function prepareSinotradeLogin(
   let retained = false;
   acknowledgeOfficialDialogs(browser);
   try {
+    await useDesktopUserAgent(browser);
     const page = await browser.newPage();
     await page.setViewport({ width: 1024, height: 768 });
     await restoreOrigin(
@@ -236,6 +259,7 @@ async function withPendingLogin<T>(
   });
   acknowledgeOfficialDialogs(browser);
   try {
+    await useDesktopUserAgent(browser);
     return await task(browser, config.loginPlatform);
   } finally {
     await browser.disconnect();
@@ -324,6 +348,7 @@ export async function completeSinotradeLogin(
   acknowledgeOfficialDialogs(browser);
   let closed = false;
   try {
+    await useDesktopUserAgent(browser);
     const platform = config.loginPlatform;
     const page = (await browser.pages())
       .filter((page) =>
