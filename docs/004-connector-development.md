@@ -383,7 +383,7 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 
 外幣活存使用同一登入工作階段開啟 `FAcctInq/R0101_FDepInq`，監聽頁面自己送出的 `R_ACCT_Q_OverView`，並以本次 request 物件配對回應。只有 HTTP 200、`returnCode: "0000"` 且 `content.isGetDemandAccountSuccess: true` 才解析 `demandAccounts[].details[]`。依官方頁面，以 `currencyCode` 與 `balance` 保存原幣餘額，保留小數，不使用臺幣參考值 `equalTwdBalance`；同帳號不同幣別使用 `bank:cathaybk:<帳號>:<幣別>` 識別，避免互相覆寫。查詢成功且帳戶或幣別明細為空／null 時不建立金融資料；失敗旗標、未知回應或查詢逾時使整次同步失敗。此流程僅同步外幣活存帳戶與餘額，不查詢外幣交易或定存，也不清除歷史資料。帳戶與餘額快照的 `raw` 僅保存帳號末四碼 `accountSuffix`、`currencyCode` 與 `balance`，不保留完整帳號或其他回應欄位。Log 只記錄事件與幣別帳戶筆數。
 
-開啟信用卡總覽前先監聽頁面自己送出的 `C_COM_Q_CardStatus` 請求，以同一 request 物件配對回應，不另外發送狀態查詢。只有 HTTP 200、`returnCode: "0000"` 且 `content.cardStatus: "Invalid"` 時，才依官方 C0101 前端的無卡判斷略過信用卡擷取，保留存款並正常完成同步；不建立零餘額或刪除歷史信用卡資料。狀態 API 逾時、HTTP 失敗、非 JSON 或未知回應格式仍使同步失敗。
+開啟信用卡總覽前先監聽頁面自己送出的 `C_COM_Q_CardStatus` 請求，以同一 request 物件配對回應，不另外發送狀態查詢。只有 HTTP 200，且回應為 `returnCode: "0000"`、`content.cardStatus: "Invalid"`，或 `returnCode` 結尾為 `702` 的狀態查詢錯誤時，才依官方 C0101 前端的無卡判斷略過信用卡擷取，保留存款並正常完成同步；不建立零餘額或刪除歷史信用卡資料。官方前端對這兩種回應顯示同一個「申辦信用卡」無卡畫面；實際無卡帳戶回的是後者。狀態 API 逾時、HTTP 失敗、非 JSON、其他錯誤碼或未知回應格式仍使同步失敗，並記錄 `cathaybk_card_status_unrecognized`（只含 `returnCode`）。
 
 其餘已知狀態 (`Valid`、`Positive`、`UnKnow`) 繼續原有信用卡總覽擷取，最多等待 15 秒，須出現可解析的完整「卡片末四碼」才繼續。逾時且偵測不到卡號時，必須有明確無卡提示，或具備信用卡總覽與「立即線上辦卡」的無卡頁面內容，才回傳空的信用卡資料。空白、維護、被登出或無法辨識的頁面使同步失敗，不能僅因缺少卡號就當成無卡。診斷 log 只記錄卡片狀態 enum、失敗階段、移除 query 的頁面路徑、卡片辨識與等待逾時狀態，不記錄完整頁面文字、帳號或憑證。
 
