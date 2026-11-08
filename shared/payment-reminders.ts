@@ -39,7 +39,7 @@ export interface PaymentReminder {
   daysUntilDue?: number;
   state: PaymentReminderState;
   asOfAt?: string;
-  /** 扣款帳戶；只有餘額不足時填入。 */
+  /** 扣款帳戶；只有餘額不足或餘額足夠而隱藏（covered）時填入。 */
   paymentAccount?: {
     id: string;
     /** 機構與帳號末碼，供畫面顯示。 */
@@ -216,7 +216,7 @@ function amountInPayerCurrency(
 
 /**
  * 依扣款帳戶可用餘額調整提醒：同一扣款帳戶的期限內款項（含已過期限與扣款未完成）
- * 換算成扣款帳戶幣別加總後比較。夠扣時隱藏待繳與待確認的提醒；不夠時改為餘額不足。
+ * 換算成扣款帳戶幣別加總後比較。夠扣時隱藏待繳與待確認的提醒並記下扣款帳戶；不夠時改為餘額不足。
  * 任一金額未知、無法換算、餘額未知或資料過舊時不判斷，維持原提醒。
  */
 function applyPaymentAccounts(
@@ -246,7 +246,10 @@ function applyPaymentAccounts(
       (item) => item.state === "due" || item.state === "confirm",
     );
     if (available >= required) {
-      for (const item of adjustable) covered.add(item);
+      for (const item of adjustable) {
+        item.paymentAccount = paymentAccountOf(payer);
+        covered.add(item);
+      }
       continue;
     }
     for (const item of adjustable) {

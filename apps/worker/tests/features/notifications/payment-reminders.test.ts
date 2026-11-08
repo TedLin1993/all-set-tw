@@ -214,9 +214,24 @@ describe("collectPaymentReminders", () => {
       // 信用卡 12,800 + 房貸 25,000 = 37,800。
       const enough = run(deposit({ availableBalance: 40_000 }));
       expect(enough.reminders).toEqual([]);
-      expect(enough.covered.map((item) => item.accountId)).toEqual([
-        "card",
-        "loan",
+      // 足額款項仍是近期要付的款，MCP 會列出並說明由哪個帳戶扣款。
+      expect(
+        enough.covered.map(({ accountId, state, paymentAccount }) => ({
+          accountId,
+          state,
+          paymentAccount: paymentAccount?.name,
+        })),
+      ).toEqual([
+        {
+          accountId: "card",
+          state: "due",
+          paymentAccount: "台新銀行 末五碼 12345",
+        },
+        {
+          accountId: "loan",
+          state: "confirm",
+          paymentAccount: "台新銀行 末五碼 12345",
+        },
       ]);
 
       // 帳戶餘額 50,000 足夠，但可用餘額 37,000 不足，應以可用餘額判斷。
