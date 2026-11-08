@@ -6,6 +6,7 @@ import {
   activityFlowTotalTwd,
   taipeiDateKey,
   type ActivityItem,
+  type PaymentReminder,
 } from "@taiwan-fin-hub/shared";
 import { getActivityItemsInRange } from "../activity/service";
 import { searchActivity } from "../activity/search-service";
@@ -181,20 +182,31 @@ export async function searchActivities(
   };
 }
 
+/**
+ * 近期要付的款項：需要處理的提醒在前，扣款帳戶餘額足夠、預計自動扣款的款項
+ * 以 `covered` 排在最後。已繳清的帳單不是即將要付的款項，不列入。
+ */
 export async function getUpcomingPayments(db: D1Database) {
-  const reminders = await loadPaymentReminders(db);
+  const { reminders, covered } = await loadPaymentReminders(db);
+  const toPayment = (
+    reminder: PaymentReminder,
+    state: PaymentReminder["state"] | "covered",
+  ) => ({
+    kind: reminder.kind,
+    name: reminder.name,
+    state,
+    amount: reminder.amount ?? null,
+    currency: reminder.currency,
+    dueDate: reminder.dueDate ?? null,
+    daysUntilDue: reminder.daysUntilDue ?? null,
+    paymentAccount: reminder.paymentAccount?.name ?? null,
+    shortfall: reminder.shortfall ?? null,
+    asOf: reminder.asOfAt ?? null,
+  });
   return {
-    reminders: reminders.map((reminder) => ({
-      kind: reminder.kind,
-      name: reminder.name,
-      state: reminder.state,
-      amount: reminder.amount ?? null,
-      currency: reminder.currency,
-      dueDate: reminder.dueDate ?? null,
-      daysUntilDue: reminder.daysUntilDue ?? null,
-      paymentAccount: reminder.paymentAccount?.name ?? null,
-      shortfall: reminder.shortfall ?? null,
-      asOf: reminder.asOfAt ?? null,
-    })),
+    payments: [
+      ...reminders.map((reminder) => toPayment(reminder, reminder.state)),
+      ...covered.map((reminder) => toPayment(reminder, "covered")),
+    ],
   };
 }

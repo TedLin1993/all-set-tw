@@ -169,7 +169,7 @@ function createServer(
     "get_upcoming_payments",
     {
       description:
-        "5 天內到期或已逾期的信用卡與貸款繳款提醒。state：due 待繳、overdue 已過期限、confirm 狀態不明請確認、collection_failed 扣款未完成、insufficient_funds 扣款帳戶餘額不足（shortfall 為差額）。扣款帳戶餘額足夠的款項不列出。",
+        "5 天內到期或已逾期、尚未付清的信用卡與貸款款項，依緊急程度排序。state：collection_failed 扣款未完成、insufficient_funds 扣款帳戶餘額不足（shortfall 為差額）、overdue 已過期限、due 待繳、confirm 狀態不明請確認、covered 扣款帳戶餘額足夠，預計自動扣款，不需處理（排在最後）。已繳清的帳單不列出，需要時以 query_api 讀取 GET /bank/bills 的 isPaid。",
       annotations: READ_ONLY,
     },
     () => jsonResult("get_upcoming_payments", () => getUpcomingPayments(db)),

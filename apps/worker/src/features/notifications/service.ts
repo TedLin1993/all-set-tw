@@ -2,6 +2,7 @@ import type {
   NotificationConfig,
   NotificationPreferences,
   PaymentReminder,
+  PaymentReminderSummary,
   PushSubscriptionInput,
 } from "@taiwan-fin-hub/shared";
 import { collectPaymentReminders, taipeiDateKey } from "@taiwan-fin-hub/shared";
@@ -219,13 +220,14 @@ export async function safelySendScheduledSyncSummary(
 }
 
 /**
- * 讀取繳款提醒。匯率只用於外幣款項由台幣帳戶扣繳時的換算，讀取失敗時以空
- * 匯率表繼續，該類款項維持原提醒；帳戶或帳單讀取失敗時拋出錯誤。
+ * 讀取繳款提醒，含扣款帳戶餘額足夠而隱藏的款項（`covered`）。匯率只用於外幣
+ * 款項由台幣帳戶扣繳時的換算，讀取失敗時以空匯率表繼續，該類款項維持原提醒；
+ * 帳戶或帳單讀取失敗時拋出錯誤。
  */
 export async function loadPaymentReminders(
   db: D1Database,
   now = new Date(),
-): Promise<PaymentReminder[]> {
+): Promise<PaymentReminderSummary> {
   // 本月到期的帳單通常屬於上一或上上期別，與總覽查詢的範圍相同。
   const [year, month] = taipeiDateKey(now).split("-").map(Number);
   const monthStart = (offset: number) => {
@@ -250,7 +252,7 @@ export async function loadPaymentReminders(
   const ratesToTwd = Object.fromEntries(
     rates.map((rate) => [rate.currency, rate.rateTwd]),
   );
-  return collectPaymentReminders(accounts, bills, now, ratesToTwd).reminders;
+  return collectPaymentReminders(accounts, bills, now, ratesToTwd);
 }
 
 /** 繳款提醒只是同步摘要的附加資訊；讀取失敗時記錄 log 並照常送出摘要。 */
@@ -259,7 +261,7 @@ export async function safelyLoadPaymentReminders(
   now = new Date(),
 ): Promise<PaymentReminder[]> {
   try {
-    return await loadPaymentReminders(db, now);
+    return (await loadPaymentReminders(db, now)).reminders;
   } catch (error) {
     const safeError = sanitizeDatabaseError(error);
     console.error(
