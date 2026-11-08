@@ -123,6 +123,25 @@ export async function startSinotradeConnection(
   });
 }
 
+/**
+ * An expired login can no longer be completed; close its browser now instead of letting it idle
+ * until keep_alive ends, and forget the pending reference.
+ */
+async function expirePendingLogin(
+  env: Env,
+  settings: Awaited<ReturnType<typeof loadConfig>>["settings"],
+  config: SinotradeConfig,
+) {
+  await closeSinotradeLogin(env.BROWSER, config);
+  await compareAndSetConnectorSecret(
+    env.DB,
+    "sinotrade",
+    settings,
+    await encryptJson(reusableConfig(config), configEncryptionKey(env)),
+    new Date().toISOString(),
+  );
+}
+
 export async function finishSinotradeConnection(
   env: Env,
 ): Promise<SinotradeConnectionResponse> {
@@ -132,16 +151,8 @@ export async function finishSinotradeConnection(
     try {
       completed = await completeSinotradeLogin(env.BROWSER, config);
     } catch (error) {
-      if (error instanceof SinotradeLoginExpiredError) {
-        await closeSinotradeLogin(env.BROWSER, config);
-        await compareAndSetConnectorSecret(
-          env.DB,
-          "sinotrade",
-          settings,
-          await encryptJson(reusableConfig(config), configEncryptionKey(env)),
-          new Date().toISOString(),
-        );
-      }
+      if (error instanceof SinotradeLoginExpiredError)
+        await expirePendingLogin(env, settings, config);
       throw error;
     }
     const pending = completed.pending;
@@ -203,8 +214,16 @@ export async function cancelSinotradeConnection(env: Env) {
 export async function readSinotradeConnectionStatus(
   env: Env,
 ): Promise<SinotradeConnectionResponse> {
-  const { config } = await loadConfig(env);
-  const challenge = await readSinotradeLoginChallenge(env.BROWSER, config);
+  const { settings, config } = await loadConfig(env);
+  let challenge: Awaited<ReturnType<typeof readSinotradeLoginChallenge>>;
+  try {
+    challenge = await readSinotradeLoginChallenge(env.BROWSER, config);
+  } catch (error) {
+    // Best effort: the expiry, not a cleanup or concurrent-update failure, is what to report.
+    if (error instanceof SinotradeLoginExpiredError)
+      await expirePendingLogin(env, settings, config).catch(() => undefined);
+    throw error;
+  }
   return {
     status: "verification_required",
     platform: config.loginPlatform!,
@@ -260,7 +279,14 @@ export async function verifySinotradeConnection(
 ): Promise<SinotradeConnectionResponse> {
   return withConnectionLock(env, async () => {
     const { settings, config } = await loadConfig(env);
-    const challenge = await verifySinotradeLogin(env.BROWSER, config, input);
+    let challenge: Awaited<ReturnType<typeof verifySinotradeLogin>>;
+    try {
+      challenge = await verifySinotradeLogin(env.BROWSER, config, input);
+    } catch (error) {
+      if (error instanceof SinotradeLoginExpiredError)
+        await expirePendingLogin(env, settings, config).catch(() => undefined);
+      throw error;
+    }
     // Agreeing to the terms issues the certificate; keep it now, whatever happens next.
     if (input.action === "accept_terms" || challenge.step === "ready")
       await rememberIssuedCertificate(env, settings, config);

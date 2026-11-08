@@ -175,6 +175,42 @@ describe("證券原生驗證的敏感狀態生命週期（隔離 D1）", () => {
     });
   });
 
+  it.each(["status", "verify"] as const)(
+    "%s 遇到已逾時的驗證時立即關閉官方 Browser 並清除 pending reference，保留帳密",
+    async (route) => {
+      await startSinotradeConnection(env, "newweb");
+      mocked.read.mockRejectedValueOnce(new SinotradeLoginExpiredError());
+      mocked.verify.mockRejectedValueOnce(new SinotradeLoginExpiredError());
+      await expect(
+        route === "status"
+          ? readSinotradeConnectionStatus(env)
+          : verifySinotradeConnection(env, {
+              action: "verify_otp",
+              values: { otp: "123456" },
+            }),
+      ).rejects.toThrow(/逾時/);
+      expect(mocked.close).toHaveBeenCalledOnce();
+      expect(mocked.close).toHaveBeenCalledWith(
+        undefined,
+        expect.objectContaining({ browserSessionId: "fixture-browser" }),
+      );
+      expect(await stored()).toEqual(credentials);
+      // Cleanup is best effort: the expiry is still what the user sees.
+      await startSinotradeConnection(env, "newweb");
+      mocked.close.mockRejectedValueOnce(new Error("fixture cleanup failure"));
+      mocked.read.mockRejectedValueOnce(new SinotradeLoginExpiredError());
+      mocked.verify.mockRejectedValueOnce(new SinotradeLoginExpiredError());
+      await expect(
+        route === "status"
+          ? readSinotradeConnectionStatus(env)
+          : verifySinotradeConnection(env, {
+              action: "verify_otp",
+              values: { otp: "123456" },
+            }),
+      ).rejects.toThrow(/逾時/);
+    },
+  );
+
   it("驗證失敗不自動重送，也不更動保存的帳密與 pending reference", async () => {
     await startSinotradeConnection(env, "newweb");
     const before = await stored();

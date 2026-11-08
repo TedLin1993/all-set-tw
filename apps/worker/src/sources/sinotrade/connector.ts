@@ -54,9 +54,15 @@ import {
 } from "./login-form";
 
 type Binding = Parameters<typeof launchBrowserWithRetry>[0];
-// First-time certificate verification waits on an OTP and the terms; Browser keep_alive is an
-// inactivity timeout that Cloudflare allows up to 20 minutes.
-const LOGIN_TTL_MS = 10 * 60_000;
+// First-time certificate verification waits on an OTP and the terms. Browser Run bills every
+// second a session stays open (keep_alive is an inactivity timeout), so match the other OTP
+// flows: five minutes, like Fubon.
+const LOGIN_TTL_MS = 5 * 60_000;
+// A normal sync takes about 20 seconds; stop and close the browser well before it can spend
+// the daily Browser Run quota, like HNCB.
+const SYNC_DEADLINE_MS = 120_000;
+const NAVIGATION_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 const LOGIN_PATHS = {
   newweb: "/newweb/SinoTrade_login/",
   savings: "/Login",
@@ -138,13 +144,13 @@ async function restoreOrigin(
     );
     await page.goto(origin + LOGIN_PATHS[platform], {
       waitUntil: "domcontentloaded",
-      timeout: 45_000,
+      timeout: NAVIGATION_TIMEOUT_MS,
     });
     await page.removeScriptToEvaluateOnNewDocument(preload.identifier);
   } else
     await page.goto(origin + LOGIN_PATHS[platform], {
       waitUntil: "domcontentloaded",
-      timeout: 45_000,
+      timeout: NAVIGATION_TIMEOUT_MS,
     });
 }
 
@@ -472,12 +478,12 @@ export async function readSinotradeSavingsOverview(page: Page) {
             url.pathname === "/API_Account/GetOverviewData"
           );
         },
-        { timeout: 45_000, signal: controller.signal },
+        { timeout: NAVIGATION_TIMEOUT_MS, signal: controller.signal },
       ),
       page
         .goto(SAVINGS_OVERVIEW_URL, {
           waitUntil: "domcontentloaded",
-          timeout: 45_000,
+          timeout: NAVIGATION_TIMEOUT_MS,
         })
         .then(async (navigation) => {
           const url = requireSavingsPage(page);
@@ -519,7 +525,7 @@ async function requestNewweb(
   label: string,
 ): Promise<unknown> {
   const response = await page.evaluate(
-    async ({ url, body, basic }) => {
+    async ({ url, body, basic, timeoutMs }) => {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
@@ -531,7 +537,7 @@ async function requestNewweb(
         credentials: basic ? "omit" : "include",
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(45_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (!response.ok) return { httpStatus: response.status, payload: null };
       let payload: unknown;
@@ -549,6 +555,7 @@ async function requestNewweb(
       url: "https://service.sinotrade.com.tw" + request.path,
       body: request.body,
       basic: request.basic,
+      timeoutMs: REQUEST_TIMEOUT_MS,
     },
   );
   if (response.httpStatus === 401)
@@ -661,6 +668,7 @@ export async function querySinotradeSavingsTrades(
       expectedOrigin,
       url,
       dateRange,
+      timeoutMs,
     }): Promise<{
       status: number;
       recognized?: boolean;
@@ -687,7 +695,7 @@ export async function querySinotradeSavingsTrades(
           QueryAssetCategories: "",
           QueryFilter: "",
         }),
-        signal: AbortSignal.timeout(45_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (!response.ok) return { status: response.status };
       const doc = new DOMParser().parseFromString(
@@ -720,6 +728,7 @@ export async function querySinotradeSavingsTrades(
       expectedOrigin: SINOTRADE_ORIGINS.savings,
       url: SAVINGS_TRANSACTION_URL,
       dateRange,
+      timeoutMs: REQUEST_TIMEOUT_MS,
     },
   );
   requireSavingsPage(page);
@@ -738,7 +747,7 @@ export async function querySinotradeSavings(
 ) {
   requireSavingsPage(page);
   const result = await page.evaluate(
-    async ({ accountValue, expectedOrigin, url }) => {
+    async ({ accountValue, expectedOrigin, url, timeoutMs }) => {
       if (location.origin !== expectedOrigin) return { status: 0, html: null };
       // The overview's account cards submit this form with the account number.
       const csrf = (
@@ -756,7 +765,7 @@ export async function querySinotradeSavings(
         redirect: "error",
         credentials: "same-origin",
         body: data,
-        signal: AbortSignal.timeout(45_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (!response.ok) return { status: response.status, html: null };
       return { status: response.status, html: await response.text() };
@@ -765,6 +774,7 @@ export async function querySinotradeSavings(
       accountValue: account.brokerAccount,
       expectedOrigin: SINOTRADE_ORIGINS.savings,
       url: SAVINGS_ASSET_URL,
+      timeoutMs: REQUEST_TIMEOUT_MS,
     },
   );
   requireSavingsPage(page);
@@ -844,60 +854,87 @@ export async function fetchSinotradeSnapshot(
     throw new SinotradeConnectionError(
       "請先完成或取消目前的登入驗證，再同步。",
     );
+  const { newweb: newwebState, savings: savingsState } = config.webState;
   const browser = await launchBrowserWithRetry(binding);
+  const work = collectSnapshot(browser, newwebState, savingsState);
+  // A step still waiting at the deadline fails once the browser closes; nobody awaits it then.
+  work.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const newweb = await browser.newPage();
-    await restoreOrigin(newweb, "newweb", config.webState.newweb);
-    const { accounts, token } = await readSinotradeNewwebSession(newweb);
-    const savings = await browser.newPage();
-    await restoreOrigin(savings, "savings", config.webState.savings);
-    const savingsAccounts = await readSinotradeSavingsOverview(savings);
-    if (!(await savings.$(SINOTRADE_SAVINGS_LOGOUT_SELECTOR)))
-      throw new SinotradeConnectionError();
-    const accountHoldings: Array<{
-      account: SinotradeAccount;
-      holdings: SinotradeHolding[];
-      trades: SinotradeTrade[];
-    }> = [];
-    const today = taipeiDateKey(new Date());
-    const statementRange = statementDateRange(today);
-    // 豐存股不限查詢年限；從最早的年份起查，取得全部買進紀錄。
-    const savingsDateRange = `2000/01/01 ~ ${today.replaceAll("-", "/")}`;
-    for (const account of accounts) {
-      if (
-        !savingsAccounts.some(
-          (savingsAccount) =>
-            savingsAccount.brokerNo === account.brokerNo &&
-            savingsAccount.brokerAccount === account.brokerAccount &&
-            savingsAccount.market === account.market,
-        )
-      )
-        throw new Error("兩平台的券商分公司與帳戶無法對應，未更新持倉。");
-      const general = await queryGeneral(newweb, account, token);
-      const recurring = await querySinotradeSavings(savings, account);
-      // 台股以對帳單為準（含賣出與費稅）；豐存美股的買進只在豐存股「成交」頁。
-      const trades =
-        account.market === "TW"
-          ? await queryTaiwanTrades(newweb, account, token, statementRange)
-          : await querySinotradeSavingsTrades(
-              savings,
-              account,
-              savingsDateRange,
-            );
-      accountHoldings.push({
-        account,
-        holdings: mergeSinotradeAccountHoldings(general, recurring),
-        trades,
-      });
-    }
-    return {
-      accountHoldings,
-      webState: {
-        newweb: await captureOrigin(newweb, "newweb"),
-        savings: await captureOrigin(savings, "savings"),
-      },
-    };
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new SinotradeSyncTimeoutError()),
+          SYNC_DEADLINE_MS,
+        );
+      }),
+    ]);
   } finally {
+    clearTimeout(timer);
     await closeBrowserSession(binding, browser);
   }
+}
+
+class SinotradeSyncTimeoutError extends Error {
+  constructor() {
+    super(
+      `永豐證券同步超過 ${SYNC_DEADLINE_MS / 1000} 秒，已停止並關閉瀏覽器，請稍後再試。`,
+    );
+    this.name = "SinotradeSyncTimeoutError";
+  }
+}
+
+async function collectSnapshot(
+  browser: Browser,
+  newwebState: SinotradeOriginState,
+  savingsState: SinotradeOriginState,
+) {
+  const newweb = await browser.newPage();
+  await restoreOrigin(newweb, "newweb", newwebState);
+  const { accounts, token } = await readSinotradeNewwebSession(newweb);
+  const savings = await browser.newPage();
+  await restoreOrigin(savings, "savings", savingsState);
+  const savingsAccounts = await readSinotradeSavingsOverview(savings);
+  if (!(await savings.$(SINOTRADE_SAVINGS_LOGOUT_SELECTOR)))
+    throw new SinotradeConnectionError();
+  const accountHoldings: Array<{
+    account: SinotradeAccount;
+    holdings: SinotradeHolding[];
+    trades: SinotradeTrade[];
+  }> = [];
+  const today = taipeiDateKey(new Date());
+  const statementRange = statementDateRange(today);
+  // 豐存股不限查詢年限；從最早的年份起查，取得全部買進紀錄。
+  const savingsDateRange = `2000/01/01 ~ ${today.replaceAll("-", "/")}`;
+  for (const account of accounts) {
+    if (
+      !savingsAccounts.some(
+        (savingsAccount) =>
+          savingsAccount.brokerNo === account.brokerNo &&
+          savingsAccount.brokerAccount === account.brokerAccount &&
+          savingsAccount.market === account.market,
+      )
+    )
+      throw new Error("兩平台的券商分公司與帳戶無法對應，未更新持倉。");
+    const general = await queryGeneral(newweb, account, token);
+    const recurring = await querySinotradeSavings(savings, account);
+    // 台股以對帳單為準（含賣出與費稅）；豐存美股的買進只在豐存股「成交」頁。
+    const trades =
+      account.market === "TW"
+        ? await queryTaiwanTrades(newweb, account, token, statementRange)
+        : await querySinotradeSavingsTrades(savings, account, savingsDateRange);
+    accountHoldings.push({
+      account,
+      holdings: mergeSinotradeAccountHoldings(general, recurring),
+      trades,
+    });
+  }
+  return {
+    accountHoldings,
+    webState: {
+      newweb: await captureOrigin(newweb, "newweb"),
+      savings: await captureOrigin(savings, "savings"),
+    },
+  };
 }

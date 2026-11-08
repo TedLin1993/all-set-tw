@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Page } from "@cloudflare/puppeteer";
 import {
+  fetchSinotradeSnapshot,
   querySinotradeSavings,
   querySinotradeSavingsTrades,
   readSinotradeNewwebSession,
@@ -12,6 +13,16 @@ import {
   SinotradeConnectionError,
   isSinotradeAuthenticationRequiredError,
 } from "../../../src/sources/sinotrade/session-protocol";
+
+const browserMocks = vi.hoisted(() => ({
+  launch: vi.fn(),
+  close: vi.fn(),
+}));
+vi.mock("../../../src/sources/browser", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/sources/browser")>()),
+  launchBrowserWithRetry: browserMocks.launch,
+  closeBrowserSession: browserMocks.close,
+}));
 
 const account = {
   brokerNo: "9999",
@@ -92,6 +103,7 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
       expectedOrigin: SINOTRADE_ORIGINS.savings,
       url: `${SINOTRADE_ORIGINS.savings}/Account/Transaction`,
       dateRange: range,
+      timeoutMs: 20_000,
     });
     for (const result of [
       { status: 200, recognized: false, table: null },
@@ -188,6 +200,39 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
       accountValue: account.brokerAccount,
       expectedOrigin: SINOTRADE_ORIGINS.savings,
       url: `${SINOTRADE_ORIGINS.savings}/Account/Asset`,
+      timeoutMs: 20_000,
     });
+  });
+
+  it("同步超過 120 秒即停止並關閉 Browser，不空耗 Browser Run 額度", async () => {
+    vi.useFakeTimers();
+    try {
+      // The official page never answers: the step would otherwise wait for the global limit.
+      const browser = { newPage: vi.fn(() => new Promise(() => undefined)) };
+      browserMocks.launch.mockResolvedValue(browser);
+      browserMocks.close.mockResolvedValue(true);
+      const state = {
+        authenticated: true,
+        cookies: [],
+        localStorage: {},
+        capturedAt: "2027-01-01T00:00:00.000Z",
+      };
+      const sync = fetchSinotradeSnapshot(
+        { fetch: vi.fn() },
+        { webState: { newweb: state, savings: state } },
+      );
+      const outcome = expect(sync).rejects.toThrow(/超過 120 秒/);
+      await vi.advanceTimersByTimeAsync(119_000);
+      expect(browserMocks.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await outcome;
+      expect(browserMocks.close).toHaveBeenCalledOnce();
+      expect(browserMocks.close).toHaveBeenCalledWith(
+        expect.anything(),
+        browser,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

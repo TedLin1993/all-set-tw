@@ -751,11 +751,11 @@ test("驗證錯誤清空 OTP，更新狀態不會重送上次驗證", async ({ p
   ).toBeEnabled();
 });
 
-test("過期的驗證不能提交，重新開始後可再次連線", async ({ page }) => {
+test("驗證逾時後自動關閉官方工作階段，之後可再次連線", async ({ page }) => {
   await page.clock.install();
   const settings = createSettings({ verificationPending: true });
   let cancelCalls = 0;
-  const expiresAt = new Date(Date.now() - 60_000).toISOString();
+  const expiresAt = new Date(Date.now() + 30_000).toISOString();
   await setupApi(page, settings, (path) => {
     if (path.endsWith("/status"))
       return { json: challengeResponse("savings", otpChallenge, expiresAt) };
@@ -780,22 +780,20 @@ test("過期的驗證不能提交，重新開始後可再次連線", async ({ pa
   });
   const details = await openSinotrade(page);
   await expect(
-    details.getByText("這次連線的等待時間已用完，請重新開始。", {
+    details.getByRole("button", { name: "送出驗證碼", exact: true }),
+  ).toBeVisible();
+  expect(cancelCalls).toBe(0);
+  // 頁面仍開著時，倒數結束就關閉 Browser，不等它閒置逾時。
+  await page.clock.fastForward(31_000);
+  await expect(
+    details.getByText("已清除逾時的驗證，請按「連線並同步」重新開始。", {
       exact: true,
     }),
   ).toBeVisible();
   await expect(
     details.getByRole("button", { name: "送出驗證碼", exact: true }),
   ).toHaveCount(0);
-  await expect(
-    details.getByRole("button", { name: "更新驗證狀態", exact: true }),
-  ).toHaveCount(0);
-  await details.getByRole("button", { name: "重新開始", exact: true }).click();
-  await expect(
-    details.getByText("已清除逾時的驗證，請按「連線並同步」重新開始。", {
-      exact: true,
-    }),
-  ).toBeVisible();
+  expect(cancelCalls).toBe(1);
   await details
     .getByRole("button", { name: "連線並同步", exact: true })
     .click();
