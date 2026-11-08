@@ -614,6 +614,19 @@
     });
   });
 
+  // 逾時後官方工作階段已無法完成；頁面仍開著就自動關閉，不讓 Browser 閒置到逾時才結束而
+  // 佔用 Browser Run 額度。每次驗證只自動取消一次，失敗時保留手動取消。
+  let autoCancelledAt = "";
+  $effect(() => {
+    if (!expired || !pending || !canManagePending) return;
+    const expiresAt = pending.expiresAt;
+    untrack(() => {
+      if (autoCancelledAt === expiresAt) return;
+      autoCancelledAt = expiresAt;
+      void cancel();
+    });
+  });
+
   onMount(() => {
     const timer = setInterval(() => (now = Date.now()), 1000);
     return () => clearInterval(timer);
