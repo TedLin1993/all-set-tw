@@ -47,6 +47,7 @@ import {
 } from "./protocol";
 import {
   acknowledgeOfficialDialogs,
+  isSinotradeOfficialLoginError,
   readSinotradeVerification,
   submitSinotradeCredentials,
   submitSinotradeVerification,
@@ -227,6 +228,10 @@ export async function prepareSinotradeLogin(
       platform,
       config,
     );
+    // Nothing can follow an official error (e.g. service paused): close the browser now
+    // instead of keeping it alive for the whole login TTL.
+    if (isSinotradeOfficialLoginError(challenge))
+      throw new SinotradeConnectionError(challenge.message);
     retained = true;
     return {
       platform,

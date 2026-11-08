@@ -5,7 +5,9 @@ import type { SinotradeVerificationInput } from "@taiwan-fin-hub/shared";
 import {
   acknowledgeOfficialDialogs,
   describeSinotradeLoginForm,
+  isSinotradeOfficialLoginError,
   readSinotradeVerification,
+  submitSinotradeCredentials,
   submitSinotradeVerification as submitWithConfig,
   type SinotradeLoginForm,
 } from "../../../src/sources/sinotrade/login-form";
@@ -755,6 +757,73 @@ describe("證券原生欄位與驗證授權", () => {
       expect(mocked.connect).not.toHaveBeenCalled();
     },
   );
+
+  it("送出帳密後官方顯示錯誤對話框（如暫停服務）時立即回報原因，不再輪詢等待", async () => {
+    const dom = new JSDOM("<!doctype html><body></body>");
+    dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      width: 10,
+      height: 10,
+      top: 0,
+      left: 0,
+      bottom: 10,
+      right: 10,
+      toJSON: () => ({}),
+    });
+    vi.stubGlobal("document", dom.window.document);
+    vi.stubGlobal(
+      "getComputedStyle",
+      dom.window.getComputedStyle.bind(dom.window),
+    );
+    vi.stubGlobal("HTMLInputElement", dom.window.HTMLInputElement);
+    const { browser, frame } = loginBrowser(LOGIN_URL);
+    const input = {
+      click: vi.fn(),
+      press: vi.fn(),
+      type: vi.fn(),
+      dispose: vi.fn(),
+    };
+    Object.assign(frame, {
+      waitForSelector: vi.fn().mockResolvedValue(undefined),
+      $: vi.fn().mockResolvedValue(input),
+      click: vi.fn(async () => {
+        dom.window.document.body.innerHTML =
+          '<form id="complex-form"><input id="complex-form_password" type="password"></form>' +
+          '<div class="ant-modal-wrap" role="dialog"><div class="ant-modal ant-modal-confirm ant-modal-confirm-error">' +
+          '<div class="ant-modal-confirm-body"><i class="anticon anticon-close-circle"></i>' +
+          '<span class="ant-modal-confirm-title">配合交易所市場實況模擬測試，暫停服務 A123456789</span></div>' +
+          '<div class="ant-modal-confirm-btns"><button>OK</button></div></div></div>';
+      }),
+    });
+    vi.mocked(frame.evaluate).mockImplementation(
+      async (fn: unknown, ...args: unknown[]) =>
+        (fn as (...pageArgs: unknown[]) => SinotradeLoginForm)(...args),
+    );
+    const challenge = await submitSinotradeCredentials(
+      browser,
+      "newweb",
+      config,
+    );
+    expect(challenge).toEqual({
+      step: "blocked",
+      fields: [],
+      actions: [],
+      message:
+        "永豐證券官方回應錯誤：配合交易所市場實況模擬測試，暫停服務 **********",
+    });
+    expect(isSinotradeOfficialLoginError(challenge)).toBe(true);
+    // The first read already ends the wait; the browser is not kept polling.
+    expect(frame.evaluate).toHaveBeenCalledOnce();
+    expect(
+      isSinotradeOfficialLoginError(
+        describeSinotradeLoginForm({
+          ...birthdayForm,
+          certificateRecordMissing: true,
+        }).challenge,
+      ),
+    ).toBe(false);
+  });
 
   it("官方頁面的對話框不會凍結流程：提示確認、提問取消，並且每個視窗只監聽一次", async () => {
     const handlers: Array<(dialog: unknown) => void> = [];

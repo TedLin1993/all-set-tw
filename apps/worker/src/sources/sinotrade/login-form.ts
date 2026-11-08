@@ -60,6 +60,8 @@ export type SinotradeLoginForm = {
   agreementText?: string;
   /** The official login refused a certificate it has not recorded yet (rcode 8040). */
   certificateRecordMissing?: boolean;
+  /** Text of an official error modal, e.g. the service is paused; ID numbers are masked. */
+  officialError?: string;
 };
 /** A radio group is one field backed by several official inputs (members). */
 type Binding = { control: Input; members?: Input[] };
@@ -81,7 +83,8 @@ const SUBMIT_LABEL =
   /^(?:確認|確定|驗證|送出|下一步|確認送出|確認驗證|驗證並繼續)$/;
 const CHANNEL_LABEL =
   /^(?:手機|行動電話|簡訊|SMS|E-?mail|電子(?:信箱|郵件)|信箱)/i;
-const REJECTED_OR_FINAL = /reCAPTCHA|日期格式|未接受|尚未登記/;
+const OFFICIAL_ERROR_PREFIX = "永豐證券官方回應錯誤：";
+const REJECTED_OR_FINAL = /reCAPTCHA|日期格式|未接受|尚未登記|官方回應錯誤/;
 // Raised while a page is navigating or closing; the next poll sees the settled page.
 const TRANSIENT_PAGE_ERROR =
   /Execution context|Cannot find context|Target closed|Session closed|Connection closed|detached|Inspected target navigated/i;
@@ -110,6 +113,13 @@ class PageUnresponsiveError extends SinotradeConnectionError {
     this.name = "PageUnresponsiveError";
   }
 }
+
+/** The official site answered with an error modal; the login cannot continue. */
+export const isSinotradeOfficialLoginError = (
+  challenge: SinotradeVerificationChallenge,
+) =>
+  challenge.step === "blocked" &&
+  Boolean(challenge.message?.startsWith(OFFICIAL_ERROR_PREFIX));
 
 const blocked = (message: string): SinotradeVerificationChallenge => ({
   step: "blocked",
@@ -240,6 +250,21 @@ function readLoginForm(
     (el) =>
       visible(el) && /rcode=8040|查無此筆憑證紀錄/.test(el.textContent ?? ""),
   );
+  // An official error modal (Ant Design Modal.error) ends the login, e.g. the service is
+  // paused; nothing appears after it, so waiting would only spend browser time.
+  const errorModal = certificateRecordMissing
+    ? undefined
+    : Array.from(
+        document.querySelectorAll<HTMLElement>(".ant-modal-confirm-error"),
+      ).find(visible);
+  const officialError = errorModal
+    ? text(
+        (errorModal.querySelector(".ant-modal-confirm-body") ?? errorModal)
+          .textContent,
+      )
+        .replace(/[A-Z][0-9A-D]\d{8}/gi, "**********")
+        .slice(0, 120) || "未提供原因"
+    : "";
   if (!scope)
     return {
       scope: null,
@@ -249,6 +274,7 @@ function readLoginForm(
       certificatePrompt: false,
       recaptchaVisible,
       ...(certificateRecordMissing ? { certificateRecordMissing } : {}),
+      ...(officialError ? { officialError } : {}),
     };
   const birthContext =
     scope.innerText?.match(
@@ -321,6 +347,7 @@ function readLoginForm(
     certificatePrompt: prompts.includes(scope),
     recaptchaVisible,
     ...(certificateRecordMissing ? { certificateRecordMissing } : {}),
+    ...(officialError ? { officialError } : {}),
     ...(agreementText ? { agreementText } : {}),
     rejected: Array.from(
       scope.querySelectorAll(
@@ -346,6 +373,10 @@ export function describeSinotradeLoginForm(
   }
   if (form.certificateRecordMissing) {
     result.challenge = blocked(CERTIFICATE_RECORD_MISSING);
+    return result;
+  }
+  if (form.officialError) {
+    result.challenge = blocked(OFFICIAL_ERROR_PREFIX + form.officialError);
     return result;
   }
   if (form.recaptchaVisible) {
