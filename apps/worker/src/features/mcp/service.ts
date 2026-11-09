@@ -185,6 +185,8 @@ export async function searchActivities(
 /**
  * 近期要付的款項：需要處理的提醒在前，扣款帳戶餘額足夠、預計自動扣款的款項
  * 以 `covered` 排在最後。已繳清的帳單不是即將要付的款項，不列入。
+ * `balanceCheck` 與資料來源 ID 讓 AI 助理分辨「未設定扣款帳戶」與「餘額過舊未比對」，
+ * 並可同步對應來源後重查。
  */
 export async function getUpcomingPayments(db: D1Database) {
   const { reminders, covered } = await loadPaymentReminders(db);
@@ -194,14 +196,23 @@ export async function getUpcomingPayments(db: D1Database) {
   ) => ({
     kind: reminder.kind,
     name: reminder.name,
+    connectorId: reminder.connectorId,
     state,
     amount: reminder.amount ?? null,
     currency: reminder.currency,
     dueDate: reminder.dueDate ?? null,
     daysUntilDue: reminder.daysUntilDue ?? null,
-    paymentAccount: reminder.paymentAccount?.name ?? null,
-    shortfall: reminder.shortfall ?? null,
     asOf: reminder.asOfAt ?? null,
+    stale: reminder.stale,
+    balanceCheck: reminder.balanceCheck,
+    paymentAccount: reminder.paymentAccount
+      ? {
+          name: reminder.paymentAccount.name,
+          connectorId: reminder.paymentAccount.connectorId,
+          asOf: reminder.paymentAccount.asOfAt ?? null,
+        }
+      : null,
+    shortfall: reminder.shortfall ?? null,
   });
   return {
     payments: [
