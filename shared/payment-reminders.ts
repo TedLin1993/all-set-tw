@@ -26,6 +26,17 @@ const FX_DEBIT_BUFFER = 1.02;
 export type PaymentReminderState =
   "due" | "confirm" | "overdue" | "collection_failed" | "insufficient_funds";
 
+/**
+ * 扣款帳戶餘額比對結果，與 `state` 分開：資料是否新鮮和款項是否緊急可以同時成立。
+ * - `covered`：可用餘額足以支付同一扣款帳戶期限內所有要扣的款項。
+ * - `insufficient`：可用餘額不足。
+ * - `stale`：扣款帳戶資料過舊，餘額可能不準確，未比對。
+ * - `unknown`：款項金額、匯率或扣款帳戶餘額不明，未比對。
+ * - `not_set`：未設定扣款帳戶。
+ */
+export type PaymentBalanceCheck =
+  "covered" | "insufficient" | "stale" | "unknown" | "not_set";
+
 export interface PaymentReminder {
   accountId: string;
   connectorId: string;
@@ -39,15 +50,20 @@ export interface PaymentReminder {
   daysUntilDue?: number;
   state: PaymentReminderState;
   asOfAt?: string;
-  /** 扣款帳戶；只有餘額不足或餘額足夠而隱藏（covered）時填入。 */
+  /** 款項帳戶本身的資料過舊（超過 48 小時未更新）。 */
+  stale: boolean;
+  balanceCheck: PaymentBalanceCheck;
+  /** 扣款帳戶；有設定且帳戶存在時填入，不論餘額是否比對。 */
   paymentAccount?: {
     id: string;
+    connectorId: string;
     /** 機構與帳號末碼，供畫面顯示。 */
     name: string;
     /** 只有機構名稱，供推播使用，避免鎖定畫面出現帳號末碼。 */
     institution: string;
     /** 扣款帳戶幣別，即差額的幣別；外幣款項可由台幣帳戶扣繳。 */
     currency: string;
+    asOfAt?: string;
   };
   /** 扣款帳戶可用餘額與期限內應扣總額的差額（扣款帳戶幣別）；只有餘額不足時填入。 */
   shortfall?: number;
@@ -144,12 +160,15 @@ function cardReminder(
           ? "overdue"
           : "due",
     asOfAt: account.asOfAt ?? undefined,
+    stale,
+    balanceCheck: "not_set",
   };
 }
 
 function loanReminder(
   account: BankAccountRow,
   today: string,
+  now: Date,
 ): PaymentReminder | null {
   const dueDate = dateKey(account.paymentDueDate);
   const daysUntilDue = dueDate ? daysBetween(today, dueDate) : undefined;
@@ -163,6 +182,8 @@ function loanReminder(
     dueDate,
     daysUntilDue,
     asOfAt: account.asOfAt ?? undefined,
+    stale: isStale(account.asOfAt, now),
+    balanceCheck: "not_set" as const,
   };
   if (account.loanPaymentStatus === "collection_incomplete")
     return { ...base, state: "collection_failed" };
@@ -190,9 +211,11 @@ function paymentAccountOf(account: BankAccountRow) {
   const institution = account.institutionName ?? "扣款帳戶";
   return {
     id: account.id,
+    connectorId: account.connectorId,
     name: [institution, account.accountName].filter(Boolean).join(" "),
     institution,
     currency: account.currency,
+    asOfAt: account.asOfAt ?? undefined,
   };
 }
 
@@ -216,8 +239,9 @@ function amountInPayerCurrency(
 
 /**
  * 依扣款帳戶可用餘額調整提醒：同一扣款帳戶的期限內款項（含已過期限與扣款未完成）
- * 換算成扣款帳戶幣別加總後比較。夠扣時隱藏待繳與待確認的提醒並記下扣款帳戶；不夠時改為餘額不足。
- * 任一金額未知、無法換算、餘額未知或資料過舊時不判斷，維持原提醒。
+ * 換算成扣款帳戶幣別加總後比較。夠扣時隱藏待繳與待確認的提醒；不夠時改為餘額不足。
+ * 任一金額未知、無法換算、餘額未知或資料過舊時不判斷，維持原提醒，並以 `balanceCheck`
+ * 標示未比對的原因。有設定扣款帳戶時一律記下，讓使用者分辨「未設定」與「未比對」。
  */
 function applyPaymentAccounts(
   reminders: PaymentReminder[],
@@ -235,26 +259,38 @@ function applyPaymentAccounts(
   const covered = new Set<PaymentReminder>();
   for (const [payerId, group] of groups) {
     const payer = byId.get(payerId);
-    const available = payer?.availableBalance ?? payer?.balance;
-    if (!payer || available == null || isStale(payer.asOfAt, now)) continue;
+    const mark = (balanceCheck: PaymentBalanceCheck) => {
+      for (const item of group) {
+        item.balanceCheck = balanceCheck;
+        if (payer) item.paymentAccount = paymentAccountOf(payer);
+      }
+    };
+    // 扣款帳戶已不存在時視同未設定。
+    if (!payer) continue;
+    if (isStale(payer.asOfAt, now)) {
+      mark("stale");
+      continue;
+    }
+    const available = payer.availableBalance ?? payer.balance;
     const amounts = group.map((item) =>
       amountInPayerCurrency(item, payer.currency, ratesToTwd),
     );
-    if (amounts.some((amount) => amount === undefined)) continue;
+    if (available == null || amounts.some((amount) => amount === undefined)) {
+      mark("unknown");
+      continue;
+    }
     const required = amounts.reduce((sum, amount) => sum! + amount!, 0)!;
     const adjustable = group.filter(
       (item) => item.state === "due" || item.state === "confirm",
     );
     if (available >= required) {
-      for (const item of adjustable) {
-        item.paymentAccount = paymentAccountOf(payer);
-        covered.add(item);
-      }
+      mark("covered");
+      for (const item of adjustable) covered.add(item);
       continue;
     }
+    mark("insufficient");
     for (const item of adjustable) {
       item.state = "insufficient_funds";
-      item.paymentAccount = paymentAccountOf(payer);
       item.shortfall = roundCurrency(required - available);
     }
   }
@@ -282,7 +318,7 @@ export function collectPaymentReminders(
       account.accountType === "credit"
         ? cardReminder(account, bills, today, now)
         : account.accountType === "loan"
-          ? loanReminder(account, today)
+          ? loanReminder(account, today, now)
           : null;
     if (reminder) reminders.push(reminder);
   }

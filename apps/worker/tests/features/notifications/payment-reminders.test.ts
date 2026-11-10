@@ -216,20 +216,25 @@ describe("collectPaymentReminders", () => {
       expect(enough.reminders).toEqual([]);
       // 足額款項仍是近期要付的款，MCP 會列出並說明由哪個帳戶扣款。
       expect(
-        enough.covered.map(({ accountId, state, paymentAccount }) => ({
-          accountId,
-          state,
-          paymentAccount: paymentAccount?.name,
-        })),
+        enough.covered.map(
+          ({ accountId, state, balanceCheck, paymentAccount }) => ({
+            accountId,
+            state,
+            balanceCheck,
+            paymentAccount: paymentAccount?.name,
+          }),
+        ),
       ).toEqual([
         {
           accountId: "card",
           state: "due",
+          balanceCheck: "covered",
           paymentAccount: "台新銀行 末五碼 12345",
         },
         {
           accountId: "loan",
           state: "confirm",
+          balanceCheck: "covered",
           paymentAccount: "台新銀行 末五碼 12345",
         },
       ]);
@@ -262,20 +267,39 @@ describe("collectPaymentReminders", () => {
       ]);
     });
 
-    it("扣款帳戶資料過舊、金額未知或幣別不同時不判斷，維持原提醒", () => {
-      for (const result of [
-        run(deposit({ asOfAt: "2026-10-17T00:00:00Z" })),
-        run(deposit({ currency: "USD" })),
-        run(deposit(), { loanPaymentAmount: undefined }),
-      ]) {
+    it("扣款帳戶資料過舊、金額未知或幣別不同時不判斷，維持原提醒並標示未比對原因", () => {
+      for (const [result, balanceCheck] of [
+        [run(deposit({ asOfAt: "2026-10-17T00:00:00Z" })), "stale"],
+        [run(deposit({ currency: "USD" })), "unknown"],
+        [run(deposit(), { loanPaymentAmount: undefined }), "unknown"],
+      ] as const) {
         expect(result.covered).toEqual([]);
+        // 仍帶出扣款帳戶，與未設定扣款帳戶的款項區分。
         expect(
-          result.reminders.map((item) => [item.accountId, item.state]),
+          result.reminders.map((item) => [
+            item.accountId,
+            item.state,
+            item.balanceCheck,
+            item.paymentAccount?.connectorId,
+          ]),
         ).toEqual([
-          ["card", "due"],
-          ["loan", "confirm"],
+          ["card", "due", balanceCheck, "taishin"],
+          ["loan", "confirm", balanceCheck, "taishin"],
         ]);
       }
+
+      const notSet = collectPaymentReminders(
+        [card({ id: "card" }), deposit()],
+        [bill({ accountId: "card" })],
+        now,
+      );
+      expect(
+        notSet.reminders.map((item) => [
+          item.accountId,
+          item.balanceCheck,
+          item.paymentAccount,
+        ]),
+      ).toEqual([["card", "not_set", undefined]]);
     });
 
     it("外幣帳單由台幣帳戶扣款時，依匯率加換匯緩衝換算後判斷；沒有匯率時不判斷", () => {
@@ -344,6 +368,8 @@ describe("scheduledSummaryNotification", () => {
     currency: "TWD",
     daysUntilDue: 3,
     state: "due",
+    stale: false,
+    balanceCheck: "not_set",
     ...input,
   });
 
@@ -438,8 +464,10 @@ describe("scheduledSummaryNotification", () => {
       reminder({
         accountId: "a",
         state: "insufficient_funds",
+        balanceCheck: "insufficient",
         paymentAccount: {
           id: "deposit",
+          connectorId: "taishin",
           name: "台新銀行 末五碼 12345",
           institution: "台新銀行",
           currency: "TWD",
