@@ -41,7 +41,7 @@ const SCHEDULE_FIELDS =
   "intervalMinutes 為支援的同步間隔分鐘數，preferredTime 為 HH:mm，preferredWeekdays 為 0–6（0 為週日）";
 
 const SYNC_USAGE =
-  "同步沒有一次全部的端點：對每個資料來源各呼叫一次 POST /connectors/<id>/sync，不帶 body。回應 202 與 status: queued 只代表已排入背景，依序一次執行一個來源；結果以 GET /sync-jobs 查詢，不要在完成前重複觸發。瀏覽器型來源共用 Cloudflare Browser 每日額度（免費方案 10 分鐘），只同步需要更新的來源；errorCode 為 BROWSER_BUSY 且訊息為今日額度用完時，須等台灣時間早上 8 點重置，不要重試。";
+  "同步請改用 sync_sources 工具（背景執行、自動處理驗證碼），結果以 get_sync_status 查詢；只有使用者要親自輸入驗證碼或 OTP 時，才以 call_api 呼叫 /connectors/<id>/captcha 與帶 body 的 /connectors/<id>/sync。";
 
 const ENDPOINT_NOTES: Record<string, string> = {
   "GET /runtime": "部署模式（是否為 Demo）。",
@@ -233,4 +233,50 @@ export async function callApi(
     }),
   );
   return { status: response.status, headers: returnedHeaders, body };
+}
+
+export type SyncStartResult =
+  | { connectorId: ConnectorId; queued: true }
+  | {
+      connectorId: ConnectorId;
+      queued: false;
+      error: { code: string; message: string };
+    };
+
+/**
+ * 逐一呼叫各來源不帶 body 的同步端點，交由 Queue 背景執行；
+ * 單一來源被拒絕（未設定、同步中）不影響其他來源。
+ */
+export async function startSyncs(
+  api: ApiApp,
+  source: Request,
+  env: Env,
+  executionCtx: ApiExecutionContext,
+  connectorIds: readonly ConnectorId[],
+): Promise<SyncStartResult[]> {
+  const results: SyncStartResult[] = [];
+  for (const connectorId of new Set(connectorIds)) {
+    const { status, body } = await callApi(api, source, env, executionCtx, {
+      method: "POST",
+      path: `/connectors/${connectorId}/sync`,
+    });
+    if (status < 400) {
+      results.push({ connectorId, queued: true });
+      continue;
+    }
+    const error = (body as { error?: { code?: unknown; message?: unknown } })
+      ?.error;
+    results.push({
+      connectorId,
+      queued: false,
+      error: {
+        code: typeof error?.code === "string" ? error.code : "SYNC_FAILED",
+        message:
+          typeof error?.message === "string"
+            ? error.message
+            : "無法開始同步，請稍後再試。",
+      },
+    });
+  }
+  return results;
 }

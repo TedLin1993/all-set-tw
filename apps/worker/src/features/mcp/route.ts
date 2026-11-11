@@ -3,6 +3,7 @@ import {
   McpServer,
   originValidationResponse,
 } from "@modelcontextprotocol/server";
+import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
 import { z } from "zod";
 import { sanitizeDatabaseError } from "../../db";
 import type { Env } from "../../platform/env";
@@ -12,6 +13,7 @@ import {
   WRITE_API_METHODS,
   callApi,
   listApiEndpoints,
+  startSyncs,
   type ApiApp,
   type ApiCallInput,
   type ApiExecutionContext,
@@ -19,6 +21,7 @@ import {
 import {
   getFinancialOverview,
   getMonthlyCashFlow,
+  getSyncStatus,
   getUpcomingPayments,
   listAccounts,
   listInvestmentHoldings,
@@ -26,6 +29,10 @@ import {
 } from "./service";
 
 const isoDate = z.iso.date();
+const CONNECTOR_IDS = Object.keys(connectorCatalog) as [
+  ConnectorId,
+  ...ConnectorId[],
+];
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
 
 type ApiContext = {
@@ -59,7 +66,7 @@ async function jsonResult(tool: string, load: () => Promise<unknown>) {
 }
 
 // 身分驗證由 Composition Root 掛在 /mcp 的 accessMiddleware 負責。
-// 查詢工具直接讀取資料；其餘讀取經 query_api、編輯與同步經 call_api 走 /api，
+// 查詢工具直接讀取資料；其餘讀取經 query_api、編輯經 call_api、同步經 sync_sources 走 /api，
 // 由同一套 Access 驗證、Zod 驗證與錯誤處理把關。
 function createServer(
   db: D1Database,
@@ -169,10 +176,51 @@ function createServer(
     "get_upcoming_payments",
     {
       description:
-        "5 天內到期或已逾期、尚未付清的信用卡與貸款款項，依緊急程度排序。state：collection_failed 扣款未完成、insufficient_funds 扣款帳戶餘額不足（shortfall 為差額）、overdue 已過期限、due 待繳、confirm 狀態不明請確認、covered 扣款帳戶餘額足夠，預計自動扣款，不需處理（排在最後）。balanceCheck 為扣款帳戶餘額比對結果：covered、insufficient、stale 扣款帳戶資料超過 48 小時未更新而未比對、unknown 金額或餘額不明、not_set 未設定扣款帳戶。stale 為 true 表示款項本身的資料過舊。資料過舊時可經使用者同意後以 call_api 同步對應的 connectorId（款項或 paymentAccount），再重新查詢。已繳清的帳單不列出，需要時以 query_api 讀取 GET /bank/bills 的 isPaid。",
+        "5 天內到期或已逾期、尚未付清的信用卡與貸款款項，依緊急程度排序。state：collection_failed 扣款未完成、insufficient_funds 扣款帳戶餘額不足（shortfall 為差額）、overdue 已過期限、due 待繳、confirm 狀態不明請確認、covered 扣款帳戶餘額足夠，預計自動扣款，不需處理（排在最後）。balanceCheck 為扣款帳戶餘額比對結果：covered、insufficient、stale 扣款帳戶資料超過 48 小時未更新而未比對、unknown 金額或餘額不明、not_set 未設定扣款帳戶。stale 為 true 表示款項本身的資料過舊。資料過舊時可經使用者同意後以 sync_sources 同步對應的 connectorId（款項或 paymentAccount），完成後再重新查詢。已繳清的帳單不列出，需要時以 query_api 讀取 GET /bank/bills 的 isPaid。",
       annotations: READ_ONLY,
     },
     () => jsonResult("get_upcoming_payments", () => getUpcomingPayments(db)),
+  );
+
+  server.registerTool(
+    "get_sync_status",
+    {
+      description:
+        "已設定資料來源的同步狀態：connectorId、名稱、running（排隊或執行中）、lastSuccessAt 上次成功時間、lastStatus 與 lastError 最近一次結果、manualRun 最近一次由 sync_sources 或網頁觸發的背景同步（status：queued、running、completed、failed、needs_user_action、cancelled）。用來確認 sync_sources 的結果，或找出要同步的 connectorId。needs_user_action 表示需要使用者到網頁版完成驗證或更新帳密。",
+      annotations: READ_ONLY,
+    },
+    () => jsonResult("get_sync_status", () => getSyncStatus(db)),
+  );
+
+  server.registerTool(
+    "sync_sources",
+    {
+      description:
+        "同步指定的資料來源（銀行、券商、電子發票等），從來源抓取最新資料；connectorId 見 get_sync_status。同步在背景依序執行，會自動處理登入與驗證碼，每個來源約需 1 到數分鐘：本工具只回報是否已排入（queued），結果請稍後以 get_sync_status 確認，未完成前不要重複觸發。多數來源共用 Cloudflare Browser 每日額度（免費方案 10 分鐘，台灣時間早上 8 點重置）：請只同步使用者指定或資料過舊的來源，使用者要求同步全部時先提醒可能用完額度；錯誤為 BROWSER_BUSY 且訊息為今日額度用完時，重置前不要重試。",
+      inputSchema: z.object({
+        connectorIds: z
+          .array(z.enum(CONNECTOR_IDS))
+          .min(1)
+          .max(CONNECTOR_IDS.length)
+          .describe('要同步的資料來源 ID，例如 ["esun", "sinopac"]。'),
+      }),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    ({ connectorIds }) =>
+      jsonResult("sync_sources", () =>
+        startSyncs(
+          apiContext.api,
+          apiContext.request,
+          apiContext.env,
+          apiContext.executionCtx,
+          connectorIds,
+        ),
+      ),
   );
 
   server.registerTool(
@@ -214,7 +262,7 @@ function createServer(
     "call_api",
     {
       description:
-        "以 POST、PUT、PATCH、DELETE 呼叫網頁版 API，編輯資料（分類、規則、手動資產、扣款帳戶、排程、通知、資料來源設定等）或觸發同步；端點與 body 格式見 list_api_endpoints。會直接變更資料，執行前請向使用者確認；讀取請改用 query_api。回傳 status、分頁 headers 與 JSON body。",
+        "以 POST、PUT、PATCH、DELETE 呼叫網頁版 API，編輯資料（分類、規則、手動資產、扣款帳戶、排程、通知、資料來源設定等）；同步請改用 sync_sources。端點與 body 格式見 list_api_endpoints。會直接變更資料，執行前請向使用者確認；讀取請改用 query_api。回傳 status、分頁 headers 與 JSON body。",
       inputSchema: z.object({
         method: z.enum(WRITE_API_METHODS),
         path: pathSchema,
