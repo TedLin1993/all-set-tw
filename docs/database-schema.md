@@ -11,7 +11,7 @@
 - Tables：35
 - Explicit indexes：48
 - Other objects：0
-- Migrations：72
+- Migrations：73
 
 ## Tables
 
@@ -1940,6 +1940,7 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0072_investment_position_identity_and_pnl.sql`](../apps/worker/migrations/0072_investment_position_identity_and_pnl.sql)
 - [`0073_sinotrade_sync_job.sql`](../apps/worker/migrations/0073_sinotrade_sync_job.sql)
 - [`0074_investment_transaction_realized_pnl.sql`](../apps/worker/migrations/0074_investment_transaction_realized_pnl.sql)
+- [`0075_chb_tx_identity_cleanup.sql`](../apps/worker/migrations/0075_chb_tx_identity_cleanup.sql)
 
 ## 程式碼導覽
 
