@@ -440,7 +440,7 @@ Request
   → 無狀態 MCP handler（每個 request 建立新的 McpServer）
 ```
 
-MCP 提供與網頁版相同的存取範圍：查詢工具整理回答所需的資料，其他讀取經 `query_api`（只送 GET、標示 `readOnlyHint`）、編輯與同步經 `call_api`（只接受 POST、PUT、PATCH、DELETE，標示 `destructiveHint`）走 `/api`；讀寫分成兩個工具，讓 AI 助理只在寫入時要求使用者確認。`features/mcp/route.ts` 的 `createMcpRoutes(api)` 由 Composition Root 傳入組裝好的 `/api` app，`features/mcp/api.ts` 在同一個 Worker 內以 `api.fetch` 呼叫，只轉送 Access 身分（`Cf-Access-Jwt-Assertion`、`Cookie`），由 `/api` 的 Access、Demo 唯讀與 Zod 驗證再次把關；不得在 MCP 另寫繞過 `/api` 的寫入工具。`list_api_endpoints` 由 `api.routes` 產生端點清單，說明文字維護於 `features/mcp/api.ts`，新增或修改 API 時同步更新；來源同步的 body 由 `sync/registry.ts` 的 schema 產生。Managed OAuth 設定與客戶端連線步驟見 [AI 助理連線（MCP）](006-mcp.md)。查詢工具的資料讀取放在 `features/mcp/service.ts`，沿用其他 feature 的 service 與 `shared/` 計算，不另寫查詢或金額邏輯：
+MCP 提供與網頁版相同的存取範圍：查詢工具整理回答所需的資料，其他讀取經 `query_api`（只送 GET、標示 `readOnlyHint`）、編輯經 `call_api`（只接受 POST、PUT、PATCH、DELETE，標示 `destructiveHint`）、同步經 `sync_sources`（逐一呼叫各來源不帶 body 的 `/connectors/<id>/sync`，交由 Queue 背景執行）走 `/api`；讀寫分成兩個工具，讓 AI 助理只在寫入時要求使用者確認。`features/mcp/route.ts` 的 `createMcpRoutes(api)` 由 Composition Root 傳入組裝好的 `/api` app，`features/mcp/api.ts` 在同一個 Worker 內以 `api.fetch` 呼叫，只轉送 Access 身分（`Cf-Access-Jwt-Assertion`、`Cookie`），由 `/api` 的 Access、Demo 唯讀與 Zod 驗證再次把關；不得在 MCP 另寫繞過 `/api` 的寫入工具。`list_api_endpoints` 由 `api.routes` 產生端點清單，說明文字維護於 `features/mcp/api.ts`，新增或修改 API 時同步更新；來源同步的 body 由 `sync/registry.ts` 的 schema 產生。Managed OAuth 設定與客戶端連線步驟見 [AI 助理連線（MCP）](006-mcp.md)。查詢工具的資料讀取放在 `features/mcp/service.ts`，沿用其他 feature 的 service 與 `shared/` 計算，不另寫查詢或金額邏輯：
 
 | 工具                       | 沿用的計算                                                                      |
 | -------------------------- | ------------------------------------------------------------------------------- |
@@ -450,6 +450,7 @@ MCP 提供與網頁版相同的存取範圍：查詢工具整理回答所需的�
 | `get_monthly_cash_flow`    | `activity` 的 `getActivityItemsInRange` 與 `shared/activity/flow.ts` 的收支加總 |
 | `search_activity`          | `activity` 的 `searchActivity`                                                  |
 | `get_upcoming_payments`    | `notifications` 的 `loadPaymentReminders`                                       |
+| `get_sync_status`          | `sync/scheduling` 的 `getSyncJobs`，只列已設定的來源                            |
 
 - `get_monthly_cash_flow` 前後各多讀一個月再以活動日期篩選，讓跨月的發票與刷卡配對結果與活動頁一致。
 - 回傳內容會送到使用者選用的 AI 服務：查詢工具的帳號只留末四碼，不回傳內部 ID、`raw_payload` 與來源設定；`query_api` 與 `call_api` 回傳與網頁版相同的 API 回應。活動的標題與說明和 App 畫面相同，銀行未提供摘要時可能是交易備註；這是搜尋與分類所需的內容，帳號遮蔽由各來源在正規化時負責。

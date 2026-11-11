@@ -5,6 +5,7 @@ import {
   activityDisplayAmount,
   activityFlowTotalTwd,
   taipeiDateKey,
+  connectorCatalog,
   type ActivityItem,
   type PaymentReminder,
 } from "@taiwan-fin-hub/shared";
@@ -16,6 +17,7 @@ import { getInvestmentPage } from "../investments/service";
 import { getManualAssets } from "../manual-assets/service";
 import { loadPaymentReminders } from "../notifications/service";
 import { calculateCurrentFinancialSnapshot } from "../sync/reports/repository";
+import { getSyncJobs } from "../sync/scheduling/service";
 import { resolveMonthDateRange } from "../../platform/month-range";
 
 // MCP 回傳內容會送到使用者選用的 AI 服務：只保留回答問題所需的欄位，
@@ -220,4 +222,29 @@ export async function getUpcomingPayments(db: D1Database) {
       ...covered.map((reminder) => toPayment(reminder, "covered")),
     ],
   };
+}
+
+/** 已設定資料來源的同步狀態；`manualRun` 是最近一次由網頁或 MCP 觸發的背景同步。 */
+export async function getSyncStatus(db: D1Database) {
+  const jobs = await getSyncJobs(db);
+  return jobs
+    .filter((job) => job.configured && job.scope === "all")
+    .map((job) => ({
+      connectorId: job.connectorId,
+      title: connectorCatalog[job.connectorId].title,
+      running: job.running,
+      phase: job.phase,
+      lastSuccessAt: job.lastSuccessAt,
+      lastRunAt: job.lastRunAt,
+      lastStatus: job.lastStatus,
+      lastErrorCode: job.lastErrorCode,
+      lastError: job.lastError,
+      manualRun: job.manualRun && {
+        status: job.manualRun.status,
+        errorCode: job.manualRun.errorCode,
+        lastError: job.manualRun.lastError,
+        createdAt: job.manualRun.createdAt,
+        completedAt: job.manualRun.completedAt,
+      },
+    }));
 }
