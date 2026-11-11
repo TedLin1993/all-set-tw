@@ -65,14 +65,9 @@ function response(status: number, payload: unknown = {}) {
     url: () => `${SINOTRADE_ORIGINS.savings}/API_Account/GetOverviewData`,
     ok: () => status >= 200 && status < 300,
     status: () => status,
-    json: vi.fn().mockResolvedValue(payload),
-    request: () => ({ isNavigationRequest: () => false }),
+    text: vi.fn().mockResolvedValue(JSON.stringify(payload)),
   };
 }
-const overviewDocument = {
-  url: () => `${SINOTRADE_ORIGINS.savings}/Account/Overview`,
-  request: () => ({ isNavigationRequest: () => true }),
-};
 
 function overviewPage(options?: {
   afterGoto?: string;
@@ -94,13 +89,18 @@ function overviewPage(options?: {
   });
   const page = {
     url: () => currentUrl,
-    waitForResponse: vi.fn(async (predicate: (value: unknown) => boolean) => {
-      // 導覽前還在途中的總覽回應屬於前一個頁面，會被導覽取消，不得採用。
-      if (predicate(response(200)) || predicate(overviewDocument))
-        throw new Error("stale response accepted");
-      if (!predicate(networkResponse)) throw new Error("unexpected response");
-      return networkResponse;
-    }),
+    waitForResponse: vi.fn(
+      async (predicate: (value: unknown) => Promise<boolean>) => {
+        // 被導覽取消的回應讀不到內容：不論先後到達都略過，繼續等讀得到的回應。
+        const cancelled = response(200);
+        cancelled.text.mockRejectedValue(new Error("Could not load body"));
+        if (await predicate(cancelled))
+          throw new Error("unreadable response accepted");
+        if (!(await predicate(networkResponse)))
+          throw new Error("unexpected response");
+        return networkResponse;
+      },
+    ),
     goto: vi.fn(async () => {
       currentUrl = options?.afterGoto ?? currentUrl;
       return { status: () => options?.navigationStatus ?? 200 };

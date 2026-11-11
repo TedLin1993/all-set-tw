@@ -563,22 +563,25 @@ async function withSessionRelogin<T>(
 export async function readSinotradeSavingsOverview(page: Page) {
   const controller = new AbortController();
   // 剛登入時，登入後頁面自己發出的總覽請求可能還在途中，會被這次導覽取消而讀不到內容。
-  // 只接受這次導覽載入總覽頁之後的回應。
-  let overviewLoaded = false;
+  // 不論回應到達的先後，只採用內容讀得到的回應，讀不到的略過並繼續等。
+  const bodies = new WeakMap<object, string>();
   try {
     const [response] = await Promise.all([
       page.waitForResponse(
-        (response) => {
+        async (response) => {
           const url = new URL(response.url());
-          if (url.origin !== SINOTRADE_ORIGINS.savings) return false;
-          if (response.request().isNavigationRequest()) {
-            if (/^\/Account\/Overview\/?$/i.test(url.pathname))
-              overviewLoaded = true;
+          if (
+            url.origin !== SINOTRADE_ORIGINS.savings ||
+            url.pathname !== "/API_Account/GetOverviewData"
+          )
+            return false;
+          if (!response.ok()) return true;
+          try {
+            bodies.set(response, await response.text());
+            return true;
+          } catch {
             return false;
           }
-          return (
-            overviewLoaded && url.pathname === "/API_Account/GetOverviewData"
-          );
         },
         { timeout: NAVIGATION_TIMEOUT_MS, signal: controller.signal },
       ),
@@ -608,7 +611,7 @@ export async function readSinotradeSavingsOverview(page: Page) {
         : new SinotradeConnectionError("豐存股帳戶總覽查詢失敗，請重新連線。");
     let payload: unknown;
     try {
-      payload = await response.json();
+      payload = JSON.parse(bodies.get(response) ?? "");
     } catch {
       throw new SinotradeConnectionError(
         "豐存股帳戶總覽格式錯誤，請重新連線。",
