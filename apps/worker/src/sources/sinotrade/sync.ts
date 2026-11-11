@@ -45,6 +45,7 @@ import {
 import {
   parseSinotradeConfig,
   SinotradeLoginExpiredError,
+  SinotradeUnattendedLoginError,
   type SinotradeConfig,
   type SinotradePlatform,
 } from "./session-protocol";
@@ -299,12 +300,54 @@ export async function verifySinotradeConnection(
   });
 }
 
+/**
+ * 自動重新登入沒有完成時，把該平台標記為未連線：之後的同步在送出帳密前就停止，直到使用者
+ * 重新連線，避免每天重送被拒絕的密碼。帳密與憑證保留，重新連線通常不必再收 OTP。標記是
+ * 盡力而為，不得蓋過原本的錯誤。
+ */
+async function forgetPlatformLogin(
+  env: SyncEnv,
+  settings: Awaited<ReturnType<typeof loadConfig>>["settings"],
+  config: SinotradeConfig,
+  platform: SinotradePlatform,
+) {
+  const state = config.webState?.[platform];
+  if (!state) return;
+  try {
+    await compareAndSetConnectorSecret(
+      env.DB,
+      "sinotrade",
+      settings,
+      await encryptJson(
+        {
+          ...reusableConfig(config),
+          webState: {
+            ...config.webState,
+            [platform]: { ...state, authenticated: false },
+          },
+        },
+        configEncryptionKey(env),
+      ),
+      new Date().toISOString(),
+    );
+  } catch {
+    // 設定已被更新（例如使用者正在重新連線）：以新的設定為準。
+  }
+}
+
 export async function syncSinotrade(
   env: SyncEnv,
   _trigger: SyncTrigger,
 ): Promise<SyncOutcome> {
   const { settings, config } = await loadConfig(env);
-  const snapshot = await fetchSinotradeSnapshot(env.BROWSER, config);
+  let snapshot: Awaited<ReturnType<typeof fetchSinotradeSnapshot>>;
+  try {
+    snapshot = await fetchSinotradeSnapshot(env.BROWSER, config);
+  } catch (error) {
+    if (error instanceof SinotradeUnattendedLoginError)
+      await forgetPlatformLogin(env, settings, config, error.platform);
+    throw error;
+  }
   const now = new Date().toISOString();
   const asOfDate = taipeiDateKey(new Date(now));
   const positions: Array<Omit<InvestmentPosition, "id" | "connectorId">> = [];

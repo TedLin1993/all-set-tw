@@ -15,6 +15,7 @@ import {
   SinotradeAuthenticationRequiredError,
   SinotradeConnectionError,
   SinotradeLoginExpiredError,
+  SinotradeUnattendedLoginError,
   isSinotradeAuthenticationRequiredError,
   isSinotradeCookie,
   parseSinotradeAccounts,
@@ -464,19 +465,123 @@ async function verifyNewwebSession(page: Page) {
     throw new SinotradeConnectionError(
       "新理財網登入尚未生效，請完成連線驗證。",
     );
+  return session;
+}
+
+const UNATTENDED_STEP_DETAILS = {
+  certificate: "官方要求確認憑證",
+  birthday: "官方要求驗證生日",
+  otp: "官方要求 OTP 驗證",
+  terms: "官方要求同意憑證作業條款",
+} as const;
+
+/**
+ * 同步中的無人值守登入：只送出已儲存的帳密一次，並載入已儲存的憑證（與連線表單自動接續的
+ * 範圍相同）。生日、OTP、條款或被官方拒絕都是使用者的決定，一律停止，不寄送、不勾選、不重試。
+ */
+export async function signInSinotradeUnattended(
+  browser: Browser,
+  platform: SinotradePlatform,
+  config: SinotradeConfig,
+) {
+  const startedAt = Date.now();
+  let challenge = await submitSinotradeCredentials(browser, platform, config);
+  if (
+    challenge.step === "certificate" &&
+    challenge.fields.length === 0 &&
+    challenge.actions.length === 1 &&
+    challenge.actions[0] === "confirm_certificate"
+  )
+    challenge = await submitSinotradeVerification(
+      browser,
+      platform,
+      { action: "confirm_certificate", values: {} },
+      config,
+    );
+  // 只記平台、停下的步驟與耗時；不記帳號、頁面文字或官方訊息。
+  console.log(
+    JSON.stringify({
+      event: "sinotrade_session_relogin",
+      platform,
+      step: challenge.step,
+      durationMs: Date.now() - startedAt,
+    }),
+  );
+  if (challenge.step === "ready") return;
+  throw new SinotradeUnattendedLoginError(
+    platform,
+    challenge.step,
+    challenge.step === "blocked"
+      ? challenge.message?.replace(/[。.]+$/, "")
+      : UNATTENDED_STEP_DETAILS[challenge.step],
+  );
+}
+
+/**
+ * 官方明確回應未登入時，在同一個 Browser 以已儲存的帳密與憑證重新登入一次再檢查；其他錯誤
+ * （403、5xx、格式不符）不重送帳密。
+ */
+async function withSessionRelogin<T>(
+  page: Page,
+  platform: SinotradePlatform,
+  config: SinotradeConfig,
+  check: () => Promise<T>,
+): Promise<{ value: T; relogged: boolean }> {
+  try {
+    return { value: await check(), relogged: false };
+  } catch (error) {
+    if (!isSinotradeAuthenticationRequiredError(error)) throw error;
+  }
+  const browser = page.browser();
+  acknowledgeOfficialDialogs(browser);
+  await useDesktopUserAgent(browser);
+  await page.setViewport({ width: 1024, height: 768 });
+  // 過期的 token 仍在 localStorage 時，登入頁會被判讀成已登入；先移除，憑證項目保留。
+  if (platform === "newweb")
+    await page.evaluate((origin) => {
+      if (location.origin !== origin) return;
+      for (const key of ["newweb_token", "acnts", "userID"])
+        localStorage.removeItem(key);
+    }, SINOTRADE_ORIGINS.newweb);
+  await page.goto(SINOTRADE_ORIGINS[platform] + LOGIN_PATHS[platform], {
+    waitUntil: "domcontentloaded",
+    timeout: NAVIGATION_TIMEOUT_MS,
+  });
+  await signInSinotradeUnattended(browser, platform, config);
+  try {
+    return { value: await check(), relogged: true };
+  } catch (error) {
+    if (!isSinotradeAuthenticationRequiredError(error)) throw error;
+    throw new SinotradeUnattendedLoginError(
+      platform,
+      "not_authenticated",
+      "登入後官方仍回應未登入",
+    );
+  }
 }
 
 export async function readSinotradeSavingsOverview(page: Page) {
   const controller = new AbortController();
+  // 剛登入時，登入後頁面自己發出的總覽請求可能還在途中，會被這次導覽取消而讀不到內容。
+  // 不論回應到達的先後，只採用內容讀得到的回應，讀不到的略過並繼續等。
+  const bodies = new WeakMap<object, string>();
   try {
     const [response] = await Promise.all([
       page.waitForResponse(
-        (response) => {
+        async (response) => {
           const url = new URL(response.url());
-          return (
-            url.origin === SINOTRADE_ORIGINS.savings &&
-            url.pathname === "/API_Account/GetOverviewData"
-          );
+          if (
+            url.origin !== SINOTRADE_ORIGINS.savings ||
+            url.pathname !== "/API_Account/GetOverviewData"
+          )
+            return false;
+          if (!response.ok()) return true;
+          try {
+            bodies.set(response, await response.text());
+            return true;
+          } catch {
+            return false;
+          }
         },
         { timeout: NAVIGATION_TIMEOUT_MS, signal: controller.signal },
       ),
@@ -506,7 +611,7 @@ export async function readSinotradeSavingsOverview(page: Page) {
         : new SinotradeConnectionError("豐存股帳戶總覽查詢失敗，請重新連線。");
     let payload: unknown;
     try {
-      payload = await response.json();
+      payload = JSON.parse(bodies.get(response) ?? "");
     } catch {
       throw new SinotradeConnectionError(
         "豐存股帳戶總覽格式錯誤，請重新連線。",
@@ -854,9 +959,8 @@ export async function fetchSinotradeSnapshot(
     throw new SinotradeConnectionError(
       "請先完成或取消目前的登入驗證，再同步。",
     );
-  const { newweb: newwebState, savings: savingsState } = config.webState;
   const browser = await launchBrowserWithRetry(binding);
-  const work = collectSnapshot(browser, newwebState, savingsState);
+  const work = collectSnapshot(browser, config);
   // A step still waiting at the deadline fails once the browser closes; nobody awaits it then.
   work.catch(() => undefined);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -885,19 +989,39 @@ class SinotradeSyncTimeoutError extends Error {
   }
 }
 
-async function collectSnapshot(
-  browser: Browser,
-  newwebState: SinotradeOriginState,
-  savingsState: SinotradeOriginState,
-) {
+async function collectSnapshot(browser: Browser, config: SinotradeConfig) {
+  // 兩個平台都先確認官方仍認得保存的登入，失效就重新登入，之後才查詢。
   const newweb = await browser.newPage();
-  await restoreOrigin(newweb, "newweb", newwebState);
-  const { accounts, token } = await readSinotradeNewwebSession(newweb);
+  await restoreOrigin(
+    newweb,
+    "newweb",
+    restorableSinotradeState(config.webState, "newweb"),
+  );
+  const {
+    value: { accounts, token },
+    relogged,
+  } = await withSessionRelogin(newweb, "newweb", config, () =>
+    verifyNewwebSession(newweb),
+  );
   const savings = await browser.newPage();
-  await restoreOrigin(savings, "savings", savingsState);
-  const savingsAccounts = await readSinotradeSavingsOverview(savings);
-  if (!(await savings.$(SINOTRADE_SAVINGS_LOGOUT_SELECTOR)))
-    throw new SinotradeConnectionError();
+  // 剛重新登入時保留新取得的父網域 cookie，不被保存的舊值覆寫。
+  await restoreOrigin(
+    savings,
+    "savings",
+    restorableSinotradeState(config.webState, "savings"),
+    relogged,
+  );
+  const { value: savingsAccounts } = await withSessionRelogin(
+    savings,
+    "savings",
+    config,
+    async () => {
+      const identities = await readSinotradeSavingsOverview(savings);
+      if (!(await savings.$(SINOTRADE_SAVINGS_LOGOUT_SELECTOR)))
+        throw new SinotradeConnectionError();
+      return identities;
+    },
+  );
   const accountHoldings: Array<{
     account: SinotradeAccount;
     holdings: SinotradeHolding[];
