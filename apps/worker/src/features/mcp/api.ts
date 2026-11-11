@@ -40,6 +40,9 @@ const PAGINATION =
 const SCHEDULE_FIELDS =
   "intervalMinutes 為支援的同步間隔分鐘數，preferredTime 為 HH:mm，preferredWeekdays 為 0–6（0 為週日）";
 
+const SYNC_USAGE =
+  "同步沒有一次全部的端點：對每個資料來源各呼叫一次 POST /connectors/<id>/sync，不帶 body。回應 202 與 status: queued 只代表已排入背景，依序一次執行一個來源；結果以 GET /sync-jobs 查詢，不要在完成前重複觸發。瀏覽器型來源共用 Cloudflare Browser 每日額度（免費方案 10 分鐘），只同步需要更新的來源；errorCode 為 BROWSER_BUSY 且訊息為今日額度用完時，須等台灣時間早上 8 點重置，不要重試。";
+
 const ENDPOINT_NOTES: Record<string, string> = {
   "GET /runtime": "部署模式（是否為 Demo）。",
   "GET /summary": "總覽頁摘要。",
@@ -119,7 +122,8 @@ const ENDPOINT_NOTES: Record<string, string> = {
   "POST /connectors/tdcc/sync/trades": "只同步集保交易，body 同上。",
   "GET /sync-schedule": "預設排程。",
   "PUT /sync-schedule": `修改預設排程。body：intervalMinutes、preferredTime、preferredWeekdays（${SCHEDULE_FIELDS}）。`,
-  "GET /sync-jobs": "各資料來源的排程與上次同步狀態。",
+  "GET /sync-jobs":
+    "各資料來源的排程與同步狀態。running 為 true 表示排隊或執行中；背景同步的結果見 manualRun 的 status、errorCode、lastError（電子發票與集保見 lastStatus、lastError）。",
   "PATCH /sync-jobs/:connectorId/:scope": `修改單一來源排程，scope 為 all。body：enabled?、nextRunAt?（ISO 時間）、scheduleMode?（inherit、custom）、intervalMinutes?、preferredTime?、preferredWeekdays?（${SCHEDULE_FIELDS}）。`,
   "GET /sync-reports/latest": "最新一次排程同步報告。",
   "GET /sync-reports/:batchId/activities": "同步報告的活動變化明細。",
@@ -136,12 +140,12 @@ function connectorRouteNote(path: string) {
   const title = connectorCatalog[id].title;
   if (match[2] === "captcha")
     return {
-      note: `取得${title}的登入驗證碼，回應含驗證碼圖片；辨識後將答案帶入 POST /connectors/${id}/sync。`,
+      note: `取得${title}的登入驗證碼圖片，供使用者親自輸入後帶入 POST /connectors/${id}/sync。一般同步會自動辨識驗證碼，不需要呼叫；每次呼叫會保留 Browser 約 2.5 分鐘並消耗每日額度，只在使用者要求手動輸入驗證碼時使用。`,
     };
   const body = manualSyncBody(id);
   return body
     ? {
-        note: `同步${title}。不帶 body 時交由 Queue 背景執行；帶驗證碼或 OTP 時在請求內完成登入與同步。`,
+        note: `同步${title}。一般不帶 body，交由 Queue 背景執行並自動處理驗證碼；只有使用者提供驗證碼或 OTP 時才帶 body，在請求內完成登入與同步。`,
         body: z.toJSONSchema(body.schema, {
           io: "input",
           unrepresentable: "any",
@@ -167,6 +171,7 @@ export function listApiEndpoints(api: ApiApp) {
   return {
     usage:
       "GET 以 query_api 呼叫，其餘方法以 call_api 呼叫；路徑中的 :param 替換為實際值。回應與網頁版 /api 相同，錯誤為 { success: false, error: { code, message } }。",
+    sync: SYNC_USAGE,
     endpoints,
     connectors: Object.values(connectorCatalog).map((entry) => ({
       id: entry.id,
