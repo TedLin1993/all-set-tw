@@ -66,8 +66,13 @@ function response(status: number, payload: unknown = {}) {
     ok: () => status >= 200 && status < 300,
     status: () => status,
     json: vi.fn().mockResolvedValue(payload),
+    request: () => ({ isNavigationRequest: () => false }),
   };
 }
+const overviewDocument = {
+  url: () => `${SINOTRADE_ORIGINS.savings}/Account/Overview`,
+  request: () => ({ isNavigationRequest: () => true }),
+};
 
 function overviewPage(options?: {
   afterGoto?: string;
@@ -90,6 +95,9 @@ function overviewPage(options?: {
   const page = {
     url: () => currentUrl,
     waitForResponse: vi.fn(async (predicate: (value: unknown) => boolean) => {
+      // 導覽前還在途中的總覽回應屬於前一個頁面，會被導覽取消，不得採用。
+      if (predicate(response(200)) || predicate(overviewDocument))
+        throw new Error("stale response accepted");
       if (!predicate(networkResponse)) throw new Error("unexpected response");
       return networkResponse;
     }),

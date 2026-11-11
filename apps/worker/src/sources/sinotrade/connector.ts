@@ -562,14 +562,22 @@ async function withSessionRelogin<T>(
 
 export async function readSinotradeSavingsOverview(page: Page) {
   const controller = new AbortController();
+  // 剛登入時，登入後頁面自己發出的總覽請求可能還在途中，會被這次導覽取消而讀不到內容。
+  // 只接受這次導覽載入總覽頁之後的回應。
+  let overviewLoaded = false;
   try {
     const [response] = await Promise.all([
       page.waitForResponse(
         (response) => {
           const url = new URL(response.url());
+          if (url.origin !== SINOTRADE_ORIGINS.savings) return false;
+          if (response.request().isNavigationRequest()) {
+            if (/^\/Account\/Overview\/?$/i.test(url.pathname))
+              overviewLoaded = true;
+            return false;
+          }
           return (
-            url.origin === SINOTRADE_ORIGINS.savings &&
-            url.pathname === "/API_Account/GetOverviewData"
+            overviewLoaded && url.pathname === "/API_Account/GetOverviewData"
           );
         },
         { timeout: NAVIGATION_TIMEOUT_MS, signal: controller.signal },
