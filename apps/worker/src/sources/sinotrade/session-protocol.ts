@@ -1,5 +1,8 @@
 import { z } from "zod";
-import type { ConnectorSessionState } from "@taiwan-fin-hub/shared";
+import type {
+  ConnectorSessionState,
+  SinotradeVerificationChallenge,
+} from "@taiwan-fin-hub/shared";
 import type { SourceSyncError, SourceSyncErrorSource } from "../sync-error";
 
 export const SINOTRADE_ORIGINS = {
@@ -302,6 +305,31 @@ export function isSinotradeAuthenticationRequiredError(
   error: unknown,
 ): error is SinotradeAuthenticationRequiredError {
   return error instanceof SinotradeAuthenticationRequiredError;
+}
+
+const PLATFORM_LABELS: Record<SinotradePlatform, string> = {
+  newweb: "新理財網",
+  savings: "豐存股",
+};
+
+/**
+ * 同步時以已儲存的帳密與憑證自動重新登入，但官方沒有讓它完成。之後的同步不得再送出帳密，
+ * 直到使用者重新連線：反覆送出被拒絕的密碼可能鎖住證券帳戶。
+ */
+export class SinotradeUnattendedLoginError extends SinotradeConnectionError {
+  constructor(
+    readonly platform: SinotradePlatform,
+    /** 停下來的官方步驟；`not_authenticated` 表示登入後官方仍回應未登入。 */
+    readonly step: SinotradeVerificationChallenge["step"] | "not_authenticated",
+    detail?: string,
+  ) {
+    super(
+      `永豐證券${PLATFORM_LABELS[platform]}登入已失效，自動重新登入未完成${
+        detail ? `（${detail}）` : ""
+      }，請到設定頁重新連線。`,
+    );
+    this.name = "SinotradeUnattendedLoginError";
+  }
 }
 
 export class SinotradeLoginExpiredError extends SinotradeConnectionError {

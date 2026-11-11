@@ -4,6 +4,7 @@ import { decryptJson, encryptJson } from "../../../src/platform/crypto";
 import { getConnectorSettings } from "../../../src/db";
 import type { Env } from "../../../src/platform/env";
 import { syncSinotrade } from "../../../src/sources/sinotrade/sync";
+import { SinotradeUnattendedLoginError } from "../../../src/sources/sinotrade/session-protocol";
 
 const mocked = vi.hoisted(() => ({ fetchSnapshot: vi.fn() }));
 vi.mock("../../../src/sources/sinotrade/connector", () => ({
@@ -231,5 +232,47 @@ describe("證券完整持倉同步（隔離 D1）", () => {
         "SELECT realized_pnl FROM investment_transactions WHERE connector_id='sinotrade' AND transaction_code='S'",
       ).first("realized_pnl"),
     ).toBeNull();
+  });
+
+  it("自動重新登入未完成時把該平台標記為未連線，保留帳密、憑證與另一平台", async () => {
+    const state = {
+      authenticated: true,
+      cookies: [],
+      localStorage: { TWCACertIdxRef: '{"TWCA1":1}', TWCA1: "fixture-cert" },
+      capturedAt: "2027-01-01T00:00:00.000Z",
+    };
+    const stored = {
+      ...credentials,
+      webState: { newweb: state, savings: state },
+    };
+    await env.DB.prepare(
+      "UPDATE connector_settings SET encrypted_config = ? WHERE connector_id='sinotrade'",
+    )
+      .bind(await encryptJson(stored, key))
+      .run();
+    const saved = async () =>
+      decryptJson(
+        (await getConnectorSettings(env.DB, "sinotrade"))!.encrypted_config,
+        key,
+      );
+
+    // 其他失敗不改變連線狀態，下一次同步照常重試。
+    mocked.fetchSnapshot.mockRejectedValueOnce(new Error("來源查詢失敗"));
+    await expect(syncSinotrade(env, "manual")).rejects.toThrow("來源查詢失敗");
+    expect(await saved()).toEqual(stored);
+
+    mocked.fetchSnapshot.mockRejectedValueOnce(
+      new SinotradeUnattendedLoginError("savings", "otp"),
+    );
+    await expect(syncSinotrade(env, "manual")).rejects.toBeInstanceOf(
+      SinotradeUnattendedLoginError,
+    );
+    expect(await saved()).toEqual({
+      ...credentials,
+      webState: {
+        newweb: state,
+        savings: { ...state, authenticated: false },
+      },
+    });
   });
 });
