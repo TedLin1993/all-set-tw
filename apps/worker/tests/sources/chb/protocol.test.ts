@@ -479,6 +479,7 @@ describe("彰化銀行帳戶與資料正規化", () => {
       [row, row],
     );
     expect(twice).toHaveLength(2);
+    expect(twice[0]!.sourceId).toMatch(/^chb:deposit:tx:v2:/);
     expect(new Set(twice.map((tx) => tx.sourceId)).size).toBe(2);
     // 再同步一次得到相同的 ID（冪等）。
     expect(
@@ -489,6 +490,16 @@ describe("彰化銀行帳戶與資料正規化", () => {
         [row, row],
       ).map((tx) => tx.sourceId),
     ).toEqual(twice.map((tx) => tx.sourceId));
+
+    // 跨同步僅交易時間微幅漂移時，sourceId 保持不變，authorizedAt 反映新時間。
+    const shifted = chbDepositTransactions(
+      chbDepositSourceId(twAccountNo),
+      twAccountNo,
+      "TWD",
+      [{ ...row, transactionTime: "11:02:15" }],
+    );
+    expect(shifted[0]!.sourceId).toBe(twice[0]!.sourceId);
+    expect(shifted[0]!.authorizedAt).toBe("2026-10-31T11:02:15+08:00");
   });
 
   it("選單項目的帳號與幣別解析：台幣取標籤帳號、外幣取 value 的幣別段", () => {

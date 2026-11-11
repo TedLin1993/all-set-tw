@@ -874,8 +874,8 @@ export function chbBalanceMismatches(
 }
 
 /**
- * 存款交易 ID：`sha256(帳號|幣別|交易日|記帳日|交易時間|帶正負號金額|交易後餘額|摘要)` 前 16 碼加上
- * 同一次查詢回應內相同識別的序號。每次同步都查整個固定區間，序號在不同同步之間一致。
+ * 存款交易 ID：`sha256(帳號|幣別|交易日|記帳日|帶正負號金額|交易後餘額|摘要)` 前 16 碼加上
+ * 同一次查詢回應內相同識別的序號（排除可能隨查詢微幅變動的交易時間，authorizedAt 仍保留時間）。
  */
 export function chbDepositTransactions(
   accountId: string,
@@ -891,7 +891,6 @@ export function chbDepositTransactions(
       currency,
       row.transactionDate ?? "",
       row.bookingDate ?? "",
-      row.transactionTime ?? "",
       // 識別用銀行欄位的方向（更正列反轉前），更正列方向修正後 sourceId 不變、同步時就地更新金額。
       (row.adjustment ? -row.amount : row.amount).toFixed(2),
       row.balanceAfter === undefined ? "" : row.balanceAfter.toFixed(2),
@@ -904,7 +903,7 @@ export function chbDepositTransactions(
     const authorizedDate = row.transactionDate ?? row.bookingDate;
     return {
       accountId,
-      sourceId: `chb:deposit:tx:v1:${stableHash(identity)}:${occurrence}`,
+      sourceId: `chb:deposit:tx:v2:${stableHash(identity)}:${occurrence}`,
       postedDate: row.bookingDate ?? row.transactionDate,
       authorizedAt:
         authorizedDate && row.transactionTime
