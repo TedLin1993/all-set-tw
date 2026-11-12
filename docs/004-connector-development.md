@@ -961,7 +961,7 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 報價：`GET /api/v3/ticker/price`，依序使用 `XUSDT`、反向 `USDTX`、`XBTC × BTCUSDT`。
 - 錯誤：`-2014`、`-2015`、`-1022` 為金鑰錯誤。HTTP 451 與沒有 Binance 錯誤碼的 403 視為地區封鎖，顯示明確訊息，並觸發改用西歐備援。成功狀態但回應不是 JSON（例如 HTML 維護頁或空回應），或格式不符（現貨 `balances`、理財 `rows`（空帳戶省略 `rows` 且 `total` 為 0 時視為沒有部位）、資金、`wallet/balance` 不是陣列，合約缺少 `assets` 陣列）時同步失敗；訊息只保留端點最後兩段並保留前一次快照，不當成空錢包。
 
-### 永豐金證券（sinotrade，試行）
+### 永豐金證券（sinotrade）
 
 使用官方新理財網及豐存股網頁，不申請券商 API。`session-protocol.ts` 管理設定、帳戶與認證白名單；`protocol.ts` 純解析外部資料；`login-form.ts` 將官方登入／憑證頁的欄位與按鈕映射成本站的分步驗證；`connector.ts` 負責 Browser Run 與唯讀頁面查詢；`sync.ts` 管理互動登入、加密狀態與完整快照寫入。原生驗證流程尚未以目標環境的實際帳密、生日及 OTP 完成驗證，也尚未證實憑證跨 session 復用與長期排程。
 
