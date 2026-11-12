@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTestD1 } from "../../helpers/d1";
-import { createDrizzle, netWorthHistory } from "../../../src/db";
+import {
+  createDrizzle,
+  investmentPositions,
+  netWorthHistory,
+} from "../../../src/db";
 import { getNetWorthChartHistory } from "../../../src/features/net-worth/service";
 
 const now = "2026-11-12T00:00:00.000Z";
@@ -25,7 +29,10 @@ describe("資產走勢的台股合併（隔離 D1）", () => {
     await harness?.mf.dispose();
   });
   beforeEach(async () => {
-    await harness.binding.prepare("DELETE FROM net_worth_history").run();
+    await harness.binding.batch([
+      harness.binding.prepare("DELETE FROM net_worth_history"),
+      harness.binding.prepare("DELETE FROM investment_positions"),
+    ]);
   });
 
   async function stockRows() {
@@ -67,5 +74,48 @@ describe("資產走勢的台股合併（隔離 D1）", () => {
       { date: "2026-11-08", netWorth: 500_000, source: "tw-stock" },
       { date: "2026-11-09", netWorth: 510_000, source: "tw-stock" },
     ]);
+  });
+
+  it("集保持股只由券商最新快照涵蓋：帳戶已不在最新快照時不輸出成本", async () => {
+    const position = (
+      id: string,
+      connectorId: string,
+      brokerAccount: string,
+      asOfDate: string,
+      costBasis?: number,
+    ) => ({
+      id,
+      connectorId,
+      sourceId: id,
+      assetType: "stock",
+      name: id,
+      brokerNo: "9A00",
+      brokerAccount,
+      market: "TW",
+      marketValue: 100_000,
+      costBasis,
+      currency: "TWD",
+      asOfDate,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const costRows = async () =>
+      (await getNetWorthChartHistory(harness.binding)).filter(
+        (row) => row.assetType === "stock_cost",
+      );
+    const database = createDrizzle(harness.binding);
+    await database
+      .insert(investmentPositions)
+      .values([
+        position("tdcc-a", "tdcc", "A", "2026-11-10"),
+        position("direct-a", "sinotrade", "A", "2026-11-10", 80_000),
+      ]);
+    expect(await costRows()).not.toEqual([]);
+
+    // 最新快照只剩帳戶 B；帳戶 A 的舊列不得讓集保的 A 持股被視為已涵蓋。
+    await database
+      .insert(investmentPositions)
+      .values([position("direct-b", "sinotrade", "B", "2026-11-11", 10_000)]);
+    expect(await costRows()).toEqual([]);
   });
 });

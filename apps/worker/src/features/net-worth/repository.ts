@@ -232,18 +232,23 @@ export async function loadStockCostInputs(db: D1Database) {
   const [positions, trades, uncovered, foreignStart] = await db.batch<
     Record<string, unknown>
   >([
-    // 各直接券商每個快照日、每個幣別的成本合計；缺成本的非零持倉另計筆數。
+    // 各直接券商每個快照日、每個市場與幣別的成本合計；缺成本的非零持倉另計筆數。
+    // 以市場區分台股與海外：海外持倉可能以 TWD 計價，不能只看幣別。
     db.prepare(
       `WITH ${COST_CONNECTORS_CTE}
       SELECT
         substr(as_of_date, 1, 10) AS date,
+        CASE
+          WHEN NULLIF(TRIM(market), '') IS NOT NULL THEN UPPER(TRIM(market)) != 'TW'
+          ELSE currency != 'TWD'
+        END AS foreign_market,
         currency,
         TOTAL(cost_basis) AS cost,
         SUM(CASE WHEN cost_basis IS NULL AND COALESCE(market_value, 0) != 0 THEN 1 ELSE 0 END) AS missing
       FROM investment_positions
       JOIN cost_connectors USING (connector_id)
       WHERE asset_type IN ('stock', 'etf')
-      GROUP BY 1, 2
+      GROUP BY 1, 2, 3
       ORDER BY 1`,
     ),
     db.prepare(
@@ -256,6 +261,7 @@ export async function loadStockCostInputs(db: D1Database) {
       FROM investment_transactions
       JOIN cost_connectors USING (connector_id)
       WHERE currency = 'TWD'
+        AND COALESCE(json_extract(raw_payload, '$.market'), 'TW') = 'TW'
         AND transaction_code IN ('B', 'S')
         AND effective_date IS NOT NULL
       ORDER BY 1 DESC`,
@@ -277,6 +283,11 @@ export async function loadStockCostInputs(db: D1Database) {
           JOIN cost_connectors USING (connector_id)
           WHERE direct.broker_no = tdcc.broker_no
             AND direct.broker_account = tdcc.broker_account
+            -- 只看券商最新快照：已不在最新快照的帳戶，舊列不代表成本仍涵蓋這筆持股。
+            AND direct.as_of_date = (
+              SELECT MAX(as_of_date) FROM investment_positions latest
+              WHERE latest.connector_id = direct.connector_id
+            )
         )`,
     ),
     // 海外市值從這天才進入走勢，成本也從這天起計入。
@@ -295,6 +306,8 @@ export async function loadStockCostInputs(db: D1Database) {
   return {
     positions: positions!.results as Array<{
       date: string;
+      /** SQLite 布林：1 為海外市場。 */
+      foreign_market: number;
       currency: string;
       cost: number;
       missing: number;

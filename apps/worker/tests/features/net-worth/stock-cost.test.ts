@@ -5,7 +5,13 @@ type Inputs = Parameters<typeof buildStockCostHistory>[0];
 
 const base: Inputs = {
   positions: [
-    { date: "2026-11-10", currency: "TWD", cost: 900_000, missing: 0 },
+    {
+      date: "2026-11-10",
+      foreign_market: 0,
+      currency: "TWD",
+      cost: 900_000,
+      missing: 0,
+    },
   ],
   trades: [],
   uncoveredTdccHoldings: 0,
@@ -95,10 +101,34 @@ describe("股票投入成本回推", () => {
       costs({
         ...base,
         positions: [
-          { date: "2026-11-08", currency: "TWD", cost: 900_000, missing: 0 },
-          { date: "2026-11-08", currency: "USD", cost: 3_000, missing: 0 },
-          { date: "2026-11-10", currency: "TWD", cost: 900_000, missing: 0 },
-          { date: "2026-11-10", currency: "USD", cost: 3_100, missing: 0 },
+          {
+            date: "2026-11-08",
+            foreign_market: 0,
+            currency: "TWD",
+            cost: 900_000,
+            missing: 0,
+          },
+          {
+            date: "2026-11-08",
+            foreign_market: 1,
+            currency: "USD",
+            cost: 3_000,
+            missing: 0,
+          },
+          {
+            date: "2026-11-10",
+            foreign_market: 0,
+            currency: "TWD",
+            cost: 900_000,
+            missing: 0,
+          },
+          {
+            date: "2026-11-10",
+            foreign_market: 1,
+            currency: "USD",
+            cost: 3_100,
+            missing: 0,
+          },
         ],
         foreignStartDate: "2026-11-10",
         ratesToTwd: { USD: 32 },
@@ -109,13 +139,47 @@ describe("股票投入成本回推", () => {
     ]);
   });
 
+  it("以台幣計價的海外持倉不併入台股基準，海外市值開始前的日期不含其成本", () => {
+    expect(
+      costs({
+        ...base,
+        positions: [
+          {
+            date: "2026-11-10",
+            foreign_market: 0,
+            currency: "TWD",
+            cost: 900_000,
+            missing: 0,
+          },
+          {
+            date: "2026-11-10",
+            foreign_market: 1,
+            currency: "TWD",
+            cost: 50_000,
+            missing: 0,
+          },
+        ],
+        foreignStartDate: "2026-11-10",
+      }),
+    ).toEqual([
+      ["1900-01-01", 900_000],
+      ["2026-11-10", 950_000],
+    ]);
+  });
+
   it("成本無法對應市值線時不輸出：集保有其他券商持股、缺成本或缺匯率", () => {
     expect(costs({ ...base, uncoveredTdccHoldings: 1 })).toEqual([]);
     expect(
       costs({
         ...base,
         positions: [
-          { date: "2026-11-10", currency: "TWD", cost: 900_000, missing: 1 },
+          {
+            date: "2026-11-10",
+            foreign_market: 0,
+            currency: "TWD",
+            cost: 900_000,
+            missing: 1,
+          },
         ],
       }),
     ).toEqual([]);
@@ -124,7 +188,13 @@ describe("股票投入成本回推", () => {
         ...base,
         positions: [
           ...base.positions,
-          { date: "2026-11-10", currency: "USD", cost: 3_000, missing: 0 },
+          {
+            date: "2026-11-10",
+            foreign_market: 1,
+            currency: "USD",
+            cost: 3_000,
+            missing: 0,
+          },
         ],
         foreignStartDate: "2026-11-10",
       }),

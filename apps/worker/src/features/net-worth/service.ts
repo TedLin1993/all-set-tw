@@ -26,8 +26,20 @@ export function buildStockCostHistory(inputs: StockCostInputs) {
   const anchor = inputs.positions.filter((row) => row.date === anchorDate);
   if (anchor.some((row) => row.missing > 0)) return [];
 
+  const toTwd = (row: StockCostInputs["positions"][number]) => {
+    if (row.currency === "TWD") return row.cost;
+    const rate = inputs.ratesToTwd[row.currency];
+    return rate === undefined ? (row.cost === 0 ? 0 : null) : row.cost * rate;
+  };
+
   const taiwan: Array<[string, number]> = [];
-  let cost = anchor.find((row) => row.currency === "TWD")?.cost;
+  const taiwanAnchor = anchor.filter((row) => !row.foreign_market);
+  let cost: number | undefined;
+  for (const row of taiwanAnchor) {
+    const value = toTwd(row);
+    if (value === null) return [];
+    cost = (cost ?? 0) + value;
+  }
   if (cost !== undefined) {
     const byDate = new Map<string, { buys: number; sold: number | null }>();
     for (const trade of inputs.trades) {
@@ -67,15 +79,11 @@ export function buildStockCostHistory(inputs: StockCostInputs) {
   const foreign = new Map<string, number>();
   if (inputs.foreignStartDate) {
     for (const row of inputs.positions) {
-      if (row.currency === "TWD" || row.date < inputs.foreignStartDate)
-        continue;
-      const rate = inputs.ratesToTwd[row.currency];
-      if (rate === undefined) {
-        if (row.cost !== 0 || row.missing > 0) return [];
-        continue;
-      }
+      if (!row.foreign_market || row.date < inputs.foreignStartDate) continue;
       if (row.missing > 0) return [];
-      foreign.set(row.date, (foreign.get(row.date) ?? 0) + row.cost * rate);
+      const value = toTwd(row);
+      if (value === null) return [];
+      foreign.set(row.date, (foreign.get(row.date) ?? 0) + value);
     }
   }
 
