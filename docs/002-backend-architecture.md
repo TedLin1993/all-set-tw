@@ -638,6 +638,8 @@ X-Next-Cursor: <opaque-cursor>
 - 自動配對只在同一天；跨日配對一定是手動建立並存於 `invoice_transaction_preferences`。活動搜尋與 `getActivityItemsInRange` 依日期讀取後，以 `loadLinkedCounterparts` 依 linked 紀錄補讀不在本批的另一端，不以放寬日期範圍處理。補讀的資料只供配對；搜尋以發票命中時一併回傳其連結交易的日期，活動仍只在交易日期呈現一次。
 - 銀行交易分類時，分類規則與第一輪查詢並行，當頁交易的分類覆寫、轉帳候選與退費原消費候選並行；只有頁面外的候選需要再查一次覆寫。退費候選依信用卡帳戶走 `idx_bank_transactions_account_posted_date`，只在當頁有信用卡正數交易時查詢。
 - 各 connector／asset type 的最新持倉統一使用 `db/investment-positions.ts`，以一次 GROUP BY 取得最新日期，不逐列執行 MAX 子查詢。
+- `GET /api/history/net-worth/chart` 將集保的台股 `stock` 與直接券商的 `tw_stock` 合併為同一個 `tw-stock` 序列：集保有資料的日期以集保為準，集保最後一天之後或未連接集保時才用券商台股（同日相加）。前端逐序列沿用前值，分成兩個序列會把集保舊值與券商新值重複相加。
+- 同一支 API 另輸出股票投入成本（`assetType = stock_cost`、`source = cost`，台幣），不另存讀模型：以直接券商最新快照的台股成本為基準，依成交往回推（扣掉之後的買進金額、加回之後賣出部位的原始成本 `raw.realizedCost`），每個成交日一點的階梯序列；最早成交以前沿用回推到的成本。賣出的原始成本缺漏或為 0（券商查不到）時不再往前推。海外成本只取快照日的來源成本，以目前匯率換算，從海外市值進入走勢那天起計入。集保有不屬於直接券商帳戶的持股、最新快照有缺成本的持倉或外幣缺少匯率時不輸出，避免市值與成本範圍不一致。
 - Cloudflare Access 公鑰只在 isolate 記憶體快取；Access 後方的 Worker 無法使用 Cache API。同一 isolate 的並行請求共用同一次下載與匯入後的金鑰。
 - 以日期 expression 篩選區間時，需同時保留可走索引的原始欄位範圍條件，並以 EXPLAIN QUERY PLAN 確認。
 

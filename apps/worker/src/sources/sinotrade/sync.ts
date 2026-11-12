@@ -27,11 +27,13 @@ import { persistStagedSyncWrite } from "../../features/sync/persistence";
 import {
   investmentPositionRecord,
   investmentTransactionRecord,
+  netWorthHistoryRecord,
 } from "../../features/sync/record-mapper";
 import type { SyncOutcome } from "../../features/sync/types";
 import type {
   InvestmentPosition,
   InvestmentTransaction,
+  NetWorthHistoryPoint,
 } from "../financial-types";
 import {
   prepareSinotradeLogin,
@@ -335,6 +337,78 @@ async function forgetPlatformLogin(
   }
 }
 
+type SinotradePositionInput = Omit<InvestmentPosition, "id" | "connectorId">;
+
+async function loadRatesToTwd(
+  db: D1Database,
+  positions: SinotradePositionInput[],
+) {
+  const currencies = [
+    ...new Set(
+      positions
+        .map((position) => position.currency)
+        .filter((currency) => currency !== "TWD"),
+    ),
+  ];
+  if (currencies.length === 0) return {};
+  const { results } = await db
+    .prepare(
+      "SELECT currency, rate_to_twd FROM exchange_rates WHERE currency IN (SELECT value FROM json_each(?))",
+    )
+    .bind(JSON.stringify(currencies))
+    .all<{ currency: string; rate_to_twd: number }>();
+  return Object.fromEntries(
+    results.map((row) => [row.currency, row.rate_to_twd]),
+  );
+}
+
+function marketHistory(
+  positions: SinotradePositionInput[],
+  ratesToTwd: Readonly<Record<string, number>>,
+  date: string,
+  assetType: NonNullable<NetWorthHistoryPoint["assetType"]>,
+): NetWorthHistoryPoint | null {
+  if (positions.length === 0) return null;
+  let netWorth = 0;
+  for (const position of positions) {
+    const amount = position.marketValue ?? 0;
+    if (amount === 0) continue;
+    const rate =
+      position.currency === "TWD" ? 1 : ratesToTwd[position.currency];
+    if (rate === undefined) return null;
+    netWorth += amount * rate;
+  }
+  return { date, netWorth: Math.round(netWorth), assetType };
+}
+
+/**
+ * 資產走勢的股票歷史：台股帳戶寫 `tw_stock`，由走勢查詢與集保的台股市值合併（集保有資料的日期以集保為準，
+ * 避免重複）；海外帳戶以同步當下的匯率換算台幣寫 `stock`，集保沒有這部分，直接相加。
+ * 沒有該市場帳戶時不寫；全數賣出時寫 0，讓走勢不沿用舊值。缺少匯率時不寫，不以 0 或原幣代替。
+ */
+export function sinotradeStockHistory(
+  positions: SinotradePositionInput[],
+  ratesToTwd: Readonly<Record<string, number>>,
+  date: string,
+): NetWorthHistoryPoint[] {
+  return [
+    marketHistory(
+      positions.filter((position) => position.market === "TW"),
+      ratesToTwd,
+      date,
+      "tw_stock",
+    ),
+    marketHistory(
+      positions.filter(
+        (position) => position.market && position.market !== "TW",
+      ),
+      ratesToTwd,
+      date,
+      "stock",
+    ),
+  ].filter((point) => point !== null);
+}
+
 export async function syncSinotrade(
   env: SyncEnv,
   _trigger: SyncTrigger,
@@ -350,7 +424,7 @@ export async function syncSinotrade(
   }
   const now = new Date().toISOString();
   const asOfDate = taipeiDateKey(new Date(now));
-  const positions: Array<Omit<InvestmentPosition, "id" | "connectorId">> = [];
+  const positions: SinotradePositionInput[] = [];
   const trades: Array<Omit<InvestmentTransaction, "id" | "connectorId">> = [];
   for (const {
     account,
@@ -419,6 +493,11 @@ export async function syncSinotrade(
         raw: { market: holding.market, positionType: holding.positionType },
       });
   }
+  const stockHistory = sinotradeStockHistory(
+    positions,
+    await loadRatesToTwd(env.DB, positions),
+    asOfDate,
+  );
   env.syncSignal?.throwIfAborted();
   const newRecords = await persistStagedSyncWrite(env.DB, {
     records: [
@@ -427,6 +506,9 @@ export async function syncSinotrade(
       ),
       ...trades.map((trade) =>
         investmentTransactionRecord("sinotrade", trade, now),
+      ),
+      ...stockHistory.map((point) =>
+        netWorthHistoryRecord("sinotrade", point, now),
       ),
     ],
     beforePromoteStatements: [

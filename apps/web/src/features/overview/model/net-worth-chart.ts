@@ -23,6 +23,8 @@ export interface NetWorthChartPoint {
   crypto?: number;
   deposit?: number;
   manual?: number;
+  /** 股票投入成本（台幣）；後端無法與市值對應時沒有資料。 */
+  stockCost?: number;
   selectedTotal: number;
 }
 
@@ -253,6 +255,9 @@ export function buildNetWorthChartData(
     ]),
   ) as Record<NetWorthAssetType, Map<string, number | undefined>>;
 
+  // 成本是階梯序列（成交日一點），依圖上的日期沿用前值；不為成本另外增加日期。
+  const costRows = sortedRows.filter((row) => row.assetType === "stock_cost");
+
   return dates.map((date) => {
     const point: NetWorthChartPoint = {
       date,
@@ -261,6 +266,7 @@ export function buildNetWorthChartData(
       crypto: valuesByType.crypto.get(date),
       deposit: valuesByType.deposit.get(date),
       manual: valuesByType.manual.get(date),
+      stockCost: latestValue(costRows, date),
       selectedTotal: 0,
     };
     point.selectedTotal = includedAssets.reduce(

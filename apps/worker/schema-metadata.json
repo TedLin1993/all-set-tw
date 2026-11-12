@@ -392,8 +392,8 @@
         "id": "歷史點的系統識別碼。",
         "date": "此數值所代表的日期。",
         "net_worth": "該日期與資產類型的金額；手動資產保留其設定幣別，其餘讀模型通常以 TWD 表示。",
-        "asset_type": "資產類型，例如 total、deposit、stock、fund、crypto 或手動資產 id。",
-        "source": "數值來源，例如 bank 或 manual。",
+        "asset_type": "資產類型，例如 total、deposit、stock、tw_stock、fund、crypto 或手動資產 id；tw_stock 是直接券商的台股市值，圖表查詢與集保台股 stock 合併，集保有資料的日期以集保為準。",
+        "source": "數值來源，例如 bank、manual 或 connector ID；股票有集保的台股市值，以及直接券商（sinotrade）的台股 tw_stock 與海外帳戶台幣市值 stock。",
         "snapshotted_at": "此歷史點實際建立或重算的時間。"
       }
     },
