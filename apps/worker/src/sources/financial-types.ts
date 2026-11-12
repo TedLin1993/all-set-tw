@@ -7,7 +7,8 @@ import type { BankTransactionStatus } from "@taiwan-fin-hub/shared";
 export interface NetWorthHistoryPoint {
   date: string; // YYYY-MM-DD
   netWorth: number;
-  assetType?: "total" | "stock" | "fund" | "crypto";
+  /** `tw_stock` 只由直接券商寫入，走勢查詢與集保的台股 `stock` 合併後才輸出為 `stock`。 */
+  assetType?: "total" | "stock" | "tw_stock" | "fund" | "crypto";
 }
 
 export interface CreditCardBill {

@@ -12,7 +12,12 @@
     hideItemLabel = false,
     focusedKey = null,
     indicator = "dot",
+    footer,
   }: {
+    /** 由該點資料算出的附加列（例如市值減成本的損益）；回傳 null 時不顯示。 */
+    footer?: (
+      data: unknown,
+    ) => { label: string; value: string; class?: string } | null;
     class?: string;
     labelFormatter?: (value: unknown) => string;
     titleFormatter?: (data: unknown, header: unknown) => string;
@@ -42,6 +47,9 @@
   });
   const visibleSeries = $derived(
     context.tooltip.series.filter((series) => series.visible),
+  );
+  const footerItem = $derived(
+    footer && context.tooltip.data ? footer(context.tooltip.data) : null,
   );
   const header = $derived(
     context.tooltip.data ? context.x(context.tooltip.data) : undefined,
@@ -89,5 +97,15 @@
         </div>
       {/each}
     </div>
+    {#if footerItem}
+      <div
+        class="flex items-center justify-between gap-2 border-t border-ink/10 pt-1.5"
+      >
+        <span class="text-ink/55">{footerItem.label}</span>
+        <span class={cn("font-semibold tabular-nums", footerItem.class)}
+          >{footerItem.value}</span
+        >
+      </div>
+    {/if}
   </div>
 </TooltipPrimitive.Root>

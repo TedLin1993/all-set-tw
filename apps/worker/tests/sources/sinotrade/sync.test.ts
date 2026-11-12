@@ -275,4 +275,63 @@ describe("證券完整持倉同步（隔離 D1）", () => {
       },
     });
   });
+
+  it("台股與美股市值分別寫入股票走勢：美股以同步當下匯率換算，賣光寫 0，缺匯率不寫", async () => {
+    const twAccount = { ...account, brokerAccount: "0000009", market: "TW" };
+    const twHolding = {
+      ...holding,
+      symbol: "0050",
+      quantity: 1000,
+      marketValue: 100_000,
+      currency: "TWD",
+      market: "TW" as const,
+    };
+    const history = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT asset_type, net_worth FROM net_worth_history WHERE source='sinotrade' ORDER BY asset_type",
+        ).all<{ asset_type: string; net_worth: number }>()
+      ).results;
+    const usHolding = { ...holding, marketValue: 1000.4 };
+
+    await env.DB.prepare("DELETE FROM net_worth_history").run();
+    // 沒有 USD 匯率：美股不得以 0 或原幣寫入；台股不需匯率照常寫。
+    mocked.fetchSnapshot.mockResolvedValue({
+      accountHoldings: [
+        { account, holdings: [usHolding], trades: [] },
+        { account: twAccount, holdings: [twHolding], trades: [] },
+      ],
+      webState: {},
+    });
+    await syncSinotrade(env, "manual");
+    expect(await history()).toEqual([
+      { asset_type: "tw_stock", net_worth: 100_000 },
+    ]);
+
+    // 1000.4 × 32 = 32012.8 → 32013；台股另存 tw_stock，由走勢查詢與集保合併。
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO exchange_rates (currency, rate_to_twd, updated_at) VALUES ('USD', 32, ?)",
+    )
+      .bind(new Date().toISOString())
+      .run();
+    await syncSinotrade(env, "manual");
+    expect(await history()).toEqual([
+      { asset_type: "stock", net_worth: 32_013 },
+      { asset_type: "tw_stock", net_worth: 100_000 },
+    ]);
+
+    // 同日全數賣出：覆寫為 0，不沿用舊市值。
+    mocked.fetchSnapshot.mockResolvedValue({
+      accountHoldings: [
+        { account, holdings: [], trades: [] },
+        { account: twAccount, holdings: [], trades: [] },
+      ],
+      webState: {},
+    });
+    await syncSinotrade(env, "manual");
+    expect(await history()).toEqual([
+      { asset_type: "stock", net_worth: 0 },
+      { asset_type: "tw_stock", net_worth: 0 },
+    ]);
+  });
 });

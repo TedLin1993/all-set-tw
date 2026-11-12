@@ -45,14 +45,6 @@
   const storageKey = "taiwan-fin-hub-net-worth-chart-included-assets";
   const knownStorageKey = "taiwan-fin-hub-net-worth-chart-known-assets";
   const timeframes: NetWorthTimeframe[] = ["1M", "3M", "6M", "1Y", "ALL"];
-  const chartConfig: ChartConfig = {
-    selectedTotal: { label: "淨資產", color: "#3e6f7c" },
-    stock: { label: "股票/ETF", color: "#6574cd" },
-    fund: { label: "基金", color: "#9b6bb0" },
-    crypto: { label: "加密貨幣", color: "#c0703a" },
-    deposit: { label: "存款", color: "#3e6f7c" },
-    manual: { label: "其他資產", color: "#b5853f" },
-  };
 
   let includedAssets = $state<NetWorthAssetType[]>([
     ...NET_WORTH_DEFAULT_ASSETS,
@@ -99,12 +91,33 @@
       ? focusedAsset
       : null,
   );
-  const chartSeries = $derived(
-    displayMode === "sum"
+  /** 成本只能與股票市值比較；同時選了存款等其他資產時不顯示。 */
+  const showCost = $derived(
+    selectedSeries.length === 1 &&
+      selectedSeries[0]!.key === "stock" &&
+      chartData.some((point) => point.stockCost !== undefined),
+  );
+  const latestCost = $derived(
+    showCost ? chartData.at(-1)?.stockCost : undefined,
+  );
+  const unrealizedPnl = $derived(
+    latestCost === undefined ? undefined : latestValue - latestCost,
+  );
+  const chartConfig: ChartConfig = $derived({
+    selectedTotal: { label: showCost ? "市值" : "淨資產", color: "#3e6f7c" },
+    stock: { label: "股票/ETF", color: "#6574cd" },
+    fund: { label: "基金", color: "#9b6bb0" },
+    crypto: { label: "加密貨幣", color: "#c0703a" },
+    deposit: { label: "存款", color: "#3e6f7c" },
+    manual: { label: "其他資產", color: "#b5853f" },
+    stockCost: { label: "投入成本", color: "#c9a227" },
+  });
+  const chartSeries = $derived([
+    ...(displayMode === "sum"
       ? [
           {
             key: "selectedTotal",
-            label: "淨資產",
+            label: showCost ? "市值" : "淨資產",
             value: "selectedTotal",
             color: "var(--color-selectedTotal)",
           },
@@ -114,8 +127,18 @@
           label,
           value: key,
           color: `var(--color-${key})`,
-        })),
-  );
+        }))),
+    ...(showCost
+      ? [
+          {
+            key: "stockCost",
+            label: "投入成本",
+            value: "stockCost",
+            color: "var(--color-stockCost)",
+          },
+        ]
+      : []),
+  ]);
 
   onMount(() => {
     try {
@@ -143,6 +166,22 @@
     );
   }
 
+  /** 提示框的未實現損益：該日市值減投入成本。 */
+  function pnlFooter(data: unknown) {
+    const point = data as NetWorthChartPoint;
+    if (point.stockCost === undefined) return null;
+    const pnl = point.selectedTotal - point.stockCost;
+    const percent =
+      point.stockCost > 0
+        ? `（${pnl > 0 ? "+" : pnl < 0 ? "−" : ""}${Math.abs((pnl / point.stockCost) * 100).toFixed(1)}%）`
+        : "";
+    return {
+      label: "未實現損益",
+      value: `${pnl > 0 ? "+" : ""}${formatCurrency(pnl)}${percent}`,
+      class: pnl > 0 ? "text-moss" : pnl < 0 ? "text-coral" : "",
+    };
+  }
+
   function xValue(point: NetWorthChartPoint) {
     return new Date(`${point.date}T00:00:00`);
   }
@@ -164,6 +203,7 @@
     labelFormatter={(value) =>
       formatDate(value instanceof Date ? value.toISOString() : String(value))}
     valueFormatter={(value) => formatCurrency(Number(value))}
+    footer={showCost ? pnlFooter : undefined}
   />
 {/snippet}
 
@@ -269,6 +309,24 @@
           >
             {formatCurrency(latestValue)}
           </p>
+          {#if latestCost !== undefined && unrealizedPnl !== undefined}
+            <p class="mt-1 text-caption text-subtle">
+              投入成本 {formatCurrency(latestCost)}　未實現損益
+              <span
+                class={`font-semibold tabular-nums ${unrealizedPnl > 0 ? "text-moss" : unrealizedPnl < 0 ? "text-coral" : ""}`}
+              >
+                {unrealizedPnl > 0 ? "+" : ""}{formatCurrency(
+                  unrealizedPnl,
+                )}{#if latestCost > 0}（{unrealizedPnl > 0
+                    ? "+"
+                    : unrealizedPnl < 0
+                      ? "−"
+                      : ""}{Math.abs(
+                    (unrealizedPnl / latestCost) * 100,
+                  ).toFixed(1)}%）{/if}
+              </span>
+            </p>
+          {/if}
         </div>
         <span class="pb-1 text-caption text-subtle">
           {formatDate(chartData.at(-1)?.date)}
@@ -339,7 +397,17 @@
                 stroke-width="2"
                 pointer-events="none"
               />
-            {:else}
+            {/if}
+            {#if showCost}
+              <Spline
+                seriesKey="stockCost"
+                strokeWidth={2}
+                stroke-dasharray="5 4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            {/if}
+            {#if displayMode !== "sum"}
               {#each selectedSeries as series (series.key)}
                 {@const latest = chartData.at(-1)!}
                 {@const value = latest[series.key]}
