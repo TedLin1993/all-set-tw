@@ -754,7 +754,7 @@ sources/
 | `transaction-merge.ts`、`card-reconciliation.ts` | 共用舊交易合併與單卡摘要帳戶修復；保留使用者偏好、分類與發票關聯。                                                                                                                                                                                                                 |
 | `crypto-holdings-write.ts`                       | 加密貨幣交易所的當天完整持倉快照：設定版本 guard、刪除同 connector 當天持倉、promotion 新列與淨資產歷史在同一 batch。                                                                                                                                                              |
 
-Worker 的 `sources/<connectorId>/sync.ts` 負責設定解密、connector 呼叫與同步資料寫入；單次銀行流程也處理互動式 challenge，override 型別與來源 colocate。`ctbc/authorizations.ts` 管信用卡授權合併，`hncb/repository.ts` 管華南舊交易／帳戶修復，`nextbank/deposits.ts` 與 `obank/time-deposits.ts` 管存款生命週期。共用同步管理留在 `features/sync`，來源之間共用的外部取資料工具留在 `sources` 根目錄（例如加密貨幣來源共用的 `crypto-holdings.ts` 正規化、`crypto-prices.ts` MAX 公開報價與 `crypto-browser-egress.ts` Browser Run 代發的瀏覽器端；Durable Object 介面在 `platform/crypto-browser-egress.ts`）。
+Worker 的 `sources/<connectorId>/sync.ts` 負責設定解密、connector 呼叫與同步資料寫入；單次銀行流程也處理互動式 challenge，override 型別與來源 colocate。`ctbc/authorizations.ts` 管信用卡授權合併，`hncb/repository.ts` 管華南舊交易／帳戶修復，`nextbank/deposits.ts` 與 `obank/time-deposits.ts` 管存款生命週期。`nextbank/transactions.ts` 管交易識別變更後的舊列合併。共用同步管理留在 `features/sync`，來源之間共用的外部取資料工具留在 `sources` 根目錄（例如加密貨幣來源共用的 `crypto-holdings.ts` 正規化、`crypto-prices.ts` MAX 公開報價與 `crypto-browser-egress.ts` Browser Run 代發的瀏覽器端；Durable Object 介面在 `platform/crypto-browser-egress.ts`）。
 
 中信的固定裝置識別、銀行發出的裝置 seed 與短期兩階段登入暫存只保存於加密設定。
 `ctbc/sync.ts` 以設定版本 CAS 在初始化前保存裝置 ID、首次握手後登入前保存 seed；

@@ -814,7 +814,7 @@ export function ctbcTransactionsMatch(
   );
 }
 
-function purchaseDay(value: string) {
+export function purchaseDay(value: string) {
   const timestamp = value.includes("T") ? Date.parse(value) : NaN;
   return Number.isFinite(timestamp)
     ? new Date(timestamp + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
@@ -1150,7 +1150,7 @@ function stableHash(value: string) {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-function normalizeMerchantName(value: string) {
+export function normalizeMerchantName(value: string) {
   return value.replace(/[\s\-_－—*＊()（）,.，。]/g, "").toLowerCase();
 }
 

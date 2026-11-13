@@ -1,4 +1,8 @@
-import { ctbcTransactionsMatch } from "./protocol";
+import {
+  ctbcTransactionsMatch,
+  normalizeMerchantName,
+  purchaseDay,
+} from "./protocol";
 import { matchCardAuthorizations } from "../../features/sync/card-authorization-matching";
 import { cardTransactionPreferenceStatements } from "../../features/sync/card-authorization-write";
 import type { SyncWriteRecord } from "../../features/sync/persistence";
@@ -220,6 +224,68 @@ export async function prepareCtbcAuthorizationWrite(
     ...all.get(link.id)!,
     matched_transaction_id: link.posted,
   }));
+  // Payments, fees and other rows without an authorization code get one
+  // identity in the unbilled feed and another in the statement feed. Once the
+  // statement closes, the unbilled row is no longer returned; keep it (ID and
+  // user settings) and fold the statement row into it. This also repairs
+  // duplicates left by earlier syncs.
+  const returnedIds = new Set(
+    [...rewritten.values()].map((record) => (record.payload as Row).id),
+  );
+  const linkedIds = new Set(
+    [...savedLinks, ...newLinks].flatMap((s) => [
+      s.id,
+      s.matched_transaction_id,
+    ]),
+  );
+  const withoutAuthorization = (s: Row) =>
+    s.status === "posted" &&
+    !raw(s).authorizationHash &&
+    !authorizationIds.has(s.id) &&
+    !linkedIds.has(s.id);
+  const lifecycleKey = (s: Row) =>
+    JSON.stringify([
+      s.account_id,
+      s.currency,
+      s.amount,
+      s.authorized_at ? purchaseDay(s.authorized_at) : null,
+      s.authorized_at ? null : s.posted_date,
+      normalizeMerchantName(s.description ?? ""),
+    ]);
+  const groupByKey = (rows: Row[]) => {
+    const groups = new Map<string, Row[]>();
+    for (const row of rows) {
+      const key = lifecycleKey(row);
+      groups.set(key, [...(groups.get(key) ?? []), row]);
+    }
+    return groups;
+  };
+  const returned = groupByKey(
+    [...all.values()].filter(
+      (s) => returnedIds.has(s.id) && withoutAuthorization(s),
+    ),
+  );
+  const feedChangeLinks = [
+    ...groupByKey(
+      stored.filter((s) => !returnedIds.has(s.id) && withoutAuthorization(s)),
+    ),
+  ].flatMap(([key, left]) => {
+    const current = returned.get(key) ?? [];
+    // Never guess: every unreturned row needs exactly one returned counterpart.
+    if (
+      left.length !== current.length ||
+      left.some((s, index) => {
+        const a = raw(s).cardLast4;
+        const b = raw(current[index]!).cardLast4;
+        return a && b && a !== b;
+      })
+    )
+      return [];
+    return left.map((s, index) => ({
+      ...s,
+      matched_transaction_id: current[index]!.id,
+    }));
+  });
   // CTBC retains the authorization ID and removes the formal duplicate. Two
   // existing linked invoices cannot be merged without discarding a decision.
   const invoices = new Set(
@@ -232,25 +298,27 @@ export async function prepareCtbcAuthorizationWrite(
         .all<{ transaction_id: string }>()
     ).results.map((row) => row.transaction_id),
   );
-  const links = [...savedLinks, ...newLinks].flatMap((pendingRow) => {
-    const posted = all.get(pendingRow.matched_transaction_id ?? "");
-    return posted &&
-      posted.id !== pendingRow.id &&
-      !(invoices.has(posted.id) && invoices.has(pendingRow.id))
-      ? [
-          {
-            id: pendingRow.id,
-            posted: posted.id,
-            postedName: posted.description,
-            postedDate: posted.posted_date,
-            postedAmount: posted.amount,
-            postedSourceId: posted.source_id,
-            postedCardLast4: posted.card_last4 ?? null,
-            postedCardName: posted.card_name ?? null,
-          },
-        ]
-      : [];
-  });
+  const links = [...savedLinks, ...newLinks, ...feedChangeLinks].flatMap(
+    (pendingRow) => {
+      const posted = all.get(pendingRow.matched_transaction_id ?? "");
+      return posted &&
+        posted.id !== pendingRow.id &&
+        !(invoices.has(posted.id) && invoices.has(pendingRow.id))
+        ? [
+            {
+              id: pendingRow.id,
+              posted: posted.id,
+              postedName: posted.description,
+              postedDate: posted.posted_date,
+              postedAmount: posted.amount,
+              postedSourceId: posted.source_id,
+              postedCardLast4: posted.card_last4 ?? null,
+              postedCardName: posted.card_name ?? null,
+            },
+          ]
+        : [];
+    },
+  );
   const linksJson = JSON.stringify(links);
   return {
     records: records.flatMap((r) =>
