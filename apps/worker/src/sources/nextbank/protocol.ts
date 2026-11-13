@@ -106,7 +106,7 @@ export function normalizeNextbankTime(value: unknown): string | undefined {
   return result;
 }
 
-function taiwanDate(value: string): string {
+export function taiwanDate(value: string): string {
   if (value.length === 10) return value;
   return new Date(Date.parse(value) + 8 * 3600_000).toISOString().slice(0, 10);
 }
@@ -127,9 +127,16 @@ function parseNextbankTransactions(
   }
   if (!accountNumber.trim()) throw new NextbankApiError("protocol");
   const accountId = `bank:nextbank:${hash(accountNumber)}:TWD`;
-  const transactions = new Map<
+  // One trade can be listed twice in the same responses (overlapping pages, or
+  // an authorization next to its posting): keep the posted version and the
+  // more precise time. tradeID is only compared within this one fetch.
+  const trades = new Map<
     string,
-    NextbankData["bankTransactions"][number]
+    {
+      date: string;
+      time: number;
+      transaction: Omit<NextbankData["bankTransactions"][number], "sourceId">;
+    }
   >();
   for (const page of pages) {
     if (!page.success) throw new NextbankApiError("protocol");
@@ -140,44 +147,78 @@ function parseNextbankTransactions(
       const postedAt = normalizeNextbankTime(trade.detail.deductionDate);
       if (!authorizedAt && !postedAt) throw new NextbankApiError("protocol");
       const status = trade.tradeChannel === "UNBILLED" ? "pending" : "posted";
-      // Bank trade IDs can repeat across monthly responses. Keep the Taiwan
-      // transaction date in the identity; date-only posting still matches the
-      // same day's pending row, and memo edits do not create new transactions.
-      const identityDate = taiwanDate(authorizedAt ?? postedAt!);
-      const sourceId = `nextbank:tx:${hash(JSON.stringify([accountNumber, identityDate, trade.tradeID]))}`;
-      const previous = transactions.get(sourceId);
-      if (previous?.status === "posted" && status === "pending") continue;
-      transactions.set(sourceId, {
-        accountId,
-        sourceId,
-        // Official UI displays tradeAmount directly; do not infer or flip its sign.
-        amount: trade.tradeAmount,
-        currency: "TWD",
-        authorizedAt:
-          previous?.authorizedAt &&
-          previous.authorizedAt.length > 10 &&
-          (!authorizedAt || authorizedAt.length === 10)
-            ? previous.authorizedAt
-            : (authorizedAt ?? previous?.authorizedAt),
-        postedDate:
-          status === "posted"
-            ? taiwanDate(postedAt ?? authorizedAt!)
-            : undefined,
-        description:
-          [
-            ...new Set(
-              [trade.detail.descript, trade.detail.summary, trade.detail.memo]
-                .filter((value): value is string => typeof value === "string")
-                .map((value) => redact(value.trim()))
-                .filter(Boolean),
+      const identityAt = authorizedAt ?? postedAt!;
+      const date = taiwanDate(identityAt);
+      const listing = JSON.stringify([date, trade.tradeID, trade.tradeAmount]);
+      const previous = trades.get(listing);
+      if (previous?.transaction.status === "posted" && status === "pending") {
+        if (
+          (authorizedAt?.length ?? 0) > 10 &&
+          (previous.transaction.authorizedAt?.length ?? 0) <= 10
+        ) {
+          previous.transaction.authorizedAt = authorizedAt;
+          previous.time = Date.parse(authorizedAt!);
+        }
+        continue;
+      }
+      const keepTime =
+        (previous?.transaction.authorizedAt?.length ?? 0) > 10 &&
+        (authorizedAt?.length ?? 0) <= 10;
+      trades.set(listing, {
+        date,
+        time: keepTime
+          ? previous!.time
+          : Date.parse(
+              identityAt.length === 10
+                ? `${identityAt}T00:00:00+08:00`
+                : identityAt,
             ),
-          ].join(" · ") || "將來銀行交易",
-        status,
-        raw: { tradeChannel: trade.tradeChannel },
+        transaction: {
+          accountId,
+          // Official UI displays tradeAmount directly; do not infer or flip its sign.
+          amount: trade.tradeAmount,
+          currency: "TWD",
+          authorizedAt: keepTime
+            ? previous!.transaction.authorizedAt
+            : authorizedAt,
+          postedDate:
+            status === "posted"
+              ? taiwanDate(postedAt ?? authorizedAt!)
+              : undefined,
+          description:
+            [
+              ...new Set(
+                [trade.detail.descript, trade.detail.summary, trade.detail.memo]
+                  .filter((value): value is string => typeof value === "string")
+                  .map((value) => redact(value.trim()))
+                  .filter(Boolean),
+              ),
+            ].join(" · ") || "將來銀行交易",
+          status,
+          raw: { tradeChannel: trade.tradeChannel },
+        },
       });
     }
   }
-  return [...transactions.values()];
+  // tradeID is not a transaction identity: the bank renumbers a month's
+  // earlier trades once newer ones arrive. Identify a trade by account, Taiwan
+  // date, amount and its order among same-day trades of that amount; memo edits
+  // and date-only posting keep the identity. Responses list newest first, so
+  // equal times count from the end and a later trade does not renumber earlier
+  // ones.
+  const occurrences = new Map<string, number>();
+  return [...trades.values()]
+    .map((trade, index) => ({ ...trade, index }))
+    .sort((a, b) => a.time - b.time || b.index - a.index)
+    .map(({ date, transaction }) => {
+      const key = JSON.stringify([accountNumber, date, transaction.amount]);
+      const occurrence = (occurrences.get(key) ?? 0) + 1;
+      occurrences.set(key, occurrence);
+      return {
+        ...transaction,
+        sourceId: `nextbank:tx:${hash(JSON.stringify(["v2", accountNumber, date, transaction.amount, occurrence]))}`,
+      };
+    });
 }
 
 /** The pocket endpoint has no date-range argument. Filter its fully collected

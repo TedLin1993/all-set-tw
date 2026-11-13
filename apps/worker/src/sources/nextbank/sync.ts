@@ -46,6 +46,7 @@ import {
   bankTransactionRecord,
 } from "../../features/sync/record-mapper";
 import { prepareNextbankDepositWrite } from "./deposits";
+import { prepareNextbankTransactionWrite } from "./transactions";
 import { reportSyncProgress } from "../sync-progress";
 import {
   rebuildBankDepositHistory,
@@ -265,14 +266,19 @@ export async function syncNextbank(
   ];
   const depositWrite = await prepareNextbankDepositWrite(env.DB, result, now);
   records.push(...depositWrite.records);
+  const transactionWrite = await prepareNextbankTransactionWrite(
+    env.DB,
+    records,
+  );
   const cursor = JSON.stringify({ syncedAt: now });
   const newRecords = await persistStagedSyncWrite(env.DB, {
-    records,
+    records: transactionWrite.records,
     beforePromoteStatements: [
       connectorSettingsGuardStatement(env.DB, connectorId, cleaned, version),
     ],
     afterPromoteStatements: [
       ...depositWrite.afterPromoteStatements,
+      ...transactionWrite.afterPromoteStatements,
       linkCanonicalBankAccountsStatement(env.DB),
     ],
     finalizeStatements: [

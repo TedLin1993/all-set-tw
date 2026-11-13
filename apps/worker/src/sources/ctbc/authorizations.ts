@@ -1,4 +1,8 @@
-import { ctbcTransactionsMatch } from "./protocol";
+import {
+  ctbcTransactionsMatch,
+  normalizeMerchantName,
+  purchaseDay,
+} from "./protocol";
 import { matchCardAuthorizations } from "../../features/sync/card-authorization-matching";
 import { cardTransactionPreferenceStatements } from "../../features/sync/card-authorization-write";
 import type { SyncWriteRecord } from "../../features/sync/persistence";
@@ -220,6 +224,101 @@ export async function prepareCtbcAuthorizationWrite(
     ...all.get(link.id)!,
     matched_transaction_id: link.posted,
   }));
+  // Payments, fees and other rows without an authorization code get one
+  // identity in the unbilled feed and another in the statement feed. Once the
+  // statement closes, the unbilled row is no longer returned; keep it (ID and
+  // user settings) and fold the statement row into it. This also repairs
+  // duplicates left by earlier syncs.
+  const returnedIds = new Set(
+    [...rewritten.values()].map((record) => (record.payload as Row).id),
+  );
+  const linkedIds = new Set(
+    [...savedLinks, ...newLinks].flatMap((s) => [
+      s.id,
+      s.matched_transaction_id,
+    ]),
+  );
+  const withoutAuthorization = (s: Row) =>
+    s.status === "posted" &&
+    !raw(s).authorizationHash &&
+    !authorizationIds.has(s.id) &&
+    !linkedIds.has(s.id);
+  const lifecycleKey = (s: Row) =>
+    JSON.stringify([
+      s.account_id,
+      s.currency,
+      s.amount,
+      normalizeMerchantName(s.description ?? ""),
+    ]);
+  const groupByKey = (rows: Row[]) => {
+    const groups = new Map<string, Row[]>();
+    for (const row of rows) {
+      const key = lifecycleKey(row);
+      groups.set(key, [...(groups.get(key) ?? []), row]);
+    }
+    return groups;
+  };
+  // Either feed may omit the purchase date; the posting date then decides.
+  const sameTransaction = (left: Row, right: Row) => {
+    const a = raw(left).cardLast4;
+    const b = raw(right).cardLast4;
+    if (a && b && a !== b) return false;
+    return left.authorized_at && right.authorized_at
+      ? purchaseDay(left.authorized_at) === purchaseDay(right.authorized_at)
+      : !!left.posted_date && left.posted_date === right.posted_date;
+  };
+  const returned = groupByKey(
+    [...all.values()].filter(
+      (s) => returnedIds.has(s.id) && withoutAuthorization(s),
+    ),
+  );
+  const feedChangeLinks = [
+    ...groupByKey(
+      stored.filter((s) => !returnedIds.has(s.id) && withoutAuthorization(s)),
+    ),
+  ].flatMap(([key, unreturned]) => {
+    const links: Row[] = [];
+    let left = unreturned;
+    let right = returned.get(key) ?? [];
+    const link = (s: Row, target: Row) => {
+      links.push({ ...s, matched_transaction_id: target.id });
+      left = left.filter((row) => row !== s);
+      right = right.filter((row) => row !== target);
+    };
+    // Never guess: pair rows that are each other's only counterpart, then
+    // interchangeable rows only when both sides have the same number.
+    for (let progress = true; progress;) {
+      progress = false;
+      for (const s of left) {
+        const targets = right.filter((row) => sameTransaction(s, row));
+        if (
+          targets.length === 1 &&
+          left.filter((row) => sameTransaction(row, targets[0]!)).length === 1
+        ) {
+          link(s, targets[0]!);
+          progress = true;
+        }
+      }
+    }
+    for (const s of left) {
+      const targets = right.filter((row) => sameTransaction(s, row));
+      const sources = left.filter((row) =>
+        targets.some((target) => sameTransaction(row, target)),
+      );
+      if (
+        targets.length &&
+        targets.length === sources.length &&
+        sources.every(
+          (row) =>
+            right.filter((target) => sameTransaction(row, target)).length ===
+              targets.length &&
+            targets.every((target) => sameTransaction(row, target)),
+        )
+      )
+        sources.forEach((row, index) => link(row, targets[index]!));
+    }
+    return links;
+  });
   // CTBC retains the authorization ID and removes the formal duplicate. Two
   // existing linked invoices cannot be merged without discarding a decision.
   const invoices = new Set(
@@ -232,25 +331,27 @@ export async function prepareCtbcAuthorizationWrite(
         .all<{ transaction_id: string }>()
     ).results.map((row) => row.transaction_id),
   );
-  const links = [...savedLinks, ...newLinks].flatMap((pendingRow) => {
-    const posted = all.get(pendingRow.matched_transaction_id ?? "");
-    return posted &&
-      posted.id !== pendingRow.id &&
-      !(invoices.has(posted.id) && invoices.has(pendingRow.id))
-      ? [
-          {
-            id: pendingRow.id,
-            posted: posted.id,
-            postedName: posted.description,
-            postedDate: posted.posted_date,
-            postedAmount: posted.amount,
-            postedSourceId: posted.source_id,
-            postedCardLast4: posted.card_last4 ?? null,
-            postedCardName: posted.card_name ?? null,
-          },
-        ]
-      : [];
-  });
+  const links = [...savedLinks, ...newLinks, ...feedChangeLinks].flatMap(
+    (pendingRow) => {
+      const posted = all.get(pendingRow.matched_transaction_id ?? "");
+      return posted &&
+        posted.id !== pendingRow.id &&
+        !(invoices.has(posted.id) && invoices.has(pendingRow.id))
+        ? [
+            {
+              id: pendingRow.id,
+              posted: posted.id,
+              postedName: posted.description,
+              postedDate: posted.posted_date,
+              postedAmount: posted.amount,
+              postedSourceId: posted.source_id,
+              postedCardLast4: posted.card_last4 ?? null,
+              postedCardName: posted.card_name ?? null,
+            },
+          ]
+        : [];
+    },
+  );
   const linksJson = JSON.stringify(links);
   return {
     records: records.flatMap((r) =>
