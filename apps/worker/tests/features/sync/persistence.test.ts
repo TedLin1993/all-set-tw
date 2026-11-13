@@ -1555,7 +1555,7 @@ describe("同步資料完整性（隔離 D1）", () => {
     },
   );
 
-  it.each(["結帳後首次回傳", "已留下重複列"])(
+  it.each(["結帳後首次回傳", "已留下重複列", "帳單缺消費日"])(
     "中信無授權碼明細由未出帳改為帳單回傳（%s）時合併為原列，仍在回傳的同額明細不合併",
     async (scenario) => {
       const sourceId = "credit:ctbc:main";
@@ -1564,19 +1564,26 @@ describe("同步資料完整性（隔離 D1）", () => {
         { sourceId, accountType: "credit", currency: "TWD" },
         now,
       );
-      const make = (identity: string, description = "電子支付繳") =>
+      const make = (
+        identity: string,
+        description = "電子支付繳",
+        cardLast4 = "1234",
+      ) =>
         bankTransactionRecord(
           "ctbc",
           {
             accountId: sourceId,
             sourceId: `ctbc:card:tx:${identity}:1`,
-            authorizedAt: "2026-10-05",
+            authorizedAt:
+              scenario === "帳單缺消費日" && identity === "statement"
+                ? undefined
+                : "2026-10-05",
             postedDate: "2026-10-05",
             status: "posted",
             amount: 3320,
             currency: "TWD",
             description,
-            raw: { cardLast4: "1234" },
+            raw: { cardLast4 },
           },
           now,
         );
@@ -1621,6 +1628,27 @@ describe("同步資料完整性（隔離 D1）", () => {
       await write([statement, second]);
       await write([statement, second, make("fee", "年費")]);
       expect(await listBankTransactions(db, 20)).toHaveLength(3);
+      // Counterparts are found by card, not by position in the response.
+      const cards = ["1111", "2222"];
+      await write(cards.map((card) => make(`old-${card}`, "循環利息", card)));
+      await write(
+        [...cards]
+          .reverse()
+          .map((card) => make(`new-${card}`, "循環利息", card)),
+      );
+      expect(
+        (
+          await db
+            .prepare(
+              "SELECT id FROM bank_transactions WHERE description = '循環利息' ORDER BY json_extract(raw_payload, '$.cardLast4')",
+            )
+            .all()
+        ).results,
+      ).toEqual(
+        cards.map((card) => ({
+          id: make(`old-${card}`, "循環利息", card).recordKey,
+        })),
+      );
       expect(
         (await db.prepare("PRAGMA foreign_key_check").all()).results,
       ).toEqual([]);
@@ -1739,6 +1767,8 @@ describe("同步資料完整性（隔離 D1）", () => {
           trade(3, "2026-11-09 13:05:12", 2000, "TRANSFERIN"),
           trade(4, "2026-11-03 18:00:00", -916),
           trade(5, "2026-11-03", -916),
+          // The same listing repeated in the responses is one transaction.
+          trade(5, "2026-11-03 13:56:31", -916, "UNBILLED"),
         ]),
       );
     const final = await rows();

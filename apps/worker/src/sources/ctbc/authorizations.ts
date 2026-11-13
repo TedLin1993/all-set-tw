@@ -248,8 +248,6 @@ export async function prepareCtbcAuthorizationWrite(
       s.account_id,
       s.currency,
       s.amount,
-      s.authorized_at ? purchaseDay(s.authorized_at) : null,
-      s.authorized_at ? null : s.posted_date,
       normalizeMerchantName(s.description ?? ""),
     ]);
   const groupByKey = (rows: Row[]) => {
@@ -260,6 +258,15 @@ export async function prepareCtbcAuthorizationWrite(
     }
     return groups;
   };
+  // Either feed may omit the purchase date; the posting date then decides.
+  const sameTransaction = (left: Row, right: Row) => {
+    const a = raw(left).cardLast4;
+    const b = raw(right).cardLast4;
+    if (a && b && a !== b) return false;
+    return left.authorized_at && right.authorized_at
+      ? purchaseDay(left.authorized_at) === purchaseDay(right.authorized_at)
+      : !!left.posted_date && left.posted_date === right.posted_date;
+  };
   const returned = groupByKey(
     [...all.values()].filter(
       (s) => returnedIds.has(s.id) && withoutAuthorization(s),
@@ -269,22 +276,45 @@ export async function prepareCtbcAuthorizationWrite(
     ...groupByKey(
       stored.filter((s) => !returnedIds.has(s.id) && withoutAuthorization(s)),
     ),
-  ].flatMap(([key, left]) => {
-    const current = returned.get(key) ?? [];
-    // Never guess: every unreturned row needs exactly one returned counterpart.
-    if (
-      left.length !== current.length ||
-      left.some((s, index) => {
-        const a = raw(s).cardLast4;
-        const b = raw(current[index]!).cardLast4;
-        return a && b && a !== b;
-      })
-    )
-      return [];
-    return left.map((s, index) => ({
-      ...s,
-      matched_transaction_id: current[index]!.id,
-    }));
+  ].flatMap(([key, unreturned]) => {
+    const links: Row[] = [];
+    let left = unreturned;
+    let right = returned.get(key) ?? [];
+    const link = (s: Row, target: Row) => {
+      links.push({ ...s, matched_transaction_id: target.id });
+      left = left.filter((row) => row !== s);
+      right = right.filter((row) => row !== target);
+    };
+    // Never guess: pair rows that are each other's only counterpart, then
+    // interchangeable rows only when both sides have the same number.
+    for (let progress = true; progress;) {
+      progress = false;
+      for (const s of left) {
+        const targets = right.filter((row) => sameTransaction(s, row));
+        if (
+          targets.length === 1 &&
+          left.filter((row) => sameTransaction(row, targets[0]!)).length === 1
+        ) {
+          link(s, targets[0]!);
+          progress = true;
+        }
+      }
+    }
+    for (const s of left) {
+      const targets = right.filter((row) => sameTransaction(s, row));
+      const sources = left.filter((row) =>
+        targets.some((target) => sameTransaction(row, target)),
+      );
+      if (
+        targets.length &&
+        targets.length === sources.length &&
+        sources.every((row) =>
+          targets.every((target) => sameTransaction(row, target)),
+        )
+      )
+        sources.forEach((row, index) => link(row, targets[index]!));
+    }
+    return links;
   });
   // CTBC retains the authorization ID and removes the formal duplicate. Two
   // existing linked invoices cannot be merged without discarding a decision.

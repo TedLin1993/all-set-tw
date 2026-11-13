@@ -127,11 +127,17 @@ function parseNextbankTransactions(
   }
   if (!accountNumber.trim()) throw new NextbankApiError("protocol");
   const accountId = `bank:nextbank:${hash(accountNumber)}:TWD`;
-  const trades: Array<{
-    date: string;
-    time: number;
-    transaction: Omit<NextbankData["bankTransactions"][number], "sourceId">;
-  }> = [];
+  // One trade can be listed twice in the same responses (overlapping pages, or
+  // an authorization next to its posting): keep the posted version and the
+  // more precise time. tradeID is only compared within this one fetch.
+  const trades = new Map<
+    string,
+    {
+      date: string;
+      time: number;
+      transaction: Omit<NextbankData["bankTransactions"][number], "sourceId">;
+    }
+  >();
   for (const page of pages) {
     if (!page.success) throw new NextbankApiError("protocol");
     for (const trade of page.data.trades) {
@@ -142,19 +148,31 @@ function parseNextbankTransactions(
       if (!authorizedAt && !postedAt) throw new NextbankApiError("protocol");
       const status = trade.tradeChannel === "UNBILLED" ? "pending" : "posted";
       const identityAt = authorizedAt ?? postedAt!;
-      trades.push({
-        date: taiwanDate(identityAt),
-        time: Date.parse(
-          identityAt.length === 10
-            ? `${identityAt}T00:00:00+08:00`
-            : identityAt,
-        ),
+      const date = taiwanDate(identityAt);
+      const listing = JSON.stringify([date, trade.tradeID, trade.tradeAmount]);
+      const previous = trades.get(listing);
+      if (previous?.transaction.status === "posted" && status === "pending")
+        continue;
+      const keepTime =
+        (previous?.transaction.authorizedAt?.length ?? 0) > 10 &&
+        (authorizedAt?.length ?? 0) <= 10;
+      trades.set(listing, {
+        date,
+        time: keepTime
+          ? previous!.time
+          : Date.parse(
+              identityAt.length === 10
+                ? `${identityAt}T00:00:00+08:00`
+                : identityAt,
+            ),
         transaction: {
           accountId,
           // Official UI displays tradeAmount directly; do not infer or flip its sign.
           amount: trade.tradeAmount,
           currency: "TWD",
-          authorizedAt,
+          authorizedAt: keepTime
+            ? previous!.transaction.authorizedAt
+            : authorizedAt,
           postedDate:
             status === "posted"
               ? taiwanDate(postedAt ?? authorizedAt!)
@@ -181,7 +199,7 @@ function parseNextbankTransactions(
   // equal times count from the end and a later trade does not renumber earlier
   // ones.
   const occurrences = new Map<string, number>();
-  return trades
+  return [...trades.values()]
     .map((trade, index) => ({ ...trade, index }))
     .sort((a, b) => a.time - b.time || b.index - a.index)
     .map(({ date, transaction }) => {
