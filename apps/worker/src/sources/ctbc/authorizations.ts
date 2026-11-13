@@ -308,8 +308,11 @@ export async function prepareCtbcAuthorizationWrite(
       if (
         targets.length &&
         targets.length === sources.length &&
-        sources.every((row) =>
-          targets.every((target) => sameTransaction(row, target)),
+        sources.every(
+          (row) =>
+            right.filter((target) => sameTransaction(row, target)).length ===
+              targets.length &&
+            targets.every((target) => sameTransaction(row, target)),
         )
       )
         sources.forEach((row, index) => link(row, targets[index]!));

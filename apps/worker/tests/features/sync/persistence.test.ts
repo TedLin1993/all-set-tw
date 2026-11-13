@@ -1649,6 +1649,23 @@ describe("同步資料完整性（隔離 D1）", () => {
           id: make(`old-${card}`, "循環利息", card).recordKey,
         })),
       );
+      // A row that could also belong to a returned row outside the group is
+      // not merged by count alone.
+      await write(
+        ["3333", ""].map((card) => make(`a-${card}`, "手續費", card)),
+      );
+      await write(
+        ["3333", "3333", "4444"].map((card, index) =>
+          make(`b-${index}`, "手續費", card),
+        ),
+      );
+      expect(
+        await db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM bank_transactions WHERE description = '手續費'",
+          )
+          .first("count"),
+      ).toBe(5);
       expect(
         (await db.prepare("PRAGMA foreign_key_check").all()).results,
       ).toEqual([]);
@@ -1771,6 +1788,14 @@ describe("同步資料完整性（隔離 D1）", () => {
           trade(5, "2026-11-03 13:56:31", -916, "UNBILLED"),
         ]),
       );
+    expect(
+      parse([
+        trade(5, "2026-11-03", -916),
+        trade(5, "2026-11-03 13:56:31", -916, "UNBILLED"),
+      ]).bankTransactions,
+    ).toMatchObject([
+      { status: "posted", authorizedAt: "2026-11-03T13:56:31+08:00" },
+    ]);
     const final = await rows();
     expect(final).toHaveLength(6);
     expect(final.find((row) => row.id === merged[1]!.id)).toMatchObject({

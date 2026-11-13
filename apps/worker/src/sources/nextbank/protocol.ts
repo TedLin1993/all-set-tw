@@ -151,8 +151,16 @@ function parseNextbankTransactions(
       const date = taiwanDate(identityAt);
       const listing = JSON.stringify([date, trade.tradeID, trade.tradeAmount]);
       const previous = trades.get(listing);
-      if (previous?.transaction.status === "posted" && status === "pending")
+      if (previous?.transaction.status === "posted" && status === "pending") {
+        if (
+          (authorizedAt?.length ?? 0) > 10 &&
+          (previous.transaction.authorizedAt?.length ?? 0) <= 10
+        ) {
+          previous.transaction.authorizedAt = authorizedAt;
+          previous.time = Date.parse(authorizedAt!);
+        }
         continue;
+      }
       const keepTime =
         (previous?.transaction.authorizedAt?.length ?? 0) > 10 &&
         (authorizedAt?.length ?? 0) <= 10;
