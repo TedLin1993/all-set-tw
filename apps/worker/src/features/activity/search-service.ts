@@ -127,6 +127,7 @@ export async function searchActivity(
             item.transactionId && linkedTransactionIds.has(item.transactionId)
           ) &&
           !(item.source === "invoice" && linkedInvoiceIds.has(item.id)) &&
+          (!input.categoryLabel || item.category === input.categoryLabel) &&
           (!cursor || compareActivityItems(item, cursor) > 0),
       ),
     );

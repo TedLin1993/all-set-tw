@@ -9,6 +9,7 @@ import { sanitizeDatabaseError } from "../../db";
 import type { Env } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
 import { isDemoMode } from "../../platform/http";
+import { monthRangeQuerySchema } from "../../platform/month-range";
 import {
   WRITE_API_METHODS,
   callApi,
@@ -22,7 +23,7 @@ import {
 import {
   McpToolInputError,
   getFinancialOverview,
-  getMonthlyCashFlow,
+  getCashFlow,
   getSyncStatus,
   getUpcomingPayments,
   listAccounts,
@@ -135,25 +136,19 @@ function createServer(
     "get_monthly_cash_flow",
     {
       description:
-        "指定月份的收入、支出總額與各分類金額（新台幣，與 App 活動頁相同計算：發票與刷卡配對不重複計入、排除統計的項目不計、退款沖減支出）。",
-      inputSchema: z.object({
-        month: z
-          .string()
-          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
-          .optional()
-          .describe("YYYY-MM；省略時為台北時間本月。"),
-      }),
+        "月份的收入、支出總額與各分類金額（新台幣，與 App 活動頁相同計算：發票與刷卡配對不重複計入、排除統計的項目不計、退款沖減支出）。單月以 month（YYYY-MM）指定，全部省略時為台北時間本月；跨月比較或趨勢以 from、to（YYYY-MM，含頭尾，最多 12 個月）一次取得，結果在 months 依月份排列。要看某分類的明細時，以 search_activity 的 category 帶入分類名稱。",
+      inputSchema: monthRangeQuerySchema,
       annotations: READ_ONLY,
     },
-    ({ month }) =>
-      jsonResult("get_monthly_cash_flow", () => getMonthlyCashFlow(db, month)),
+    (input) =>
+      jsonResult("get_monthly_cash_flow", () => getCashFlow(db, input)),
   );
 
   server.registerTool(
     "search_activity",
     {
       description:
-        "以關鍵字搜尋銀行交易、刷卡與電子發票（含品項），關鍵字也會比對使用者寫的交易備註；由新到舊每次最多回傳 30 筆，note 為備註。truncated 為 true 表示還有更多結果：以相同的參數加上 cursor（上一次回傳的 nextCursor）取得下一頁，或縮小日期範圍。金額負數為支出。",
+        "列出或搜尋銀行交易、刷卡與電子發票（含品項）。query 為關鍵字，也會比對使用者寫的交易備註；省略 query 時列出日期範圍內的全部活動，須帶 from。category 以分類名稱篩選（名稱見 get_monthly_cash_flow 或結果的 category），例如某月餐飲的明細：category、from、to 加上 flow 為 expense。由新到舊每次最多回傳 30 筆，note 為備註。truncated 為 true 表示還有更多結果：以相同的參數加上 cursor（上一次回傳的 nextCursor）取得下一頁，或縮小日期範圍。金額負數為支出。",
       inputSchema: z
         .object({
           query: z
@@ -161,7 +156,15 @@ function createServer(
             .trim()
             .min(1)
             .max(200)
+            .optional()
             .describe("關鍵字，例如商家、品項、帳戶名稱或備註內容。"),
+          category: z
+            .string()
+            .trim()
+            .min(1)
+            .max(100)
+            .optional()
+            .describe("分類名稱，須與結果的 category 完全相同，例如餐飲。"),
           from: isoDate.optional().describe("起始日期 YYYY-MM-DD（含）。"),
           to: isoDate.optional().describe("結束日期 YYYY-MM-DD（含）。"),
           source: z
@@ -178,6 +181,10 @@ function createServer(
         .refine(
           (value) => !value.from || !value.to || value.from <= value.to,
           "from 不可晚於 to。",
+        )
+        .refine(
+          (value) => value.query !== undefined || value.from !== undefined,
+          "省略 query 時須帶 from。",
         ),
       annotations: READ_ONLY,
     },
