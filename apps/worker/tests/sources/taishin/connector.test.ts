@@ -305,6 +305,55 @@ describe("台新驗證碼換圖與登入保護", () => {
       }
     },
   );
+
+  it("登入 frame 在送出前被銀行替換時重開登入頁，不在舊 frame 送出登入", async () => {
+    const { page, browser } = captchaSession([1, 2], {
+      loginDetail: "使用者密碼錯誤",
+    });
+    const frame = Object.assign(page, { detached: false });
+    frame.goto.mockImplementation(async () => {
+      frame.detached = false;
+    });
+    frame.type.mockImplementationOnce(async () => {
+      frame.detached = true;
+      throw new Error("Attempted to use detached Frame 'synthetic-frame'.");
+    });
+    const recognizeCaptcha = vi.fn().mockResolvedValue("123456");
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      mockCaptchaBrowser(browser);
+      await expect(
+        createTaishinConnector(
+          { fetch } as unknown as Fetcher,
+          recognizeCaptcha,
+        ).sync({
+          userId: "synthetic-id",
+          account: "synthetic-user",
+          password: "synthetic-password",
+        }),
+      ).rejects.toMatchObject({ name: "TaishinCredentialRejectedError" });
+      expect(page.goto).toHaveBeenCalledTimes(2);
+      expect(page.type).toHaveBeenCalledTimes(2);
+      const attempts = log.mock.calls
+        .map(([value]) => JSON.parse(String(value)))
+        .filter((value) => value.event === "taishin_auto_login_attempt");
+      expect(
+        attempts.map(({ outcome, totalLoginRequests }) => ({
+          outcome,
+          totalLoginRequests,
+        })),
+      ).toEqual([
+        { outcome: "frame_detached", totalLoginRequests: 0 },
+        { outcome: "credential_rejected", totalLoginRequests: 1 },
+      ]);
+      expect(browser.close).toHaveBeenCalledOnce();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });
 
 function mockCaptchaBrowser(

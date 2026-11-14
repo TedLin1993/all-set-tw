@@ -49,6 +49,7 @@ const CAPTCHA_IMAGE_SELECTOR = "img._field_item__verify-code";
 const CAPTCHA_IMAGE_PATH = `${API_ROOT}/web/shuffle/NonSessionShuffle`;
 const CAPTCHA_TOKEN_PATH = `${API_ROOT}/web/login/getToken`;
 const LOGIN_RESULT_ATTEMPTS = 10;
+const LOGIN_FRAME_ATTEMPTS = 3;
 const LOGIN_RESULT_POLL_MS = 500;
 const POST_LOGIN_PAGE_TIMEOUT_MS = 15_000;
 const REQUIRED_API_TIMEOUT_MS = 8_000;
@@ -188,6 +189,15 @@ class TaishinCaptchaUnavailableError extends TaishinConnectionError {
   }
 }
 
+// The bank can rebuild the login iframe at any time. Thrown only before a
+// login request is submitted, so reopening the form never resends credentials.
+class TaishinLoginFrameDetachedError extends TaishinCaptchaUnavailableError {
+  constructor(cause?: unknown) {
+    super("台新登入頁在登入前重新載入，請稍後再試。", cause);
+    this.name = "TaishinLoginFrameDetachedError";
+  }
+}
+
 class TaishinTransientConnectionError extends TaishinConnectionError {
   constructor(message: string) {
     super(message);
@@ -264,7 +274,15 @@ export function createTaishinConnector(
           }
           assertCaptcha(config.captcha, config.captchaDigitCount ?? 6);
           pageContext = await findLoginFrame(page);
-          await submitLogin(pageContext, config.captcha, "manual", page);
+          try {
+            await submitLogin(pageContext, config.captcha, "manual", page);
+          } catch (error) {
+            if (!(error instanceof TaishinLoginFrameDetachedError)) throw error;
+            // The preserved form is gone, and so is the CAPTCHA the user read.
+            throw new TaishinVerificationRequiredError(
+              "台新登入頁已重新載入，請重新取得驗證碼。",
+            );
+          }
           loggedIn = true;
         } else {
           const prepared = await prepareBrowserLoginWithRetry({
@@ -464,6 +482,7 @@ async function loginWithOcr(
   let ocrAttempts = 0;
   let loginRequests = 0;
   let loginFrame: BrowserPage | undefined;
+  let frameReopens = 0;
   const recognizedImageHashes = new Set<string>();
   while (
     ocrAttempts < TAISHIN_AUTO_OCR_ATTEMPTS &&
@@ -532,6 +551,16 @@ async function loginWithOcr(
     } catch (error) {
       if (error instanceof TaishinCaptchaRejectedError) {
         outcome = captchaValid ? "captcha_rejected" : "ocr_invalid";
+      } else if (
+        error instanceof TaishinCaptchaUnavailableError &&
+        (error instanceof TaishinLoginFrameDetachedError ||
+          isFrameDetached(loginFrame)) &&
+        frameReopens < LOGIN_FRAME_ATTEMPTS - 1
+      ) {
+        // Nothing was submitted on the replaced frame; reopen the login form.
+        frameReopens += 1;
+        loginFrame = undefined;
+        outcome = "frame_detached";
       } else {
         if (error instanceof TaishinCredentialRejectedError) {
           outcome = "credential_rejected";
@@ -977,126 +1006,145 @@ async function openLoginAndFill(
     timeout: 30_000,
   });
   reportStage?.("form");
-  const frame = await findLoginFrame(page);
+  let frame = await findLoginFrame(page);
   if (await isLoggedIn(frame)) return frame;
 
-  const selectors = await frame.evaluate(
-    (values: { userId: string; account: string; password: string }) => {
-      const inputs = Array.from(
-        document.querySelectorAll<HTMLInputElement>("input"),
-      );
-      const renderedInputs = inputs.filter((input) => {
-        const rect = input.getBoundingClientRect();
-        return (
-          !input.disabled &&
-          input.type !== "hidden" &&
-          rect.width > 0 &&
-          rect.height > 0
+  const fillLoginForm = (target: BrowserPage) =>
+    target.evaluate(
+      (values: { userId: string; account: string; password: string }) => {
+        const inputs = Array.from(
+          document.querySelectorAll<HTMLInputElement>("input"),
         );
-      });
-      const candidateInputs =
-        renderedInputs.length >= 4
-          ? renderedInputs
-          : inputs.filter(
-              (input) => !input.disabled && input.type !== "hidden",
-            );
-      const labelText = (input: HTMLInputElement) => {
-        const explicit = input.id
-          ? document.querySelector<HTMLLabelElement>(
-              `label[for="${CSS.escape(input.id)}"]`,
-            )?.innerText
-          : "";
-        const parentText = input.parentElement?.innerText ?? "";
-        const localParent = parentText.length <= 20 ? parentText : "";
-        return [
-          input.id,
-          input.name,
-          input.placeholder,
-          input.getAttribute("aria-label"),
-          input.getAttribute("aria-placeholder"),
-          explicit,
-          input.closest("label")?.innerText,
-          localParent,
-        ]
-          .filter(Boolean)
-          .join(" ");
-      };
-      const mark = (input: HTMLInputElement | undefined, field: string) => {
-        if (!input) return "";
-        input.dataset.taishinField = field;
-        return `input[data-taishin-field="${field}"]`;
-      };
-      const setValue = (input: HTMLInputElement | undefined, value: string) => {
-        if (!input || !value) return;
-        input.focus();
-        const setter = Object.getOwnPropertyDescriptor(
-          window.HTMLInputElement.prototype,
-          "value",
-        )?.set;
-        setter?.call(input, value);
-        if (input.value !== value) input.value = value;
-        input.dispatchEvent(
-          new InputEvent("input", {
-            bubbles: true,
-            composed: true,
-            data: value,
-            inputType: "insertText",
-          }),
-        );
-        input.dispatchEvent(new Event("change", { bubbles: true }));
-      };
-      const find = (pattern: RegExp) =>
-        candidateInputs.find((input) => pattern.test(labelText(input)));
-      const password =
-        find(/使用者密碼|password|passwd/i) ??
-        candidateInputs.find((input) => input.type === "password");
-      const captcha =
-        find(/驗證碼|captcha|validate|check.?code/i) ??
-        candidateInputs.find(
+        const renderedInputs = inputs.filter((input) => {
+          const rect = input.getBoundingClientRect();
+          return (
+            !input.disabled &&
+            input.type !== "hidden" &&
+            rect.width > 0 &&
+            rect.height > 0
+          );
+        });
+        const candidateInputs =
+          renderedInputs.length >= 4
+            ? renderedInputs
+            : inputs.filter(
+                (input) => !input.disabled && input.type !== "hidden",
+              );
+        const labelText = (input: HTMLInputElement) => {
+          const explicit = input.id
+            ? document.querySelector<HTMLLabelElement>(
+                `label[for="${CSS.escape(input.id)}"]`,
+              )?.innerText
+            : "";
+          const parentText = input.parentElement?.innerText ?? "";
+          const localParent = parentText.length <= 20 ? parentText : "";
+          return [
+            input.id,
+            input.name,
+            input.placeholder,
+            input.getAttribute("aria-label"),
+            input.getAttribute("aria-placeholder"),
+            explicit,
+            input.closest("label")?.innerText,
+            localParent,
+          ]
+            .filter(Boolean)
+            .join(" ");
+        };
+        const mark = (input: HTMLInputElement | undefined, field: string) => {
+          if (!input) return "";
+          input.dataset.taishinField = field;
+          return `input[data-taishin-field="${field}"]`;
+        };
+        const setValue = (
+          input: HTMLInputElement | undefined,
+          value: string,
+        ) => {
+          if (!input || !value) return;
+          input.focus();
+          const setter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype,
+            "value",
+          )?.set;
+          setter?.call(input, value);
+          if (input.value !== value) input.value = value;
+          input.dispatchEvent(
+            new InputEvent("input", {
+              bubbles: true,
+              composed: true,
+              data: value,
+              inputType: "insertText",
+            }),
+          );
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        const find = (pattern: RegExp) =>
+          candidateInputs.find((input) => pattern.test(labelText(input)));
+        const password =
+          find(/使用者密碼|password|passwd/i) ??
+          candidateInputs.find((input) => input.type === "password");
+        const captcha =
+          find(/驗證碼|captcha|validate|check.?code/i) ??
+          candidateInputs.find(
+            (input) =>
+              input !== password &&
+              input.maxLength >= 4 &&
+              input.maxLength <= 8 &&
+              (input.inputMode === "numeric" || input.pattern.includes("\\d")),
+          ) ??
+          candidateInputs.at(-1);
+        const identityInputs = candidateInputs.filter(
           (input) =>
             input !== password &&
-            input.maxLength >= 4 &&
-            input.maxLength <= 8 &&
-            (input.inputMode === "numeric" || input.pattern.includes("\\d")),
-        ) ??
-        candidateInputs.at(-1);
-      const identityInputs = candidateInputs.filter(
-        (input) =>
-          input !== password &&
-          input !== captcha &&
-          ["", "text", "tel"].includes(input.type),
-      );
-      const matchedUserId = find(/身分證|統一編號|cust(?:omer)?id/i);
-      const userId =
-        matchedUserId && matchedUserId !== password && matchedUserId !== captcha
-          ? matchedUserId
-          : identityInputs[0];
-      const matchedAccount = find(
-        /使用者代(?:號|碼)|登入代(?:號|碼)|user(?:id|code)/i,
-      );
-      const account =
-        matchedAccount &&
-        matchedAccount !== userId &&
-        matchedAccount !== password &&
-        matchedAccount !== captcha
-          ? matchedAccount
-          : identityInputs.find((input) => input !== userId);
-      setValue(userId, values.userId);
-      setValue(account, values.account);
-      setValue(password, values.password);
-      return {
-        userId: mark(userId, "user-id"),
-        account: mark(account, "account"),
-        password: mark(password, "password"),
-        captcha: mark(captcha, "captcha"),
-      };
-    },
-    {
-      userId: config.userId ?? "",
-      account: config.account ?? "",
-      password: config.password ?? "",
-    },
-  );
+            input !== captcha &&
+            ["", "text", "tel"].includes(input.type),
+        );
+        const matchedUserId = find(/身分證|統一編號|cust(?:omer)?id/i);
+        const userId =
+          matchedUserId &&
+          matchedUserId !== password &&
+          matchedUserId !== captcha
+            ? matchedUserId
+            : identityInputs[0];
+        const matchedAccount = find(
+          /使用者代(?:號|碼)|登入代(?:號|碼)|user(?:id|code)/i,
+        );
+        const account =
+          matchedAccount &&
+          matchedAccount !== userId &&
+          matchedAccount !== password &&
+          matchedAccount !== captcha
+            ? matchedAccount
+            : identityInputs.find((input) => input !== userId);
+        setValue(userId, values.userId);
+        setValue(account, values.account);
+        setValue(password, values.password);
+        return {
+          userId: mark(userId, "user-id"),
+          account: mark(account, "account"),
+          password: mark(password, "password"),
+          captcha: mark(captcha, "captcha"),
+        };
+      },
+      {
+        userId: config.userId ?? "",
+        account: config.account ?? "",
+        password: config.password ?? "",
+      },
+    );
+  let selectors: Awaited<ReturnType<typeof fillLoginForm>>;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      selectors = await fillLoginForm(frame);
+      break;
+    } catch (error) {
+      if (!isFrameDetached(frame)) throw error;
+      if (attempt >= LOGIN_FRAME_ATTEMPTS)
+        throw new TaishinLoginFrameDetachedError(error);
+      frame = await findLoginFrame(page);
+      if (await isLoggedIn(frame)) return frame;
+    }
+  }
   if (
     !selectors.userId ||
     !selectors.account ||
@@ -1113,7 +1161,11 @@ async function openLoginAndCaptureCaptcha(page: Page, config: TaishinConfig) {
   try {
     return { frame, captcha: await captureCaptcha(frame) };
   } catch (error) {
-    if (!(error instanceof TaishinCaptchaUnavailableError)) throw error;
+    if (
+      !(error instanceof TaishinCaptchaUnavailableError) ||
+      error instanceof TaishinLoginFrameDetachedError
+    )
+      throw error;
     return { frame, captcha: await refreshCaptcha(page, frame) };
   }
 }
@@ -1226,6 +1278,7 @@ async function refreshCaptcha(networkPage: Page, frame: BrowserPage) {
     return captcha;
   } catch (error) {
     if (error instanceof TaishinCaptchaUnavailableError) throw error;
+    if (isFrameDetached(frame)) throw new TaishinLoginFrameDetachedError(error);
     throw new TaishinCaptchaUnavailableError(
       "台新驗證碼換圖未完成或圖片尚未就緒，請稍後再試。",
       error,
@@ -1253,6 +1306,19 @@ async function typeInput(page: BrowserPage, selector: string, value: string) {
 }
 
 async function captureCaptcha(page: BrowserPage, expectedSource?: string) {
+  try {
+    return await captureCaptchaImage(page, expectedSource);
+  } catch (error) {
+    if (
+      isFrameDetached(page) &&
+      !(error instanceof TaishinLoginFrameDetachedError)
+    )
+      throw new TaishinLoginFrameDetachedError(error);
+    throw error;
+  }
+}
+
+async function captureCaptchaImage(page: BrowserPage, expectedSource?: string) {
   const imageTarget = {
     selector: CAPTCHA_IMAGE_SELECTOR,
     origin: BANK_ORIGIN,
@@ -1424,7 +1490,12 @@ async function submitLogin(
   try {
     const captchaInput =
       'input[data-taishin-field="captcha"], input[placeholder*="驗證碼"]';
-    await typeInput(page, captchaInput, captcha);
+    await typeInput(page, captchaInput, captcha).catch((error: unknown) => {
+      // Still before the login click, so no request has been submitted.
+      if (isFrameDetached(page))
+        throw new TaishinLoginFrameDetachedError(error);
+      throw error;
+    });
     const loginButton = await page.evaluate(() => {
       const normalize = (value: string | null | undefined) =>
         value?.replace(/\s+/g, "").trim() ?? "";
@@ -1705,6 +1776,10 @@ async function dismissPasswordReminder(
   throw new TaishinConnectionError(
     "台新登入後頁面或密碼提醒尚未就緒，已停止同步。",
   );
+}
+
+function isFrameDetached(page: BrowserPage | undefined) {
+  return page !== undefined && "detached" in page && page.detached === true;
 }
 
 async function findLoginFrame(page: Page): Promise<BrowserPage> {
