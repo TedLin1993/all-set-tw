@@ -497,18 +497,27 @@ async function fetchMegabankData(
           "query",
         )
       : { rsData: { detailList: [] } };
-  // 有卡但查詢期間沒有任何消費時，銀行回 1120（查無資料）且不帶 detailList；
-  // 只有這個代碼視為 0 筆，0000 卻缺少清單仍當作格式變更。
-  const cardTransactions =
-    safeBankCode(cardTransactionResponse) === "1120"
-      ? { rsData: { detailList: [] } }
-      : cardTransactionResponse;
-  const cardTransactionData = dataAt(cardTransactions);
-  if (!Array.isArray(cardTransactionData.detailList)) {
+  // 有卡但查詢期間沒有任何消費時，銀行不帶 detailList：可能回 1120（查無資料），
+  // 也可能回 0000 但 rsData 沒有任何清單。兩者都視為 0 筆；帶了其他非空清單才是格式變更。
+  const cardTransactionsEmpty = isEmptyCardTransactionResponse(
+    cardTransactionResponse,
+  );
+  const hasDetailList = Array.isArray(
+    dataAt(cardTransactionResponse).detailList,
+  );
+  // 沒有 detailList 卻被視為 0 筆的回應一律留下結構診斷，用來確認銀行的實際空回應。
+  if (cardTransactionsEmpty && !hasDetailList) {
+    logCardTransactionShape("treated_as_empty", cardTransactionResponse);
+  }
+  if (!cardTransactionsEmpty && !hasDetailList) {
+    logCardTransactionShape("format_changed", cardTransactionResponse);
     throw new MegabankProtocolError(
       "兆豐信用卡消費明細格式已變更，未更新資料。",
     );
   }
+  const cardTransactions = cardTransactionsEmpty
+    ? { rsData: { detailList: [] } }
+    : cardTransactionResponse;
   const depositTransactions: MegabankPayloads["depositTransactions"] = [];
   const queriedAccounts = new Set<string>();
   for (const item of arrayAt(dataAt(deposits), "depositInfoList")) {
@@ -1052,6 +1061,55 @@ function md5(value: string): string {
 function safeBankCode(response: JsonRecord): string {
   const code = stringAt(response, "code");
   return /^[A-Za-z0-9_-]{1,32}$/.test(code) ? code : "unknown";
+}
+/**
+ * 消費查詢沒有可用的 detailList 時，判斷是否為「查詢期間沒有消費」：
+ * 代碼 1120，或 rsData 沒有 detailList 且不含任何非空清單。
+ * rsData 帶著其他非空清單代表欄位改名，仍應視為格式變更。
+ */
+function isEmptyCardTransactionResponse(response: JsonRecord): boolean {
+  if (safeBankCode(response) === "1120") return true;
+  const data = response.rsData;
+  if (data === undefined || data === null || data === "") return true;
+  if (Array.isArray(data)) return data.length === 0;
+  if (!isRecord(data)) return false;
+  const list = data.detailList;
+  if (Array.isArray(list)) return list.length === 0;
+  if (list !== undefined && list !== null && list !== "") return false;
+  return !Object.values(data).some(
+    (value) => Array.isArray(value) && value.length > 0,
+  );
+}
+/** 只記錄回應的欄位名稱與型別，不含任何欄位值。 */
+function logCardTransactionShape(outcome: string, response: JsonRecord): void {
+  const data = response.rsData;
+  const shape = isRecord(data)
+    ? Object.fromEntries(
+        Object.entries(data)
+          .filter(([key]) => /^[A-Za-z0-9_]{1,40}$/.test(key))
+          .slice(0, 30)
+          .map(([key, value]) => [
+            key,
+            Array.isArray(value)
+              ? `array(${value.length})`
+              : value === null
+                ? "null"
+                : typeof value,
+          ]),
+      )
+    : Array.isArray(data)
+      ? `array(${data.length})`
+      : data === null
+        ? "null"
+        : typeof data;
+  console.warn(
+    JSON.stringify({
+      event: "megabank_card_transactions_shape",
+      outcome,
+      code: safeBankCode(response),
+      shape,
+    }),
+  );
 }
 function dataAt(value: unknown): JsonRecord {
   return isRecord(value) && isRecord(value.rsData) ? value.rsData : {};
