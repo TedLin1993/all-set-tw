@@ -114,7 +114,7 @@ function registerBankRoutes(api: Hono<AppBindings>) {
       const query = c.req.query();
       // 月份區間預設一次回傳整段；帶 limit 或 cursor 時改在區間內分頁，
       // 讓 MCP 等回應大小有限的呼叫端讀取交易較多的月份。
-      if (range && query.limit === undefined && query.cursor === undefined)
+      if (range && query.limit === undefined && !query.cursor)
         return c.json(
           (await getBankRange(c.env.DB, range)) satisfies BankDataResponse,
         );
