@@ -336,9 +336,34 @@ describe("兆豐信用卡消費查詢", () => {
     );
   });
 
-  it("查詢成功（0000）卻缺少 detailList 時仍視為格式變更並整次失敗", async () => {
+  it.each([
+    ["rsData 為空物件", { code: "0000", rsData: {} }],
+    ["detailList 為 null", { code: "0000", rsData: { detailList: null } }],
+    ["沒有 rsData", { code: "0000" }],
+  ])(
+    "查詢成功（0000）但沒有消費清單（%s）時視為 0 筆，不誤判為格式變更",
+    async (_name, response) => {
+      const baseline = createFakeBank();
+      const expected = await createMegabankConnector(baseline.fetcher).sync(
+        await freshSyncConfig(baseline.fetcher),
+      );
+      const bank = createFakeBank();
+      bank.state.cardQueryResponse = response;
+      const result = await createMegabankConnector(bank.fetcher).sync(
+        await freshSyncConfig(bank.fetcher),
+      );
+      expect(creditTransactions(result)).toHaveLength(0);
+      expect(result.bankAccounts).toEqual(expected.bankAccounts);
+      expect(result.creditCardBills).toEqual(expected.creditCardBills);
+    },
+  );
+
+  it("查詢成功（0000）卻把消費放在其他清單欄位時仍視為格式變更並整次失敗", async () => {
     const bank = createFakeBank();
-    bank.state.malformedResource = "/fao/fao01010/query";
+    bank.state.cardQueryResponse = {
+      code: "0000",
+      rsData: { recordList: [{ purchaseDate: "2026/11/01" }] },
+    };
     await expect(
       createMegabankConnector(bank.fetcher).sync(
         await freshSyncConfig(bank.fetcher),
