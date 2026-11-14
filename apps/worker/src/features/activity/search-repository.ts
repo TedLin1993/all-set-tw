@@ -8,6 +8,8 @@ export interface ActivitySearchInput {
   source?: "all" | "bank" | "card" | "invoice";
   flow?: "all" | "income" | "expense";
   category?: string;
+  /** 依顯示的分類名稱篩選；MCP 使用，AI 助理看到的是名稱而非分類 ID。 */
+  categoryLabel?: string;
 }
 
 /** Read bounded candidate days; full same-day context preserves invoice matching. */
@@ -18,6 +20,7 @@ export async function findActivitySearchDays(
   beforeDay?: string,
   inclusive = false,
 ) {
+  // q 為空字串時 instr 恆為真，所有日期都是候選日，由日期範圍與分頁限制讀取量。
   const q = input.q.toLowerCase();
   const from = input.from ?? null;
   const to = input.to ?? null;

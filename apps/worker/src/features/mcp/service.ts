@@ -1,4 +1,5 @@
 import {
+  EMPTY_INVESTMENT_SOURCE_ID,
   activityAmountTwd,
   activityCategoryTotalsTwd,
   activityDateKey,
@@ -78,7 +79,8 @@ export async function listAccounts(db: D1Database) {
 export async function listInvestmentHoldings(db: D1Database) {
   const page = await getInvestmentPage(db, HOLDINGS_LIMIT);
   return {
-    holdings: page.positions.map((position) => ({
+    // 來源沒有持倉時寫入的零值佔位列不是部位，與前端一樣不列出。
+    holdings: page.positions.filter(isHolding).map((position) => ({
       assetType: position.assetType,
       symbol: position.symbol ?? null,
       name: position.name,
@@ -90,6 +92,13 @@ export async function listInvestmentHoldings(db: D1Database) {
     })),
     truncated: page.hasMore,
   };
+}
+
+function isHolding({ sourceId }: { sourceId: string }) {
+  return (
+    sourceId !== EMPTY_INVESTMENT_SOURCE_ID &&
+    !sourceId.startsWith(`${EMPTY_INVESTMENT_SOURCE_ID}:`)
+  );
 }
 
 function shiftMonth(month: string, offset: number) {
@@ -106,14 +115,34 @@ function isCashFlowItem(item: ActivityItem) {
   );
 }
 
+export interface McpCashFlowInput {
+  month?: string;
+  from?: string;
+  to?: string;
+}
+
 /** 與活動頁相同的月收支與分類計算；月份預設為台北時間本月。 */
 export async function getMonthlyCashFlow(db: D1Database, month?: string) {
   const selectedMonth = month ?? taipeiDateKey(new Date()).slice(0, 7);
+  const [result] = await loadCashFlowMonths(db, selectedMonth, selectedMonth);
+  return { currency: "TWD", ...result! };
+}
+
+/** 帶 from、to 時回傳區間內每個月的收支，供跨月比較；否則回傳單月。 */
+export async function getCashFlow(db: D1Database, input: McpCashFlowInput) {
+  if (!input.from || !input.to) return getMonthlyCashFlow(db, input.month);
+  return {
+    currency: "TWD",
+    months: await loadCashFlowMonths(db, input.from, input.to),
+  };
+}
+
+async function loadCashFlowMonths(db: D1Database, from: string, to: string) {
   // 活動頁一次載入多個月份；前後各多讀一個月，讓跨月的發票與刷卡仍能配對，
   // 避免同一筆消費被重複計入支出。
   const range = resolveMonthDateRange({
-    from: shiftMonth(selectedMonth, -1),
-    to: shiftMonth(selectedMonth, 1),
+    from: shiftMonth(from, -1),
+    to: shiftMonth(to, 1),
   })!;
   const [allItems, rateRows] = await Promise.all([
     getActivityItemsInRange(db, range),
@@ -122,39 +151,43 @@ export async function getMonthlyCashFlow(db: D1Database, month?: string) {
   const rates = Object.fromEntries(
     rateRows.map((rate) => [rate.currency, rate.rateTwd]),
   );
-  const items = allItems.filter(
-    (item) =>
-      isCashFlowItem(item) && activityDateKey(item).startsWith(selectedMonth),
-  );
+  const cashFlowItems = allItems.filter(isCashFlowItem);
   const round = (value: number) => Math.round(value);
-  return {
-    month: selectedMonth,
-    currency: "TWD",
-    income: round(activityFlowTotalTwd(items, "income", rates)),
-    expense: round(activityFlowTotalTwd(items, "expense", rates)),
-    expenseByCategory: activityCategoryTotalsTwd(items, "expense", rates).map(
-      ({ category, amount }) => ({ category, amount: round(amount) }),
-    ),
-    incomeByCategory: activityCategoryTotalsTwd(items, "income", rates).map(
-      ({ category, amount }) => ({ category, amount: round(amount) }),
-    ),
-    missingExchangeRateCurrencies: [
-      ...new Set(
-        items
-          .filter(
-            (item) =>
-              !item.excludedFromCalculation &&
-              item.amount != null &&
-              activityAmountTwd(item, rates) == null,
-          )
-          .map((item) => item.currency),
+  const months = [];
+  for (let month = from; month <= to; month = shiftMonth(month, 1)) {
+    const items = cashFlowItems.filter((item) =>
+      activityDateKey(item).startsWith(month),
+    );
+    months.push({
+      month,
+      income: round(activityFlowTotalTwd(items, "income", rates)),
+      expense: round(activityFlowTotalTwd(items, "expense", rates)),
+      expenseByCategory: activityCategoryTotalsTwd(items, "expense", rates).map(
+        ({ category, amount }) => ({ category, amount: round(amount) }),
       ),
-    ].sort(),
-  };
+      incomeByCategory: activityCategoryTotalsTwd(items, "income", rates).map(
+        ({ category, amount }) => ({ category, amount: round(amount) }),
+      ),
+      missingExchangeRateCurrencies: [
+        ...new Set(
+          items
+            .filter(
+              (item) =>
+                !item.excludedFromCalculation &&
+                item.amount != null &&
+                activityAmountTwd(item, rates) == null,
+            )
+            .map((item) => item.currency),
+        ),
+      ].sort(),
+    });
+  }
+  return months;
 }
 
 export interface McpActivitySearchInput {
-  query: string;
+  query?: string;
+  category?: string;
   from?: string;
   to?: string;
   source?: "all" | "bank" | "card" | "invoice";
@@ -180,7 +213,8 @@ export async function searchActivities(
   const result = await searchActivity(
     db,
     {
-      q: input.query,
+      q: input.query ?? "",
+      categoryLabel: input.category,
       from: input.from,
       to: input.to,
       source: input.source,

@@ -8,7 +8,11 @@ import {
 import { searchActivity } from "../../../src/features/activity/search-service";
 import { getBankTransactionsByIds } from "../../../src/features/bank/service";
 import { getInvoicesByIds } from "../../../src/features/invoices/service";
-import { getMonthlyCashFlow } from "../../../src/features/mcp/service";
+import {
+  getCashFlow,
+  getMonthlyCashFlow,
+  searchActivities,
+} from "../../../src/features/mcp/service";
 
 describe("跨日手動配對的發票（隔離 D1）", () => {
   let harness: Awaited<ReturnType<typeof createTestD1>>;
@@ -57,6 +61,44 @@ describe("跨日手動配對的發票（隔離 D1）", () => {
   it("月收支只在扣款月份計入一次", async () => {
     expect((await getMonthlyCashFlow(db, "2026-08")).expense).toBe(0);
     expect((await getMonthlyCashFlow(db, "2026-10")).expense).toBe(980);
+  });
+
+  it("MCP 跨月收支與單月逐一查詢的結果相同", async () => {
+    const range = await getCashFlow(db, { from: "2026-08", to: "2026-10" });
+    if (!("months" in range)) throw new Error("expected months");
+    expect(range.months.map(({ month, expense }) => [month, expense])).toEqual([
+      ["2026-08", 0],
+      ["2026-09", 0],
+      ["2026-10", 980],
+    ]);
+    const { currency: _currency, ...october } = await getMonthlyCashFlow(
+      db,
+      "2026-10",
+    );
+    expect(range.months[2]).toEqual(october);
+  });
+
+  it("MCP 省略關鍵字時列出日期範圍內的活動，並可依分類名稱篩選", async () => {
+    const dates = { from: "2026-10-01", to: "2026-10-31" };
+    const all = await searchActivities(db, dates);
+    expect(
+      all.items.map((item) => item.amount ?? 0).sort((a, b) => a - b),
+    ).toEqual([-500, -480]);
+
+    const category = all.items[0]!.category;
+    const filtered = await searchActivities(db, { ...dates, category });
+    expect(filtered.items.length).toBeGreaterThan(0);
+    expect(filtered.items.every((item) => item.category === category)).toBe(
+      true,
+    );
+    expect(
+      (await searchActivities(db, { ...dates, category: "不存在的分類" }))
+        .items,
+    ).toEqual([]);
+    expect(
+      (await searchActivities(db, { from: "2026-09-01", to: "2026-09-30" }))
+        .items,
+    ).toEqual([]);
   });
 
   it("補讀另一端時，超過 D1 綁定參數上限的 ID 數量仍可查詢", async () => {
