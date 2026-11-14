@@ -1,5 +1,5 @@
 import { generateKeyPairSync, randomBytes } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createMegabankConnector,
   prepareMegabankCaptcha,
@@ -349,8 +349,20 @@ describe("兆豐信用卡消費查詢", () => {
       );
       const bank = createFakeBank();
       bank.state.cardQueryResponse = response;
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       const result = await createMegabankConnector(bank.fetcher).sync(
         await freshSyncConfig(bank.fetcher),
+      );
+      const events = warn.mock.calls.map(
+        ([line]) => JSON.parse(String(line)) as Record<string, unknown>,
+      );
+      warn.mockRestore();
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: "megabank_card_transactions_shape",
+          outcome: "treated_as_empty",
+          code: "0000",
+        }),
       );
       expect(creditTransactions(result)).toHaveLength(0);
       expect(result.bankAccounts).toEqual(expected.bankAccounts);

@@ -502,10 +502,14 @@ async function fetchMegabankData(
   const cardTransactionsEmpty = isEmptyCardTransactionResponse(
     cardTransactionResponse,
   );
-  if (
-    !cardTransactionsEmpty &&
-    !Array.isArray(dataAt(cardTransactionResponse).detailList)
-  ) {
+  const hasDetailList = Array.isArray(
+    dataAt(cardTransactionResponse).detailList,
+  );
+  // 沒有 detailList 卻被視為 0 筆的回應一律留下結構診斷，用來確認銀行的實際空回應。
+  if (cardTransactionsEmpty && !hasDetailList) {
+    logCardTransactionShape("treated_as_empty", cardTransactionResponse);
+  }
+  if (!cardTransactionsEmpty && !hasDetailList) {
     logCardTransactionShape("format_changed", cardTransactionResponse);
     throw new MegabankProtocolError(
       "兆豐信用卡消費明細格式已變更，未更新資料。",
@@ -1072,11 +1076,9 @@ function isEmptyCardTransactionResponse(response: JsonRecord): boolean {
   const list = data.detailList;
   if (Array.isArray(list)) return list.length === 0;
   if (list !== undefined && list !== null && list !== "") return false;
-  const empty = !Object.values(data).some(
+  return !Object.values(data).some(
     (value) => Array.isArray(value) && value.length > 0,
   );
-  if (empty) logCardTransactionShape("treated_as_empty", response);
-  return empty;
 }
 /** 只記錄回應的欄位名稱與型別，不含任何欄位值。 */
 function logCardTransactionShape(outcome: string, response: JsonRecord): void {
