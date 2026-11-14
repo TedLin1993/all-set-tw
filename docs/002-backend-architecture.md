@@ -551,6 +551,8 @@ X-Next-Cursor: <opaque-cursor>
 
 只有 `X-Has-More` 為 `true` 時，才需要回傳 `X-Next-Cursor`。
 
+`GET /api/bank` 帶月份區間（`month` 或 `from`、`to`）時預設一次回傳整段，供網頁版配對與統計使用；同時帶 `limit` 或 `cursor` 時改在該區間內分頁，讓 MCP 的 `query_api` 能在回應大小上限內讀取交易較多的月份。
+
 ## 銀行交易分類與退費
 
 `features/bank/service.ts` 回傳交易時依序決定分類：年費減免沖銷（`auto_offset`）、

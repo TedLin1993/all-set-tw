@@ -111,17 +111,20 @@ function registerBankRoutes(api: Hono<AppBindings>) {
     ),
     async (c) => {
       const range = resolveMonthDateRange(c.req.valid("query"));
-      if (range)
+      const query = c.req.query();
+      // 月份區間預設一次回傳整段；帶 limit 或 cursor 時改在區間內分頁，
+      // 讓 MCP 等回應大小有限的呼叫端讀取交易較多的月份。
+      if (range && query.limit === undefined && query.cursor === undefined)
         return c.json(
           (await getBankRange(c.env.DB, range)) satisfies BankDataResponse,
         );
 
       const { limit, cursor } = parseKeysetPagination(
-        c.req.query(),
+        query,
         transactionPageCursorSchema,
         100,
       );
-      const page = await getBankPage(c.env.DB, limit, cursor);
+      const page = await getBankPage(c.env.DB, limit, cursor, range);
       setKeysetPaginationHeaders((name, value) => c.header(name, value), {
         hasMore: page.hasMore,
         nextCursor:

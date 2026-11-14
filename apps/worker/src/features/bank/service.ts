@@ -101,15 +101,17 @@ export async function clearPaymentAccount(db: D1Database, accountId: string) {
   await deletePaymentAccountOverride(db, accountId);
 }
 
+/** 由新到舊分頁；帶 range 時只在該月份區間內分頁。 */
 export async function getBankPage(
   db: D1Database,
   limit: number,
   cursor?: TransactionPageCursor,
+  range?: MonthDateRange,
 ) {
   const rules = loadClassificationRules(db);
   const [accounts, transactions] = await Promise.all([
     listBankAccounts(db),
-    listBankTransactions(db, limit + 1, cursor),
+    listBankTransactions(db, limit + 1, cursor, range),
   ]);
   const hasMore = transactions.length > limit;
   const page = transactions.slice(0, limit);

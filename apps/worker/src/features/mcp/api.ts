@@ -91,7 +91,8 @@ const ENDPOINT_NOTES: Record<string, string> = {
   "PUT /bank/accounts/:id/payment-account":
     "設定信用卡或貸款的扣款帳戶。body：paymentAccountId（存款帳戶 ID，或 null 取消）。",
   "DELETE /bank/accounts/:id/payment-account": "取消扣款帳戶設定。",
-  "GET /bank": `銀行帳戶與交易。${MONTH_RANGE}`,
+  "GET /bank":
+    "銀行帳戶與交易，由新到舊。query：month=YYYY-MM，或 from、to=YYYY-MM；可加 limit（1–100）、cursor 在該區間內分頁，省略月份時對全部交易分頁（cursor 取自回應的 X-Next-Cursor）。交易多的月份請帶 limit（建議 30），每頁都含完整的 accounts。",
   "GET /bank/bills": `信用卡帳單。${MONTH_RANGE}`,
   "PATCH /bank/transactions/:transactionId/calculation":
     "設定交易是否排除統計。body：excludedFromCalculation（boolean）。",
