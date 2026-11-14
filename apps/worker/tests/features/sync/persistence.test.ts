@@ -523,6 +523,68 @@ describe("同步資料完整性（隔離 D1）", () => {
     }
   });
 
+  it("bank API 帶月份區間分頁時只回該月交易，且各頁不重複、不遺漏", async () => {
+    const accountId = "credit:ctbc:TWD";
+    const account = bankAccountRecord(
+      "ctbc",
+      {
+        sourceId: accountId,
+        institutionName: "中國信託商業銀行",
+        accountName: "中國信託信用卡",
+        accountType: "credit",
+        currency: "TWD",
+      },
+      now,
+    );
+    const transaction = (sourceId: string, postedDate: string) =>
+      bankTransactionRecord(
+        "ctbc",
+        {
+          accountId,
+          sourceId,
+          postedDate,
+          amount: -100,
+          currency: "TWD",
+          description: sourceId,
+          status: "posted",
+        },
+        now,
+      );
+    await persistStagedSyncWrite(db, {
+      records: [
+        account,
+        transaction("oct-1", "2026-10-01"),
+        transaction("sep-30", "2026-09-30"),
+        transaction("sep-15", "2026-09-15"),
+        transaction("sep-01", "2026-09-01"),
+        transaction("aug-31", "2026-08-31"),
+      ],
+    });
+    const range = { from: "2026-09-01", to: "2026-10-01" };
+
+    const first = await getBankPage(db, 2, undefined, range);
+    expect(first.transactions.map((row) => row.description)).toEqual([
+      "sep-30",
+      "sep-15",
+    ]);
+    expect(first.hasMore).toBe(true);
+
+    const second = await getBankPage(
+      db,
+      2,
+      {
+        effectiveDate: first.last!.effectiveDate,
+        updatedAt: first.last!.updatedAt,
+        id: first.last!.id,
+      },
+      range,
+    );
+    expect(second.transactions.map((row) => row.description)).toEqual([
+      "sep-01",
+    ]);
+    expect(second.hasMore).toBe(false);
+  });
+
   it("貸款資料缺值時保留既有非空類別、利率、開戶日與繳款欄位", async () => {
     const sourceId = "loan:sinopac:stable-test-id";
     const write = async (includeFields: boolean) => {

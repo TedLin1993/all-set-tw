@@ -91,7 +91,8 @@ const ENDPOINT_NOTES: Record<string, string> = {
   "PUT /bank/accounts/:id/payment-account":
     "設定信用卡或貸款的扣款帳戶。body：paymentAccountId（存款帳戶 ID，或 null 取消）。",
   "DELETE /bank/accounts/:id/payment-account": "取消扣款帳戶設定。",
-  "GET /bank": `銀行帳戶與交易。${MONTH_RANGE}`,
+  "GET /bank":
+    "銀行帳戶與交易，由新到舊。query：month=YYYY-MM，或 from、to=YYYY-MM；可加 limit（1–100）、cursor 在該區間內分頁，省略月份時對全部交易分頁（cursor 取自回應的 X-Next-Cursor）。交易多的月份請帶 limit（建議 30），每頁都含完整的 accounts。",
   "GET /bank/bills": `信用卡帳單。${MONTH_RANGE}`,
   "PATCH /bank/transactions/:transactionId/calculation":
     "設定交易是否排除統計。body：excludedFromCalculation（boolean）。",
@@ -110,6 +111,15 @@ const ENDPOINT_NOTES: Record<string, string> = {
   "PUT /notifications/preferences":
     "通知偏好。body：success、failed、needsUserAction、paymentDue?（皆為 boolean）。",
   "POST /notifications/test": "傳送測試推播。",
+  "POST /connectors/sinotrade/connect":
+    "開始永豐金證券連線，開啟官方登入頁。body：platform?（newweb、savings，預設 newweb）。登入與憑證、OTP 驗證須由使用者在網頁版的資料來源面板親自完成，AI 助理通常不使用。",
+  "POST /connectors/sinotrade/connect/status":
+    "永豐金證券連線進度與待完成的驗證步驟，屬於網頁版連線流程。",
+  "POST /connectors/sinotrade/connect/verify":
+    "送出永豐金證券連線的驗證步驟，屬於網頁版連線流程。body：action（confirm_certificate、submit_birthday、request_otp、verify_otp、accept_terms）、values?。",
+  "POST /connectors/sinotrade/connect/complete":
+    "使用者登入後儲存永豐金證券的連線狀態，屬於網頁版連線流程。",
+  "POST /connectors/sinotrade/connect/cancel": "取消進行中的永豐金證券連線。",
   "GET /connectors/:connectorId/settings":
     "資料來源設定狀態（不含帳密）。connectorId 見 connectors。",
   "PUT /connectors/:connectorId/settings":
@@ -154,36 +164,95 @@ function connectorRouteNote(path: string) {
     : { note: `同步${title}（Queue 背景執行）。` };
 }
 
-export function listApiEndpoints(api: ApiApp) {
+/** 回應超過此字元數時不回傳內容，避免單次讀取占滿 AI 助理的 context。 */
+export const API_RESPONSE_MAX_CHARS = 60_000;
+
+const API_USAGE =
+  "GET 以 query_api 呼叫，其餘方法以 call_api 呼叫；路徑中的 :param 替換為實際值。回應與網頁版 /api 相同，錯誤為 { success: false, error: { code, message } }。";
+
+/**
+ * 不帶 resource 時只回各類別的端點清單；帶 resource（路徑第一段，例如 bank）時
+ * 才回該類端點的用途與 body 格式，資料來源 ID 與帳密欄位在 connectors。
+ */
+export function listApiEndpoints(api: ApiApp, resource?: string) {
   const seen = new Set<string>();
-  const endpoints = [];
+  const byResource = new Map<string, { method: string; path: string }[]>();
   for (const { method, path } of api.routes) {
     if (!(API_METHODS as readonly string[]).includes(method)) continue;
     const key = `${method} ${path}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    endpoints.push({
+    const name = path.split("/")[1] ?? "";
+    byResource.set(name, [...(byResource.get(name) ?? []), { method, path }]);
+  }
+  const selected =
+    resource === undefined ? undefined : byResource.get(resource);
+  if (!selected)
+    return {
+      usage: `${API_USAGE}以 resource 指定下列其中一類，取得端點的用途、query 與 body 格式。`,
+      sync: SYNC_USAGE,
+      ...(resource === undefined
+        ? {}
+        : { error: `找不到 resource「${resource}」，請從 resources 擇一。` }),
+      resources: [...byResource].map(([name, endpoints]) => ({
+        resource: name,
+        endpoints: endpoints.map(({ method, path }) => `${method} ${path}`),
+      })),
+    };
+  return {
+    usage: API_USAGE,
+    sync: SYNC_USAGE,
+    endpoints: selected.map(({ method, path }) => ({
       method,
       path,
-      ...(connectorRouteNote(path) ?? { note: ENDPOINT_NOTES[key] }),
-    });
-  }
-  return {
-    usage:
-      "GET 以 query_api 呼叫，其餘方法以 call_api 呼叫；路徑中的 :param 替換為實際值。回應與網頁版 /api 相同，錯誤為 { success: false, error: { code, message } }。",
-    sync: SYNC_USAGE,
-    endpoints,
-    connectors: Object.values(connectorCatalog).map((entry) => ({
-      id: entry.id,
-      title: entry.title,
-      credentialFields: entry.credentialFields.map(
-        ({ key, type, options }: ConnectorCredentialField) => ({
-          key,
-          type,
-          ...(options ? { options: options.map(({ value }) => value) } : {}),
-        }),
-      ),
+      ...(connectorRouteNote(path) ?? {
+        note: ENDPOINT_NOTES[`${method} ${path}`],
+      }),
     })),
+    ...(resource === "connectors"
+      ? {
+          connectors: Object.values(connectorCatalog).map((entry) => ({
+            id: entry.id,
+            title: entry.title,
+            credentialFields: entry.credentialFields.map(
+              ({ key, type, options }: ConnectorCredentialField) => ({
+                key,
+                type,
+                ...(options
+                  ? { options: options.map(({ value }) => value) }
+                  : {}),
+              }),
+            ),
+          })),
+        }
+      : {}),
+  };
+}
+
+export type ApiCallResult = {
+  status: number;
+  headers: Record<string, string>;
+  body: unknown;
+};
+
+/**
+ * 工具回傳的文字。讀取的回應過大時只回狀態與縮小範圍的提示；
+ * 寫入已經生效，回應一律完整回傳。
+ */
+export function serializeApiResult(method: ApiMethod, result: ApiCallResult) {
+  const text = JSON.stringify(result);
+  if (method !== "GET" || text.length <= API_RESPONSE_MAX_CHARS)
+    return { text, tooLarge: false };
+  return {
+    tooLarge: true,
+    text: JSON.stringify({
+      status: result.status,
+      headers: result.headers,
+      error: {
+        code: "RESPONSE_TOO_LARGE",
+        message: `回應共 ${text.length} 字元，超過上限 ${API_RESPONSE_MAX_CHARS}，未回傳內容。請改以 limit 搭配 cursor 分頁、縮小 month 或 from、to 的範圍，或改用 search_activity 等查詢工具。`,
+      },
+    }),
   };
 }
 
@@ -194,7 +263,7 @@ export async function callApi(
   env: Env,
   executionCtx: ApiExecutionContext,
   input: ApiCallInput,
-) {
+): Promise<ApiCallResult> {
   // 只替換 pathname，避免 "//host" 之類的路徑改變請求的主機。
   const url = new URL(source.url);
   url.pathname = input.path;

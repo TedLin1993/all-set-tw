@@ -13,12 +13,14 @@ import {
   WRITE_API_METHODS,
   callApi,
   listApiEndpoints,
+  serializeApiResult,
   startSyncs,
   type ApiApp,
   type ApiCallInput,
   type ApiExecutionContext,
 } from "./api";
 import {
+  McpToolInputError,
   getFinancialOverview,
   getMonthlyCashFlow,
   getSyncStatus,
@@ -49,6 +51,11 @@ async function jsonResult(tool: string, load: () => Promise<unknown>) {
       content: [{ type: "text" as const, text: JSON.stringify(await load()) }],
     };
   } catch (error) {
+    if (error instanceof McpToolInputError)
+      return {
+        isError: true,
+        content: [{ type: "text" as const, text: error.message }],
+      };
     const safeError = sanitizeDatabaseError(error);
     console.error(
       JSON.stringify({
@@ -146,7 +153,7 @@ function createServer(
     "search_activity",
     {
       description:
-        "以關鍵字搜尋銀行交易、刷卡與電子發票（含品項），關鍵字也會比對使用者寫的交易備註；由新到舊最多回傳 30 筆，note 為備註，truncated 為 true 表示還有更多結果，可縮小日期範圍再查。金額負數為支出。",
+        "以關鍵字搜尋銀行交易、刷卡與電子發票（含品項），關鍵字也會比對使用者寫的交易備註；由新到舊每次最多回傳 30 筆，note 為備註。truncated 為 true 表示還有更多結果：以相同的參數加上 cursor（上一次回傳的 nextCursor）取得下一頁，或縮小日期範圍。金額負數為支出。",
       inputSchema: z
         .object({
           query: z
@@ -162,6 +169,11 @@ function createServer(
             .optional()
             .describe("bank 為存款帳戶、card 為信用卡、invoice 為電子發票。"),
           flow: z.enum(["all", "income", "expense"]).optional(),
+          cursor: z
+            .string()
+            .max(500)
+            .optional()
+            .describe("上一次回傳的 nextCursor，其他參數須與上一次相同。"),
         })
         .refine(
           (value) => !value.from || !value.to || value.from <= value.to,
@@ -227,12 +239,19 @@ function createServer(
     "list_api_endpoints",
     {
       description:
-        "列出 query_api 與 call_api 可呼叫的全部網頁版 API 端點、用途與 body 格式，以及資料來源 ID 與帳密欄位。",
+        "列出 query_api 與 call_api 可呼叫的網頁版 API 端點。不帶 resource 時回傳各類別（resource）的端點清單；帶 resource 時回傳該類端點的用途、query 與 body 格式，connectors 另含資料來源 ID 與帳密欄位。",
+      inputSchema: z.object({
+        resource: z
+          .string()
+          .max(50)
+          .optional()
+          .describe("端點類別，為路徑第一段，例如 bank、classification。"),
+      }),
       annotations: READ_ONLY,
     },
-    () =>
+    ({ resource }) =>
       jsonResult("list_api_endpoints", async () =>
-        listApiEndpoints(apiContext.api),
+        listApiEndpoints(apiContext.api, resource),
       ),
   );
 
@@ -251,7 +270,7 @@ function createServer(
     "query_api",
     {
       description:
-        "以 GET 讀取網頁版 API（例如交易、發票、帳單、分類規則、排程與同步狀態），只讀不寫；端點與 query 格式見 list_api_endpoints。回傳 status、分頁 headers 與 JSON body。",
+        "以 GET 讀取網頁版 API（例如交易、發票、帳單、分類規則、排程與同步狀態），只讀不寫；端點與 query 格式見 list_api_endpoints。回傳 status、分頁 headers 與 JSON body；回應過大時回傳 RESPONSE_TOO_LARGE 而不含內容，請以 limit、cursor 分頁或縮小月份範圍。",
       inputSchema: z.object({ path: pathSchema, query: querySchema }),
       annotations: READ_ONLY,
     },
@@ -290,9 +309,10 @@ function createServer(
         apiContext.executionCtx,
         input,
       );
+      const { text, tooLarge } = serializeApiResult(input.method, result);
       return {
-        isError: result.status >= 400,
-        content: [{ type: "text" as const, text: JSON.stringify(result) }],
+        isError: tooLarge || result.status >= 400,
+        content: [{ type: "text" as const, text }],
       };
     } catch (error) {
       const safeError = sanitizeDatabaseError(error);

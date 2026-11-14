@@ -10,7 +10,7 @@ import {
   resolveMonthDateRange,
 } from "../../platform/month-range";
 import { validationHook } from "../../platform/validation";
-import { searchActivity } from "./search-service";
+import { activitySearchCursorSchema, searchActivity } from "./search-service";
 import { listInvoiceTransactionPreferences } from "./repository";
 import {
   keepInvoiceSeparate,
@@ -53,12 +53,7 @@ function registerActivityRoutes(api: Hono<AppBindings>) {
     async (c) => {
       const { cursor } = parseKeysetPagination(
         c.req.query(),
-        z.object({
-          id: z.string().min(1),
-          source: z.enum(["bank", "card", "invoice", "investment"]),
-          date: z.string().min(1).max(64),
-          dateHasTime: z.boolean().optional(),
-        }),
+        activitySearchCursorSchema,
         30,
       );
       return c.json(

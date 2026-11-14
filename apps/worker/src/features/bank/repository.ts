@@ -202,11 +202,18 @@ export async function listBankTransactions(
   db: D1Database,
   limit: number,
   cursor?: TransactionPageCursor,
+  range?: MonthDateRange,
 ) {
   return bankTransactionQuery(db)
     .where(
       and(
         visibleBankTransactionFilter,
+        range
+          ? and(
+              sql`(${bankTransactionDay}) >= ${range.from}`,
+              sql`(${bankTransactionDay}) < ${range.to}`,
+            )
+          : undefined,
         cursor
           ? sql`(${txn.effectiveDate}, ${txn.updatedAt}, ${txn.id}) < (${cursor.effectiveDate}, ${cursor.updatedAt}, ${cursor.id})`
           : undefined,

@@ -9,6 +9,7 @@ import {
   type ActivityItem,
   type ActivityOrderKey,
 } from "@taiwan-fin-hub/shared";
+import { z } from "zod";
 import { listBankAccounts } from "../bank/repository";
 import { normalizeBankAccountDisplay } from "../bank/display";
 import { getBankRange } from "../bank/service";
@@ -23,6 +24,15 @@ import {
 } from "./search-repository";
 
 const PAGE_SIZE = 30;
+
+/** 搜尋分頁 cursor 的內容；網頁版 API 與 MCP 共用。 */
+export const activitySearchCursorSchema = z.object({
+  id: z.string().min(1),
+  source: z.enum(["bank", "card", "invoice", "investment"]),
+  date: z.string().min(1).max(64),
+  dateHasTime: z.boolean().optional(),
+});
+
 const DAY_BATCH_SIZE = 32;
 export async function searchActivity(
   db: D1Database,
