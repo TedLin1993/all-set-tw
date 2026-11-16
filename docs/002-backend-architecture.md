@@ -642,8 +642,10 @@ X-Next-Cursor: <opaque-cursor>
 - 帳戶照常出現在資產清單、總覽與淨值，不需要在其他查詢排除。`stored_value` 已被排除在扣款帳戶候選之外。
 - 交易寫入 `bank_transactions`，`source_id` 為呼叫端的 `externalId`（省略時為 UUID）、`id` 為 `manual:<source_id>`。
   既有的 `UNIQUE (connector_id, account_id, source_id)` 讓相同 `externalId` 重送時更新同一筆；`raw_payload` 只保存 `type`。
-- 現金餘額沒有獨立來源：每次寫入或刪除，都在同一個 D1 batch 的最後以交易加總覆寫唯一的 `bank_balance_snapshots` 列，
-  因此餘額永遠等於手動記錄加總。帶 `balance` 時由 SQL 算出差額並補一筆「餘額調整」交易，差額為 0 時不寫入。
+- 現金餘額沒有獨立來源：每次寫入或刪除，都在同一個 D1 batch 的最後重建這個帳戶的 `bank_balance_snapshots`，
+  每個有記錄的日期各一列（`as_of_at` 為該日期），餘額是到當天為止的累計，因此餘額永遠等於手動記錄加總，
+  補記過去日期或重建歷史淨值時，各日期也讀得到當時的現金；記錄全數刪除後保留一列 0。
+  帶 `balance` 時由 SQL 算出差額並補一筆「餘額調整」交易，差額為 0 時不寫入。
   這些 statement 需要原子性與 set-based 的 `INSERT ... SELECT`，因此 repository 使用原生 SQL。
 - 類型決定正負號與計算偏好，寫在 `bank_transaction_preferences.excluded_from_calculation`：
 
@@ -662,7 +664,10 @@ X-Next-Cursor: <opaque-cursor>
   分類不存在時回 `CATEGORY_NOT_FOUND`（404），整批不寫入。
 - 刪除只作用在 `connector_id = manual` 的交易，其他回 `MANUAL_TRANSACTION_NOT_FOUND`（404）。同一 batch 先移除分類覆寫、AI 分類與交易偏好，
   已連結的發票配對刪除（發票回到自動配對），「保持分開」的決定保留、只清掉交易引用，再刪除交易並重算餘額。
-- 寫入後以 `rebuildBankDepositHistory` 更新當日存款歷史；失敗只記錄 log，不讓呼叫端誤以為需要重送。
+- 寫入或刪除後以 `rebuildBankDepositHistory` 重算最早受影響日期到今天（台北日期）的存款歷史，最多往回 31 天；
+  更早的補記由 `/history/net-worth/rebuild-bank` 重建。失敗只記錄 log，不讓呼叫端誤以為需要重送。
+- 發票自動配對（`shared/activity/matching.ts`）略過排除統計的手動記錄，也就是現金移動與餘額調整：它們不是消費，
+  配到同日同額的發票會讓那筆發票跟著排除統計。手動支出照常自動配對，使用者仍可手動連結任何一筆。
 - 活動的 `source` 維持 `bank`，另以 `ActivityItem.manual` 標示；來源篩選的 `manual` 由 `shared/activity/filter.ts` 處理，
   收支加總、發票配對與分類統計都沿用銀行交易的邏輯。
 

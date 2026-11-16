@@ -3,6 +3,7 @@ import {
   MANUAL_ACCOUNT_ID,
   MANUAL_CONNECTOR_ID,
   isConnectorId,
+  matchInvoicesToTransactions,
 } from "@taiwan-fin-hub/shared";
 import { createTestD1 } from "../../helpers/d1";
 import {
@@ -139,6 +140,16 @@ describe("手動記錄的現金帳戶（隔離 D1）", () => {
         new Date().toISOString().slice(0, 10),
       ),
     ).toBe(BANK_BALANCE + 3_450);
+    // 每個日期讀到的是到當天為止的現金，重建過去的歷史淨值不會漏掉或提前計入。
+    for (const [date, cash] of [
+      ["2026-10-04", 0],
+      ["2026-10-05", 3_000],
+      ["2026-10-06", 2_650],
+      ["2026-10-07", 3_450],
+    ] as const)
+      expect(await calculateBankDepositValue(db, date)).toBe(
+        BANK_BALANCE + cash,
+      );
 
     const byId = await loadById();
     expect(byId.get("manual:night-market")).toMatchObject({
@@ -170,6 +181,36 @@ describe("手動記錄的現金帳戶（隔離 D1）", () => {
     expect(byId.get("manual:red-envelope")?.classification?.source).not.toBe(
       "auto_transfer",
     );
+  });
+
+  it("現金移動不自動配發票，手動支出照常配對", async () => {
+    await recordManualTransactions(db, {
+      transactions: [
+        {
+          externalId: "deposit",
+          date: "2026-10-20",
+          type: "transfer_out",
+          amount: 350,
+          description: "範例存入",
+        },
+      ],
+    });
+    const byId = await loadById();
+    const transactions = [
+      byId.get("manual:deposit")!,
+      byId.get("manual:night-market")!,
+    ];
+    const matches = matchInvoicesToTransactions(transactions, [
+      { id: "invoice-deposit-day", invoiceDate: "2026-10-20", amount: 350 },
+      { id: "invoice-market-day", invoiceDate: "2026-10-06", amount: 350 },
+    ]);
+
+    expect([...matches.invoiceToTransactionId]).toEqual([
+      ["invoice-market-day", "manual:night-market"],
+    ]);
+    expect(await removeManualTransaction(db, "manual:deposit")).toEqual({
+      balance: 3_450,
+    });
   });
 
   it("相同 externalId 重送只更新同一筆，省略的分類與備註保留", async () => {

@@ -43,7 +43,7 @@ export async function listExistingManualTransactionIds(
 
 /**
  * 交易、分類、備註、餘額調整與餘額快照在同一個 batch 寫入，
- * 現金餘額因此永遠等於手動記錄的加總。
+ * 每一天的現金餘額因此永遠等於到當天為止的手動記錄加總。
  */
 export async function writeManualTransactions(
   db: D1Database,
@@ -67,7 +67,7 @@ export async function writeManualTransactions(
       ),
     ...rows.flatMap((row) => transactionStatements(db, row, now)),
     ...(adjustment ? adjustmentStatements(db, adjustment, now) : []),
-    balanceSnapshotStatement(db, now),
+    ...balanceSnapshotStatements(db, now),
     balanceQuery(db),
     db
       .prepare(`SELECT amount FROM bank_transactions WHERE id = ?`)
@@ -195,15 +195,14 @@ function adjustmentStatements(
   ];
 }
 
-export async function manualTransactionExists(db: D1Database, id: string) {
-  return Boolean(
-    await db
-      .prepare(
-        `SELECT 1 FROM bank_transactions WHERE id = ? AND connector_id = ?`,
-      )
-      .bind(id, MANUAL_CONNECTOR_ID)
-      .first(),
-  );
+export async function findManualTransactionDate(db: D1Database, id: string) {
+  const row = await db
+    .prepare(
+      `SELECT posted_date AS date FROM bank_transactions WHERE id = ? AND connector_id = ?`,
+    )
+    .bind(id, MANUAL_CONNECTOR_ID)
+    .first<{ date: string }>();
+  return row?.date;
 }
 
 export async function deleteManualTransaction(
@@ -240,7 +239,7 @@ export async function deleteManualTransaction(
         `DELETE FROM bank_transactions WHERE id = ? AND connector_id = ?`,
       )
       .bind(id, MANUAL_CONNECTOR_ID),
-    balanceSnapshotStatement(db, now),
+    ...balanceSnapshotStatements(db, now),
     balanceQuery(db),
   ]);
   return results.at(-1)?.results[0]?.balance ?? 0;
@@ -281,31 +280,59 @@ function deleteOverrideStatement(db: D1Database, transactionId: string) {
     .bind(OVERRIDE_TARGET_TYPE, transactionId);
 }
 
-function balanceSnapshotStatement(db: D1Database, now: string) {
-  return db
-    .prepare(
-      `INSERT INTO bank_balance_snapshots (id, connector_id, account_id, source_id, balance, currency, as_of_at, created_at, updated_at)
-       SELECT ?, ?, ?, ?, COALESCE(SUM(amount), 0), 'TWD', ?, ?, ?
-       FROM bank_transactions WHERE account_id = ?
-       ON CONFLICT (connector_id, account_id, source_id) DO UPDATE SET
-         balance = excluded.balance,
-         as_of_at = excluded.as_of_at,
-         updated_at = excluded.updated_at`,
-    )
-    .bind(
-      BALANCE_SNAPSHOT_ID,
-      MANUAL_CONNECTOR_ID,
-      MANUAL_ACCOUNT_ID,
-      ACCOUNT_SOURCE_ID,
-      now,
-      now,
-      now,
-      MANUAL_ACCOUNT_ID,
-    );
+/**
+ * 每個有記錄的日期各一列快照，餘額是到當天為止的累計，
+ * 補記過去日期或重建歷史淨值時，各日期才讀得到當時的現金。
+ */
+function balanceSnapshotStatements(db: D1Database, now: string) {
+  const columns = `id, connector_id, account_id, source_id, balance, currency, as_of_at, created_at, updated_at`;
+  return [
+    db
+      .prepare(`DELETE FROM bank_balance_snapshots WHERE account_id = ?`)
+      .bind(MANUAL_ACCOUNT_ID),
+    db
+      .prepare(
+        `INSERT INTO bank_balance_snapshots (${columns})
+         SELECT ? || ':' || posted_date, ?, ?, ? || ':' || posted_date,
+           SUM(SUM(amount)) OVER (ORDER BY posted_date), 'TWD',
+           posted_date || 'T00:00:00.000Z', ?, ?
+         FROM bank_transactions WHERE account_id = ?
+         GROUP BY posted_date`,
+      )
+      .bind(
+        BALANCE_SNAPSHOT_ID,
+        MANUAL_CONNECTOR_ID,
+        MANUAL_ACCOUNT_ID,
+        ACCOUNT_SOURCE_ID,
+        now,
+        now,
+        MANUAL_ACCOUNT_ID,
+      ),
+    // 記錄全數刪除後，帳戶仍顯示 0 而不是沒有餘額。
+    db
+      .prepare(
+        `INSERT INTO bank_balance_snapshots (${columns})
+         SELECT ?, ?, ?, ?, 0, 'TWD', ?, ?, ?
+         WHERE NOT EXISTS (SELECT 1 FROM bank_transactions WHERE account_id = ?)`,
+      )
+      .bind(
+        BALANCE_SNAPSHOT_ID,
+        MANUAL_CONNECTOR_ID,
+        MANUAL_ACCOUNT_ID,
+        ACCOUNT_SOURCE_ID,
+        now,
+        now,
+        now,
+        MANUAL_ACCOUNT_ID,
+      ),
+  ];
 }
 
 function balanceQuery(db: D1Database) {
   return db
-    .prepare(`SELECT balance FROM bank_balance_snapshots WHERE account_id = ?`)
+    .prepare(
+      `SELECT balance FROM bank_balance_snapshots WHERE account_id = ?
+       ORDER BY as_of_at DESC LIMIT 1`,
+    )
     .bind(MANUAL_ACCOUNT_ID);
 }

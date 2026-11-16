@@ -7,11 +7,11 @@ import {
 } from "@taiwan-fin-hub/shared";
 import { listClassificationCategories } from "../classification/repository";
 import { ClassificationCategoryNotFoundError } from "../classification/service";
-import { dateFromIso, rebuildBankDepositHistory } from "../net-worth/service";
+import { rebuildBankDepositHistory } from "../net-worth/service";
 import {
   deleteManualTransaction,
+  findManualTransactionDate,
   listExistingManualTransactionIds,
-  manualTransactionExists,
   writeManualTransactions,
   type ManualTransactionRow,
 } from "./repository";
@@ -19,6 +19,12 @@ import {
 export class ManualTransactionNotFoundError extends Error {}
 
 const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** 補記較早的日期時，寫入當下往回重算歷史淨值的天數上限；更早的日期由歷史重建 API 處理。 */
+const HISTORY_REFRESH_MAX_DAYS = 31;
+
+const taipeiDate = (time: number) =>
+  new Date(time + TAIPEI_OFFSET_MS).toISOString().slice(0, 10);
 
 /**
  * 收支明確計入統計，因此不會被自動配成互轉；
@@ -83,9 +89,7 @@ export async function recordManualTransactions(
       : {
           id: manualTransactionId(adjustmentSourceId),
           sourceId: adjustmentSourceId,
-          date: new Date(now.getTime() + TAIPEI_OFFSET_MS)
-            .toISOString()
-            .slice(0, 10),
+          date: taipeiDate(now.getTime()),
           target: input.balance,
         };
   const { balance, adjustmentAmount } = await writeManualTransactions(
@@ -94,7 +98,11 @@ export async function recordManualTransactions(
     adjustment,
     nowIso,
   );
-  await refreshDepositHistory(db, nowIso);
+  await refreshDepositHistory(
+    db,
+    now,
+    rows.map((row) => row.date),
+  );
   return {
     transactions: rows.map((row) => ({
       id: row.id,
@@ -109,18 +117,43 @@ export async function recordManualTransactions(
 }
 
 export async function removeManualTransaction(db: D1Database, id: string) {
-  if (!(await manualTransactionExists(db, id)))
-    throw new ManualTransactionNotFoundError();
-  const now = new Date().toISOString();
-  const balance = await deleteManualTransaction(db, id, now);
-  await refreshDepositHistory(db, now);
+  const date = await findManualTransactionDate(db, id);
+  if (date === undefined) throw new ManualTransactionNotFoundError();
+  const now = new Date();
+  const balance = await deleteManualTransaction(db, id, now.toISOString());
+  await refreshDepositHistory(db, now, [date]);
   return { balance };
 }
 
-/** 記錄已寫入，歷史淨值更新失敗不讓呼叫端誤以為要重送；下次同步會再重建。 */
-async function refreshDepositHistory(db: D1Database, now: string) {
+/**
+ * 重算最早受影響日期到今天的存款歷史，補記過去日期時之後每一天的現金都會改變。
+ * 記錄已寫入，更新失敗不讓呼叫端誤以為要重送；下次同步會再重建今天。
+ */
+async function refreshDepositHistory(
+  db: D1Database,
+  now: Date,
+  affectedDates: string[],
+) {
+  const today = taipeiDate(now.getTime());
+  const earliest = taipeiDate(
+    now.getTime() - (HISTORY_REFRESH_MAX_DAYS - 1) * DAY_MS,
+  );
+  const first = affectedDates.reduce(
+    (min, date) => (date < min ? date : min),
+    today,
+  );
+  const dates: string[] = [];
+  for (
+    let time = Date.parse(first < earliest ? earliest : first);
+    dates.length < HISTORY_REFRESH_MAX_DAYS;
+    time += DAY_MS
+  ) {
+    const date = new Date(time).toISOString().slice(0, 10);
+    if (date > today) break;
+    dates.push(date);
+  }
   try {
-    await rebuildBankDepositHistory(db, [dateFromIso(now)]);
+    await rebuildBankDepositHistory(db, dates);
   } catch (error) {
     console.error(
       "[manual-transactions] rebuild deposit history failed:",
