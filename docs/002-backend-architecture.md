@@ -33,6 +33,7 @@ apps/
     │   │   ├── investments/
     │   │   ├── invoices/
     │   │   ├── manual-assets/
+    │   │   ├── manual-transactions/
     │   │   ├── net-worth/
     │   │   ├── notifications/
     │   │   ├── ocr/
@@ -280,6 +281,7 @@ Browser 登入前復原最多三次嘗試，只包住頁面與驗證碼準備；
 - API success/error contract。
 - API 錯誤代碼：同步錯誤 `SyncErrorCode` 與其他 `GeneralApiErrorCode`，合併為 `ApiErrorCode`。
 - 銀行與信用卡帳單 API response contract。
+- 手動記錄的 request／response contract、交易類型允許值，以及現金帳戶的 connector／帳戶 ID 常數。
 - 設定頁的排程、連接器設定狀態與分類規則 API response contract，以及排程間隔、分類規則欄位與比對方式的允許值。
 - 活動配對、去重、排序與資料組裝。
 - 近期繳款提醒（`payment-reminders.ts`）：總覽「值得留意」與預設排程推播共用同一套到期、繳款狀態與扣款帳戶餘額判斷。
@@ -440,7 +442,7 @@ Request
   → 無狀態 MCP handler（每個 request 建立新的 McpServer）
 ```
 
-MCP 提供與網頁版相同的存取範圍：查詢工具整理回答所需的資料，其他讀取經 `query_api`（只送 GET、標示 `readOnlyHint`）、編輯經 `call_api`（只接受 POST、PUT、PATCH、DELETE，標示 `destructiveHint`）、同步經 `sync_sources`（逐一呼叫各來源不帶 body 的 `/connectors/<id>/sync`，交由 Queue 背景執行）走 `/api`；讀寫分成兩個工具，讓 AI 助理只在寫入時要求使用者確認。`features/mcp/route.ts` 的 `createMcpRoutes(api)` 由 Composition Root 傳入組裝好的 `/api` app，`features/mcp/api.ts` 在同一個 Worker 內以 `api.fetch` 呼叫，只轉送 Access 身分（`Cf-Access-Jwt-Assertion`、`Cookie`），由 `/api` 的 Access、Demo 唯讀與 Zod 驗證再次把關；不得在 MCP 另寫繞過 `/api` 的寫入工具。`list_api_endpoints` 由 `api.routes` 產生端點清單，依路徑第一段分成 resource：不帶 `resource` 時只回各類別的端點清單，帶 `resource` 時才回用途與 body 格式（`connectors` 另含資料來源 ID 與帳密欄位）。說明文字維護於 `features/mcp/api.ts` 的 `ENDPOINT_NOTES`，新增或修改 API 時同步更新，缺少說明時 `tests/features/mcp/api-tool.test.ts` 會失敗；`query_api` 的回應超過 `API_RESPONSE_MAX_CHARS` 時只回 `RESPONSE_TOO_LARGE` 與分頁 headers，寫入的回應一律完整回傳；來源同步的 body 由 `sync/registry.ts` 的 schema 產生。Managed OAuth 設定與客戶端連線步驟見 [AI 助理連線（MCP）](006-mcp.md)。查詢工具的資料讀取放在 `features/mcp/service.ts`，沿用其他 feature 的 service 與 `shared/` 計算，不另寫查詢或金額邏輯：
+MCP 提供與網頁版相同的存取範圍：查詢工具整理回答所需的資料，其他讀取經 `query_api`（只送 GET、標示 `readOnlyHint`）、編輯經 `call_api`（只接受 POST、PUT、PATCH、DELETE，標示 `destructiveHint`）、同步經 `sync_sources`（逐一呼叫各來源不帶 body 的 `/connectors/<id>/sync`，交由 Queue 背景執行）走 `/api`；讀寫分成兩個工具，讓 AI 助理只在寫入時要求使用者確認。`features/mcp/route.ts` 的 `createMcpRoutes(api)` 由 Composition Root 傳入組裝好的 `/api` app，`features/mcp/api.ts` 在同一個 Worker 內以 `api.fetch` 呼叫，只轉送 Access 身分（`Cf-Access-Jwt-Assertion`、`Cookie`），由 `/api` 的 Access、Demo 唯讀與 Zod 驗證再次把關；不得在 MCP 另寫繞過 `/api` 的寫入工具；`record_manual_transactions` 同樣以 `api.fetch` 呼叫 `POST /manual-transactions`，輸入直接使用該 route 的 Zod schema（`features/manual-transactions/schema.ts`），因為只新增或更新使用者口述的記錄而標示 `destructiveHint: false`，刪除仍經 `call_api`。`list_api_endpoints` 由 `api.routes` 產生端點清單，依路徑第一段分成 resource：不帶 `resource` 時只回各類別的端點清單，帶 `resource` 時才回用途與 body 格式（`connectors` 另含資料來源 ID 與帳密欄位）。說明文字維護於 `features/mcp/api.ts` 的 `ENDPOINT_NOTES`，新增或修改 API 時同步更新，缺少說明時 `tests/features/mcp/api-tool.test.ts` 會失敗；`query_api` 的回應超過 `API_RESPONSE_MAX_CHARS` 時只回 `RESPONSE_TOO_LARGE` 與分頁 headers，寫入的回應一律完整回傳；來源同步的 body 由 `sync/registry.ts` 的 schema 產生。Managed OAuth 設定與客戶端連線步驟見 [AI 助理連線（MCP）](006-mcp.md)。查詢工具的資料讀取放在 `features/mcp/service.ts`，沿用其他 feature 的 service 與 `shared/` 計算，不另寫查詢或金額邏輯：
 
 | 工具                       | 沿用的計算                                                                                                                    |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -452,6 +454,7 @@ MCP 提供與網頁版相同的存取範圍：查詢工具整理回答所需的�
 | `get_upcoming_payments`    | `notifications` 的 `loadPaymentReminders`                                                                                     |
 | `get_sync_status`          | `sync/scheduling` 的 `getSyncJobs`，只列已設定的來源                                                                          |
 
+- `search_activity` 的手動記錄另附 `manualTransactionId`，供 AI 助理以相同 `externalId` 修改或經 `call_api` 刪除；其他活動仍不回傳內部 ID。
 - `get_monthly_cash_flow` 前後各多讀一個月再以活動日期篩選，讓跨月的發票與刷卡配對結果與活動頁一致。
 - 回傳內容會送到使用者選用的 AI 服務：查詢工具的帳號只留末四碼，不回傳內部 ID、`raw_payload` 與來源設定；`query_api` 與 `call_api` 回傳與網頁版相同的 API 回應。活動的標題與說明和 App 畫面相同，銀行未提供摘要時可能是交易備註；這是搜尋與分類所需的內容，帳號遮蔽由各來源在正規化時負責。
 - 工具錯誤只回通用訊息，細節經 `sanitizeDatabaseError` 消毒後寫入 log；讀取失敗不得以空結果代替，避免 AI 誤判為「沒有資料」。
@@ -627,6 +630,46 @@ X-Next-Cursor: <opaque-cursor>
 - 手動設定存於 `bank_account_payment_accounts`，優先於銀行資料；`payment_account_id` 為 NULL 表示明確「不指定」。指定的帳戶已不存在或不再符合條件時，退回銀行資料。此表的兩個帳戶 ID 都不設 FK：帳戶被移除或合併時視為未設定，不阻擋同步資料清理，也不以 CASCADE 悄悄刪除使用者設定。
 - 扣款帳戶須是非信用卡／貸款／定存／儲值的帳戶，且與款項同幣別或為台幣帳戶（外幣帳單常由台幣帳戶換匯扣繳）；銀行提供的扣款帳戶也依此比對，推測則只用同幣別帳戶。`PUT /api/bank/accounts/:id/payment-account`（`{ paymentAccountId: string | null }`）寫入手動設定，`DELETE` 同路徑移除手動設定、改回銀行資料；對象不是有效的信用卡或貸款時回 `BANK_ACCOUNT_NOT_FOUND`（404），扣款帳戶不符合條件時回 `INVALID_PAYMENT_ACCOUNT`（400）。
 - 帳戶 API（`/api/bank/accounts`、`/api/bank`）的信用卡與貸款附上 `paymentAccountId`、`paymentAccountSource`（`manual`／`bank`／`inferred`）與 `bankAutopay`；銀行資料的內部欄位不回傳。
+
+## 手動記錄的現金帳戶
+
+銀行與發票抓不到的現金收支由 `features/manual-transactions` 寫入，入口只有 `POST /api/manual-transactions`
+（MCP 的 `record_manual_transactions` 也呼叫它）與 `DELETE /api/manual-transactions/:id`；網頁版只提供刪除，不提供新增表單。
+
+- 資料模型不新增資料表或欄位：現金是一個一般的 `bank_accounts` 列（`id = manual:cash`、`connector_id = manual`、
+  `account_type = stored_value`、TWD），第一次寫入時才建立，沒用過的部署不會有這個帳戶。`manual` 不是 connector catalog 的 ID，
+  常數在 `shared/api/manual-transactions.ts`；判斷手動記錄一律比對 `connector_id`。
+- 帳戶照常出現在資產清單、總覽與淨值，不需要在其他查詢排除。`stored_value` 已被排除在扣款帳戶候選之外。
+- 交易寫入 `bank_transactions`，`source_id` 為呼叫端的 `externalId`（省略時為 UUID）、`id` 為 `manual:<source_id>`。
+  既有的 `UNIQUE (connector_id, account_id, source_id)` 讓相同 `externalId` 重送時更新同一筆；`raw_payload` 只保存 `type`。
+- 現金餘額沒有獨立來源：每次寫入或刪除，都在同一個 D1 batch 的最後重建這個帳戶的 `bank_balance_snapshots`，
+  每個有記錄的日期各一列（`as_of_at` 為該日期），餘額是到當天為止的累計，因此餘額永遠等於手動記錄加總，
+  補記過去日期或重建歷史淨值時，各日期也讀得到當時的現金；記錄全數刪除後保留一列 0。
+  帶 `balance` 時由 SQL 算出差額並補一筆「餘額調整」交易，差額為 0 時不寫入。
+  這些 statement 需要原子性與 set-based 的 `INSERT ... SELECT`，因此 repository 使用原生 SQL。
+- 類型決定正負號與計算偏好，寫在 `bank_transaction_preferences.excluded_from_calculation`：
+
+  | type           | 金額 | 計算偏好                | 互轉配對                       |
+  | -------------- | ---- | ----------------------- | ------------------------------ |
+  | `expense`      | 負   | 0（明確計入）           | 不參與，避免與同日同額交易誤配 |
+  | `income`       | 正   | 0（明確計入）           | 不參與                         |
+  | `transfer_in`  | 正   | 1（排除）               | 參與，例如與 ATM 提款配成互轉  |
+  | `transfer_out` | 負   | 1（排除）               | 參與，例如把現金存入銀行       |
+  | 餘額調整       | 差額 | 1，並手動分類為「轉帳」 | 不參與（手動分類擋下配對）     |
+
+  ATM 提款因此不會和之後的現金支出重複計算：現金轉入與銀行提款配成 `auto_transfer`，兩邊都不計入收支。
+  沒配到時（例如跨日）現金這一側仍排除，銀行那一側維持原本的計算方式，由使用者自行排除。
+
+- `categoryId` 只適用於收支，寫入 `classification_overrides`；省略時走一般分類規則。現金移動會移除既有的手動分類，否則會擋下互轉配對。
+  分類不存在時回 `CATEGORY_NOT_FOUND`（404），整批不寫入。
+- 刪除只作用在 `connector_id = manual` 的交易，其他回 `MANUAL_TRANSACTION_NOT_FOUND`（404）。同一 batch 先移除分類覆寫、AI 分類與交易偏好，
+  已連結的發票配對刪除（發票回到自動配對），「保持分開」的決定保留、只清掉交易引用，再刪除交易並重算餘額。
+- 寫入或刪除後以 `rebuildBankDepositHistory` 重算最早受影響日期（更新日期時包含原日期）到今天（台北日期）的存款歷史，最多往回 31 天；
+  更早的補記由 `/history/net-worth/rebuild-bank` 重建。失敗只記錄 log，不讓呼叫端誤以為需要重送。
+- 發票自動配對（`shared/activity/matching.ts`）略過排除統計的手動記錄，也就是現金移動與餘額調整：它們不是消費，
+  配到同日同額的發票會讓那筆發票跟著排除統計。手動支出照常自動配對，使用者仍可手動連結任何一筆。
+- 活動的 `source` 維持 `bank`，另以 `ActivityItem.manual` 標示；來源篩選的 `manual` 由 `shared/activity/filter.ts` 處理，
+  收支加總、發票配對與分類統計都沿用銀行交易的邏輯。
 
 ## 讀取 API 效能
 

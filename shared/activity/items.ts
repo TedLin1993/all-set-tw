@@ -1,3 +1,4 @@
+import { MANUAL_CONNECTOR_ID } from "../api/manual-transactions";
 import type { ActivityItem } from "./types";
 import { compareActivityItems, isActivityDateTime } from "./list";
 import {
@@ -100,6 +101,7 @@ export function buildActivityItems(
           matchedInvoice ? "電子發票" : undefined,
           accountLast4,
           isCard ? "信用卡" : "銀行",
+          t.connectorId === MANUAL_CONNECTOR_ID ? "手動" : undefined,
         ]
           .filter(Boolean)
           .join(" "),
@@ -117,6 +119,7 @@ export function buildActivityItems(
         classificationRuleId: t.classification?.ruleId,
         refund: t.classification?.refund,
         transactionId: t.id,
+        manual: t.connectorId === MANUAL_CONNECTOR_ID ? true : undefined,
         note: t.note ?? undefined,
         invoiceId: matchedInvoice?.id,
         invoiceAmount: matchedInvoice?.amount,

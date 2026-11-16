@@ -1,3 +1,5 @@
+import { MANUAL_CONNECTOR_ID } from "../api/manual-transactions";
+
 export interface MatchingTransaction {
   id: string;
   connectorId: string;
@@ -9,6 +11,7 @@ export interface MatchingTransaction {
   postedDate?: string | null;
   counterparty?: string | null;
   description?: string | null;
+  excludedFromCalculation?: boolean;
 }
 export interface MatchingInvoice {
   id: string;
@@ -102,8 +105,14 @@ export function matchInvoicesToTransactions<I extends MatchingInvoice>(
       !separateInvoiceIds.has(invoice.id) &&
       !invoiceToTransactionId.has(invoice.id),
   );
+  // 手動記錄的現金移動與餘額調整不是消費；自動配到發票會讓那筆發票跟著排除統計。
   const autoTransactions = transactions.filter(
-    (transaction) => !transactionToInvoice.has(transaction.id),
+    (transaction) =>
+      !transactionToInvoice.has(transaction.id) &&
+      !(
+        transaction.connectorId === MANUAL_CONNECTOR_ID &&
+        transaction.excludedFromCalculation
+      ),
   );
   addAutomaticMatches(
     autoInvoices,

@@ -5,7 +5,7 @@ export interface ActivitySearchInput {
   q: string;
   from?: string;
   to?: string;
-  source?: "all" | "bank" | "card" | "invoice";
+  source?: "all" | "bank" | "card" | "invoice" | "manual";
   flow?: "all" | "income" | "expense";
   category?: string;
   /** 依顯示的分類名稱篩選；MCP 使用，AI 助理看到的是名稱而非分類 ID。 */

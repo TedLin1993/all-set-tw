@@ -36,6 +36,7 @@
     { id: "bank", label: "銀行" },
     { id: "card", label: "信用卡" },
     { id: "invoice", label: "發票" },
+    { id: "manual", label: "手動" },
   ];
   function focusSheet(node: HTMLDivElement) {
     const previous = document.activeElement as HTMLElement | null;
