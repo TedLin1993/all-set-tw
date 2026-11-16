@@ -664,7 +664,7 @@ X-Next-Cursor: <opaque-cursor>
   分類不存在時回 `CATEGORY_NOT_FOUND`（404），整批不寫入。
 - 刪除只作用在 `connector_id = manual` 的交易，其他回 `MANUAL_TRANSACTION_NOT_FOUND`（404）。同一 batch 先移除分類覆寫、AI 分類與交易偏好，
   已連結的發票配對刪除（發票回到自動配對），「保持分開」的決定保留、只清掉交易引用，再刪除交易並重算餘額。
-- 寫入或刪除後以 `rebuildBankDepositHistory` 重算最早受影響日期到今天（台北日期）的存款歷史，最多往回 31 天；
+- 寫入或刪除後以 `rebuildBankDepositHistory` 重算最早受影響日期（更新日期時包含原日期）到今天（台北日期）的存款歷史，最多往回 31 天；
   更早的補記由 `/history/net-worth/rebuild-bank` 重建。失敗只記錄 log，不讓呼叫端誤以為需要重送。
 - 發票自動配對（`shared/activity/matching.ts`）略過排除統計的手動記錄，也就是現金移動與餘額調整：它們不是消費，
   配到同日同額的發票會讓那筆發票跟著排除統計。手動支出照常自動配對，使用者仍可手動連結任何一筆。

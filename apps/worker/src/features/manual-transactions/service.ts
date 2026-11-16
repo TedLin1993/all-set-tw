@@ -11,7 +11,7 @@ import { rebuildBankDepositHistory } from "../net-worth/service";
 import {
   deleteManualTransaction,
   findManualTransactionDate,
-  listExistingManualTransactionIds,
+  listExistingManualTransactionDates,
   writeManualTransactions,
   type ManualTransactionRow,
 } from "./repository";
@@ -69,9 +69,9 @@ export async function recordManualTransactions(
   const categoryIds = new Set(
     rows.flatMap((row) => (row.categoryId ? [row.categoryId] : [])),
   );
-  const [categories, existingIds] = await Promise.all([
+  const [categories, existingDates] = await Promise.all([
     categoryIds.size > 0 ? listClassificationCategories(db) : [],
-    listExistingManualTransactionIds(
+    listExistingManualTransactionDates(
       db,
       rows.map((row) => row.id),
     ),
@@ -98,16 +98,15 @@ export async function recordManualTransactions(
     adjustment,
     nowIso,
   );
-  await refreshDepositHistory(
-    db,
-    now,
-    rows.map((row) => row.date),
-  );
+  await refreshDepositHistory(db, now, [
+    ...rows.map((row) => row.date),
+    ...existingDates.values(),
+  ]);
   return {
     transactions: rows.map((row) => ({
       id: row.id,
       externalId: row.sourceId,
-      created: !existingIds.has(row.id),
+      created: !existingDates.has(row.id),
     })),
     balance,
     ...(adjustment && adjustmentAmount !== undefined

@@ -241,6 +241,42 @@ describe("手動記錄的現金帳戶（隔離 D1）", () => {
     });
   });
 
+  it("更新日期時，原日期起的存款歷史一併重算", async () => {
+    const today = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    const day = (offset: number) =>
+      new Date(today.getTime() - offset * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+    const history = async (date: string) =>
+      (
+        await db
+          .prepare(
+            `SELECT net_worth AS value FROM net_worth_history
+             WHERE date = ? AND source = 'bank' AND asset_type = 'deposit'`,
+          )
+          .bind(date)
+          .first<{ value: number }>()
+      )?.value;
+    const moved = {
+      externalId: "moved",
+      type: "expense" as const,
+      amount: 100,
+      description: "範例支出",
+    };
+
+    await recordManualTransactions(db, {
+      transactions: [{ ...moved, date: day(5) }],
+    });
+    const before = await history(day(4));
+    await recordManualTransactions(db, {
+      transactions: [{ ...moved, date: day(2) }],
+    });
+
+    expect(await history(day(4))).toBe(before! + 100);
+    expect(await history(day(2))).toBe(before);
+    await removeManualTransaction(db, "manual:moved");
+  });
+
   it("分類不存在時整批不寫入", async () => {
     await expect(
       recordManualTransactions(db, {

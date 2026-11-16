@@ -26,19 +26,20 @@ export type ManualBalanceAdjustment = {
   target: number;
 };
 
-export async function listExistingManualTransactionIds(
+/** 已存在的手動記錄與它們目前的日期；更新日期時原日期也要重算歷史。 */
+export async function listExistingManualTransactionDates(
   db: D1Database,
   ids: string[],
 ) {
-  if (ids.length === 0) return new Set<string>();
+  if (ids.length === 0) return new Map<string, string>();
   const { results } = await db
     .prepare(
-      `SELECT id FROM bank_transactions
+      `SELECT id, posted_date AS date FROM bank_transactions
        WHERE connector_id = ? AND id IN (SELECT value FROM json_each(?))`,
     )
     .bind(MANUAL_CONNECTOR_ID, JSON.stringify(ids))
-    .all<{ id: string }>();
-  return new Set(results.map((row) => row.id));
+    .all<{ id: string; date: string }>();
+  return new Map(results.map((row) => [row.id, row.date]));
 }
 
 /**
