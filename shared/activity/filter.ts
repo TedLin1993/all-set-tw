@@ -3,7 +3,8 @@ import { activityDateKey } from "./list";
 import type { ActivityItem } from "./types";
 
 export type ActivityFlowFilter = "all" | ActivityFlow;
-export type ActivitySourceFilter = "all" | "bank" | "card" | "invoice";
+export type ActivitySourceFilter =
+  "all" | "bank" | "card" | "invoice" | "manual";
 
 export interface ActivityCategoryFilter {
   flow: ActivityFlow;
@@ -33,7 +34,8 @@ export function filterActivities(
     const matchesSource =
       filters.source === "all" ||
       item.source === filters.source ||
-      (filters.source === "invoice" && Boolean(item.invoiceId));
+      (filters.source === "invoice" && Boolean(item.invoiceId)) ||
+      (filters.source === "manual" && item.manual === true);
     const matchesSearch =
       !normalizedSearch ||
       `${item.title} ${item.subtitle} ${item.institutionName ?? ""} ${item.accountName ?? ""} ${item.category} ${item.searchText ?? ""} ${item.note ?? ""}`

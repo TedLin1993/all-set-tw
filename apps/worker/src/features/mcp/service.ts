@@ -190,7 +190,7 @@ export interface McpActivitySearchInput {
   category?: string;
   from?: string;
   to?: string;
-  source?: "all" | "bank" | "card" | "invoice";
+  source?: "all" | "bank" | "card" | "invoice" | "manual";
   flow?: "all" | "income" | "expense";
   cursor?: string;
 }
@@ -236,6 +236,8 @@ export async function searchActivities(
       note: item.note ?? null,
       excludedFromCalculation: item.excludedFromCalculation ?? false,
       status: item.status,
+      // 手動記錄可由 AI 助理修改或刪除，因此附上識別碼。
+      ...(item.manual ? { manualTransactionId: item.transactionId } : {}),
     })),
     truncated: Boolean(result.nextCursor),
     nextCursor: result.nextCursor,

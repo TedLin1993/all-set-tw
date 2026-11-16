@@ -25,6 +25,8 @@ export interface ActivityItem {
     | "fallback";
   classificationRuleId?: string;
   transactionId?: string;
+  /** 手動記錄的現金收支，可由使用者刪除。 */
+  manual?: boolean;
   /** 使用者為銀行／信用卡交易寫的備註。 */
   note?: string;
   excludedFromCalculation?: boolean;

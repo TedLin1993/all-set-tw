@@ -443,6 +443,10 @@
           invoiceMatches,
         ),
   );
+  // 沒有手動記錄的使用者不會看到「手動」來源。
+  const hasManualItems = $derived(
+    source === "manual" || rawItems.some((item) => item.manual),
+  );
   const detailItem = $derived(
     rawItems.find((item) => activityKey(item) === detailKey),
   );
@@ -663,6 +667,23 @@
     // 月份與搜尋快取都以 bank 開頭；等重新載入後才結束儲存，避免顯示舊備註。
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bank }),
   }));
+  // 手動記錄只能由 AI 助理新增；網頁提供刪除，讓記錯的項目不必回到對話修正。
+  let manualDeleteConfirmKey = $state<string | null>(null);
+  const manualDeleteMutation = createMutation(() => ({
+    mutationFn: (transactionId: string) =>
+      api.delete(
+        `/api/manual-transactions/${encodeURIComponent(transactionId)}`,
+      ),
+    onSuccess: () => {
+      manualDeleteConfirmKey = null;
+      closeDetail();
+      // 現金餘額隨記錄變動，資產與淨值也要重新載入。
+      qc.invalidateQueries({ queryKey: queryKeys.summary });
+      qc.invalidateQueries({ queryKey: queryKeys.netWorthHistory });
+      qc.invalidateQueries({ queryKey: queryKeys.invoiceTransactionMappings });
+      return qc.invalidateQueries({ queryKey: queryKeys.bank });
+    },
+  }));
   const invoiceCalculationMutation = createMutation(() => ({
     mutationFn: (payload: {
       invoiceId: string;
@@ -788,6 +809,8 @@
     return `${item.source}-${item.id}`;
   }
   function openDetail(item: ActivityItem) {
+    manualDeleteConfirmKey = null;
+    manualDeleteMutation.reset();
     detailKey = activityKey(item);
     // 明細有自己的 history entry，返回鍵與 iOS 主畫面 App 的系統右滑都會經 popstate 關閉；
     // 不要再加自訂右滑，否則兩種手勢會同時拖動畫面。
@@ -1225,8 +1248,8 @@
             <span class="text-caption font-semibold text-subtle">來源</span>
             <TabsList
               aria-label="活動來源"
-              class="grid h-auto w-full grid-cols-4"
-              >{#each [{ key: "all", label: "全部" }, { key: "bank", label: "銀行" }, { key: "card", label: "信用卡" }, { key: "invoice", label: "發票" }] as filter (filter.key)}<TabsTrigger
+              class={`grid h-auto w-full ${hasManualItems ? "grid-cols-5" : "grid-cols-4"}`}
+              >{#each [{ key: "all", label: "全部" }, { key: "bank", label: "銀行" }, { key: "card", label: "信用卡" }, { key: "invoice", label: "發票" }, ...(hasManualItems ? [{ key: "manual", label: "手動" }] : [])] as filter (filter.key)}<TabsTrigger
                   class="min-h-9 min-w-0 px-1 text-caption md:text-sm"
                   active={source === filter.key}
                   onclick={() => (source = filter.key as ActivitySourceFilter)}
@@ -1788,6 +1811,34 @@
                       variant={transaction ? "outline" : "default"}
                       onclick={() => openMapping(detailItem)}
                       >{transaction ? "管理配對" : "配對交易"}</Button
+                    >
+                  </div>{/if}
+
+                {#if detailItem.manual && detailItem.transactionId}{@const manualId =
+                    detailItem.transactionId}{@const confirming =
+                    manualDeleteConfirmKey === activityKey(detailItem)}
+                  <div class="flex items-center justify-between gap-4 py-4">
+                    <div class="min-w-0">
+                      <p class="font-semibold">手動記錄</p>
+                      <p
+                        aria-live="polite"
+                        class={`mt-1 text-caption ${manualDeleteMutation.isError ? "text-coral" : "text-subtle"}`}
+                      >
+                        {manualDeleteMutation.isError
+                          ? "刪除失敗，請稍後再試"
+                          : confirming
+                            ? "刪除後無法復原，現金餘額會一併調整"
+                            : "由 AI 助理記錄，可在此刪除"}
+                      </p>
+                    </div>
+                    <Button
+                      class="h-11 shrink-0 whitespace-nowrap"
+                      variant={confirming ? "destructive" : "outline"}
+                      disabled={manualDeleteMutation.isPending}
+                      onclick={() => {
+                        if (confirming) manualDeleteMutation.mutate(manualId);
+                        else manualDeleteConfirmKey = activityKey(detailItem);
+                      }}>{confirming ? "確認刪除" : "刪除"}</Button
                     >
                   </div>{/if}
               </div>

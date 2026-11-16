@@ -34,7 +34,7 @@
 - `apps/worker/src/db`：跨後端 feature 共用的 D1 基礎能力與 Drizzle schema／client。
 - `apps/worker/migrations`、`apps/worker/schema-metadata.json`、`apps/worker/seeds`：資料庫遷移、schema 文件語意與 Demo 種子資料。
 - 根目錄 `shared/`：前後端共用的穩定型別、契約與純活動處理邏輯，一律從 `@taiwan-fin-hub/shared` 的 `index.ts` 引用；只有 Worker 使用的型別不放這裡。
-- `shared/api/`：依 API resource 分檔的 HTTP 契約（`errors`、`bank`、`sync`、`sync-reports`、`connectors`、`classification`、`notifications`、`dashboard`）；前端引用，Worker 在驗證與 JSON 回傳處檢查。`errors.ts` 是 Worker 會回傳的全部錯誤代碼。
+- `shared/api/`：依 API resource 分檔的 HTTP 契約（`errors`、`bank`、`sync`、`sync-reports`、`connectors`、`classification`、`notifications`、`dashboard`、`manual-transactions`）；前端引用，Worker 在驗證與 JSON 回傳處檢查。`errors.ts` 是 Worker 會回傳的全部錯誤代碼。
 - `shared/activity/`：活動配對、去重、排序與資料組裝的純邏輯；`shared/connector-catalog.ts` 是資料來源 catalog。
 - `apps/worker/src/sources/types.ts`、`financial-types.ts`：僅後端使用的 `Connector`／`SyncResult` 與 connector 正規化金融資料型別。
 - `docs/002-backend-architecture.md`：後端分層、相依方向與維護約定的詳細文件。

@@ -9,6 +9,7 @@ import { exchangeRateRoutes } from "./features/exchange-rates/route";
 import { investmentRoutes } from "./features/investments/route";
 import { invoiceRoutes } from "./features/invoices/route";
 import { manualAssetRoutes } from "./features/manual-assets/route";
+import { manualTransactionRoutes } from "./features/manual-transactions/route";
 import { createMcpRoutes } from "./features/mcp/route";
 import { netWorthRoutes } from "./features/net-worth/route";
 import { notificationRoutes } from "./features/notifications/route";
@@ -43,6 +44,7 @@ api.use("*", demoReadOnlyMiddleware);
 api.use("/connectors/:connectorId/*", connectorContextMiddleware);
 
 api.route("/", manualAssetRoutes);
+api.route("/", manualTransactionRoutes);
 api.route("/", exchangeRateRoutes);
 api.route("/", invoiceRoutes);
 api.route("/", classificationRoutes);

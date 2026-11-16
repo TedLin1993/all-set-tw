@@ -59,6 +59,10 @@ const ENDPOINT_NOTES: Record<string, string> = {
   "POST /manual-assets/:id/history": "新增或覆寫某日價值。body：value、date。",
   "DELETE /manual-assets/:id/history/:date":
     "刪除某日價值（date 為 YYYY-MM-DD）。",
+  "POST /manual-transactions":
+    "記錄現金收支並更新現金餘額；請改用 record_manual_transactions 工具，body 與該工具的輸入相同。",
+  "DELETE /manual-transactions/:id":
+    "刪除一筆手動記錄並重算現金餘額；id 為 search_activity 回傳的 manualTransactionId，只能刪除手動記錄。",
   "GET /invoices": `電子發票。${MONTH_RANGE}`,
   "GET /invoice-detail": "發票明細。query：invoiceId。",
   "GET /invoices/:invoiceId": "發票明細。",
@@ -82,7 +86,7 @@ const ENDPOINT_NOTES: Record<string, string> = {
   "DELETE /classification/overrides/:targetType/*":
     "移除單筆交易的手動分類，路徑同上。",
   "GET /activity/search":
-    "搜尋活動。query：q（必填）、from?、to?（YYYY-MM-DD）、source?（all、bank、card、invoice）、flow?（all、income、expense）、category?、cursor?。",
+    "搜尋活動。query：q（必填）、from?、to?（YYYY-MM-DD）、source?（all、bank、card、invoice、manual）、flow?（all、income、expense）、category?、cursor?。",
   "GET /activity/invoice-mappings": `發票與交易的手動配對。${MONTH_RANGE}`,
   "PUT /activity/invoice-mappings/:invoiceId":
     "手動配對發票與交易。body：transactionId。",
@@ -302,6 +306,24 @@ export async function callApi(
     }),
   );
   return { status: response.status, headers: returnedHeaders, body };
+}
+
+/** 經 /api 寫入手動記錄；回傳 API 的回應內容與是否失敗。 */
+export async function recordManualTransactions(
+  api: ApiApp,
+  source: Request,
+  env: Env,
+  executionCtx: ApiExecutionContext,
+  body: Record<string, unknown>,
+) {
+  const { status, body: response } = await callApi(
+    api,
+    source,
+    env,
+    executionCtx,
+    { method: "POST", path: "/manual-transactions", body },
+  );
+  return { isError: status >= 400, response };
 }
 
 export type SyncStartResult =

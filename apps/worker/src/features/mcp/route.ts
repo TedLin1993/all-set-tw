@@ -10,10 +10,12 @@ import type { Env } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
 import { isDemoMode } from "../../platform/http";
 import { monthRangeQuerySchema } from "../../platform/month-range";
+import { manualTransactionsSchema } from "../manual-transactions/schema";
 import {
   WRITE_API_METHODS,
   callApi,
   listApiEndpoints,
+  recordManualTransactions,
   serializeApiResult,
   startSyncs,
   type ApiApp,
@@ -168,9 +170,11 @@ function createServer(
           from: isoDate.optional().describe("起始日期 YYYY-MM-DD（含）。"),
           to: isoDate.optional().describe("結束日期 YYYY-MM-DD（含）。"),
           source: z
-            .enum(["all", "bank", "card", "invoice"])
+            .enum(["all", "bank", "card", "invoice", "manual"])
             .optional()
-            .describe("bank 為存款帳戶、card 為信用卡、invoice 為電子發票。"),
+            .describe(
+              "bank 為存款帳戶、card 為信用卡、invoice 為電子發票、manual 為手動記錄的現金收支。",
+            ),
           flow: z.enum(["all", "income", "expense"]).optional(),
           cursor: z
             .string()
@@ -240,6 +244,52 @@ function createServer(
           connectorIds,
         ),
       ),
+  );
+
+  server.registerTool(
+    "record_manual_transactions",
+    {
+      description:
+        "記錄使用者親口告知、銀行與發票抓不到的現金收支（例如夜市、紅包），並維護現金帳戶餘額；回傳每筆的 id 與寫入後的現金餘額。只記使用者明確提供的金額與日期，不要推測或重複記錄已出現在 search_activity 的交易。ATM 提款請記為 transfer_in，會與同日同額的銀行提款配成互轉而不重複計入支出。修改已記錄的項目時帶相同的 externalId 重送；刪除請以 call_api 呼叫 DELETE /manual-transactions/<id>，id 為 search_activity 回傳的 manualTransactionId。",
+      inputSchema: manualTransactionsSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async (input) => {
+      try {
+        const { isError, response } = await recordManualTransactions(
+          apiContext.api,
+          apiContext.request,
+          apiContext.env,
+          apiContext.executionCtx,
+          input,
+        );
+        return {
+          isError,
+          content: [{ type: "text" as const, text: JSON.stringify(response) }],
+        };
+      } catch (error) {
+        const safeError = sanitizeDatabaseError(error);
+        console.error(
+          JSON.stringify({
+            event: "mcp_tool_failed",
+            tool: "record_manual_transactions",
+            message:
+              safeError instanceof Error
+                ? safeError.message
+                : String(safeError),
+          }),
+        );
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: "寫入失敗，請稍後再試。" }],
+        };
+      }
+    },
   );
 
   server.registerTool(
