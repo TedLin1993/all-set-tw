@@ -1662,6 +1662,32 @@
                       )}
                     </p>
                   </div>{/if}
+                {#if detailItem.trade}{@const trade = detailItem.trade}
+                  <div class="rounded-xl bg-moss/10 p-4">
+                    <p class="text-caption font-semibold text-moss">證券成交</p>
+                    <p class="mt-1 break-words font-semibold">
+                      {trade.name}{trade.symbol && trade.symbol !== trade.name
+                        ? `（${trade.symbol}）`
+                        : ""}
+                    </p>
+                    <p class="mt-1 text-caption text-subtle">
+                      {[
+                        trade.side,
+                        trade.quantity != null
+                          ? `${formatNumber(trade.quantity)} 股`
+                          : undefined,
+                        trade.price != null
+                          ? `成交價 ${formatNumber(trade.price)}`
+                          : undefined,
+                        `成交日 ${trade.date}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                    <p class="mt-1 text-caption text-subtle">
+                      這筆扣款是此成交的交割款，已合併為一筆活動。
+                    </p>
+                  </div>{/if}
                 {#if invoice}<div class="rounded-xl bg-coral/10 p-4">
                     <p class="text-caption font-semibold text-coral">
                       發票商家名稱
