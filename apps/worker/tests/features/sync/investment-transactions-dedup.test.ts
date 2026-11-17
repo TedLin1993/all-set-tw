@@ -23,7 +23,7 @@ type TradeInput = {
 };
 
 async function write(db: D1Database, ...inputs: TradeInput[]) {
-  await persistStagedSyncWrite(db, {
+  return persistStagedSyncWrite(db, {
     records: inputs.map((input) =>
       investmentTransactionRecord(
         input.connectorId,
@@ -69,6 +69,8 @@ describe("投資交易紀錄跨來源去重（隔離 D1）", () => {
   beforeEach(async () => {
     await db.batch([
       db.prepare("DELETE FROM investment_transactions"),
+      db.prepare("DELETE FROM scheduled_sync_batches"),
+      db.prepare("DELETE FROM sync_jobs"),
       db.prepare("DELETE FROM sync_write_staging"),
     ]);
   });
@@ -263,5 +265,117 @@ describe("投資交易紀錄跨來源去重（隔離 D1）", () => {
     expect(await findActivitySearchDays(db, { q: "113" })).toEqual([
       "2026-11-03",
     ]);
+  });
+
+  describe("同步報告", () => {
+    const trade = (
+      connectorId: "sinotrade" | "tdcc",
+      sourceId: string,
+      code: string,
+    ): TradeInput => ({
+      connectorId,
+      sourceId,
+      tradeDate:
+        connectorId === "tdcc" ? "2026-11-13T00:00:00.000Z" : "2026-11-13",
+      code,
+    });
+    /** 以持有 lock 的 activity run 寫入，該次同步的新增才會列進報告。 */
+    async function reportedWrite(...inputs: TradeInput[]) {
+      const connectorId = inputs[0]!.connectorId;
+      await db.batch([
+        db
+          .prepare(
+            "INSERT OR IGNORE INTO scheduled_sync_batches (id, created_at) VALUES ('batch', ?)",
+          )
+          .bind(NOW),
+        db
+          .prepare(
+            "INSERT INTO sync_activity_runs (id, batch_id, connector_id, created_at, published) VALUES (?1, 'batch', ?1, ?2, 1)",
+          )
+          .bind(connectorId, NOW),
+        db
+          .prepare(
+            `INSERT INTO sync_jobs (id, connector_id, scope, interval_minutes, next_run_at, locked_by, created_at, updated_at)
+             VALUES (?1, ?1, 'default', 1440, ?2, ?1, ?2, ?2)`,
+          )
+          .bind(connectorId, NOW),
+      ]);
+      const newRecords = await write(db, ...inputs);
+      // 同步完成後的報告狀態：筆數已記錄，展示快照已產生。
+      await db.batch([
+        db
+          .prepare(
+            `INSERT INTO scheduled_sync_batch_results (batch_id, job_id, connector_id, status, completed_at, new_investment_transactions)
+             VALUES ('batch', ?1, ?1, 'success', ?2, ?3)`,
+          )
+          .bind(connectorId, NOW, newRecords.investmentTransactions),
+        db
+          .prepare(
+            `INSERT INTO sync_activity_details (run_id, activity_id, snapshot)
+             SELECT run_id, 'investment:' || record_id, snapshot FROM sync_activity_changes WHERE run_id = ?`,
+          )
+          .bind(connectorId),
+        db.prepare("UPDATE sync_jobs SET locked_by = NULL"),
+      ]);
+      return newRecords.investmentTransactions;
+    }
+    const reported = async (table: string) =>
+      (
+        await db
+          .prepare(
+            `SELECT run_id || ':' || json_extract(snapshot, '$.transactionCode') AS entry
+             FROM ${table} ORDER BY 1`,
+          )
+          .all<{ entry: string }>()
+      ).results.map((row) => row.entry);
+    const counts = async () =>
+      (
+        await db
+          .prepare(
+            `SELECT connector_id || ':' || new_investment_transactions AS entry
+             FROM scheduled_sync_batch_results ORDER BY 1`,
+          )
+          .all<{ entry: string }>()
+      ).results.map((row) => row.entry);
+
+    it("永豐已列進報告的成交，集保同步時不再列為新增；集保獨有的交易照常列出", async () => {
+      expect(await reportedWrite(trade("sinotrade", "s", "B"))).toBe(1);
+      expect(
+        await reportedWrite(
+          trade("tdcc", "t-dup", "113"),
+          trade("tdcc", "t-split", "1F5"),
+        ),
+      ).toBe(1);
+      expect(await reported("sync_activity_changes")).toEqual([
+        "sinotrade:B",
+        "tdcc:1F5",
+      ]);
+    });
+
+    it("集保先同步的成交，永豐列進報告後從集保的報告移除並扣回新增筆數", async () => {
+      expect(
+        await reportedWrite(
+          trade("tdcc", "t-first", "113"),
+          trade("tdcc", "t-split", "1F5"),
+        ),
+      ).toBe(2);
+      expect(await reportedWrite(trade("sinotrade", "s", "B"))).toBe(1);
+      const expected = ["sinotrade:B", "tdcc:1F5"];
+      expect(await reported("sync_activity_changes")).toEqual(expected);
+      expect(await reported("sync_activity_details")).toEqual(expected);
+      expect(await counts()).toEqual(["sinotrade:1", "tdcc:1"]);
+    });
+
+    it("永豐未列進報告（例如手動同步或首次回補）時，集保那筆是唯一紀錄，前後都保留", async () => {
+      await write(db, { ...trade("sinotrade", "s-old", "B"), quantity: 5 });
+      expect(
+        await reportedWrite({ ...trade("tdcc", "t-old", "113"), quantity: 5 }),
+      ).toBe(1);
+      await write(db, trade("sinotrade", "s-new", "B"));
+      const expected = ["tdcc:113"];
+      expect(await reported("sync_activity_changes")).toEqual(expected);
+      expect(await reported("sync_activity_details")).toEqual(expected);
+      expect(await counts()).toEqual(["tdcc:1"]);
+    });
   });
 });
