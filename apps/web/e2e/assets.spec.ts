@@ -345,11 +345,7 @@ test("資產清冊區分待繳與未知金額，並可新增手動資產", async
 
   await ledger.getByRole("button", { name: /^其他資產/ }).click();
   await expect(ledger.getByRole("button", { name: /^自住房屋/ })).toBeVisible();
-  const manageHistory = ledger.getByRole("button", {
-    name: "管理估值歷史",
-    exact: true,
-  });
-  await manageHistory.click();
+  await ledger.getByRole("button", { name: /^自住房屋/ }).click();
   await expect(
     ledger.getByRole("heading", { name: "估值歷史", exact: true }),
   ).toBeVisible();
@@ -372,11 +368,10 @@ test("資產清冊區分待繳與未知金額，並可新增手動資產", async
   const reserve = ledger.getByRole("button", { name: /^緊急預備金/ });
   await reserve.click();
   await ledger.getByLabel("估值（TWD）").fill("0");
-  await ledger.getByRole("button", { name: "新增估值", exact: true }).click();
+  await ledger.getByRole("button", { name: "更新估值", exact: true }).click();
   const settled = ledger.getByRole("button", { name: "已結清（1）" });
   await expect(settled).toBeVisible();
   await expect(reserve).toBeHidden();
-  await expect(manageHistory).toBeVisible();
   await settled.click();
   await expect(reserve).toBeVisible();
 });
