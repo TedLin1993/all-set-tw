@@ -249,6 +249,24 @@ test.beforeEach(async ({ page }) => {
     ) {
       const assetId = path.split("/")[3]!;
       body = manualAssetHistory.get(assetId) ?? [];
+    } else if (
+      path.match(/^\/api\/manual-assets\/[^/]+\/history$/) &&
+      method === "POST"
+    ) {
+      const assetId = path.split("/")[3]!;
+      const input = route.request().postDataJSON();
+      // 後端以日期 upsert，同一天只留一筆。
+      manualAssetHistory.set(assetId, [
+        ...manualAssetHistory
+          .get(assetId)!
+          .filter((entry) => entry.date !== input.date),
+        input,
+      ]);
+      Object.assign(
+        manualAssets.find((asset) => asset.id === assetId)!,
+        input,
+      );
+      body = { success: true };
     } else if (path === "/api/exchange-rates")
       body = [
         { currency: "USD", rateTwd: 32, updatedAt: "2026-08-08" },
@@ -349,4 +367,15 @@ test("資產清冊區分待繳與未知金額，並可新增手動資產", async
   await editor.getByRole("button", { name: "儲存", exact: true }).click();
   await expect(ledger.getByText("緊急預備金", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/#\/assets$/);
+
+  // 到期回收：估值記為 0 後收進「已結清」，資產與歷史都保留，不必刪除。
+  const reserve = ledger.getByRole("button", { name: /^緊急預備金/ });
+  await reserve.click();
+  await ledger.getByLabel("估值（TWD）").fill("0");
+  await ledger.getByRole("button", { name: "新增估值", exact: true }).click();
+  const settled = ledger.getByRole("button", { name: "已結清（1）" });
+  await expect(settled).toBeVisible();
+  await expect(reserve).toBeHidden();
+  await settled.click();
+  await expect(reserve).toBeVisible();
 });

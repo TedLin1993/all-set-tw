@@ -48,6 +48,11 @@ export interface AssetSummary {
   missingCurrencies: string[];
 }
 
+/** 最新估值為 0 的手動資產視為已結清（例如投資到期回收）；尚未估值的不算。 */
+export function isSettledManualAsset(asset: ManualAssetRow) {
+  return asset.value === 0;
+}
+
 function institutionKey(account: BankAccountRow) {
   const bankCode = account.bankCode ?? connectorBankCode(account.connectorId);
   return bankCode ? `bank:${bankCode}` : `connector:${account.connectorId}`;
