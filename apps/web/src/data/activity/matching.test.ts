@@ -152,6 +152,20 @@ describe("證券成交與交割款合併", () => {
       },
     });
     expect(settled.subtitle).toContain("元大台灣50 買進 200 股");
+
+    // 配對看入帳日：授權時間早於成交日（預先圈存）仍是這筆成交的交割款。
+    const held = build(
+      [
+        {
+          ...expense("held", "2026-11-16", -9950),
+          authorizedAt: "2026-11-12T12:00:00+08:00",
+        },
+      ],
+      [trade("regular", "2026-11-13", -9950)],
+    );
+    expect(held.map(({ id, trade: t }) => [id, t?.id])).toEqual([
+      ["held", "regular"],
+    ]);
     expect(activityFlowTotalTwd(items, "expense", {})).toBe(9950 + 19587 + 120);
   });
 

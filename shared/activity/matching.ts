@@ -247,9 +247,10 @@ export function matchTradesToSettlements(
     )
     .map((transaction) => ({
       transaction,
-      day: transaction.authorizedAt
-        ? dayNumber(transaction.authorizedAt)
-        : dateOnlyNumber(transaction.postedDate),
+      // 交割以入帳日為準；授權時間可能早於成交日（例如預先圈存）。
+      day:
+        dateOnlyNumber(transaction.postedDate) ??
+        dayNumber(transaction.authorizedAt),
     }))
     .filter(
       (candidate): candidate is typeof candidate & { day: number } =>
