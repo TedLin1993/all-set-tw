@@ -290,6 +290,16 @@
     toggleHistory(firstAsset.id);
   }
 
+  // 展開中的資產收進收合的「已結清」後就看不到了，一併清掉展開狀態，
+  // 否則「管理估值歷史」會停在「收起」，第一次點擊沒有作用。
+  $effect(() => {
+    if (
+      !showSettled &&
+      settledAssets.some((asset) => asset.id === expandedAssetId)
+    )
+      expandedAssetId = null;
+  });
+
   onMount(() => {
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;

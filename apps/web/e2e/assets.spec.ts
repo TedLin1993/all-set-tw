@@ -376,6 +376,7 @@ test("資產清冊區分待繳與未知金額，並可新增手動資產", async
   const settled = ledger.getByRole("button", { name: "已結清（1）" });
   await expect(settled).toBeVisible();
   await expect(reserve).toBeHidden();
+  await expect(manageHistory).toBeVisible();
   await settled.click();
   await expect(reserve).toBeVisible();
 });
