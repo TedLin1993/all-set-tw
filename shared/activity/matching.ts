@@ -217,6 +217,78 @@ function addAutomaticMatches<I extends MatchingInvoice>(
   }
 }
 
+/** 交割扣款可晚於成交日的最多天數：台股 T+2 個營業日，加上週末與連假的緩衝。 */
+export const TRADE_SETTLEMENT_MAX_DAYS = 7;
+
+export interface SettlementTrade {
+  id: string;
+  /** 成交日，YYYY-MM-DD 開頭。 */
+  date: string;
+  /** 帶正負號、含費稅的淨收付金額；來源沒有提供時不配對。 */
+  amount?: number | null;
+  currency: string;
+}
+
+/**
+ * 把證券成交配到銀行帳戶上的交割款：同幣別、金額（含正負號）完全相同，且入帳日在成交日
+ * 當天到其後 TRADE_SETTLEMENT_MAX_DAYS 天內。一筆交割款只配一筆成交，同條件多筆時取最接近
+ * 成交日的那筆；同日多筆成交合併成一筆交割款時金額對不上，不猜測配對。
+ * 信用卡與手動記錄不是交割帳戶，不參與。回傳銀行交易 id → 成交 id。
+ */
+export function matchTradesToSettlements(
+  transactions: MatchingTransaction[],
+  trades: SettlementTrade[],
+) {
+  const candidates = transactions
+    .filter(
+      (transaction) =>
+        transaction.accountType !== "credit" &&
+        transaction.connectorId !== MANUAL_CONNECTOR_ID,
+    )
+    .map((transaction) => ({
+      transaction,
+      // 交割以入帳日為準；授權時間可能早於成交日（例如預先圈存）。
+      day:
+        dateOnlyNumber(transaction.postedDate) ??
+        dayNumber(transaction.authorizedAt),
+    }))
+    .filter(
+      (candidate): candidate is typeof candidate & { day: number } =>
+        candidate.day != null,
+    );
+  const settlementToTrade = new Map<string, string>();
+  const datedTrades = trades
+    .map((trade) => ({ trade, day: dateOnlyNumber(trade.date) }))
+    .filter(
+      (entry): entry is typeof entry & { day: number } =>
+        entry.day != null &&
+        entry.trade.amount != null &&
+        entry.trade.amount !== 0,
+    )
+    .sort(
+      (left, right) =>
+        left.day - right.day || compareById(left.trade, right.trade),
+    );
+  for (const { trade, day } of datedTrades) {
+    const settlement = candidates
+      .filter(
+        (candidate) =>
+          !settlementToTrade.has(candidate.transaction.id) &&
+          candidate.transaction.currency === trade.currency &&
+          candidate.transaction.amount === trade.amount &&
+          candidate.day >= day &&
+          candidate.day - day <= TRADE_SETTLEMENT_MAX_DAYS,
+      )
+      .sort(
+        (left, right) =>
+          left.day - right.day ||
+          compareById(left.transaction, right.transaction),
+      )[0];
+    if (settlement) settlementToTrade.set(settlement.transaction.id, trade.id);
+  }
+  return settlementToTrade;
+}
+
 function expenseDay(transaction: ExpenseDayTransaction) {
   if (
     transaction.amount === 0 ||

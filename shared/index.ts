@@ -23,6 +23,7 @@ export {
   invoiceTransactionDayGap,
   isManualInvoiceMatchCandidate,
   MANUAL_INVOICE_MATCH_MAX_DAYS,
+  TRADE_SETTLEMENT_MAX_DAYS,
   type InvoiceTransactionMatches,
   type InvoiceTransactionPreference,
 } from "./activity/matching";

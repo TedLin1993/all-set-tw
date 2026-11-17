@@ -142,9 +142,12 @@ export async function materializeActivityReport(
       const invoiceAdded = Boolean(
         item.invoiceId && invoiceIds.has(item.invoiceId),
       );
+      // 成交併入交割款時，活動是銀行那筆；成交仍算這次同步的新增。
+      const tradeAdded = Boolean(item.trade && tradeIds.has(item.trade.id));
       if (
         !bankKinds &&
         !invoiceAdded &&
+        !tradeAdded &&
         !(item.source === "investment" && tradeIds.has(item.id))
       )
         continue;
@@ -154,6 +157,7 @@ export async function materializeActivityReport(
         bankKinds?.has("added") ||
         item.source === "investment" ||
         item.source === "invoice" ||
+        tradeAdded ||
         newBankIds.has(item.id)
       )
         kinds.push("added");
