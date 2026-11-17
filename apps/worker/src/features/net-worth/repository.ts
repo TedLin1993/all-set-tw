@@ -220,7 +220,7 @@ export async function upsertBankDepositHistory(
   }
 }
 
-const COST_CONNECTORS_CTE = `cost_connectors AS (
+const COST_CONNECTORS_CTE = `cost_connectors AS MATERIALIZED (
   SELECT DISTINCT connector_id FROM investment_positions WHERE cost_basis IS NOT NULL
 )`;
 
@@ -267,27 +267,42 @@ export async function loadStockCostInputs(db: D1Database) {
       ORDER BY 1 DESC`,
     ),
     // 集保最新快照中，不屬於任何直接券商帳戶的持股：市值線含這些持股但成本未知。
+    // 各 CTE 先物化、只算一次：寫成相關子查詢時，每筆集保持股都會重掃整張
+    // investment_positions，快照累積後單次查詢可讀上百萬列（D1 每日讀取額度）。
     db.prepare(
-      `WITH ${COST_CONNECTORS_CTE}
+      `WITH ${COST_CONNECTORS_CTE},
+      -- 只看券商最新快照：已不在最新快照的帳戶，舊列不代表成本仍涵蓋這筆持股。
+      direct_latest AS MATERIALIZED (
+        SELECT connector_id, MAX(as_of_date) AS as_of_date
+        FROM investment_positions
+        JOIN cost_connectors USING (connector_id)
+        GROUP BY connector_id
+      ),
+      covered_accounts AS MATERIALIZED (
+        SELECT DISTINCT direct.broker_no, direct.broker_account
+        FROM investment_positions direct
+        JOIN direct_latest
+          ON direct_latest.connector_id = direct.connector_id
+          AND direct_latest.as_of_date = direct.as_of_date
+      ),
+      tdcc_latest AS MATERIALIZED (
+        SELECT asset_type, MAX(as_of_date) AS as_of_date
+        FROM investment_positions
+        WHERE connector_id = 'tdcc' AND asset_type IN ('stock', 'etf')
+        GROUP BY asset_type
+      )
+      -- CROSS JOIN 固定由最新快照日帶出集保列，只讀最新那天，不掃集保歷史。
       SELECT COUNT(*) AS count
-      FROM investment_positions tdcc
-      WHERE tdcc.connector_id = 'tdcc'
-        AND tdcc.asset_type IN ('stock', 'etf')
-        AND COALESCE(tdcc.market_value, 0) != 0
-        AND tdcc.as_of_date = (
-          SELECT MAX(as_of_date) FROM investment_positions latest
-          WHERE latest.connector_id = 'tdcc' AND latest.asset_type = tdcc.asset_type
-        )
+      FROM tdcc_latest
+      CROSS JOIN investment_positions tdcc
+        ON tdcc.connector_id = 'tdcc'
+        AND tdcc.asset_type = tdcc_latest.asset_type
+        AND tdcc.as_of_date = tdcc_latest.as_of_date
+      WHERE COALESCE(tdcc.market_value, 0) != 0
         AND NOT EXISTS (
-          SELECT 1 FROM investment_positions direct
-          JOIN cost_connectors USING (connector_id)
-          WHERE direct.broker_no = tdcc.broker_no
-            AND direct.broker_account = tdcc.broker_account
-            -- 只看券商最新快照：已不在最新快照的帳戶，舊列不代表成本仍涵蓋這筆持股。
-            AND direct.as_of_date = (
-              SELECT MAX(as_of_date) FROM investment_positions latest
-              WHERE latest.connector_id = direct.connector_id
-            )
+          SELECT 1 FROM covered_accounts covered
+          WHERE covered.broker_no = tdcc.broker_no
+            AND covered.broker_account = tdcc.broker_account
         )`,
     ),
     // 海外市值從這天才進入走勢，成本也從這天起計入。
