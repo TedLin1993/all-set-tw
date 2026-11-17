@@ -22,6 +22,7 @@
     manualAssetsQuery,
   } from "@/data/assets/queries";
   import type { ManualAssetRow } from "@/data/assets/types";
+  import { isSettledManualAsset } from "./model/summary";
   import {
     formatCurrency,
     formatDate,
@@ -53,6 +54,7 @@
     assetName: string;
     date: string;
   } | null>(null);
+  let showSettled = $state(false);
   let formError = $state("");
   let editorDialog = $state<HTMLDivElement>();
   let deleteDialog = $state<HTMLDivElement>();
@@ -72,6 +74,15 @@
     other: "其他",
   };
   const currencies = ["TWD", "USD", "JPY", "EUR"] as const;
+  const activeAssets = $derived(
+    (assets.data ?? []).filter((asset) => !isSettledManualAsset(asset)),
+  );
+  const settledAssets = $derived(
+    (assets.data ?? []).filter(isSettledManualAsset),
+  );
+  // type="number" 的輸入清空後是 null、未輸入時是空字串；0 是有效估值（例如投資到期回收）。
+  const hasAmount = (value: string | number | null | undefined) =>
+    value !== "" && value != null && Number.isFinite(Number(value));
   const rateValues = $derived(
     Object.fromEntries(
       (rates.data ?? []).map((rate) => [rate.currency, rate.rateTwd]),
@@ -246,7 +257,7 @@
     restoreFocus();
   }
   function submit() {
-    if (!form.name.trim() || !form.value) {
+    if (!form.name.trim() || !hasAmount(form.value)) {
       formError = "請輸入資產名稱與目前估值。";
       return;
     }
@@ -273,9 +284,21 @@
       expandedAssetId = null;
       return;
     }
-    const firstAsset = assets.data?.[0];
-    if (firstAsset) toggleHistory(firstAsset.id);
+    const firstAsset = activeAssets[0] ?? settledAssets[0];
+    if (!firstAsset) return;
+    if (isSettledManualAsset(firstAsset)) showSettled = true;
+    toggleHistory(firstAsset.id);
   }
+
+  // 展開中的資產收進收合的「已結清」後就看不到了，一併清掉展開狀態，
+  // 否則「管理估值歷史」會停在「收起」，第一次點擊沒有作用。
+  $effect(() => {
+    if (
+      !showSettled &&
+      settledAssets.some((asset) => asset.id === expandedAssetId)
+    )
+      expandedAssetId = null;
+  });
 
   onMount(() => {
     const handleKeydown = (event: KeyboardEvent) => {
@@ -349,7 +372,7 @@
           {#if (assets.data ?? []).length === 0}
             <p class="p-8 text-center text-sm text-subtle">尚無其他資產。</p>
           {:else}
-            {#each assets.data ?? [] as asset (asset.id)}
+            {#snippet assetRow(asset: ManualAssetRow)}
               <div class={hideSummary ? "" : "px-5 py-4"}>
                 <div class="flex items-center gap-1">
                   <button
@@ -422,6 +445,7 @@
                                 /><Button
                                   size="sm"
                                   variant="ghost"
+                                  disabled={!hasAmount(editingHistoryValue)}
                                   onclick={() =>
                                     editHistory.mutate({
                                       assetId: asset.id,
@@ -479,7 +503,8 @@
                         /></label
                       ><Button
                         size="sm"
-                        disabled={!historyValue || addHistory.isPending}
+                        disabled={!hasAmount(historyValue) ||
+                          addHistory.isPending}
                         onclick={() =>
                           addHistory.mutate({
                             assetId: asset.id,
@@ -491,7 +516,27 @@
                   </div>
                 {/if}
               </div>
+            {/snippet}
+            {#each activeAssets as asset (asset.id)}
+              {@render assetRow(asset)}
             {/each}
+            {#if settledAssets.length > 0}
+              <button
+                class={`flex w-full cursor-pointer items-center gap-2 py-3 text-left text-sm text-subtle transition hover:bg-ink/3 ${hideSummary ? "" : "px-5"}`}
+                aria-expanded={showSettled}
+                onclick={() => (showSettled = !showSettled)}
+              >
+                <ChevronRight
+                  class={`size-4 transition ${showSettled ? "rotate-90" : ""}`}
+                />
+                已結清（{settledAssets.length}）
+              </button>
+              {#if showSettled}
+                {#each settledAssets as asset (asset.id)}
+                  {@render assetRow(asset)}
+                {/each}
+              {/if}
+            {/if}
           {/if}
         </div>
       </CardContent>

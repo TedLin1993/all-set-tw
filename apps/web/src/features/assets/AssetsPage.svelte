@@ -19,7 +19,7 @@
   import InstitutionDetails from "./components/InstitutionDetails.svelte";
   import InvestmentWorkspace from "./components/InvestmentWorkspace.svelte";
   import ManualAssets from "./ManualAssets.svelte";
-  import { calculateAssetSummary } from "./model/summary";
+  import { calculateAssetSummary, isSettledManualAsset } from "./model/summary";
   import {
     isCryptoPosition,
     listedHoldingCount,
@@ -44,6 +44,10 @@
   const investments = createQuery(() => investmentsQuery(() => api));
   const trades = createQuery(() => investmentTransactionsQuery(() => api));
   const manual = createQuery(() => manualAssetsQuery(() => api));
+  // 筆數不含已結清（估值為 0）的資產；區塊是否顯示仍看全部，已結清的才找得到。
+  const activeManualCount = $derived(
+    (manual.data ?? []).filter((asset) => !isSettledManualAsset(asset)).length,
+  );
   const rates = createQuery(() => exchangeRatesQuery(() => api));
 
   const summary = $derived(
@@ -240,7 +244,7 @@
             {formatCurrency(summary.manualTotal)}
           </p>
           <p class="mt-1 text-caption text-subtle">
-            {manual.data?.length ?? 0} 筆
+            {activeManualCount} 筆
           </p>
         </div>
       </div>
@@ -379,7 +383,7 @@
                 <span class="min-w-0">
                   <strong class="block text-sm">其他資產</strong>
                   <small class="mt-1 block text-caption text-subtle">
-                    {manual.data?.length ?? 0} 筆 · 手動維護估值
+                    {activeManualCount} 筆 · 手動維護估值
                   </small>
                 </span>
                 <strong class="text-sm tabular-nums text-moss">
@@ -568,7 +572,7 @@
             <div class="min-w-0">
               <h2 class="text-base font-semibold">其他資產</h2>
               <p class="mt-1 text-caption text-subtle">
-                {manual.data?.length ?? 0} 筆 · 估值歷史
+                {activeManualCount} 筆 · 估值歷史
               </p>
             </div>
             <div class="shrink-0 text-right">
