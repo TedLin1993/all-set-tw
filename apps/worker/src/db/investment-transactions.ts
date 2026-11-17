@@ -15,20 +15,29 @@ END`;
  * 券商帳戶、日期或代碼不完整時 NULL 比較不成立，不會猜測配對；集保獨有的交易
  * （例如分割轉入／轉出）與永豐沒有的區間維持顯示。外層資料表以原名 investment_transactions 引用。
  */
-export const SUPERSEDED_TDCC_TRADE_SQL = `investment_transactions.connector_id = 'tdcc'
-  AND investment_transactions.transaction_code IN ('113', '123')
+export const supersededTdccTradeSql = (
+  column: (name: string) => string,
+  /** 對配對到的永豐列（別名 direct）追加的條件，以 AND 開頭。 */
+  directCondition = "",
+) => `${column("connector_id")} = 'tdcc'
+  AND ${column("transaction_code")} IN ('113', '123')
   AND EXISTS (
     SELECT 1 FROM investment_transactions direct
     WHERE direct.connector_id = 'sinotrade'
-      AND direct.broker_no = investment_transactions.broker_no
-      AND direct.broker_account = investment_transactions.broker_account
-      AND direct.symbol = investment_transactions.symbol
-      AND direct.currency = investment_transactions.currency
-      AND direct.quantity = investment_transactions.quantity
-      AND direct.transaction_code = CASE investment_transactions.transaction_code
+      AND direct.broker_no = ${column("broker_no")}
+      AND direct.broker_account = ${column("broker_account")}
+      AND direct.symbol = ${column("symbol")}
+      AND direct.currency = ${column("currency")}
+      AND direct.quantity = ${column("quantity")}
+      AND direct.transaction_code = CASE ${column("transaction_code")}
         WHEN '113' THEN 'B' WHEN '123' THEN 'S' END
-      AND ${tradeDay("direct.trade_date")} = ${tradeDay("investment_transactions.trade_date")}
+      AND ${tradeDay("direct.trade_date")} = ${tradeDay(column("trade_date"))}
+      ${directCondition}
   )`;
+
+export const SUPERSEDED_TDCC_TRADE_SQL = supersededTdccTradeSql(
+  (name) => `investment_transactions.${name}`,
+);
 
 /** 排除已由永豐取代的集保買賣；外層查詢必須直接從 investment_transactions 取列。 */
 export function isNotSupersededInvestmentTransaction() {

@@ -1,3 +1,23 @@
+import { supersededTdccTradeSql } from "../../../db";
+
+/**
+ * 報告層的去重只處理「兩邊都列進報告」的成交：集保買賣對得上永豐成交，而且永豐那筆
+ * 已在報告的變化紀錄裡。永豐以未列入報告的方式匯入（例如手動同步、首次回補）時，
+ * 集保那筆是報告裡唯一的紀錄，必須保留。
+ */
+const REPORTED_DIRECT_TRADE_SQL = `AND EXISTS (SELECT 1 FROM sync_activity_changes reported
+  WHERE reported.entity_type = 'investment_transaction' AND reported.record_id = direct.id)`;
+const REPORTED_DUPLICATE_TDCC_TRADE_SQL = supersededTdccTradeSql(
+  (name) => `investment_transactions.${name}`,
+  REPORTED_DIRECT_TRADE_SQL,
+);
+/** 同一條規則套用在尚未寫入的 staging payload（JSON 欄位名與資料表欄位相同）。 */
+export const stagedReportedDuplicateTdccTradeSql = (payload: string) =>
+  supersededTdccTradeSql(
+    (name) => `json_extract(${payload}, '$.${name}')`,
+    REPORTED_DIRECT_TRADE_SQL,
+  );
+
 /** Set-based journal writes share the promotion transaction and its lock owner. */
 export function captureStagedActivityBefore(
   db: D1Database,
@@ -96,6 +116,16 @@ export function captureStagedActivityAfter(
     ) WHERE run_id IN (${runs}) AND entity_type = 'invoice'`,
       )
       .bind(stagingRunId),
+    // 永豐那筆已列進報告的集保買賣不重複列為新增。
+    db
+      .prepare(
+        `DELETE FROM sync_activity_changes WHERE run_id IN (${runs})
+      AND entity_type = 'investment_transaction'
+      AND EXISTS (SELECT 1 FROM investment_transactions
+        WHERE investment_transactions.id = sync_activity_changes.record_id
+          AND ${REPORTED_DUPLICATE_TDCC_TRADE_SQL})`,
+      )
+      .bind(stagingRunId),
     db
       .prepare(
         `UPDATE sync_activity_changes AS change SET snapshot = (
@@ -111,5 +141,40 @@ export function captureStagedActivityAfter(
         `DELETE FROM sync_activity_changes WHERE run_id IN (${runs}) AND snapshot = '{}'`,
       )
       .bind(stagingRunId),
+  ];
+}
+
+const DUPLICATE_TDCC_CHANGE_SQL = `change.entity_type = 'investment_transaction'
+  AND EXISTS (SELECT 1 FROM investment_transactions
+    WHERE investment_transactions.id = change.record_id
+      AND ${REPORTED_DUPLICATE_TDCC_TRADE_SQL})`;
+
+/**
+ * 集保比永豐先同步到的成交，要等永豐寫入後才對得上。投資交易 promotion 後回頭把
+ * 先前報告裡與永豐重複的集保買賣移除：先扣新增筆數，再刪展示快照與變化紀錄，
+ * 讓同一筆成交只留在永豐的報告。本次集保 run 自己的重複列已由
+ * captureStagedActivityAfter 移除且未計入筆數，不會在這裡被重複扣除。
+ */
+export function removeDuplicateTdccReportActivity(db: D1Database) {
+  return [
+    db.prepare(
+      `UPDATE scheduled_sync_batch_results AS result
+      SET new_investment_transactions = MAX(0, new_investment_transactions - (
+        SELECT COUNT(*) FROM sync_activity_changes change
+        JOIN sync_activity_runs run ON run.id = change.run_id
+        WHERE run.batch_id = result.batch_id AND run.connector_id = result.connector_id
+          AND ${DUPLICATE_TDCC_CHANGE_SQL}))
+      WHERE connector_id = 'tdcc' AND new_investment_transactions > 0`,
+    ),
+    db.prepare(
+      `DELETE FROM sync_activity_details
+      WHERE activity_id LIKE 'investment:%'
+        AND EXISTS (SELECT 1 FROM investment_transactions
+          WHERE investment_transactions.id = substr(sync_activity_details.activity_id, 12)
+            AND ${REPORTED_DUPLICATE_TDCC_TRADE_SQL})`,
+    ),
+    db.prepare(
+      `DELETE FROM sync_activity_changes AS change WHERE ${DUPLICATE_TDCC_CHANGE_SQL}`,
+    ),
   ];
 }

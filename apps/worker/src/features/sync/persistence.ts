@@ -1,6 +1,8 @@
 import {
   captureStagedActivityBefore,
   captureStagedActivityAfter,
+  removeDuplicateTdccReportActivity,
+  stagedReportedDuplicateTdccTradeSql,
 } from "./reports/activity-capture";
 import {
   createDrizzle,
@@ -489,6 +491,9 @@ export async function promoteStagedSyncWrite(
     ...promotionStatements,
     ...(input.afterPromoteStatements ?? []),
     ...captureStagedActivityAfter(db, input.runId),
+    ...(entityTypes.has("investment_transaction")
+      ? removeDuplicateTdccReportActivity(db)
+      : []),
     ...(input.finalizeStatements ?? []),
     db
       .prepare("DELETE FROM sync_write_staging WHERE run_id = ?")
@@ -594,7 +599,12 @@ function newRecordCountStatement(
            SELECT 1
            FROM ${config.table} target
            WHERE ${conflictMatch}
-         )`,
+         )${
+           // 報告已列過永豐那筆的集保買賣不算新增。
+           entityType === "investment_transaction"
+             ? ` AND NOT COALESCE(${stagedReportedDuplicateTdccTradeSql("staging.payload")}, 0)`
+             : ""
+         }`,
     )
     .bind(runId, entityType);
 }
