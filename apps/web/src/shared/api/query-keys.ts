@@ -1,4 +1,5 @@
 export const queryKeys = {
+  releases: ["releases"] as const,
   runtime: ["runtime"] as const,
   summary: ["summary"] as const,
   bank: ["bank"] as const,

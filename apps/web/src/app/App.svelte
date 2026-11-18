@@ -2,10 +2,12 @@
   import { onMount } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { Ellipsis, Eye, EyeOff } from "@lucide/svelte";
-  import { QueryClientProvider } from "@tanstack/svelte-query";
+  import { createQuery, QueryClientProvider } from "@tanstack/svelte-query";
   import { connectorList } from "@taiwan-fin-hub/shared";
   import Overview from "@/features/overview/OverviewPage.svelte";
+  import ReleaseHistoryDialog from "@/features/settings/components/ReleaseHistoryDialog.svelte";
   import type { ConnectorId } from "@/data/connectors/types";
+  import { releaseHistory, releasesQuery } from "@/data/releases/queries";
   import { createApiClient } from "@/shared/api/client";
   import { swipeBack } from "@/shared/actions/swipe-back";
   import { moneyState } from "@/shared/state/money-visibility.svelte";
@@ -45,6 +47,11 @@
   const pagePromises: Partial<Record<PageKey, Promise<LazyPageModule>>> = {};
 
   const api = createApiClient();
+  const releases = createQuery(
+    () => releasesQuery,
+    () => queryClient,
+  );
+  const versions = $derived(releaseHistory(releases.data));
   // Read the hash before the first render so deep links do not mount the
   // overview page and fire its queries first.
   const initialRouteView = parseViewHash(window.location.hash);
@@ -295,7 +302,7 @@
     }}
   >
     <aside
-      class="hidden border-r border-white/10 bg-inverse px-6 py-7 text-white xl:sticky xl:top-0 xl:flex xl:h-screen xl:flex-col"
+      class="hidden border-r border-white/10 bg-inverse px-6 py-7 text-white xl:sticky xl:top-0 xl:flex xl:h-dvh xl:flex-col xl:overflow-y-auto"
     >
       <div class="px-2">
         <h1 class="text-xl font-semibold tracking-normal">不用記帳</h1>
@@ -305,7 +312,7 @@
           ALL SET
         </p>
       </div>
-      <nav class="mt-6 grid gap-1">
+      <nav class="my-6 grid gap-1">
         {#each navItems as item (item.view)}
           {@const NavIcon = item.icon}
           <button
@@ -317,6 +324,9 @@
           </button>
         {/each}
       </nav>
+      <div class="mt-auto shrink-0 border-t border-white/10 pt-3">
+        <ReleaseHistoryDialog history={versions} variant="sidebar" />
+      </div>
     </aside>
 
     {#if pageSwipe && backTarget}
@@ -331,6 +341,7 @@
             {@const Page = module.default as SettingsPageComponent}
             <Page
               {api}
+              history={versions}
               demoMode={runtime.demoMode}
               mobileView="data-sources"
               {navigate}
@@ -344,6 +355,7 @@
               {@const Page = module.default as SettingsPageComponent}
               <Page
                 {api}
+                history={versions}
                 demoMode={runtime.demoMode}
                 connectorTarget={null}
                 mobileView={backTarget.view === "more"
@@ -368,7 +380,7 @@
         : undefined}
     >
       <div
-        class="no-scrollbar hidden border-b border-ink/10 bg-paper px-4 py-2 md:flex md:gap-1 md:overflow-x-auto xl:hidden"
+        class="no-scrollbar hidden border-b border-ink/10 bg-paper px-4 py-2 md:flex md:items-center md:gap-1 md:overflow-x-auto xl:hidden"
       >
         {#each navItems as item (item.view)}
           {@const NavIcon = item.icon}
@@ -378,6 +390,7 @@
             ><NavIcon class="size-4" />{item.label}</button
           >
         {/each}
+        <ReleaseHistoryDialog history={versions} class="ml-auto shrink-0" />
       </div>
       {@render pageHeader(view, connectorTarget)}
 
@@ -404,6 +417,7 @@
                   module.default as typeof import("@/features/settings/SettingsPage.svelte").default}
                 <Page
                   {api}
+                  history={versions}
                   demoMode={runtime.demoMode}
                   {connectorTarget}
                   mobileView={view === "more"
