@@ -7,6 +7,7 @@ export const currentVersion = bundledReleases[0].version;
 const cacheDuration = 6 * 60 * 60 * 1000;
 const versionOrder = new Intl.Collator("en", { numeric: true });
 
+// 規則與 .github/workflows/release.yml 的驗證一致，修改時需一起調整。
 function isRelease(value: unknown): value is Release {
   return (
     typeof value === "object" &&
@@ -16,6 +17,7 @@ function isRelease(value: unknown): value is Release {
     /^\d+\.\d+\.\d+$/.test(value.version) &&
     "date" in value &&
     typeof value.date === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value.date) &&
     "changes" in value &&
     Array.isArray(value.changes) &&
     value.changes.every((change: unknown) => typeof change === "string")

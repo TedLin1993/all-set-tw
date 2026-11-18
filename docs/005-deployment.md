@@ -222,10 +222,12 @@ workflow 會：
 版本從 `v1.0.0` 開始。維護者依使用者可見的改動決定發版時間與版號：相容的修正遞增 patch、新功能遞增 minor、不相容變更遞增 major。
 
 1. 在根目錄 `releases.json` 的陣列最前方加入一筆紀錄，填入版號（例如 `1.0.1`）、發布日期（`YYYY-MM-DD`）與一至三條正體中文更新摘要。保留所有歷史紀錄供前端查閱。
-2. PR 通過 CI 後合併至官方 `main`。版本紀錄此時公開，前端下次檢查即可取得公告。
-3. 合併後，`.github/workflows/release.yml` 讀取 `releases.json` 的第一筆紀錄，在合併 commit 建立 `v1.0.1` 這類 Git tag 與 GitHub Release，並以更新摘要作為說明。
+2. 開啟 PR 後，`.github/workflows/release.yml` 會驗證整份清單的格式。任一筆不符時，所有部署都會拒收上游紀錄，因此請在驗證通過後再合併至官方 `main`。版本紀錄合併後即公開，前端下次檢查即可取得公告。
+3. 合併後，同一個 workflow 再驗證一次，讀取第一筆紀錄，在合併 commit 建立 `v1.0.1` 這類 Git tag 與 GitHub Release，並以更新摘要作為說明。連續合併多次發版時，各次發布會依序執行。
 
-workflow 只在官方 repository 執行，已發布的版號會略過。修改已發布版本的摘要時，請一併編輯對應的 GitHub Release。
+workflow 只在官方 repository 建立 Release，已發布的版號會略過。若 tag 已存在但沒有對應的 Release，workflow 會停止，請確認 tag 指向的 commit 後手動建立。修改已發布版本的摘要時，請一併編輯對應的 GitHub Release。
+
+格式規則由 workflow 與前端 `apps/web/src/data/releases/queries.ts` 各自檢查，調整欄位或格式時兩處需一起修改。
 
 部署 repository 仍同步上游 `main`。兩次發版之間的部署顯示最近一次發版的版號，實際納入的上游程式碼可由 Commit 辨識。
 

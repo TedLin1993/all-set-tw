@@ -1,24 +1,59 @@
-name: Publish Release
+name: Release
 
 on:
   push:
     branches: [main]
     paths:
       - releases.json
+  pull_request:
+    paths:
+      - releases.json
 
 permissions:
-  contents: write
-
-concurrency:
-  group: publish-release
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  publish:
-    # 只在官方 repository 發布；fork 與部署副本不建立 tag。
-    if: github.repository == 'TedLin1993/all-set-tw'
+  check:
+    name: Validate releases.json
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 規則與 apps/web/src/data/releases/queries.ts 的 isRelease 一致；
+      # 任一筆不符時，前端會拒收整份上游紀錄。
+      - name: Validate every entry
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! jq -e '
+            type == "array" and length > 0 and all(.[];
+              type == "object"
+              and (.version | type == "string" and test("^[0-9]+[.][0-9]+[.][0-9]+$"))
+              and (.date | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+              and (.changes | type == "array" and all(.[]; type == "string"))
+            )
+          ' releases.json > /dev/null; then
+            echo "::error file=releases.json::每筆紀錄需包含 X.Y.Z 版號、YYYY-MM-DD 日期與字串陣列的 changes。"
+            exit 1
+          fi
+
+  publish:
+    name: Publish GitHub Release
+    needs: check
+    # 只在官方 repository 的 main 發布；PR、fork 與部署副本不建立 tag。
+    if: github.event_name == 'push' && github.repository == 'TedLin1993/all-set-tw'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-release
+      cancel-in-progress: false
+      queue: max
 
     steps:
       - name: Checkout
@@ -32,16 +67,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          version="$(jq -r '.[0].version' releases.json)"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "releases.json 第一筆的版號格式錯誤：$version" >&2
-            exit 1
-          fi
-          tag="v$version"
+          tag="v$(jq -r '.[0].version' releases.json)"
 
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "$tag 已發布，略過。"
             exit 0
+          fi
+
+          # tag 已存在時 GitHub 會忽略 --target，Release 可能指向其他 commit。
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag 的 tag 已存在但沒有 GitHub Release，請確認 tag 指向的 commit 後手動建立 Release。"
+            exit 1
           fi
 
           notes="$RUNNER_TEMP/release-notes.md"
