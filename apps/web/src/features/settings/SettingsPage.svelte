@@ -19,6 +19,7 @@
   import type { ConnectorId } from "@/data/connectors/types";
   import { formatDateTime } from "@/shared/format/financial";
   import Button from "@/shared/ui/Button.svelte";
+  import type { Release } from "@/data/releases/queries";
   import AboutPanel from "./components/AboutPanel.svelte";
   import AppearancePanel from "./components/AppearancePanel.svelte";
   import ClassificationRulesPanel from "./components/ClassificationRulesPanel.svelte";
@@ -37,6 +38,7 @@
   } from "./model/sources";
   let {
     api,
+    history,
     demoMode,
     connectorTarget,
     mobileView,
@@ -45,6 +47,7 @@
     addSourcePreview = false,
   }: {
     api: ApiClient;
+    history: Release[];
     demoMode: boolean;
     connectorTarget?: ConnectorId | null;
     mobileView?: MobileSettingsView | "more";
@@ -194,6 +197,7 @@
 
   {#if mobileView === "more"}
     <MobileMore
+      {history}
       {demoMode}
       jobs={jobs.data ?? []}
       jobsLoading={jobs.isPending}
@@ -206,8 +210,8 @@
   {:else if mobileView === "about"}
     <div class="grid min-w-0 gap-4">
       <h2 class="hidden text-2xl font-bold tracking-tight md:block">關於</h2>
-      <AppearancePanel />
       <AboutPanel />
+      <AppearancePanel />
     </div>
   {:else if mobileView === "data-sources"}
     <div class="grid min-w-0 gap-4">

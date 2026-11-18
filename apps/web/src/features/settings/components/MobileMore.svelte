@@ -11,6 +11,7 @@
   import type { ApiClient } from "@/shared/api/client";
   import type { View } from "@/app/types";
   import type { ClassificationRuleRow } from "@/data/classification/types";
+  import type { Release } from "@/data/releases/queries";
   import { connectorList } from "@taiwan-fin-hub/shared";
   import {
     getActionableSyncJobs,
@@ -18,7 +19,10 @@
     getPendingSyncJobs,
   } from "@/data/connectors/sync-status";
   import type { ConnectorId, SyncJobRow } from "@/data/connectors/types";
+  import ReleaseHistoryDialog from "./ReleaseHistoryDialog.svelte";
+
   let {
+    history,
     demoMode,
     jobs,
     jobsLoading = false,
@@ -27,6 +31,7 @@
     navigate,
     openConnector,
   }: {
+    history: Release[];
     api: ApiClient;
     demoMode: boolean;
     jobs: SyncJobRow[];
@@ -141,6 +146,10 @@
             >{customRuleCount} 條自訂　›</span
           ></button
         >
+        <ReleaseHistoryDialog
+          {history}
+          class="min-h-16 w-full rounded-none px-4 py-3 focus-visible:-outline-offset-2"
+        />
         <button
           type="button"
           class="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left"
@@ -150,8 +159,7 @@
             ><Info class="size-5" /></span
           ><span class="flex-1"
             ><span class="block font-semibold">關於</span><span
-              class="block text-sm text-ink/45"
-              >外觀主題、Commit 與組建時間</span
+              class="block text-sm text-ink/45">外觀主題、版本與診斷資訊</span
             ></span
           ><span class="text-sm font-semibold text-steel">›</span></button
         >

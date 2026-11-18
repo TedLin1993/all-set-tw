@@ -1,0 +1,52 @@
+name: Publish Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - releases.json
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # 只在官方 repository 發布；fork 與部署副本不建立 tag。
+    if: github.repository == 'TedLin1993/all-set-tw'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create tag and GitHub Release for the newest entry
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          version="$(jq -r '.[0].version' releases.json)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "releases.json 第一筆的版號格式錯誤：$version" >&2
+            exit 1
+          fi
+          tag="v$version"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag 已發布，略過。"
+            exit 0
+          fi
+
+          notes="$RUNNER_TEMP/release-notes.md"
+          jq -r '.[0].changes[] | "- " + .' releases.json > "$notes"
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --notes-file "$notes"

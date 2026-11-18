@@ -217,9 +217,21 @@ workflow 會：
 
 更新流程會保留部署 repository 目前安裝的 workflow，因此上游若修正更新流程，仍需手動替換 workflow 檔案。
 
+## 發布版本與更新紀錄
+
+版本從 `v1.0.0` 開始。維護者依使用者可見的改動決定發版時間與版號：相容的修正遞增 patch、新功能遞增 minor、不相容變更遞增 major。
+
+1. 在根目錄 `releases.json` 的陣列最前方加入一筆紀錄，填入版號（例如 `1.0.1`）、發布日期（`YYYY-MM-DD`）與一至三條正體中文更新摘要。保留所有歷史紀錄供前端查閱。
+2. PR 通過 CI 後合併至官方 `main`。版本紀錄此時公開，前端下次檢查即可取得公告。
+3. 合併後，`.github/workflows/release.yml` 讀取 `releases.json` 的第一筆紀錄，在合併 commit 建立 `v1.0.1` 這類 Git tag 與 GitHub Release，並以更新摘要作為說明。
+
+workflow 只在官方 repository 執行，已發布的版號會略過。修改已發布版本的摘要時，請一併編輯對應的 GitHub Release。
+
+部署 repository 仍同步上游 `main`。兩次發版之間的部署顯示最近一次發版的版號，實際納入的上游程式碼可由 Commit 辨識。
+
 ## 組建版本資訊
 
-「關於」頁面顯示 `TedLin1993/all-set-tw` 的上游 Commit、追蹤分支 `main` 與本次部署的台灣組建時間（`Asia/Taipei`，UTC+8），並可一次複製診斷資訊。
+桌面導覽與手機「更多」頁的「更新紀錄」可查閱所有版本的改動，有較新版時會顯示新版版號。「關於」頁顯示目前版本、`TedLin1993/all-set-tw` 的上游 Commit、追蹤分支 `main` 與本次部署的台灣組建時間（`Asia/Taipei`，UTC+8），並可一次複製診斷資訊。
 `scripts/build-info.mjs` 在 Vite 組建時辨識採用的上游版本，再由 `apps/web/vite.config.ts` 寫入前端產物。
 
 - 官方 repository 的 checkout 使用 `HEAD` 作為上游 Commit。

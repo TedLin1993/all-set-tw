@@ -71,6 +71,6 @@ export const mobileSettingsLabels: Record<
   },
   about: {
     label: "關於",
-    description: "切換外觀主題，並查看上游版本的 Commit、分支與本次組建時間。",
+    description: "切換外觀主題，查看目前版本與診斷資訊。",
   },
 };

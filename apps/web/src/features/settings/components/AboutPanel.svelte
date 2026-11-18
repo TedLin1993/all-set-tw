@@ -5,6 +5,7 @@
   import CardContent from "@/shared/ui/CardContent.svelte";
   import Icon from "@/shared/ui/Icon.svelte";
   import Textarea from "@/shared/ui/Textarea.svelte";
+  import { currentVersion } from "@/data/releases/queries";
 
   const buildInfo = __BUILD_INFO__;
   const buildTime = `${new Intl.DateTimeFormat("zh-TW", {
@@ -24,6 +25,7 @@
   ];
   const diagnostics = [
     "不用記帳 ALL SET",
+    `目前版本: v${currentVersion}`,
     `上游專案: ${buildInfo.repository}`,
     `Commit: ${buildInfo.commit}`,
     `分支: ${buildInfo.branch}`,
@@ -41,6 +43,13 @@
     }
   }
 </script>
+
+<Card>
+  <CardContent class="pt-5 sm:p-6">
+    <h3 class="text-lg font-bold">不用記帳 ALL SET</h3>
+    <p class="mt-1 text-sm text-muted-foreground">目前版本 v{currentVersion}</p>
+  </CardContent>
+</Card>
 
 <Card>
   <CardContent class="pt-5 sm:p-6">
