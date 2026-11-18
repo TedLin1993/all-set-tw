@@ -67,6 +67,22 @@ export class EPassbookError extends Error {
   }
 }
 
+/**
+ * TDCC sometimes answers 200 with an HTML page (maintenance or blocking) instead
+ * of the API envelope; surface that as a TDCC error rather than a SyntaxError.
+ */
+async function readJson<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new EPassbookError(
+      "NON_JSON_RESPONSE",
+      "集保 e 存摺回傳的不是資料而是網頁（可能正在維護或暫時阻擋連線），請稍後再同步。",
+    );
+  }
+}
+
 export type EPassbookSession = {
   tokenId: string | null;
   richUrl: string | null;
@@ -207,14 +223,14 @@ export class EPassbookClient {
       );
     }
 
-    const envelope = (await response.json()) as {
+    const envelope = await readJson<{
       responseHeader?: {
         returnCode?: string;
         returnMsg?: string;
         tokenID?: string;
       };
       responseBody?: unknown;
-    };
+    }>(response);
     const header = envelope.responseHeader ?? {};
     if (header.tokenID) this.tokenId = header.tokenID;
     const code = header.returnCode ?? "0000";
@@ -337,9 +353,9 @@ export class EPassbookClient {
       },
     });
     if (!response.ok) return null;
-    const data = (await response.json()) as {
+    const data = await readJson<{
       responseBody?: Record<string, unknown>;
-    };
+    }>(response);
     const body = data.responseBody;
     if (
       !body?.chartDate ||
