@@ -29,13 +29,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! jq -e '
-            type == "array" and length > 0 and all(.[];
+          # -s 把檔案內的所有 JSON 值收成陣列，藉此拒絕串接多個根值的檔案。
+          # \A 與 \z 只比對整個字串的開頭與結尾，和前端正則的 ^、$ 一致。
+          if ! jq -s -e '
+            length == 1 and (.[0] | type == "array" and length > 0 and all(.[];
               type == "object"
-              and (.version | type == "string" and test("^[0-9]+[.][0-9]+[.][0-9]+$"))
-              and (.date | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+              and (.version | type == "string" and test("\\A[0-9]+[.][0-9]+[.][0-9]+\\z"))
+              and (.date | type == "string" and test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}\\z"))
               and (.changes | type == "array" and all(.[]; type == "string"))
-            )
+            ))
           ' releases.json > /dev/null; then
             echo "::error file=releases.json::每筆紀錄需包含 X.Y.Z 版號、YYYY-MM-DD 日期與字串陣列的 changes。"
             exit 1
@@ -69,16 +71,34 @@ jobs:
 
           tag="v$(jq -r '.[0].version' releases.json)"
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "$tag 已發布，略過。"
-            exit 0
-          fi
+          # 查不到 Release 時 gh 會失敗，視為尚未建立。
+          release_state="$(gh release view "$tag" --json isDraft --jq 'if .isDraft then "draft" else "published" end' 2>/dev/null || echo missing)"
+          case "$release_state" in
+            published)
+              echo "$tag 已發布，略過。"
+              exit 0
+              ;;
+            draft)
+              echo "::error::$tag 已有草稿 Release，請確認內容後手動發布。"
+              exit 1
+              ;;
+          esac
 
           # tag 已存在時 GitHub 會忽略 --target，Release 可能指向其他 commit。
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-            echo "::error::$tag 的 tag 已存在但沒有 GitHub Release，請確認 tag 指向的 commit 後手動建立 Release。"
-            exit 1
-          fi
+          # git ls-remote 只在查無 tag 時回傳 2，其他錯誤一律停止。
+          tag_status=0
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || tag_status=$?
+          case "$tag_status" in
+            0)
+              echo "::error::$tag 的 tag 已存在但沒有 GitHub Release，請確認 tag 指向的 commit 後手動建立 Release。"
+              exit 1
+              ;;
+            2) ;;
+            *)
+              echo "::error::無法確認 $tag 的 tag 是否存在（git ls-remote 退出碼 ${tag_status}），請稍後重新執行。"
+              exit 1
+              ;;
+          esac
 
           notes="$RUNNER_TEMP/release-notes.md"
           jq -r '.[0].changes[] | "- " + .' releases.json > "$notes"
