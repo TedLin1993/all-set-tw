@@ -10,6 +10,7 @@ const views = new Set<View>([
   "sync-notifications",
   "exchange-rates",
   "classification-rules",
+  "ai-assistant",
   "more",
 ]);
 

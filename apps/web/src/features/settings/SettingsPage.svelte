@@ -26,6 +26,7 @@
   import AiClassificationPanel from "./components/AiClassificationPanel.svelte";
   import DefaultSchedulePanel from "./components/DefaultSchedulePanel.svelte";
   import ExchangeRatesPanel from "./components/ExchangeRatesPanel.svelte";
+  import McpPanel from "./components/McpPanel.svelte";
   import MobileMore from "./components/MobileMore.svelte";
   import NotificationPanel from "./components/NotificationPanel.svelte";
   import AddSourceDialog from "./components/AddSourceDialog.svelte";
@@ -68,6 +69,7 @@
     { view: "sync-notifications" as const, label: "同步與通知" },
     { view: "exchange-rates" as const, label: "匯率" },
     { view: "classification-rules" as const, label: "分類" },
+    { view: "ai-assistant" as const, label: "AI 助理" },
     { view: "about" as const, label: "關於" },
   ];
   const jobs = createQuery(() => syncJobsQuery(() => api));
@@ -207,6 +209,16 @@
       {api}
       {openConnector}
     />
+  {:else if mobileView === "ai-assistant"}
+    <div class="grid min-w-0 gap-4">
+      <section aria-label="AI 助理頁標題" class="hidden min-w-0 md:block">
+        <h2 class="text-2xl font-bold tracking-tight">AI 助理（MCP）</h2>
+        <p class="mt-1 text-sm text-muted-foreground">
+          用 MCP 讓 AI 助理回答「這個月餐飲花多少」，也能代你分類交易與同步。
+        </p>
+      </section>
+      <McpPanel {demoMode} />
+    </div>
   {:else if mobileView === "about"}
     <div class="grid min-w-0 gap-4">
       <h2 class="hidden text-2xl font-bold tracking-tight md:block">關於</h2>
