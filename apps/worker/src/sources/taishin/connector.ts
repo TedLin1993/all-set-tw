@@ -40,6 +40,14 @@ const OVERVIEW_PATH = `${API_ROOT}/web4/rb0760/getCardOverviewData`;
 const BILL_PATH = `${API_ROOT}/web4/rb0708rwd/init`;
 const REALTIME_PATH = `${API_ROOT}/web4/rb0708rwd/queryRealTime`;
 const UNBILLED_PATH = `${API_ROOT}/web4/rb0708rwd/qryUnposted`;
+// Online banking may list a deposit account it cannot query, such as a
+// securities settlement account or an account seen by a query-only member.
+// The per-account balance and FX detail queries then answer EBF0015.
+const DEPOSIT_NO_PERMISSION_PATHS = [
+  `${API_ROOT}/web1/rb0101/query`,
+  `${API_ROOT}/web2/rb0800/getRB08000100QueryRealtimeBalance`,
+  `${API_ROOT}/web2/rb0802/getRB08020100ForeignTranDetail`,
+];
 export const TAISHIN_AUTO_LOGIN_ATTEMPTS = 3;
 const TAISHIN_AUTO_OCR_ATTEMPTS = 6;
 const CAPTCHA_KEEP_ALIVE_MS = 150_000;
@@ -867,7 +875,7 @@ async function postJson(
     },
     { path, body, timeoutMs },
   );
-  const endpoint = path.split("/").at(-1) ?? path;
+  const endpoint = taishinEndpointLabel(path);
   if (diagnostic) {
     Object.assign(diagnostic, {
       httpStatus: response.status,
@@ -925,6 +933,8 @@ async function postJson(
         throw new TaishinVerificationRequiredError(
           "台新銀行 session 已失效，需要重新登入。",
         );
+      if (isDepositNoPermission(path, detail))
+        throw new TaishinDepositNoPermissionError();
       if (
         [REALTIME_PATH, UNBILLED_PATH].includes(path) &&
         isTaishinNoConsumption(payload.error)
@@ -946,7 +956,6 @@ async function postJson(
         )
       )
         throw new TaishinNoCreditCardError();
-      const endpoint = path.split("/").at(-1) ?? path;
       throw new TaishinConnectionError(
         `台新銀行 API ${endpoint} 回傳錯誤${detail ? `：${detail}` : ""}。`,
       );
@@ -962,9 +971,7 @@ async function postJson(
         throw new TaishinVerificationRequiredError(
           "台新銀行 session 已失效，需要重新登入。",
         );
-      // Online banking may list an account whose live balance it cannot
-      // query, such as a securities settlement account; it answers EBF0015.
-      if (path.endsWith("/web1/rb0101/query") && detail.startsWith("(EBF0015)"))
+      if (isDepositNoPermission(path, detail))
         throw new TaishinDepositNoPermissionError();
       throw new TaishinConnectionError(
         `台新銀行 API ${endpoint} 回傳錯誤${detail ? `：${detail}` : ""}。`,
@@ -979,6 +986,20 @@ async function postJson(
     if (diagnostic) diagnostic.validJson = false;
     throw new TaishinConnectionError("台新銀行 API 回應格式無效。");
   }
+}
+
+function isDepositNoPermission(path: string, detail: string) {
+  return (
+    DEPOSIT_NO_PERMISSION_PATHS.includes(path) && detail.startsWith("(EBF0015)")
+  );
+}
+
+// Sync errors redact 24+ character tokens, which would hide names such as
+// getRB08000100QueryRealtimeBalance. Show the program id and a short action
+// instead, e.g. "rb0800 QueryRealtimeBalance".
+function taishinEndpointLabel(path: string) {
+  const [program = "", action = path] = path.split("/").slice(-2);
+  return `${program} ${action.replace(/^getRB\d{8}/, "")}`.trim();
 }
 
 function browserFetchErrorDetail(name: string, message: string) {

@@ -692,6 +692,85 @@ describe("台新必要金融查詢", () => {
         input.path.endsWith("/web1/rb0102/query"),
       ),
     ).toBe(false);
+
+    // 外幣端點回 EBF0015 的實際外層格式未確認（#376 只有錯誤文字），
+    // 餘額與明細各用一種外層，兩種都要視為無查詢權限。
+    const fxNoPermission = responsePage((input) =>
+      input.path.endsWith("/getRB08000100QueryRealtimeBalance")
+        ? { error: { message: "(EBF0015)客戶無此交易權限" }, data: null }
+        : undefined,
+    );
+    const fxOverviewOnly = await fetchTaishinBankData(
+      fxNoPermission.page,
+      () => {},
+      bankNow,
+    );
+    const fxAccounts = fxOverviewOnly.bankAccounts.filter(
+      (row) => row.accountType === "savings" && row.currency !== "TWD",
+    );
+    expect(fxAccounts.map((row) => row.currency)).toEqual(["USD", "JPY"]);
+    // 總覽 BALANCE 是活存餘額（不含定存的 ALL_BALANCE）。
+    expect(
+      fxOverviewOnly.bankBalanceSnapshots
+        .filter((row) =>
+          fxAccounts.some((acc) => acc.sourceId === row.accountId),
+        )
+        .map((row) => [row.currency, row.balance, row.availableBalance]),
+    ).toEqual([
+      ["USD", 125.25, undefined],
+      ["JPY", 0, undefined],
+    ]);
+    expect(
+      fxOverviewOnly.bankTransactions.some((row) => row.currency !== "TWD"),
+    ).toBe(false);
+    expect(
+      fxNoPermission.evaluate.mock.calls.some(([, input]) =>
+        input.path.endsWith("/getRB08020100ForeignTranDetail"),
+      ),
+    ).toBe(false);
+    expect(fxOverviewOnly.bankAccounts.at(-1)?.accountType).toBe("credit");
+
+    const fxDetailNoPermission = responsePage((input) =>
+      input.path.endsWith("/getRB08020100ForeignTranDetail")
+        ? { RESULT: "ERROR", ERRORMSG: "(EBF0015)客戶無此交易權限" }
+        : undefined,
+    );
+    const fxBalanceOnly = await fetchTaishinBankData(
+      fxDetailNoPermission.page,
+      () => {},
+      bankNow,
+    );
+    expect(
+      fxBalanceOnly.bankAccounts.map((row) => [row.accountType, row.currency]),
+    ).toEqual([
+      ["savings", "TWD"],
+      ["savings", "USD"],
+      ["savings", "JPY"],
+      ["credit", "TWD"],
+    ]);
+    expect(
+      fxBalanceOnly.bankTransactions.some((row) => row.currency !== "TWD"),
+    ).toBe(false);
+    expect(
+      fxBalanceOnly.bankTransactions.filter(
+        (row) => row.accountId === fxBalanceOnly.bankAccounts[0]!.sourceId,
+      ),
+    ).toHaveLength(3);
+
+    // 其他錯誤仍使整次同步失敗，訊息保留可辨識的端點（不被長 token 遮罩吃掉）。
+    const fxOtherError = responsePage((input) =>
+      input.path.endsWith("/getRB08000100QueryRealtimeBalance")
+        ? { error: { message: "(EBF9999)系統異常" }, data: null }
+        : undefined,
+    );
+    const otherError = await fetchTaishinBankData(
+      fxOtherError.page,
+      () => {},
+      bankNow,
+    ).catch((error: unknown) => error);
+    expect(safeErrorMessage(otherError)).toContain(
+      "rb0800 QueryRealtimeBalance 回傳錯誤：(EBF9999)系統異常",
+    );
   });
 
   it("即時消費忙碌重試耗盡時整次失敗，不能以空清單成功", async () => {
