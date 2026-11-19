@@ -3,7 +3,12 @@ import type { CreateQueryOptions } from "@tanstack/svelte-query";
 import type { ApiClient } from "@/shared/api/client";
 import { queryKeys } from "@/shared/api/query-keys";
 import type { MonthRange } from "@/shared/date-range";
-import type { BankAccountRow, BankData, CreditCardBillRow } from "./types";
+import type {
+  BankAccountRow,
+  BankData,
+  BankTransactionRow,
+  CreditCardBillRow,
+} from "./types";
 
 type ApiProvider = () => ApiClient;
 
@@ -20,6 +25,39 @@ export const bankRangeQuery = (getApi: ApiProvider, range: MonthRange) =>
       getApi().get<BankData>(
         `/api/bank?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
       ),
+  });
+
+const TRANSACTION_IDS_PER_REQUEST = 100;
+
+/** 依 ID 讀取交易；沒有 ID 時不送出請求。 */
+export const bankTransactionsByIdsQuery = (
+  getApi: ApiProvider,
+  ids: readonly string[],
+) =>
+  queryOptions({
+    queryKey: queryKeys.bankTransactions(ids),
+    enabled: ids.length > 0,
+    queryFn: async () => {
+      const requests: Promise<BankTransactionRow[]>[] = [];
+      for (
+        let offset = 0;
+        offset < ids.length;
+        offset += TRANSACTION_IDS_PER_REQUEST
+      ) {
+        const params = new URLSearchParams();
+        for (const id of ids.slice(
+          offset,
+          offset + TRANSACTION_IDS_PER_REQUEST,
+        ))
+          params.append("ids", id);
+        requests.push(
+          getApi().get<BankTransactionRow[]>(
+            `/api/bank/transactions?${params}`,
+          ),
+        );
+      }
+      return (await Promise.all(requests)).flat();
+    },
   });
 
 export const creditCardBillsRangeQuery = (

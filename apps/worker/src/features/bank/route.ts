@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import type {
   BankAccountResponse,
   BankDataResponse,
+  BankTransactionResponse,
   CreditCardBillResponse,
   PaymentAccountInput,
 } from "@taiwan-fin-hub/shared";
@@ -25,6 +26,7 @@ import {
   getBankAccounts,
   getBankPage,
   getBankRange,
+  getBankTransactionsByIds,
   getCreditCardBillPage,
   getCreditCardBillsRange,
   setPaymentAccount,
@@ -45,6 +47,11 @@ const creditCardBillPageCursorSchema = z.object({
   accountId: z.string(),
   id: z.string(),
 });
+
+const transactionIdsSchema = z
+  .array(z.string().min(1).max(512))
+  .min(1)
+  .max(100);
 
 const paymentAccountSchema = z.object({
   paymentAccountId: z.string().min(1).max(256).nullable(),
@@ -142,6 +149,22 @@ function registerBankRoutes(api: Hono<AppBindings>) {
       } satisfies BankDataResponse);
     },
   );
+
+  // 月份區間以外、但已與區間內發票連結的交易，供前端配對時補讀另一端。
+  api.get("/bank/transactions", async (c) => {
+    const ids = transactionIdsSchema.safeParse(c.req.queries("ids") ?? []);
+    if (!ids.success)
+      return jsonError(
+        "INVALID_REQUEST",
+        "ids must list 1 to 100 transaction IDs.",
+        400,
+      );
+    return c.json(
+      (await getBankTransactionsByIds(c.env.DB, [
+        ...new Set(ids.data),
+      ])) satisfies BankTransactionResponse[],
+    );
+  });
 
   api.get(
     "/bank/bills",

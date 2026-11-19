@@ -43,7 +43,10 @@
   import type { ApiClient } from "@/shared/api/client";
   import { queryKeys } from "@/shared/api/query-keys";
   import { exchangeRatesQuery } from "@/data/assets/queries";
-  import { bankRangeQuery } from "@/data/bank/queries";
+  import {
+    bankRangeQuery,
+    bankTransactionsByIdsQuery,
+  } from "@/data/bank/queries";
   import type { BankData, BankTransactionRow } from "@/data/bank/types";
   import { classificationCategoriesQuery } from "@/data/classification/queries";
   import { investmentTransactionsRangeQuery } from "@/data/investments/queries";
@@ -90,6 +93,7 @@
     matchInvoicesToTransactions,
     MANUAL_INVOICE_MATCH_MAX_DAYS,
     MANUAL_INVOICE_MATCH_MAX_EARLY_DAYS,
+    missingLinkedTransactionIds,
   } from "@/data/activity/matching";
   import { getActivityDataStatus } from "./model/load-status";
   import { createCategorySheet } from "./model/category-sheet.svelte";
@@ -194,6 +198,19 @@
           searchResults.data?.pages.flatMap((page) => page.invoices) ?? [],
         )
       : invoices.data,
+  );
+  // 區間內發票連結到區間前的刷卡時，補讀那筆交易才能配對；它本身不在區間內呈現。
+  const linkedTransactions = createQuery(() =>
+    bankTransactionsByIdsQuery(
+      () => api,
+      !searching && bank.data && invoices.data && invoiceMappings.data
+        ? missingLinkedTransactionIds(
+            bank.data.transactions,
+            invoices.data,
+            invoiceMappings.data,
+          )
+        : [],
+    ),
   );
   const tradeData = $derived(
     searching
@@ -390,7 +407,7 @@
             },
             {
               label: "發票配對",
-              isError: invoiceMappings.isError,
+              isError: invoiceMappings.isError || linkedTransactions.isError,
             },
             {
               label: "投資活動",
@@ -405,6 +422,7 @@
       bank.isFetching ||
       invoices.isFetching ||
       invoiceMappings.isFetching ||
+      linkedTransactions.isFetching ||
       trades.isFetching,
   );
   const categories = $derived(
@@ -416,19 +434,33 @@
   const bankAccounts = $derived(
     new Map((bankData?.accounts ?? []).map((account) => [account.id, account])),
   );
+  function withAccountType(transaction: BankTransactionRow) {
+    return {
+      ...transaction,
+      accountType:
+        transaction.accountType ??
+        bankAccounts.get(transaction.accountId)?.accountType,
+    };
+  }
   const activityBankTransactions = $derived(
     deduplicateBankTransactions(
-      (bankData?.transactions ?? []).map((transaction) => ({
-        ...transaction,
-        accountType:
-          transaction.accountType ??
-          bankAccounts.get(transaction.accountId)?.accountType,
-      })),
+      (bankData?.transactions ?? []).map(withAccountType),
     ),
   );
+  // 補讀的區間外交易只供配對：活動屬於區間前的日期，不在此呈現也不計入。
+  const linkedOnlyTransactions = $derived(
+    searching ? [] : (linkedTransactions.data ?? []).map(withAccountType),
+  );
+  const linkedOnlyTransactionIds = $derived(
+    new Set(linkedOnlyTransactions.map(({ id }) => id)),
+  );
+  const matchingBankTransactions = $derived([
+    ...activityBankTransactions,
+    ...linkedOnlyTransactions,
+  ]);
   const invoiceMatches = $derived(
     matchInvoicesToTransactions(
-      activityBankTransactions,
+      matchingBankTransactions,
       invoiceData ?? [],
       invoiceMappings.data ?? [],
     ),
@@ -437,11 +469,15 @@
     searching
       ? (searchResults.data?.pages.flatMap((page) => page.items) ?? [])
       : buildActivityItems(
-          activityBankTransactions,
+          matchingBankTransactions,
           invoiceData ?? [],
           tradeData ?? [],
           bankAccounts,
           invoiceMatches,
+        ).filter(
+          (item) =>
+            !item.transactionId ||
+            !linkedOnlyTransactionIds.has(item.transactionId),
         ),
   );
   // 沒有手動記錄的使用者不會看到「手動」來源。
@@ -793,6 +829,7 @@
     if (bank.isError) void bank.refetch();
     if (invoices.isError) void invoices.refetch();
     if (invoiceMappings.isError) void invoiceMappings.refetch();
+    if (linkedTransactions.isError) void linkedTransactions.refetch();
     if (trades.isError) void trades.refetch();
   }
   function sourceLabel(item: ActivityItem) {
@@ -951,7 +988,7 @@
   }
 </script>
 
-{#if !searching && (bank.isPending || invoices.isPending || invoiceMappings.isPending || trades.isPending)}
+{#if !searching && (bank.isPending || invoices.isPending || invoiceMappings.isPending || linkedTransactions.isLoading || trades.isPending)}
   <EmptyState title="載入活動中" body="正在整理銀行、投資與發票資料。" />
 {:else}
   <div class="grid min-w-0 max-w-full gap-6 overflow-x-clip pt-3 md:pt-2">

@@ -5,6 +5,8 @@ export const queryKeys = {
   bank: ["bank"] as const,
   bankAccounts: ["bank", "accounts"] as const,
   bankRange: (from: string, to: string) => ["bank", "range", from, to] as const,
+  bankTransactions: (ids: readonly string[]) =>
+    ["bank", "transactions", ...ids] as const,
   bills: ["creditCardBills"] as const,
   billsRange: (from: string, to: string) =>
     ["creditCardBills", "range", from, to] as const,

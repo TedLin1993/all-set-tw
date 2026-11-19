@@ -147,6 +147,18 @@ describe("calculateMonthlyActivityTotals", () => {
         {},
       ),
     ).toEqual({ income: 0, expense: 1_200 });
+
+    // 先刷卡、隔月初才開發票：刷卡屬於上個月，補讀後發票不再計入本月。
+    const earlyCard = { ...cardExpense, postedDate: "2026-06-29" };
+    expect(
+      calculateMonthlyActivityTotals(
+        { accounts: [], transactions: [] },
+        [matchedInvoice],
+        mappings,
+        {},
+        [earlyCard],
+      ),
+    ).toEqual({ income: 0, expense: 0 });
   });
 
   it("退費扣減支出，不計入收入", () => {

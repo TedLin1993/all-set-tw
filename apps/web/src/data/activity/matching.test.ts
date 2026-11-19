@@ -9,6 +9,7 @@ import {
 import {
   invoiceTransactionCandidates,
   matchInvoicesToTransactions,
+  missingLinkedTransactionIds,
 } from "./matching";
 
 function expense(
@@ -96,6 +97,27 @@ describe("發票手動配對", () => {
     expect(itemDate(delayed)).toBe("2026-10-03");
     expect(itemDate(early)).toBe("2026-09-14");
     expect(itemDate(sameDay)).toBe(invoice.invoiceDate);
+  });
+
+  it("只補讀本批發票連結、但不在本批交易中的交易", () => {
+    const link = (invoiceId: string, transactionId: string | null) => ({
+      invoiceId,
+      transactionId,
+      decision: transactionId ? ("linked" as const) : ("separate" as const),
+      updatedAt: "2026-10-04T00:00:00.000Z",
+    });
+    expect(
+      missingLinkedTransactionIds(
+        [expense("loaded", "2026-09-17")],
+        [invoice, { ...invoice, id: "invoice-2" }],
+        [
+          link(invoice.id, "before-range"),
+          link("invoice-2", "loaded"),
+          link("outside-batch", "unrelated"),
+          link("invoice-3", null),
+        ],
+      ),
+    ).toEqual(["before-range"]);
   });
 });
 
