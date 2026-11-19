@@ -205,6 +205,11 @@ export class TaishinDepositNoPermissionError extends Error {
   }
 }
 
+function skipNoPermission(error: unknown): undefined {
+  if (error instanceof TaishinDepositNoPermissionError) return undefined;
+  throw error;
+}
+
 function checked<T>(
   schema: z.ZodType<T>,
   value: unknown,
@@ -675,10 +680,7 @@ export async function fetchTaishinDeposits(
         );
       const balancePayload = await request(`${root}/web1/rb0101/query`, {
         account: account.accountNo,
-      }).catch((error: unknown) => {
-        if (error instanceof TaishinDepositNoPermissionError) return undefined;
-        throw error;
-      });
+      }).catch(skipNoPermission);
       // Query-only members and securities settlement accounts are listed by
       // RB0100 with a balance, but RB0101 answers EBF0015. Keep the account
       // with the RB0100 balance and skip only its transaction details.
@@ -795,6 +797,31 @@ export async function fetchTaishinDeposits(
             accountIdentity(group.ACCOUNT_NO)
         )
           throw new TaishinDepositProtocolError("台新外幣餘額帳戶與總覽不符。");
+        const currency = normalizeTaishinCurrency(detail.CURRENCY_CODE)!;
+        const balancePayload = await request(
+          `${root}/web2/rb0800/getRB08000100QueryRealtimeBalance`,
+          {
+            requestAccount: detail.ACCOUNT_NO ?? group.ACCOUNT_NO,
+            requestAccountAlias: detail.ACCOUNT_ALIAS ?? "",
+            requestCcyCode: detail.CURRENCY_CODE,
+          },
+        ).catch(skipNoPermission);
+        // Same as RB0101: an account the member cannot query answers EBF0015.
+        // Keep it with the RB0800 overview balance and skip its details.
+        if (balancePayload === undefined) {
+          addAccount(
+            group.ACCOUNT_NO,
+            currency,
+            group.ACCOUNT_NAME ?? "",
+            amount(detail.BALANCE),
+            undefined,
+            "",
+          );
+          console.log(
+            JSON.stringify({ event: "taishin_fx_overview_balance_used" }),
+          );
+          continue;
+        }
         const balances = checked(
           z.array(
             z.object({
@@ -804,16 +831,7 @@ export async function fetchTaishinDeposits(
               BALANCE: moneySchema,
             }),
           ),
-          fxData(
-            await request(
-              `${root}/web2/rb0800/getRB08000100QueryRealtimeBalance`,
-              {
-                requestAccount: detail.ACCOUNT_NO ?? group.ACCOUNT_NO,
-                requestAccountAlias: detail.ACCOUNT_ALIAS ?? "",
-                requestCcyCode: detail.CURRENCY_CODE,
-              },
-            ),
-          ),
+          fxData(balancePayload),
           "外幣即時餘額",
         );
         if (
@@ -826,7 +844,6 @@ export async function fetchTaishinDeposits(
           throw new TaishinDepositProtocolError(
             "台新外幣即時餘額與查詢帳戶或幣別不符。",
           );
-        const currency = normalizeTaishinCurrency(detail.CURRENCY_CODE)!;
         // 群組的 ACCOUNT_NAME 可能是使用者自訂別名，只用即時餘額回應的帳戶種類命名。
         addAccount(
           group.ACCOUNT_NO,
@@ -848,7 +865,15 @@ export async function fetchTaishinDeposits(
             requestEmail: options.EMAIL ?? "",
             rb0802OrderType: String(options.RB0802_ORDER_TYPE ?? 0),
           },
-        );
+        ).catch(skipNoPermission);
+        if (payload === undefined) {
+          console.log(
+            JSON.stringify({
+              event: "taishin_fx_detail_no_permission_skipped",
+            }),
+          );
+          continue;
+        }
         checkWindow(
           parseTaishinFxDepositTransactions(
             payload,
