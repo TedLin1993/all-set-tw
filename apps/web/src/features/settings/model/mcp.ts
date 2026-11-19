@@ -43,17 +43,45 @@ const AUTHORIZE_CLIENT_SCREENSHOT: McpScreenshot = {
 };
 
 /** 啟用 MCP 的一次性 Cloudflare 設定，與 docs/006-mcp.md「一次性設定：開啟 Managed OAuth」一致。 */
-export function managedOauthSteps(host: string) {
+export interface McpLink {
+  label: string;
+  href: string;
+}
+
+/**
+ * Cloudflare 主控台的 Access Applications 列表（Zero Trust → Access controls → Applications），
+ * 與 Cloudflare 官方文件使用的深層連結相同；:account 由主控台帶入目前帳號，多帳號時先選擇。
+ * 沒有 Application 的內部 ID，無法直接開到單一 Application 的設定頁。
+ */
+export const CLOUDFLARE_ACCESS_APPS_URL =
+  "https://dash.cloudflare.com/?to=/:account/one/access/apps";
+
+const ACCESS_APPS_LINK: McpLink = {
+  label: "開啟 Cloudflare Applications 頁面",
+  href: CLOUDFLARE_ACCESS_APPS_URL,
+};
+
+export function managedOauthSteps(
+  host: string,
+): { text: string; link?: McpLink }[] {
   return [
-    `前往 Cloudflare One／Zero Trust → Access controls → Applications，點擊目的地為 ${host} 的 Application。`,
-    "切換到 Additional settings，點擊上方的 OAuth 篩選，開啟 Managed OAuth 並展開設定。",
-    "開啟 Allow localhost clients 與 Allow loopback clients；Grant session duration 可選 1 month，點擊 Save。",
+    {
+      text: `開啟 Cloudflare 的 Applications 頁面（Zero Trust → Access controls → Applications），點擊目的地為 ${host} 的 Application。`,
+      link: ACCESS_APPS_LINK,
+    },
+    {
+      text: "切換到 Additional settings，點擊上方的 OAuth 篩選，開啟 Managed OAuth 並展開設定。",
+    },
+    {
+      text: "開啟 Allow localhost clients 與 Allow loopback clients；Grant session duration 可選 1 month，點擊 Save。",
+    },
   ];
 }
 
 export interface McpGuideStep {
   title: string;
   detail?: string;
+  link?: McpLink;
   copy?: { label: string; text: string; mono?: boolean };
   screenshots?: McpScreenshot[];
 }
@@ -145,6 +173,7 @@ export function mcpClientGuides(endpoint: string): McpClientGuide[] {
           title: "把回呼網址加入 Access",
           detail:
             "展開「進階 OAuth 設定」，註冊方式先切換到「使用者自訂的 OAuth 用戶端」，複製回呼網址（https://chatgpt.com/connector/oauth/…），貼到 Cloudflare Access Managed OAuth 的 Allowed redirect URIs 並儲存。",
+          link: ACCESS_APPS_LINK,
           screenshots: [MANAGED_OAUTH_SCREENSHOT],
         },
         {
@@ -198,6 +227,7 @@ export function mcpClientGuides(endpoint: string): McpClientGuide[] {
           title: "網頁型助理：允許回呼網址",
           detail:
             "把該助理提供的回呼網址加入 Cloudflare Access Managed OAuth 的 Allowed redirect URIs；本機程式以 localhost／loopback 接收登入結果，不需額外設定。",
+          link: ACCESS_APPS_LINK,
           screenshots: [MANAGED_OAUTH_SCREENSHOT],
         },
       ],

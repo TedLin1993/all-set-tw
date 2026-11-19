@@ -25,6 +25,7 @@
     mcpDocsUrl,
     mcpEndpoint,
     type McpClientGuide,
+    type McpLink,
     type McpScreenshot,
   } from "../model/mcp";
   import { mcpAuthStatusQuery } from "../model/mcp-auth";
@@ -110,6 +111,15 @@
   );
 </script>
 
+{#snippet externalLink(link: McpLink)}
+  <a
+    class="inline-flex w-fit min-h-8 items-center gap-1 text-sm font-semibold text-steel transition hover:text-steel/80"
+    href={link.href}
+    target="_blank"
+    rel="noreferrer">{link.label}<Icon icon={ExternalLink} size="sm" /></a
+  >
+{/snippet}
+
 {#snippet screenshot(shot: McpScreenshot)}
   <!-- 收合時不渲染圖片，搭配 lazy 只在展開後才下載。 -->
   <details class="group min-w-0">
@@ -148,13 +158,10 @@
         Demo 部署不提供 MCP 端點。部署自己的版本並開啟 Cloudflare Access
         後，即可讓 AI 助理連線。
       </p>
-      <a
-        class="inline-flex w-fit items-center gap-1 text-sm font-semibold text-steel transition hover:text-steel/80"
-        href={mcpDocsUrl(repository)}
-        target="_blank"
-        rel="noreferrer"
-        >查看 AI 助理連線說明<Icon icon={ExternalLink} size="sm" /></a
-      >
+      {@render externalLink({
+        label: "查看 AI 助理連線說明",
+        href: mcpDocsUrl(repository),
+      })}
     </CardContent>
   </Card>
 {:else}
@@ -195,9 +202,15 @@
                       class="flex size-6 items-center justify-center rounded-full bg-steel/10 text-xs font-bold text-steel"
                       >{index + 1}</span
                     >
-                    <span class="text-muted-foreground [overflow-wrap:anywhere]"
-                      >{step}</span
-                    >
+                    <div class="grid min-w-0 gap-1">
+                      <span
+                        class="text-muted-foreground [overflow-wrap:anywhere]"
+                        >{step.text}</span
+                      >
+                      {#if step.link}
+                        {@render externalLink(step.link)}
+                      {/if}
+                    </div>
                   </li>
                 {/each}
               </ol>
@@ -294,6 +307,9 @@
                         >
                           {step.detail}
                         </p>
+                      {/if}
+                      {#if step.link}
+                        {@render externalLink(step.link)}
                       {/if}
                       {#if step.copy}
                         <CopyField
