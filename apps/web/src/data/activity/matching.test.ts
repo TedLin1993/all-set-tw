@@ -9,6 +9,7 @@ import {
 import {
   invoiceTransactionCandidates,
   matchInvoicesToTransactions,
+  missingLinkedTransactionIds,
 } from "./matching";
 
 function expense(
@@ -37,12 +38,15 @@ const invoice: ActivityInvoice = {
 };
 
 describe("發票手動配對", () => {
-  it("同日支出不限金額；45 天內的跨日支出須同額且未配對，依日期差排序", () => {
+  it("同日支出不限金額；發票日前 14 天到後 45 天的跨日支出須同額且未配對，依日期差排序", () => {
     const candidates = invoiceTransactionCandidates(
       [
         expense("after-window", "2026-11-02"),
         expense("last-day", "2026-11-01"),
-        expense("before-invoice", "2026-09-16"),
+        expense("before-window", "2026-09-02"),
+        expense("earliest-day", "2026-09-03"),
+        expense("day-before", "2026-09-16"),
+        expense("earlier-different-amount", "2026-09-15", -480),
         expense("later-different-amount", "2026-09-20", -480),
         expense("already-linked", "2026-09-25"),
         expense("next-month", "2026-10-03"),
@@ -54,6 +58,8 @@ describe("發票手動配對", () => {
 
     expect(candidates.map(({ id }) => id)).toEqual([
       "same-day-discounted",
+      "day-before",
+      "earliest-day",
       "next-month",
       "last-day",
     ]);
@@ -61,6 +67,7 @@ describe("發票手動配對", () => {
 
   it("跨日配對的活動沿用扣款日期，同日配對使用發票時間", () => {
     const delayed = expense("delayed", "2026-10-03");
+    const early = expense("early", "2026-09-14");
     const sameDay = expense("same-day", "2026-09-17");
     const itemDate = (transaction: ActivityTransaction) => {
       const matches = matchInvoicesToTransactions(
@@ -88,7 +95,29 @@ describe("發票手動配對", () => {
     };
 
     expect(itemDate(delayed)).toBe("2026-10-03");
+    expect(itemDate(early)).toBe("2026-09-14");
     expect(itemDate(sameDay)).toBe(invoice.invoiceDate);
+  });
+
+  it("只補讀本批發票連結、但不在本批交易中的交易", () => {
+    const link = (invoiceId: string, transactionId: string | null) => ({
+      invoiceId,
+      transactionId,
+      decision: transactionId ? ("linked" as const) : ("separate" as const),
+      updatedAt: "2026-10-04T00:00:00.000Z",
+    });
+    expect(
+      missingLinkedTransactionIds(
+        [expense("loaded", "2026-09-17")],
+        [invoice, { ...invoice, id: "invoice-2" }],
+        [
+          link(invoice.id, "before-range"),
+          link("invoice-2", "loaded"),
+          link("outside-batch", "unrelated"),
+          link("invoice-3", null),
+        ],
+      ),
+    ).toEqual(["before-range"]);
   });
 });
 

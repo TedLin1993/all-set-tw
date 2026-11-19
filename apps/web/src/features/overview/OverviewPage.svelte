@@ -18,7 +18,11 @@
     netWorthHistoryQuery,
   } from "@/data/assets/queries";
   import { depositAccountCount } from "@/data/bank/account-groups";
-  import { bankRangeQuery, creditCardBillsQuery } from "@/data/bank/queries";
+  import {
+    bankRangeQuery,
+    bankTransactionsByIdsQuery,
+    creditCardBillsQuery,
+  } from "@/data/bank/queries";
   import { syncJobsQuery } from "@/data/connectors/queries";
   import type { ConnectorId } from "@/data/connectors/types";
   import { latestSyncReportQuery } from "@/data/sync-reports/queries";
@@ -38,6 +42,7 @@
     invoicesRangeQuery,
   } from "@/data/invoices/queries";
   import { calculateMonthlyActivityTotals } from "@/data/activity/monthly-totals";
+  import { missingLinkedTransactionIds } from "@/data/activity/matching";
   import type { View } from "@/app/types";
   import { recentMonthRange } from "@/shared/date-range";
   import {
@@ -109,6 +114,19 @@
   );
   const invoiceMappings = createQuery(() =>
     invoiceTransactionMappingsQuery(() => api, currentMonthRange),
+  );
+  // 本月發票連結到上個月的刷卡時，補讀那筆交易配對，避免發票重複計入本月支出。
+  const linkedTransactions = createQuery(() =>
+    bankTransactionsByIdsQuery(
+      () => api,
+      monthlyBank.data && monthlyInvoices.data && invoiceMappings.data
+        ? missingLinkedTransactionIds(
+            monthlyBank.data.transactions,
+            monthlyInvoices.data,
+            invoiceMappings.data,
+          )
+        : [],
+    ),
   );
   const manualAssets = createQuery(() => manualAssetsQuery(() => api));
   const rates = createQuery(() => exchangeRatesQuery(() => api));
@@ -214,6 +232,7 @@
       monthlyInvoices.data ?? [],
       invoiceMappings.data ?? [],
       rateValues,
+      linkedTransactions.data,
     ),
   );
   const monthlyIncome = $derived(monthlyTotals.income);
@@ -526,6 +545,7 @@
     monthlyBank.isPending ||
       monthlyInvoices.isPending ||
       invoiceMappings.isPending ||
+      linkedTransactions.isLoading ||
       investments.isPending ||
       manualAssets.isPending,
   );
@@ -533,6 +553,7 @@
     monthlyBank.isError ||
       monthlyInvoices.isError ||
       invoiceMappings.isError ||
+      linkedTransactions.isError ||
       investments.isError ||
       manualAssets.isError,
   );
