@@ -5,6 +5,7 @@ export type MobileSettingsView =
   | "sync-notifications"
   | "exchange-rates"
   | "classification-rules"
+  | "ai-assistant"
   | "about";
 
 export type View = PrimaryView | MobileSettingsView | "more";

@@ -63,6 +63,20 @@ apps/web/src/
 桌面「設定 → 關於」與手機「更多 → 關於」皆開啟 `#/about`，直接顯示目前版本、上游 Commit 前七碼、分支與台灣組建時間（`Asia/Taipei`，UTC+8）。Vite 注入 `__BUILD_INFO__`，型別宣告位於 `src/vite-env.d.ts`。複製診斷資訊時包含版號、來源專案與完整上游 SHA。剪貼簿寫入失敗時提供唯讀文字框。
 資訊來源與本機開發時間的定義見部署文件。
 
+## AI 助理（MCP）頁
+
+桌面「設定 → AI 助理」與手機「更多 → AI 助理（MCP）」皆開啟 `#/ai-assistant`。第一張卡片只顯示 MCP 是否可以使用，尚未啟用或無法確認時列出 Managed OAuth 的啟用步驟；其後是「連接 AI 助理」、範例問題與隱私說明，端點網址以 `location.origin` 組出並帶入提示詞與步驟。
+Codex、Claude Code 與「其他」提供設定提示詞：貼給能執行指令的 AI 助理，由它新增伺服器、引導瀏覽器授權並呼叫 `whoami` 確認，頁面只列出使用者仍需親自處理的事；「其他」另附助理無法自行修改設定時的手動步驟。ChatGPT 必須在其網頁介面新增並把回呼網址加入 Access，因此只列手動步驟。
+啟用步驟、提示詞、手動步驟、截圖、範例問題與疑難排解集中於 `features/settings/model/mcp.ts`，內容須與 `docs/006-mcp.md` 一致，調整任一處時同步更新另一處。
+說明盡量在 App 內呈現，不連到外部網站：設定截圖由根目錄 `images/` 匯入，與 006 文件共用同一批檔案，收合在對應步驟下方，展開後才下載，點擊可開啟原尺寸；常見連線問題收在「連線失敗時」；撤銷授權寫在隱私說明。只有 Demo 模式無法在 App 內設定，才連到上游文件。
+
+Managed OAuth 檢查位於 `features/settings/model/mcp-auth.ts`：以 `credentials: "omit"`、`redirect: "manual"` 對 `/mcp` 送出 POST，模擬尚未登入的 AI 助理，與文件的 `curl` 檢查相同。
+收到 `opaqueredirect`（Access 轉址到登入頁）表示未開啟；`401` 表示已開啟，但 body 為 Worker 自己的 `UNAUTHORIZED` 時代表請求沒有經過 Access；本機主機名稱的其他回應視為本機開發模式；其餘回應與網路錯誤顯示無法確認。
+查詢不快取並在視窗重新取得焦點時重新檢查，方便使用者在另一個分頁改完 Access 設定後回來確認；Demo 模式不送出檢查。
+
+Demo 模式不開放 MCP，頁面只顯示說明。`CopyField` 寫入剪貼簿失敗時提示手動複製，文字可點選全選；等寬指令只在空白處換行，過長的網址才在內部斷行。
+Vite 開發伺服器將 `/mcp` 轉到本機 Worker，讓頁面顯示的網址可直接連線。
+
 ## 外觀主題
 
 主題由 `<html data-theme="light|dark">` 決定，`dark:` variant 也以它為準。偏好（跟隨系統、淺色、深色）存在本機 `localStorage`，

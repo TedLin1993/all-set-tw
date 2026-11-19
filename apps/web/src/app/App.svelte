@@ -269,7 +269,7 @@
             {headerSetting?.description ?? headerNav.description}
           </p>
         </div>
-        {#if headerView !== "about"}
+        {#if headerView !== "about" && headerView !== "ai-assistant"}
           <div class="flex shrink-0 items-center gap-2">
             <Button
               class={headerSetting

@@ -69,6 +69,11 @@ export const mobileSettingsLabels: Record<
     label: "分類",
     description: "以規則與 AI 自動分類銀行交易。",
   },
+  "ai-assistant": {
+    label: "AI 助理（MCP）",
+    description:
+      "讓 Codex、ChatGPT 等 AI 助理查詢財務資料、調整設定與觸發同步。",
+  },
   about: {
     label: "關於",
     description: "切換外觀主題，查看目前版本與診斷資訊。",
