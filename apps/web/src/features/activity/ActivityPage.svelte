@@ -89,6 +89,7 @@
     invoiceTransactionDayGap,
     matchInvoicesToTransactions,
     MANUAL_INVOICE_MATCH_MAX_DAYS,
+    MANUAL_INVOICE_MATCH_MAX_EARLY_DAYS,
   } from "@/data/activity/matching";
   import { getActivityDataStatus } from "./model/load-status";
   import { createCategorySheet } from "./model/category-sheet.svelte";
@@ -1986,7 +1987,8 @@
                 >
                   <p class="font-semibold">沒有可配對的支出</p>
                   <p class="mt-1 text-caption text-subtle">
-                    只列出發票日當天，或 {MANUAL_INVOICE_MATCH_MAX_DAYS} 天內金額相同、尚未配對的
+                    只列出發票日當天，或發票日前 {MANUAL_INVOICE_MATCH_MAX_EARLY_DAYS}
+                    天到後 {MANUAL_INVOICE_MATCH_MAX_DAYS} 天內金額相同、尚未配對的
                     TWD 銀行或信用卡支出。
                   </p>
                 </div>{:else}{#each mappingCandidates as transaction (transaction.id)}{@const difference =
@@ -2022,7 +2024,9 @@
                     </span>
                     <span class="mt-3 flex flex-wrap items-center gap-2">
                       <Badge variant="secondary" class="bg-moss/10 text-moss"
-                        >{dayGap ? `晚 ${dayGap} 天` : "同一天"}</Badge
+                        >{dayGap
+                          ? `${dayGap > 0 ? "晚" : "早"} ${Math.abs(dayGap)} 天`
+                          : "同一天"}</Badge
                       >
                       {#if difference > 0}<Badge
                           variant="secondary"

@@ -19,6 +19,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
+import { MANUAL_INVOICE_MATCH_MAX_EARLY_DAYS } from "@taiwan-fin-hub/shared";
 import { invoiceDayInRange } from "../invoices/repository";
 import type { MonthDateRange } from "../../platform/month-range";
 
@@ -65,15 +66,24 @@ export async function listInvoiceTransactionPreferences(
     .from(invoiceTransactionPreferences)
     .where(
       and(
-        // A linked transaction is on or after its invoice date, so a page
-        // only needs the decisions for invoices inside its range.
+        // A linked transaction is at most MANUAL_INVOICE_MATCH_MAX_EARLY_DAYS
+        // before its invoice date, so a page needs the decisions for invoices
+        // inside its range plus that many days after it.
         range
           ? inArray(
               invoiceTransactionPreferences.invoiceId,
               drizzle
                 .select({ id: invoices.id })
                 .from(invoices)
-                .where(invoiceDayInRange(range)),
+                .where(
+                  invoiceDayInRange({
+                    from: range.from,
+                    to: shiftDate(
+                      range.to,
+                      MANUAL_INVOICE_MATCH_MAX_EARLY_DAYS,
+                    ),
+                  }),
+                ),
             )
           : undefined,
         notExists(
@@ -95,6 +105,12 @@ export async function listInvoiceTransactionPreferences(
       asc(invoiceTransactionPreferences.invoiceId),
     )
     .all();
+}
+
+function shiftDate(date: string, days: number) {
+  const shifted = new Date(`${date}T00:00:00Z`);
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+  return shifted.toISOString().slice(0, 10);
 }
 
 export async function findMappingInvoice(db: D1Database, invoiceId: string) {
