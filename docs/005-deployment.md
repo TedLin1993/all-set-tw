@@ -210,6 +210,8 @@ Deploy to Cloudflare 建立的新 repository 不會包含本專案的 `.github/w
 
 要自行修改程式碼時，請先安裝並執行一次同步 workflow，再開始修改。首次同步的安全檢查會拒絕首次部署後已改過程式碼的 repository，避免覆蓋修改；之後的同步以三方合併保留修改。
 
+安裝前先在 Worker 的 **Settings → Build → Build watch paths**，於排除路徑（exclude）加入 `.github/*` 並儲存。沒有 workflow 時，網站可能已透過重新部署更新，但部署 repository 的檔案仍是首次部署時的版本；只新增 workflow 的 commit 若觸發 build，會改用這些舊檔案建置，網站暫時退回舊版，直到同步 workflow 推送新版。加入排除路徑後，只改 `.github/` 的 commit 不會觸發 build，這個設定可以保留。安裝後請立即手動執行一次同步 workflow。
+
 #### 從 GitHub 網頁安裝
 
 1. 在部署 repository 開啟 [`deploy/github/sync-upstream.yml`](../deploy/github/sync-upstream.yml)，點擊 **Raw** 並複製內容。
@@ -227,7 +229,7 @@ git commit -m "啟用版本自動更新"
 git push
 ```
 
-完成後可從 **Actions → Sync Latest Version → Run workflow** 手動更新，也會在每天台灣時間 **04:15** 自動執行。
+安裝後立即從 **Actions → Sync Latest Version → Run workflow** 執行一次，之後也可隨時手動更新；workflow 每天台灣時間 **04:15** 會自動執行。
 
 #### 同步如何運作
 
