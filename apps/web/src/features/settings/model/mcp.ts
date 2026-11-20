@@ -49,12 +49,12 @@ export interface McpLink {
 }
 
 /**
- * Cloudflare 主控台的 Access Applications 列表（Zero Trust → Access controls → Applications），
- * 與 Cloudflare 官方文件使用的深層連結相同；:account 由主控台帶入目前帳號，多帳號時先選擇。
- * 沒有 Application 的內部 ID，無法直接開到單一 Application 的設定頁。
+ * Cloudflare 主控台的 Access Applications 列表（Zero Trust → Access controls → Applications）。
+ * :account 由主控台帶入目前帳號，多帳號時先選擇。路徑取自目前主控台的網址；Cloudflare 官方文件
+ * 仍使用的 /one/access/apps 已找不到頁面。沒有 Application 的內部 ID，無法直接開到單一 Application。
  */
 export const CLOUDFLARE_ACCESS_APPS_URL =
-  "https://dash.cloudflare.com/?to=/:account/one/access/apps";
+  "https://dash.cloudflare.com/?to=/:account/one/access-controls/apps";
 
 const ACCESS_APPS_LINK: McpLink = {
   label: "開啟 Cloudflare Applications 頁面",
