@@ -82,7 +82,7 @@
 請先註冊並登入以下兩個帳號；已有帳號可直接登入：
 
 - [Cloudflare 帳號](https://dash.cloudflare.com/sign-up)：用來部署網站、儲存金融資料與設定登入保護。
-- [GitHub 帳號](https://github.com/signup)：用來存放部署用的程式碼，並接收後續版本更新。
+- [GitHub 帳號](https://github.com/signup)：用來存放部署用的程式碼。
 
 ### 步驟一：一鍵部署
 
@@ -122,26 +122,7 @@
 
 後續自動部署與更新會沿用這些登入設定。
 
-部署與登入故障排查及自動更新原理，請參考[進階部署與更新](docs/005-deployment.md)。
-
-## 自動更新
-
-點選「更新紀錄」可查閱所有版本的改動。入口位於桌面側欄底部、窄版桌面的上方導覽列，以及手機的「更多」頁。瀏覽器會向 GitHub 讀取官方版本紀錄，有較新版時，入口會以強調色顯示新版版號。
-
-Cloudflare 的 Deploy to Cloudflare 流程目前不會將 `.github/workflows` 複製到新 repository，因此首次部署可以正常使用，但需要完成下方的一次性設定才會啟用版本更新。
-
-### 一次性啟用更新功能
-
-不需要修改程式碼，可直接在 GitHub 網頁完成：
-
-1. 在你的部署 repository 開啟 [`deploy/github/sync-upstream.yml`](deploy/github/sync-upstream.yml)，點擊 **Raw** 並複製完整內容
-2. 回到 repository 首頁，選擇 **Add file → Create new file**
-3. 將檔名設為 `.github/workflows/sync-upstream.yml`，貼上剛才複製的內容並 commit 至 `main`
-4. 前往 **Settings → Actions → General → Workflow permissions**，確認已允許 GitHub Actions 讀寫 repository 內容
-
-完成一次性設定後，可以前往部署 repository 的 **Actions → Sync Latest Version → Run workflow**，點擊 **Run workflow** 立即更新。workflow 也會在每天台灣時間 **04:15** 自動執行。
-
-每次執行會取得最新版本、進行安全三方合併，並由 Cloudflare Workers Builds 重新部署。若你修改過程式碼並與上游發生衝突，workflow 會停止且不會推送；請從 Actions 紀錄查看衝突並手動處理。首次同步、備份 branch 與舊版 workflow 的排查方式請參考[進階部署與更新](docs/005-deployment.md)。
+部署與登入故障排查，以及版本更新方式（含較早部署的一次性切換），請參考[進階部署與更新](docs/005-deployment.md)。
 
 ## 本機開發
 

@@ -58,6 +58,8 @@ apps/web/src/
 
 「更新紀錄」入口位於桌面側欄底部、窄版桌面的上方導覽列，以及手機的「更多」頁。平時顯示目前版號，有較新版時以強調色顯示新版版號。點選入口會開啟對話框，桌面置中，手機面板貼齊底部、高度接近全螢幕。清單列出所有版本，標示目前版本與可用新版，預設展開最新一版。較舊的版本可逐一展開。
 
+有新版時，對話框依 `__BUILD_INFO__.updateMethod` 顯示更新方式。`cloudflare`（重新部署即取得最新版本）顯示 Retry build 步驟與「前往 Cloudflare 更新」連結；Worker 沒有啟動 build 的權限，網站內無法直接更新。`features/settings/model/release-update.ts` 從 `workers.dev` 網址的第一段取得 Worker 名稱並連到其 Deployments 頁，自訂網域時改開 Workers & Pages 列表。`repository`（由部署 repository 管理版本）只提示從 GitHub 更新；本機建置不顯示。
+
 `data/releases/queries.ts` 匯入根目錄的 `releases.json` 作為隨組建提供的紀錄。App 啟動時查詢上游的公開紀錄，所有入口使用同一份 TanStack Query 結果，成功結果保有六小時的查詢有效期。清單依版號數字由新到舊排序，每個版號只列一次，同版號優先採用上游摘要。離線或查詢失敗時仍可閱讀隨組建提供的紀錄。
 
 桌面「設定 → 關於」與手機「更多 → 關於」皆開啟 `#/about`，直接顯示目前版本、上游 Commit 前七碼、分支與台灣組建時間（`Asia/Taipei`，UTC+8）。Vite 注入 `__BUILD_INFO__`，型別宣告位於 `src/vite-env.d.ts`。複製診斷資訊時包含版號、來源專案與完整上游 SHA。剪貼簿寫入失敗時提供唯讀文字框。

@@ -98,10 +98,18 @@ export function getBuildInfo(directory, upstreamUrl = UPSTREAM_URL) {
     }
   }
 
+  // 由 scripts/cloudflare-build.mjs 在 Workers Builds 中設定；本機建置沒有更新方式。
+  const updateMethod = ["cloudflare", "repository"].includes(
+    process.env.TAIWAN_FIN_HUB_UPDATE_METHOD,
+  )
+    ? process.env.TAIWAN_FIN_HUB_UPDATE_METHOD
+    : null;
+
   return {
     repository: UPSTREAM_REPOSITORY,
     commit: commit || "未知",
     branch: UPSTREAM_BRANCH,
     builtAt: new Date().toISOString(),
+    updateMethod,
   };
 }

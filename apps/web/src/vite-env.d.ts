@@ -3,4 +3,6 @@ declare const __BUILD_INFO__: {
   commit: string;
   branch: string;
   builtAt: string;
+  /** cloudflare：重新部署即可更新；repository：由部署 repository 管理版本；null：本機建置。 */
+  updateMethod: "cloudflare" | "repository" | null;
 };
