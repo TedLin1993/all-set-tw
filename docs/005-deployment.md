@@ -1,6 +1,6 @@
 # 進階部署與更新
 
-本文件補充 README 的部署流程，說明 Cloudflare Access、Secrets、自動更新、本機開發與既有 D1 部署。Cloudflare Dashboard 的名稱與位置可能調整；若畫面不同，請以官方文件為準。
+本文件補充 README 的部署流程，說明 Cloudflare Access、Secrets、版本更新、本機開發與既有 D1 部署。Cloudflare Dashboard 的名稱與位置可能調整；若畫面不同，請以官方文件為準。
 
 ## 部署前準備
 
@@ -55,7 +55,7 @@ GUI 部署使用 Cloudflare Builds 原有的部署 token，不需另建 token �
 
 為了解有多少人部署本專案，部署 script 會在 Worker 首次部署成功後，下載一次上游 repository 的公開 Release 檔案 [`deploy-counter/first-deploy.txt`](https://github.com/TedLin1993/all-set-tw/releases/tag/deploy-counter)。維護者只能從 GitHub 看到這個檔案的累計下載次數。
 
-- **觸發時機**：只在 Workers Builds（`WORKERS_CI=1`）中、Worker 尚未有 VAPID 金鑰且首次 `wrangler deploy` 成功後執行。之後的 build、自動更新與 Worker 執行期間都不會再發出請求。
+- **觸發時機**：只在 Workers Builds（`WORKERS_CI=1`）中、Worker 尚未有 VAPID 金鑰且首次 `wrangler deploy` 成功後執行。之後的 build、版本更新與 Worker 執行期間都不會再發出請求。
 - **送出內容**：一般的 HTTPS GET，不附加 ID、Worker 名稱、帳號、設定或金融資料。請求從 Cloudflare 的建置環境發出，不是使用者的瀏覽器或裝置。
 - **失敗處理**：逾時（5 秒）或任何錯誤只會在 log 顯示 `[deploy] First-deployment count skipped.`，不影響部署。
 - **關閉方式**：在首次 build 執行前，於 Workers Builds 的 **Build variables and secrets** 設定 `DEPLOY_COUNTER=false`。本機部署與 `--dry-run` 不會計數。
@@ -171,18 +171,55 @@ Cloudflare Access 預設可能使用 Email OTP。如要限定 Cloudflare 帳號�
 
 要讓 Codex、ChatGPT 等 AI 助理透過 `/mcp` 查詢資料，需在保護此 Worker 的 Application 開啟 **Managed OAuth**。開啟後，未登入的非瀏覽器請求會收到 `401` 而非轉址；網頁版登入方式不變。完整設定與各助理的連線步驟見 [AI 助理連線（MCP）](006-mcp.md)。
 
-## 自動更新
+## 版本更新
 
-Deploy to Cloudflare 建立的新 repository 不會包含本專案的 `.github/workflows`，需要一次性安裝更新 workflow。
+一般部署只要在 Cloudflare 重新部署（Retry build）即可取得官方最新版本，GitHub repository 不需要任何變更。想每天自動更新，或修改過程式碼、需要保留修改的部署，可改用[同步 workflow](#同步-workflow選用)。
 
-### 從 GitHub 網頁安裝
+### 重新部署取得最新版本
+
+Build command `npm run build` 執行 `scripts/cloudflare-build.mjs`。在 Workers Builds（`WORKERS_CI=1`）中，且 repository 沒有 `.github/workflows` 時，會：
+
+1. 以 `git fetch --depth=1` 取得 `TedLin1993/all-set-tw` 的最新 `main`，並將這次 build 的 checkout 重設為該版本。只影響建置環境的暫存檔案，不會推送到部署 repository。
+2. 沿用部署 repository `wrangler.toml` 中的 Worker `name`、D1 `database_name`／`database_id` 與 Queue 名稱，避免改連到另一個空的 D1 或 Queue。
+3. 依新版的 lockfile 重新執行 `npm ci`，再執行新版的 `npm run build:app`。後續的 Deploy command `npm run deploy` 也使用新版檔案，並套用新版的 D1 migrations。
+
+使用者的操作：在 Worker 的 build 紀錄中，點擊最近一次 build 右側的 **⋯**，選擇 **Retry build**，完成後重新整理網站。有新版時，網站的「更新紀錄」會顯示這個步驟與「前往 Cloudflare 更新」連結。
+
+取得官方版本失敗時 build 直接失敗，網站維持目前版本。Retry build 會重建同一個 commit，但 build 時仍會重新取得最新版本。
+
+因此沒有安裝同步 workflow 時，部署 repository 只提供首次部署與 `wrangler.toml` 的部署設定，直接修改程式碼不會生效。repository 在首次部署後有新的 commit 時，build log 會提醒這件事。
+
+下列情況使用 repository 目前的檔案建置，不切換版本：
+
+- 本機或 GitHub Actions 等非 Workers Builds 環境。
+- repository 有 `.github/workflows`：官方 repository、fork，或已安裝同步 workflow 的部署，由 repository 自己管理版本。
+
+較早的部署 repository 沒有 `cloudflare-build.mjs`，Retry build 後「目前版本」不會改變，需切換一次：在 Worker 的 **Settings → Builds** 編輯 build 設定，將 **Build command** 改為下方指令並儲存，再 Retry build。之後保留這個 Build command，**Deploy command** 維持 `npm run deploy`；已安裝同步 workflow 的部署不需要切換。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TedLin1993/all-set-tw/main/scripts/cloudflare-build.mjs -o /tmp/cloudflare-build.mjs && node /tmp/cloudflare-build.mjs
+```
+
+該指令下載官方 `main` 的同一個 script 執行，行為與 `npm run build` 相同。
+
+舊部署的 `cloudflare-build.mjs` 會在新版目錄執行 `npm run build:app`，並以 `TAIWAN_FIN_HUB_UPDATE_METHOD` 告知更新方式，因此往後版本必須保留 `build:app` script 與這個變數名稱；`cloudflare-build.mjs` 也可能以 curl 下載執行，只能 import Node 內建模組。
+
+### 同步 workflow（選用）
+
+Deploy to Cloudflare 建立的新 repository 不會包含本專案的 `.github/workflows`，需要一次性安裝同步 workflow。安裝後由 workflow 每天將上游合併至部署 repository，build 不會再另外取得官方版本。
+
+要自行修改程式碼時，請先安裝並執行一次同步 workflow，再開始修改。首次同步的安全檢查會拒絕首次部署後已改過程式碼的 repository，避免覆蓋修改；之後的同步以三方合併保留修改。
+
+安裝前先在 Worker 的 **Settings → Build → Build watch paths**，於排除路徑（exclude）加入 `.github/*` 並儲存。沒有 workflow 時，網站可能已透過重新部署更新，但部署 repository 的檔案仍是首次部署時的版本；只新增 workflow 的 commit 若觸發 build，會改用這些舊檔案建置，網站暫時退回舊版，直到同步 workflow 推送新版。加入排除路徑後，只改 `.github/` 的 commit 不會觸發 build，這個設定可以保留。安裝後請立即手動執行一次同步 workflow。
+
+#### 從 GitHub 網頁安裝
 
 1. 在部署 repository 開啟 [`deploy/github/sync-upstream.yml`](../deploy/github/sync-upstream.yml)，點擊 **Raw** 並複製內容。
 2. 回到 repository 首頁，選擇 **Add file → Create new file**。
 3. 建立 `.github/workflows/sync-upstream.yml`，貼上內容並 commit 至 `main`。
 4. 前往 **Settings → Actions → General → Workflow permissions**，允許 GitHub Actions 寫入 repository。
 
-### 從本機安裝
+#### 從本機安裝
 
 ```bash
 mkdir -p .github/workflows
@@ -192,9 +229,9 @@ git commit -m "啟用版本自動更新"
 git push
 ```
 
-完成後可從 **Actions → Sync Latest Version → Run workflow** 手動更新，也會在每天台灣時間 **04:15** 自動執行。
+安裝後立即從 **Actions → Sync Latest Version → Run workflow** 執行一次，之後也可隨時手動更新；workflow 每天台灣時間 **04:15** 會自動執行。
 
-### 更新如何運作
+#### 同步如何運作
 
 workflow 會：
 
@@ -207,7 +244,7 @@ workflow 會：
 
 後續同步會在 commit message 記錄上游基準，不使用 force push。若本地修改與上游衝突，更新器會在推送前停止，保留目前內容供手動處理。
 
-### 更新故障排查
+#### 同步故障排查
 
 - **Workflow 沒有執行**：確認檔案位於 `.github/workflows/sync-upstream.yml`，並檢查 Actions 是否啟用。
 - **無法推送更新**：確認 Workflow permissions 允許寫入 repository。
@@ -229,7 +266,7 @@ workflow 只在官方 repository 建立 Release，已發布的版號會略過。
 
 格式規則由 workflow 與前端 `apps/web/src/data/releases/queries.ts` 各自檢查，調整欄位或格式時兩處需一起修改。
 
-部署 repository 仍同步上游 `main`。兩次發版之間的部署顯示最近一次發版的版號，實際納入的上游程式碼可由 Commit 辨識。
+重新部署與同步 workflow 都取得上游 `main`。兩次發版之間的部署顯示最近一次發版的版號，實際納入的上游程式碼可由 Commit 辨識。
 
 ## 組建版本資訊
 
@@ -237,9 +274,12 @@ workflow 只在官方 repository 建立 Release，已發布的版號會略過。
 `scripts/build-info.mjs` 在 Vite 組建時辨識採用的上游版本，再由 `apps/web/vite.config.ts` 寫入前端產物。
 
 - 官方 repository 的 checkout 使用 `HEAD` 作為上游 Commit。
-- 獨立部署只採用目前 `HEAD` 中更新器寫入的 `Taiwan-Fin-Hub-Upstream` 紀錄。
+- 重新部署時 build 已切換到官方 commit，`HEAD` 位於上游歷史，直接使用該 Commit。
+- 安裝同步 workflow 的部署只採用目前 `HEAD` 中更新器寫入的 `Taiwan-Fin-Hub-Upstream` 紀錄。
 - 沒有紀錄的 fork／首次一鍵部署會在暫存 Git repository 取得官方 `main`；`HEAD` 本身位於上游歷史時使用該 Commit，沒有 parent 的首次匯入則以目前原始碼快照比對版本，忽略部署流程未複製的 `.github/workflows`。
 - 使用者在同步後自行新增 commit 時，Commit 顯示「未知」；完整與淺層 checkout 採用相同規則，不沿用先前的同步紀錄、共同祖先或初始快照。
+
+`updateMethod` 讀取 `cloudflare-build.mjs` 設定的 `TAIWAN_FIN_HUB_UPDATE_METHOD`：切換到官方版本建置時為 `cloudflare`，repository 有 `.github/workflows` 時為 `repository`，本機建置為 `null`。前端依此決定「更新紀錄」顯示的更新方式。
 
 版本比對只讀取上游，不變更部署 repository。首次辨識需要連線 GitHub；無法辨識時 Commit 顯示「未知」。
 本機 Vite dev server 的時間代表啟動時刻，正式組建則代表該次 Vite build 的時間；重新部署既有產物不會改變時間。

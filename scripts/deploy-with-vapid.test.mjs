@@ -372,7 +372,7 @@ console.log(JSON.stringify({
       await writeFile(join(directory, name), fixture, { mode: 0o700 });
     }
     for (const tokenCase of cases) {
-      for (const name of ["prebuild", "deploy"]) {
+      for (const name of ["build:app", "deploy"]) {
         const { stdout, stderr } = await execute(
           "/bin/sh",
           ["-c", scripts[name]],
@@ -392,12 +392,13 @@ console.log(JSON.stringify({
         );
         assert.deepEqual(
           calls.map(({ command, args }) => ({ command, args })),
-          name === "prebuild"
+          name === "build:app"
             ? [
                 {
                   command: "node",
                   args: ["scripts/prepare-cloudflare-build.mjs"],
                 },
+                { command: "npm", args: ["run", "build", "--workspaces"] },
               ]
             : [
                 { command: "npm", args: ["run", "db:migrate:remote"] },

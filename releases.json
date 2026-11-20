@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.2.0",
+    "date": "2026-11-20",
+    "changes": [
+      "更新版本只要在 Cloudflare 重新部署（Retry build），不需再設定 GitHub workflow；有新版時，「更新紀錄」會提供前往 Cloudflare 的按鈕與步驟。",
+      "較早建立且未安裝同步 workflow 的部署，需先在 Cloudflare 的 build 設定修改一次 Build command，步驟見專案的「進階部署與更新」文件。",
+      "手機版有新版時，底部導覽的「更多」會顯示紅點；並修正「AI 助理」頁的 Cloudflare 連結找不到頁面。"
+    ]
+  },
+  {
     "version": "1.1.0",
     "date": "2026-11-19",
     "changes": [

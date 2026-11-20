@@ -1,8 +1,15 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight, NotebookText, X } from "@lucide/svelte";
+  import {
+    ChevronDown,
+    ChevronRight,
+    ExternalLink,
+    NotebookText,
+    X,
+  } from "@lucide/svelte";
   import { Dialog } from "bits-ui";
   import { currentVersion, type Release } from "@/data/releases/queries";
   import { cn } from "@/shared/utils/cn";
+  import { cloudflareUpdateUrl } from "../model/release-update";
 
   let {
     history,
@@ -17,6 +24,8 @@
   const newVersion = $derived(
     history[0].version === currentVersion ? undefined : history[0].version,
   );
+  const updateMethod = __BUILD_INFO__.updateMethod;
+  const updateUrl = cloudflareUpdateUrl(window.location.hostname);
   const triggerStyles = {
     sidebar:
       "w-full border border-transparent text-white/85 hover:bg-white/5 focus-visible:outline-white data-[update-available]:border-cyan-200/25 data-[update-available]:bg-cyan-200/10 data-[update-available]:text-white data-[update-available]:hover:bg-cyan-200/15",
@@ -81,6 +90,36 @@
           <X aria-hidden="true" class="size-5" />
         </Dialog.Close>
       </header>
+      {#if newVersion && updateMethod === "cloudflare"}
+        <section
+          aria-label="更新版本"
+          class="shrink-0 border-b border-border bg-muted/50 px-4 py-3 md:px-5"
+        >
+          <p class="text-sm font-semibold">可更新至 v{newVersion}</p>
+          <p class="mt-1 text-sm leading-6 text-muted-foreground">
+            在 Cloudflare 的 build 紀錄中，點擊最近一次 build 右側的
+            <strong class="font-semibold text-foreground">⋯</strong>，選擇
+            <strong class="font-semibold text-foreground">Retry build</strong
+            >。完成後重新整理此頁面。
+          </p>
+          <a
+            href={updateUrl}
+            target="_blank"
+            rel="noreferrer"
+            class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >前往 Cloudflare 更新<ExternalLink
+              aria-hidden="true"
+              class="size-4"
+            /></a
+          >
+        </section>
+      {:else if newVersion && updateMethod === "repository"}
+        <p
+          class="shrink-0 border-b border-border bg-muted/50 px-4 py-3 text-sm leading-6 text-muted-foreground md:px-5"
+        >
+          此部署由 GitHub repository 管理版本，請從 GitHub 更新。
+        </p>
+      {/if}
       <ol
         role="list"
         class="min-h-0 divide-y divide-border overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:px-5"

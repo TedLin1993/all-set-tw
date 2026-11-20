@@ -7,7 +7,11 @@
   import Overview from "@/features/overview/OverviewPage.svelte";
   import ReleaseHistoryDialog from "@/features/settings/components/ReleaseHistoryDialog.svelte";
   import type { ConnectorId } from "@/data/connectors/types";
-  import { releaseHistory, releasesQuery } from "@/data/releases/queries";
+  import {
+    currentVersion,
+    releaseHistory,
+    releasesQuery,
+  } from "@/data/releases/queries";
   import { createApiClient } from "@/shared/api/client";
   import { swipeBack } from "@/shared/actions/swipe-back";
   import { moneyState } from "@/shared/state/money-visibility.svelte";
@@ -52,6 +56,8 @@
     () => queryClient,
   );
   const versions = $derived(releaseHistory(releases.data));
+  // 手機版「更新紀錄」位於「更多」頁；有新版時在底部導覽的「更多」標示，首頁就看得到。
+  const updateAvailable = $derived(versions[0].version !== currentVersion);
   // Read the hash before the first render so deep links do not mount the
   // overview page and fire its queries first.
   const initialRouteView = parseViewHash(window.location.hash);
@@ -474,7 +480,14 @@
       {/each}
       <button
         class={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[11px] font-medium transition ${view === "more" || !mobilePrimaryViews.includes(primaryView) ? "bg-white/10 text-white" : "text-white/65"}`}
-        onclick={() => navigate("more")}><Ellipsis class="size-5" />更多</button
+        onclick={() => navigate("more")}
+        ><span class="relative"
+          ><Ellipsis class="size-5" />{#if updateAvailable}<span
+              aria-hidden="true"
+              class="absolute -top-0.5 -right-1 size-2.5 rounded-full bg-destructive ring-2 ring-inverse"
+            ></span>{/if}</span
+        >更多{#if updateAvailable}<span class="sr-only">（有新版本）</span
+          >{/if}</button
       >
     </nav>
   </div>
