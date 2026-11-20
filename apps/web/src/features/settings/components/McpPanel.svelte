@@ -43,7 +43,7 @@
     icon: Component;
     tone: string;
     title: string;
-    description: string;
+    description?: string;
     showSetup: boolean;
   }>(() => {
     if (authStatus.isPending)
@@ -63,9 +63,8 @@
         return {
           icon: CircleCheckBig,
           tone: "text-moss",
+          // 回呼網址等連線細節已在下方各助理的步驟與「連線失敗時」說明。
           title: "MCP 可以使用",
-          description:
-            "Cloudflare Access 已開啟 Managed OAuth，AI 助理連線時會開啟瀏覽器完成登入。連接 ChatGPT 等網頁型助理時，仍需把它的回呼網址加入 Allowed redirect URIs。",
           showSetup: false,
         };
       case "not_enabled":
@@ -182,11 +181,13 @@
                 class={authView.tone}
               /></span
             >
-            <div class="grid min-w-0 gap-1">
+            <div class="grid min-w-0 gap-1 self-center">
               <h3 class="text-lg font-bold">{authView.title}</h3>
-              <p class="text-sm leading-relaxed text-muted-foreground">
-                {authView.description}
-              </p>
+              {#if authView.description}
+                <p class="text-sm leading-relaxed text-muted-foreground">
+                  {authView.description}
+                </p>
+              {/if}
             </div>
           </div>
           {#if authView.showSetup}
