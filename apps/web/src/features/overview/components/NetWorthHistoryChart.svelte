@@ -98,7 +98,13 @@
       chartData.some((point) => point.stockCost !== undefined),
   );
   const latestCost = $derived(
-    showCost ? chartData.at(-1)?.stockCost : undefined,
+    showCost && !chartData.at(-1)?.stockCostAheadOfValue
+      ? chartData.at(-1)?.stockCost
+      : undefined,
+  );
+  /** 成本線含美股買進、但美股市值還沒進入走勢的區間；這段不算未實現損益。 */
+  const costAheadOfValue = $derived(
+    showCost && chartData.some((point) => point.stockCostAheadOfValue),
   );
   const unrealizedPnl = $derived(
     latestCost === undefined ? undefined : latestValue - latestCost,
@@ -170,6 +176,12 @@
   function pnlFooter(data: unknown) {
     const point = data as NetWorthChartPoint;
     if (point.stockCost === undefined) return null;
+    if (point.stockCostAheadOfValue)
+      return {
+        label: "未實現損益",
+        value: "美股市值首次同步後才有",
+        class: "text-subtle",
+      };
     const pnl = point.selectedTotal - point.stockCost;
     const percent =
       point.stockCost > 0
@@ -325,6 +337,11 @@
                     (unrealizedPnl / latestCost) * 100,
                   ).toFixed(1)}%）{/if}
               </span>
+            </p>
+          {/if}
+          {#if costAheadOfValue}
+            <p class="mt-1 text-caption text-subtle">
+              投入成本從美股買進日起計入；美股市值首次同步後才有，之前不計算未實現損益。
             </p>
           {/if}
         </div>

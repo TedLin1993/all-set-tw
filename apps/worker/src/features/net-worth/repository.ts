@@ -229,13 +229,12 @@ const COST_CONNECTORS_CTE = `cost_connectors AS MATERIALIZED (
  * 只看曾提供成本的直接券商（目前為永豐）。
  */
 export async function loadStockCostInputs(db: D1Database) {
-  const [positions, trades, uncovered, foreignStart] = await db.batch<
-    Record<string, unknown>
-  >([
-    // 各直接券商每個快照日、每個市場與幣別的成本合計；缺成本的非零持倉另計筆數。
-    // 以市場區分台股與海外：海外持倉可能以 TWD 計價，不能只看幣別。
-    db.prepare(
-      `WITH ${COST_CONNECTORS_CTE}
+  const [positions, trades, foreignTrades, uncovered, foreignStart] =
+    await db.batch<Record<string, unknown>>([
+      // 各直接券商每個快照日、每個市場與幣別的成本合計；缺成本的非零持倉另計筆數。
+      // 以市場區分台股與海外：海外持倉可能以 TWD 計價，不能只看幣別。
+      db.prepare(
+        `WITH ${COST_CONNECTORS_CTE}
       SELECT
         substr(as_of_date, 1, 10) AS date,
         CASE
@@ -250,9 +249,9 @@ export async function loadStockCostInputs(db: D1Database) {
       WHERE asset_type IN ('stock', 'etf')
       GROUP BY 1, 2, 3
       ORDER BY 1`,
-    ),
-    db.prepare(
-      `WITH ${COST_CONNECTORS_CTE}
+      ),
+      db.prepare(
+        `WITH ${COST_CONNECTORS_CTE}
       SELECT
         substr(effective_date, 1, 10) AS date,
         transaction_code AS code,
@@ -265,12 +264,27 @@ export async function loadStockCostInputs(db: D1Database) {
         AND transaction_code IN ('B', 'S')
         AND effective_date IS NOT NULL
       ORDER BY 1 DESC`,
-    ),
-    // 集保最新快照中，不屬於任何直接券商帳戶的持股：市值線含這些持股但成本未知。
-    // 各 CTE 先物化、只算一次：寫成相關子查詢時，每筆集保持股都會重掃整張
-    // investment_positions，快照累積後單次查詢可讀上百萬列（D1 每日讀取額度）。
-    db.prepare(
-      `WITH ${COST_CONNECTORS_CTE},
+      ),
+      // 海外成交（原幣），供海外市值進入走勢以前的成本回推。
+      db.prepare(
+        `WITH ${COST_CONNECTORS_CTE}
+      SELECT
+        substr(effective_date, 1, 10) AS date,
+        transaction_code AS code,
+        amount,
+        currency
+      FROM investment_transactions
+      JOIN cost_connectors USING (connector_id)
+      WHERE COALESCE(json_extract(raw_payload, '$.market'), 'TW') != 'TW'
+        AND transaction_code IN ('B', 'S')
+        AND effective_date IS NOT NULL
+      ORDER BY 1`,
+      ),
+      // 集保最新快照中，不屬於任何直接券商帳戶的持股：市值線含這些持股但成本未知。
+      // 各 CTE 先物化、只算一次：寫成相關子查詢時，每筆集保持股都會重掃整張
+      // investment_positions，快照累積後單次查詢可讀上百萬列（D1 每日讀取額度）。
+      db.prepare(
+        `WITH ${COST_CONNECTORS_CTE},
       -- 只看券商最新快照：已不在最新快照的帳戶，舊列不代表成本仍涵蓋這筆持股。
       direct_latest AS MATERIALIZED (
         SELECT connector_id, MAX(as_of_date) AS as_of_date
@@ -304,13 +318,13 @@ export async function loadStockCostInputs(db: D1Database) {
           WHERE covered.broker_no = tdcc.broker_no
             AND covered.broker_account = tdcc.broker_account
         )`,
-    ),
-    // 海外市值從這天才進入走勢，成本也從這天起計入。
-    db.prepare(
-      `SELECT MIN(date) AS date FROM net_worth_history
+      ),
+      // 海外市值從這天才進入走勢；之前的海外成本由成交回推。
+      db.prepare(
+        `SELECT MIN(date) AS date FROM net_worth_history
        WHERE asset_type = 'stock' AND source != 'tdcc'`,
-    ),
-  ]);
+      ),
+    ]);
   const rates = await createDrizzle(db)
     .select({
       currency: exchangeRates.currency,
@@ -332,6 +346,12 @@ export async function loadStockCostInputs(db: D1Database) {
       code: string;
       amount: number | null;
       realizedCost: number | null;
+    }>,
+    foreignTrades: foreignTrades!.results as Array<{
+      date: string;
+      code: string;
+      amount: number | null;
+      currency: string;
     }>,
     uncoveredTdccHoldings: Number(uncovered!.results[0]?.count ?? 0),
     foreignStartDate: (foreignStart!.results[0]?.date as string | null) ?? null,

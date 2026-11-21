@@ -192,7 +192,7 @@ NT$10（`INVESTMENT_DUST_THRESHOLD_TWD`，與後端加密貨幣同步共用）�
 `/api/investments` 每頁最多 100 筆，`investmentsQuery` 以 `ApiClient.getAllPages` 依 `X-Has-More`／`X-Next-Cursor` 取完所有頁，避免持倉超過一頁時少算市值。
 
 總覽的資產走勢只選「股票/ETF」時，另畫出投入成本虛線（`stock_cost`，階梯序列，依圖上日期沿用前值、不另外增加日期），
-並在合計下方與滑鼠提示框（`ChartTooltip` 的 `footer`）顯示投入成本與未實現損益（市值減成本）；同時選了存款等其他資產，或後端沒有成本資料時不顯示。成本的回推規則見後端文件「讀取 API 效能」。
+並在合計下方與滑鼠提示框（`ChartTooltip` 的 `footer`）顯示投入成本與未實現損益（市值減成本）；同時選了存款等其他資產，或後端沒有成本資料時不顯示。後端以 `source = cost_ahead_of_value` 標示已含美股買進、但美股市值還沒進入走勢的成本點（`stockCostAheadOfValue`）：成本線照畫，提示框改說明美股市值首次同步後才有、不算未實現損益，圖表上方另加一行說明。成本的回推規則見後端文件「讀取 API 效能」。
 
 ## 匯率設定
 

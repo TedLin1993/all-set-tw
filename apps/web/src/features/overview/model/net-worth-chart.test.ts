@@ -88,6 +88,51 @@ describe("淨資產走勢的加密貨幣系列", () => {
     ]);
   });
 
+  it("成本已含美股買進、美股市值還沒進入走勢的日期另外標示，不與市值相減", () => {
+    const rows = [
+      {
+        date: "2026-10-20",
+        netWorth: 1300,
+        assetType: "stock_cost",
+        source: "cost_ahead_of_value",
+      },
+      {
+        date: "2026-10-21",
+        netWorth: 1000,
+        assetType: "stock",
+        source: "tdcc",
+      },
+      {
+        date: "2026-10-22",
+        netWorth: 1350,
+        assetType: "stock_cost",
+        source: "cost",
+      },
+      {
+        date: "2026-10-22",
+        netWorth: 1500,
+        assetType: "stock",
+        source: "sinotrade",
+      },
+    ];
+    const points = buildNetWorthChartData(
+      rows,
+      ["stock"],
+      "ALL",
+      new Date("2026-10-22T12:00:00+08:00"),
+    );
+    expect(
+      points.map(({ date, stockCost, stockCostAheadOfValue }) => ({
+        date,
+        stockCost,
+        stockCostAheadOfValue,
+      })),
+    ).toEqual([
+      { date: "2026-10-21", stockCost: 1300, stockCostAheadOfValue: true },
+      { date: "2026-10-22", stockCost: 1350, stockCostAheadOfValue: undefined },
+    ]);
+  });
+
   it("舊版偏好自動補上新的預設類別，看過後取消的類別維持取消", () => {
     expect(restoreIncludedNetWorthAssets(["stock", "deposit"], null)).toEqual([
       "stock",

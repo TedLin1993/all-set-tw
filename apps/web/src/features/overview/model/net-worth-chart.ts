@@ -25,6 +25,8 @@ export interface NetWorthChartPoint {
   manual?: number;
   /** 股票投入成本（台幣）；後端無法與市值對應時沒有資料。 */
   stockCost?: number;
+  /** 投入成本已含美股買進、美股市值還沒進入走勢：不能與市值相減算未實現損益。 */
+  stockCostAheadOfValue?: true;
   selectedTotal: number;
 }
 
@@ -125,14 +127,21 @@ function cutoffDate(timeframe: NetWorthTimeframe, now: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function latestValue(rows: NetWorthHistoryRow[], date: string) {
-  let value: number | undefined;
+function latestRow(rows: NetWorthHistoryRow[], date: string) {
+  let latest: NetWorthHistoryRow | undefined;
   for (const row of rows) {
     if (row.date > date) break;
-    value = row.netWorth;
+    latest = row;
   }
-  return value;
+  return latest;
 }
+
+function latestValue(rows: NetWorthHistoryRow[], date: string) {
+  return latestRow(rows, date)?.netWorth;
+}
+
+/** 後端 `STOCK_COST_AHEAD_OF_VALUE_SOURCE`：成本已含美股買進，但美股市值還沒進入走勢。 */
+const STOCK_COST_AHEAD_OF_VALUE_SOURCE = "cost_ahead_of_value";
 
 function subtractDays(date: string, days: number) {
   const value = new Date(`${date}T00:00:00Z`);
@@ -259,6 +268,7 @@ export function buildNetWorthChartData(
   const costRows = sortedRows.filter((row) => row.assetType === "stock_cost");
 
   return dates.map((date) => {
+    const cost = latestRow(costRows, date);
     const point: NetWorthChartPoint = {
       date,
       stock: valuesByType.stock.get(date),
@@ -266,7 +276,10 @@ export function buildNetWorthChartData(
       crypto: valuesByType.crypto.get(date),
       deposit: valuesByType.deposit.get(date),
       manual: valuesByType.manual.get(date),
-      stockCost: latestValue(costRows, date),
+      stockCost: cost?.netWorth,
+      ...(cost?.source === STOCK_COST_AHEAD_OF_VALUE_SOURCE
+        ? { stockCostAheadOfValue: true as const }
+        : {}),
       selectedTotal: 0,
     };
     point.selectedTotal = includedAssets.reduce(
