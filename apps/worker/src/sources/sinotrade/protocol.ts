@@ -37,10 +37,38 @@ export class SinotradeProtocolError extends Error {
   }
 }
 
+/** 官方暫停服務時的固定訊息；不帶官方訊息原文。 */
+export class SinotradeServiceSuspendedError extends Error {
+  constructor() {
+    super(
+      "永豐證券官方暫停服務中（例如配合證交所市場實況模擬測試），請稍後再試。",
+    );
+    this.name = "SinotradeServiceSuspendedError";
+  }
+}
+
 type SinotradeRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is SinotradeRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 官方暫停服務（例如配合證交所市場實況模擬測試）時，新理財網 API 對所有請求回 HTTP 405，
+ * 內容為 `{ success: "False", errorType: "AccessError", result: { msg: "…暫停服務。" } }`。
+ */
+export function isSinotradeServiceSuspended(payload: unknown): boolean {
+  if (
+    !isRecord(payload) ||
+    payload.success !== "False" ||
+    payload.errorType !== "AccessError" ||
+    !isRecord(payload.result)
+  )
+    return false;
+  const message = payload.result.msg;
+  return (
+    typeof message === "string" && /暫停服務|系統維護|維護中/.test(message)
+  );
 }
 
 function protocolError(): never {

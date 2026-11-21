@@ -25,6 +25,8 @@ export interface NetWorthChartPoint {
   manual?: number;
   /** 股票投入成本（台幣）；後端無法與市值對應時沒有資料。 */
   stockCost?: number;
+  /** 投入成本中，美股市值還沒進入走勢的部分（台幣）；算未實現損益時扣除。 */
+  stockCostUnvalued?: number;
   selectedTotal: number;
 }
 
@@ -132,6 +134,25 @@ function latestValue(rows: NetWorthHistoryRow[], date: string) {
     value = row.netWorth;
   }
   return value;
+}
+
+/** 後端 `STOCK_COST_UNVALUED_ASSET_TYPE`：投入成本中，美股市值還沒進入走勢的部分。 */
+const STOCK_COST_UNVALUED_ASSET_TYPE = "stock_cost_unvalued";
+
+/**
+ * 股票未實現損益：市值減投入成本。成本中美股市值還沒進入走勢的部分先扣除，只比較市值涵蓋的持股，
+ * 此時 `excludesUnvalued` 為 true（損益不含美股）。沒有成本時回傳 null。
+ */
+export function getStockUnrealizedPnl(point: NetWorthChartPoint) {
+  if (point.stockCost === undefined) return null;
+  const unvalued = point.stockCostUnvalued ?? 0;
+  const cost = point.stockCost - unvalued;
+  const pnl = point.selectedTotal - cost;
+  return {
+    pnl,
+    percent: cost > 0 ? (pnl / cost) * 100 : null,
+    excludesUnvalued: unvalued > 0,
+  };
 }
 
 function subtractDays(date: string, days: number) {
@@ -258,6 +279,10 @@ export function buildNetWorthChartData(
   // 成本是階梯序列（成交日一點），依圖上的日期沿用前值；不為成本另外增加日期。
   const costRows = sortedRows.filter((row) => row.assetType === "stock_cost");
 
+  const unvaluedRows = sortedRows.filter(
+    (row) => row.assetType === STOCK_COST_UNVALUED_ASSET_TYPE,
+  );
+
   return dates.map((date) => {
     const point: NetWorthChartPoint = {
       date,
@@ -267,6 +292,7 @@ export function buildNetWorthChartData(
       deposit: valuesByType.deposit.get(date),
       manual: valuesByType.manual.get(date),
       stockCost: latestValue(costRows, date),
+      stockCostUnvalued: latestValue(unvaluedRows, date),
       selectedTotal: 0,
     };
     point.selectedTotal = includedAssets.reduce(

@@ -23,6 +23,7 @@
     buildNetWorthChartData,
     getNetWorthComparison,
     getAvailableNetWorthAssets,
+    getStockUnrealizedPnl,
     NET_WORTH_COMPARISON_PERIODS,
     NET_WORTH_ASSET_SERIES,
     NET_WORTH_DEFAULT_ASSETS,
@@ -100,8 +101,13 @@
   const latestCost = $derived(
     showCost ? chartData.at(-1)?.stockCost : undefined,
   );
-  const unrealizedPnl = $derived(
-    latestCost === undefined ? undefined : latestValue - latestCost,
+  const latestPnl = $derived.by(() => {
+    const point = chartData.at(-1);
+    return showCost && point ? getStockUnrealizedPnl(point) : null;
+  });
+  /** 成本線含美股買進、但美股市值還沒進入走勢的區間；這段的未實現損益不含美股。 */
+  const costIncludesUnvalued = $derived(
+    showCost && chartData.some((point) => (point.stockCostUnvalued ?? 0) > 0),
   );
   const chartConfig: ChartConfig = $derived({
     selectedTotal: { label: showCost ? "市值" : "淨資產", color: "#3e6f7c" },
@@ -166,18 +172,14 @@
     );
   }
 
-  /** 提示框的未實現損益：該日市值減投入成本。 */
+  /** 提示框的未實現損益：該日市值減投入成本；美股市值還沒進入走勢時不含美股。 */
   function pnlFooter(data: unknown) {
-    const point = data as NetWorthChartPoint;
-    if (point.stockCost === undefined) return null;
-    const pnl = point.selectedTotal - point.stockCost;
-    const percent =
-      point.stockCost > 0
-        ? `（${pnl > 0 ? "+" : pnl < 0 ? "−" : ""}${Math.abs((pnl / point.stockCost) * 100).toFixed(1)}%）`
-        : "";
+    const result = getStockUnrealizedPnl(data as NetWorthChartPoint);
+    if (!result) return null;
+    const { pnl, percent, excludesUnvalued } = result;
     return {
-      label: "未實現損益",
-      value: `${pnl > 0 ? "+" : ""}${formatCurrency(pnl)}${percent}`,
+      label: excludesUnvalued ? "未實現損益（不含美股）" : "未實現損益",
+      value: `${pnl > 0 ? "+" : ""}${formatCurrency(pnl)}${percent === null ? "" : `（${pnl > 0 ? "+" : pnl < 0 ? "−" : ""}${Math.abs(percent).toFixed(1)}%）`}`,
       class: pnl > 0 ? "text-moss" : pnl < 0 ? "text-coral" : "",
     };
   }
@@ -309,22 +311,28 @@
           >
             {formatCurrency(latestValue)}
           </p>
-          {#if latestCost !== undefined && unrealizedPnl !== undefined}
+          {#if latestCost !== undefined && latestPnl}
+            {@const { pnl, percent, excludesUnvalued } = latestPnl}
             <p class="mt-1 text-caption text-subtle">
-              投入成本 {formatCurrency(latestCost)}　未實現損益
+              投入成本 {formatCurrency(latestCost)}　未實現損益{excludesUnvalued
+                ? "（不含美股）"
+                : ""}
               <span
-                class={`font-semibold tabular-nums ${unrealizedPnl > 0 ? "text-moss" : unrealizedPnl < 0 ? "text-coral" : ""}`}
+                class={`font-semibold tabular-nums ${pnl > 0 ? "text-moss" : pnl < 0 ? "text-coral" : ""}`}
               >
-                {unrealizedPnl > 0 ? "+" : ""}{formatCurrency(
-                  unrealizedPnl,
-                )}{#if latestCost > 0}（{unrealizedPnl > 0
+                {pnl > 0 ? "+" : ""}{formatCurrency(
+                  pnl,
+                )}{#if percent !== null}（{pnl > 0
                     ? "+"
-                    : unrealizedPnl < 0
+                    : pnl < 0
                       ? "−"
-                      : ""}{Math.abs(
-                    (unrealizedPnl / latestCost) * 100,
-                  ).toFixed(1)}%）{/if}
+                      : ""}{Math.abs(percent).toFixed(1)}%）{/if}
               </span>
+            </p>
+          {/if}
+          {#if costIncludesUnvalued}
+            <p class="mt-1 text-caption text-subtle">
+              投入成本從美股買進日起計入；美股市值首次同步後才有，之前的未實現損益不含美股。
             </p>
           {/if}
         </div>

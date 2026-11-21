@@ -9,6 +9,7 @@ import {
   readSinotradeNewwebSession,
   readSinotradeSavingsOverview,
 } from "../../../src/sources/sinotrade/connector";
+import { SinotradeServiceSuspendedError } from "../../../src/sources/sinotrade/protocol";
 import {
   SINOTRADE_ORIGINS,
   SinotradeAuthenticationRequiredError,
@@ -270,8 +271,11 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
         },
       ]),
     };
-    /** 新理財網分頁：`evaluate` 依序回應讀取登入狀態、清除舊 token 與官方 API。 */
-    function newwebBrowser(evaluations: unknown[]) {
+    /**
+     * 新理財網分頁：`evaluate` 依序回應讀取登入狀態、清除舊 token 與官方 API。沒有給豐存股
+     * 分頁時，新理財網確認完成、要開啟豐存股分頁就停止。
+     */
+    function newwebBrowser(evaluations: unknown[], savings?: Page) {
       const evaluate = vi.fn();
       for (const value of evaluations) evaluate.mockResolvedValueOnce(value);
       const page = {
@@ -292,12 +296,32 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
         newPage: vi
           .fn()
           .mockResolvedValueOnce(page)
-          // 新理財網確認完成後才會開啟豐存股分頁。
-          .mockRejectedValue(new Error("豐存股分頁")),
+          .mockImplementation(async () => {
+            if (!savings) throw new Error("豐存股分頁");
+            return savings;
+          }),
       };
       browserMocks.launch.mockResolvedValue(fake);
       return page;
     }
+    /** 豐存股分頁：總覽確認通過，庫存查詢在這裡停止，只用來觀察之前的新理財網查詢。 */
+    function savingsPage() {
+      return Object.assign(overviewPage(), {
+        browser: () => ({
+          userAgent: vi.fn().mockResolvedValue("HeadlessChrome/1"),
+        }),
+        setUserAgent: vi.fn().mockResolvedValue(undefined),
+        evaluateOnNewDocument: vi.fn().mockResolvedValue({ identifier: "1" }),
+        removeScriptToEvaluateOnNewDocument: vi
+          .fn()
+          .mockResolvedValue(undefined),
+        evaluate: vi.fn().mockRejectedValue(new Error("豐存股庫存")),
+      }) as unknown as Page;
+    }
+    const emptyHoldings = {
+      httpStatus: 200,
+      payload: { success: "True", result: { unreal_sums: { unreal_sum: [] } } },
+    };
 
     it("只送出帳密一次並載入已存憑證；生日、OTP、條款或被拒絕時停止，不寄送也不同意", async () => {
       loginMocks.credentials.mockResolvedValue(challenge("certificate"));
@@ -391,10 +415,87 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
       expect(loginMocks.credentials).toHaveBeenCalledOnce();
     });
 
-    it("權限或其他查詢錯誤不重送帳密", async () => {
-      for (const httpStatus of [403, 500]) {
+    it("確認通過後查詢途中才回應未登入：重新登入一次，換用新 token 重試", async () => {
+      const page = newwebBrowser(
+        [
+          storedSession,
+          { httpStatus: 200, payload: { success: "True" } },
+          // 官方的登入在確認後幾秒失效，庫存查詢收到 401。
+          { httpStatus: 401, payload: null },
+          undefined,
+          { ...storedSession, token: "renewed-token" },
+          { httpStatus: 200, payload: { success: "True" } },
+          emptyHoldings,
+        ],
+        savingsPage(),
+      );
+      loginMocks.credentials.mockResolvedValue(challenge("ready"));
+      await expect(
+        fetchSinotradeSnapshot({ fetch: vi.fn() }, config),
+      ).rejects.toThrow("豐存股庫存");
+      expect(loginMocks.credentials).toHaveBeenCalledOnce();
+      expect(loginMocks.credentials.mock.calls[0]![1]).toBe("newweb");
+      expect(page.evaluate).toHaveBeenCalledTimes(7);
+      expect(page.evaluate.mock.calls[2]![1]).toMatchObject({
+        body: { token: "fixture-token" },
+      });
+      expect(page.evaluate.mock.calls[6]![1]).toMatchObject({
+        body: { token: "renewed-token" },
+      });
+    });
+
+    it("這次同步已重新登入過的平台，查詢又回應未登入時照原錯誤停止，不送第二次帳密", async () => {
+      const unauthorized = { httpStatus: 401, payload: null };
+      const verified = { httpStatus: 200, payload: { success: "True" } };
+      for (const evaluations of [
+        // 確認時就重新登入過，之後的查詢收到 401。
+        [{ token: null, accounts: null }, undefined, storedSession, verified],
+        // 查詢途中重新登入、登入後的確認通過，重試的查詢仍收到 401。
+        [
+          storedSession,
+          verified,
+          unauthorized,
+          undefined,
+          { ...storedSession, token: "renewed-token" },
+          verified,
+        ],
+      ]) {
+        loginMocks.credentials
+          .mockReset()
+          .mockResolvedValue(challenge("ready"));
+        newwebBrowser([...evaluations, unauthorized], savingsPage());
+        const failure = await fetchSinotradeSnapshot(
+          { fetch: vi.fn() },
+          config,
+        ).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(SinotradeAuthenticationRequiredError);
+        // 不把平台標成未連線：下次同步仍會先確認、必要時重新登入。
+        expect(failure).not.toBeInstanceOf(SinotradeUnattendedLoginError);
+        expect(loginMocks.credentials).toHaveBeenCalledOnce();
+      }
+    });
+
+    it("權限、官方暫停服務或其他查詢錯誤不重送帳密", async () => {
+      const suspended = {
+        success: "False",
+        errorType: "AccessError",
+        errorCode: "None",
+        result: { msg: "因配合證交所市場實況模擬測試，暫停服務。" },
+      };
+      const cases = [
+        { httpStatus: 403, payload: null },
+        { httpStatus: 500, payload: null },
+        { httpStatus: 405, payload: suspended },
+        // 同樣是 AccessError，但不是暫停服務的訊息時不猜測原因。
+        {
+          httpStatus: 405,
+          payload: { ...suspended, result: { msg: "其他錯誤" } },
+        },
+      ];
+      const failures: unknown[] = [];
+      for (const apiResponse of cases) {
         loginMocks.credentials.mockReset();
-        newwebBrowser([storedSession, { httpStatus, payload: null }]);
+        newwebBrowser([storedSession, apiResponse]);
         const failure = await fetchSinotradeSnapshot(
           { fetch: vi.fn() },
           config,
@@ -402,7 +503,16 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
         expect(failure).toBeInstanceOf(Error);
         expect(failure).not.toBeInstanceOf(SinotradeUnattendedLoginError);
         expect(loginMocks.credentials).not.toHaveBeenCalled();
+        failures.push(failure);
       }
+      // 暫停服務不是登入問題，不要求重新連線；以固定訊息說明，不帶官方訊息原文。
+      expect(failures[2]).toBeInstanceOf(SinotradeServiceSuspendedError);
+      expect(failures[2]).not.toBeInstanceOf(SinotradeConnectionError);
+      expect((failures[2] as Error).message).toBe(
+        new SinotradeServiceSuspendedError().message,
+      );
+      expect(failures[3]).not.toBeInstanceOf(SinotradeServiceSuspendedError);
+      expect((failures[3] as Error).message).toContain("HTTP 405");
     });
   });
 

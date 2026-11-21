@@ -30,6 +30,7 @@ import {
 } from "./session-protocol";
 import {
   applyRealizedPnl,
+  isSinotradeServiceSuspended,
   parseTaiwanUnrealizedResponse,
   parseForeignUnrealizedResponse,
   parseSavingsAssetHtml,
@@ -37,6 +38,7 @@ import {
   parseTaiwanRealizedResponse,
   parseTaiwanStatementResponse,
   realizedDateWindows,
+  SinotradeServiceSuspendedError,
   statementDateRange,
   taiwanRealizedRequestBody,
   taiwanStatementRequestBody,
@@ -475,6 +477,9 @@ const UNATTENDED_STEP_DETAILS = {
   terms: "官方要求同意憑證作業條款",
 } as const;
 
+/** 同步中自動登入的時機：查詢前確認登入（`check`），或確認通過後的查詢途中（`query`）。 */
+type SinotradeReloginStage = "check" | "query";
+
 /**
  * 同步中的無人值守登入：只送出已儲存的帳密一次，並載入已儲存的憑證（與連線表單自動接續的
  * 範圍相同）。生日、OTP、條款或被官方拒絕都是使用者的決定，一律停止，不寄送、不勾選、不重試。
@@ -483,6 +488,7 @@ export async function signInSinotradeUnattended(
   browser: Browser,
   platform: SinotradePlatform,
   config: SinotradeConfig,
+  stage: SinotradeReloginStage = "check",
 ) {
   const startedAt = Date.now();
   let challenge = await submitSinotradeCredentials(browser, platform, config);
@@ -498,11 +504,12 @@ export async function signInSinotradeUnattended(
       { action: "confirm_certificate", values: {} },
       config,
     );
-  // 只記平台、停下的步驟與耗時；不記帳號、頁面文字或官方訊息。
+  // 只記平台、時機、停下的步驟與耗時；不記帳號、頁面文字或官方訊息。
   console.log(
     JSON.stringify({
       event: "sinotrade_session_relogin",
       platform,
+      stage,
       step: challenge.step,
       durationMs: Date.now() - startedAt,
     }),
@@ -517,21 +524,13 @@ export async function signInSinotradeUnattended(
   );
 }
 
-/**
- * 官方明確回應未登入時，在同一個 Browser 以已儲存的帳密與憑證重新登入一次再檢查；其他錯誤
- * （403、5xx、格式不符）不重送帳密。
- */
-async function withSessionRelogin<T>(
+/** 同步時在 `page` 所在的 Browser 以已儲存的帳密與憑證登入 `platform`。 */
+async function reloginSinotradePlatform(
   page: Page,
   platform: SinotradePlatform,
   config: SinotradeConfig,
-  check: () => Promise<T>,
-): Promise<{ value: T; relogged: boolean }> {
-  try {
-    return { value: await check(), relogged: false };
-  } catch (error) {
-    if (!isSinotradeAuthenticationRequiredError(error)) throw error;
-  }
+  stage: SinotradeReloginStage,
+) {
   const browser = page.browser();
   acknowledgeOfficialDialogs(browser);
   await useDesktopUserAgent(browser);
@@ -547,9 +546,44 @@ async function withSessionRelogin<T>(
     waitUntil: "domcontentloaded",
     timeout: NAVIGATION_TIMEOUT_MS,
   });
-  await signInSinotradeUnattended(browser, platform, config);
+  await signInSinotradeUnattended(browser, platform, config, stage);
+}
+
+/**
+ * 官方明確回應未登入時，在同一個 Browser 以已儲存的帳密與憑證重新登入再重試；其他錯誤
+ * （403、5xx、格式不符）不重送帳密。查詢前的確認（`check`）與之後的查詢（`query`）都適用：
+ * 官方的登入約 24 小時失效，確認通過後幾秒的查詢仍可能收到 401。同一次同步每個平台最多
+ * 重新登入一次，已重新登入過的平台再回應未登入就照原錯誤停止，不送第二次帳密。
+ *
+ * 只有重新登入後的確認仍回應未登入，才視為登入沒有生效（`not_authenticated`，之後的同步
+ * 等使用者重新連線）；確認通過後重試的查詢再回應未登入，照原錯誤停止，不把平台存成未連線。
+ */
+async function withSessionRelogin<T>(
+  page: Page,
+  platform: SinotradePlatform,
+  session: { config: SinotradeConfig; relogins: Set<SinotradePlatform> },
+  stage: SinotradeReloginStage,
+  run: () => Promise<T>,
+  /**
+   * 重新登入後確認登入生效，並恢復重試 `run` 需要的狀態，例如換用新 token 或回到總覽頁。
+   * 省略時以重試的 `run` 本身作為確認。
+   */
+  restore?: () => Promise<unknown>,
+): Promise<T> {
   try {
-    return { value: await check(), relogged: true };
+    return await run();
+  } catch (error) {
+    if (
+      !isSinotradeAuthenticationRequiredError(error) ||
+      session.relogins.has(platform)
+    )
+      throw error;
+  }
+  session.relogins.add(platform);
+  await reloginSinotradePlatform(page, platform, session.config, stage);
+  try {
+    if (!restore) return await run();
+    await restore();
   } catch (error) {
     if (!isSinotradeAuthenticationRequiredError(error)) throw error;
     throw new SinotradeUnattendedLoginError(
@@ -558,6 +592,7 @@ async function withSessionRelogin<T>(
       "登入後官方仍回應未登入",
     );
   }
+  return run();
 }
 
 export async function readSinotradeSavingsOverview(page: Page) {
@@ -644,12 +679,12 @@ async function requestNewweb(
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
       });
-      if (!response.ok) return { httpStatus: response.status, payload: null };
-      let payload: unknown;
+      // 錯誤回應也讀取 JSON，用來辨識官方暫停服務；讀不到時維持原本的狀態碼。
+      let payload: unknown = null;
       try {
         payload = await response.json();
       } catch {
-        return { httpStatus: 502, payload: null };
+        if (response.ok) return { httpStatus: 502, payload: null };
       }
       return {
         httpStatus: response.status,
@@ -663,6 +698,9 @@ async function requestNewweb(
       timeoutMs: REQUEST_TIMEOUT_MS,
     },
   );
+  // 官方暫停服務不是登入失效：不重新登入、不改變已保存的登入狀態。
+  if (isSinotradeServiceSuspended(response.payload))
+    throw new SinotradeServiceSuspendedError();
   if (response.httpStatus === 401)
     throw new SinotradeAuthenticationRequiredError();
   if (response.httpStatus === 403) throw new SinotradeConnectionError();
@@ -991,37 +1029,59 @@ class SinotradeSyncTimeoutError extends Error {
 
 async function collectSnapshot(browser: Browser, config: SinotradeConfig) {
   // 兩個平台都先確認官方仍認得保存的登入，失效就重新登入，之後才查詢。
+  // 每個平台在這次同步最多重新登入一次。
+  const session = { config, relogins: new Set<SinotradePlatform>() };
   const newweb = await browser.newPage();
   await restoreOrigin(
     newweb,
     "newweb",
     restorableSinotradeState(config.webState, "newweb"),
   );
-  const {
-    value: { accounts, token },
-    relogged,
-  } = await withSessionRelogin(newweb, "newweb", config, () =>
-    verifyNewwebSession(newweb),
+  const newwebSession = await withSessionRelogin(
+    newweb,
+    "newweb",
+    session,
+    "check",
+    () => verifyNewwebSession(newweb),
   );
+  const { accounts } = newwebSession;
+  let { token } = newwebSession;
   const savings = await browser.newPage();
   // 剛重新登入時保留新取得的父網域 cookie，不被保存的舊值覆寫。
   await restoreOrigin(
     savings,
     "savings",
     restorableSinotradeState(config.webState, "savings"),
-    relogged,
+    session.relogins.has("newweb"),
   );
-  const { value: savingsAccounts } = await withSessionRelogin(
+  const verifySavingsSession = async () => {
+    const identities = await readSinotradeSavingsOverview(savings);
+    if (!(await savings.$(SINOTRADE_SAVINGS_LOGOUT_SELECTOR)))
+      throw new SinotradeConnectionError();
+    return identities;
+  };
+  const savingsAccounts = await withSessionRelogin(
     savings,
     "savings",
-    config,
-    async () => {
-      const identities = await readSinotradeSavingsOverview(savings);
-      if (!(await savings.$(SINOTRADE_SAVINGS_LOGOUT_SELECTOR)))
-        throw new SinotradeConnectionError();
-      return identities;
-    },
+    session,
+    "check",
+    verifySavingsSession,
   );
+  // 確認通過後，官方的登入仍可能在查詢途中失效：查詢回應未登入時同樣重新登入再重試。
+  // 新理財網重新登入後換用新的 token；豐存股的查詢需要總覽頁的 CSRF token，先回到總覽頁。
+  const queryNewweb = <T>(query: () => Promise<T>) =>
+    withSessionRelogin(newweb, "newweb", session, "query", query, async () => {
+      ({ token } = await verifyNewwebSession(newweb));
+    });
+  const querySavings = <T>(query: () => Promise<T>) =>
+    withSessionRelogin(
+      savings,
+      "savings",
+      session,
+      "query",
+      query,
+      verifySavingsSession,
+    );
   const accountHoldings: Array<{
     account: SinotradeAccount;
     holdings: SinotradeHolding[];
@@ -1041,13 +1101,21 @@ async function collectSnapshot(browser: Browser, config: SinotradeConfig) {
       )
     )
       throw new Error("兩平台的券商分公司與帳戶無法對應，未更新持倉。");
-    const general = await queryGeneral(newweb, account, token);
-    const recurring = await querySinotradeSavings(savings, account);
+    const general = await queryNewweb(() =>
+      queryGeneral(newweb, account, token),
+    );
+    const recurring = await querySavings(() =>
+      querySinotradeSavings(savings, account),
+    );
     // 台股以對帳單為準（含賣出與費稅）；豐存美股的買進只在豐存股「成交」頁。
     const trades =
       account.market === "TW"
-        ? await queryTaiwanTrades(newweb, account, token, statementRange)
-        : await querySinotradeSavingsTrades(savings, account, savingsDateRange);
+        ? await queryNewweb(() =>
+            queryTaiwanTrades(newweb, account, token, statementRange),
+          )
+        : await querySavings(() =>
+            querySinotradeSavingsTrades(savings, account, savingsDateRange),
+          );
     accountHoldings.push({
       account,
       holdings: mergeSinotradeAccountHoldings(general, recurring),
