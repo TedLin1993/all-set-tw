@@ -183,7 +183,11 @@ Build command `npm run build` 執行 `scripts/cloudflare-build.mjs`。在 Worker
 2. 沿用部署 repository `wrangler.toml` 中的 Worker `name`、D1 `database_name`／`database_id` 與 Queue 名稱，避免改連到另一個空的 D1 或 Queue。
 3. 依新版的 lockfile 重新執行 `npm ci`，再執行新版的 `npm run build:app`。後續的 Deploy command `npm run deploy` 也使用新版檔案，並套用新版的 D1 migrations。
 
-使用者的操作：在 Worker 的 build 紀錄中，點擊最近一次 build 右側的 **⋯**，選擇 **Retry build**，完成後重新整理網站。有新版時，網站的「更新紀錄」會顯示這個步驟與「前往 Cloudflare 更新」連結。
+有新版時，在網站的「更新紀錄」點 **前往 Cloudflare 更新**，即可前往產生目前版本的 Build Details。按 **Retry build**，等建置成功後重新整理網站。
+
+網站以組建時間估算 Cloudflare 的 [90 天保留期限](https://developers.cloudflare.com/changelog/post/2026-10-28-workers-builds-90-day-retention/)。滿 90 天或缺少 `WORKERS_CI_BUILD_UUID` 時，按 **查看 Cloudflare 建置紀錄**，在最近一次正式分支的 build 右側點 **⋯ → Retry build**。若連結開啟 Workers & Pages 列表，先選擇 Worker，再開啟 **Deployments → View build history**。
+
+首次一鍵部署可能無法重試。若所有建置都無法重試或紀錄已過期，可用 GitHub 網頁編輯部署 repository 的 README，將小修改提交到正式分支，觸發新的建置。若設過 Build watch paths，請選擇包含在監看範圍內的檔案。
 
 取得官方版本失敗時 build 直接失敗，網站維持目前版本。Retry build 會重建同一個 commit，但 build 時仍會重新取得最新版本。
 

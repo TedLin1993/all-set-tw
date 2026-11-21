@@ -111,5 +111,13 @@ export function getBuildInfo(directory, upstreamUrl = UPSTREAM_URL) {
     branch: UPSTREAM_BRANCH,
     builtAt: new Date().toISOString(),
     updateMethod,
+    cloudflareBuildId:
+      updateMethod === "cloudflare"
+        ? (process.env.WORKERS_CI_BUILD_UUID ?? null)
+        : null,
+    cloudflareWorkerName:
+      updateMethod === "cloudflare"
+        ? (process.env.WRANGLER_CI_OVERRIDE_NAME ?? null)
+        : null,
   };
 }
