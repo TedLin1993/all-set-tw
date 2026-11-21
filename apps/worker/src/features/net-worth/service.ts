@@ -12,10 +12,10 @@ import {
 type StockCostInputs = Awaited<ReturnType<typeof loadStockCostInputs>>;
 
 /**
- * 成本點已含海外買進、但海外市值還沒進入走勢：只畫成本線，不能與當天市值相減算未實現損益。
- * 前端 `apps/web/src/features/overview/model/net-worth-chart.ts` 依同一個值判斷。
+ * 投入成本中市值還沒進入走勢的部分（台幣），也就是回補的海外成本。前端算未實現損益時從成本扣除，
+ * 只比較市值線涵蓋的持股；前端 `apps/web/src/features/overview/model/net-worth-chart.ts` 依同一個值讀取。
  */
-export const STOCK_COST_AHEAD_OF_VALUE_SOURCE = "cost_ahead_of_value";
+export const STOCK_COST_UNVALUED_ASSET_TYPE = "stock_cost_unvalued";
 
 /**
  * 海外市值進入走勢以前的海外成本（台幣，以目前匯率換算）：依海外成交累加買進金額，每個成交日一點；
@@ -55,8 +55,8 @@ function backfillForeignCost(
  * 台股以最新券商快照的成本為基準，依成交往回推：扣掉之後的買進金額、加回之後賣出部位的原始成本；
  * 輸出為階梯序列（每個成交日一點），最早一筆成交之前沿用回推到的成本（涵蓋查詢年限以前的持股）。
  * 賣出缺少原始成本（缺漏或 0）時不再往前推。海外成本取快照日的來源成本，以目前匯率換算，從海外
- * 市值進入走勢那天起計入；更早的日期依海外成交回推到買進日（`backfillForeignCost`），這段成本點
- * 標示為 `STOCK_COST_AHEAD_OF_VALUE_SOURCE`。成本無法與市值線對應時回傳空陣列，不畫出誤導的差距：
+ * 市值進入走勢那天起計入；更早的日期依海外成交回推到買進日（`backfillForeignCost`），並另外輸出
+ * 其中尚無市值的海外成本（`STOCK_COST_UNVALUED_ASSET_TYPE`）。成本無法與市值線對應時回傳空陣列，不畫出誤導的差距：
  * 集保有不屬於直接券商的持股、最新快照有缺成本的持倉，或外幣缺少匯率。
  */
 export function buildStockCostHistory(inputs: StockCostInputs) {
@@ -137,15 +137,13 @@ export function buildStockCostHistory(inputs: StockCostInputs) {
   };
   const foreignSeries = [...foreign].sort(([a], [b]) => a.localeCompare(b));
   const foreignValueStart = foreignSeries[0]?.[0];
+  const foreignBackfill = backfillForeignCost(
+    foreignSeries[0],
+    inputs.foreignTrades,
+    inputs.ratesToTwd,
+  );
   // 回補的日期都早於第一個海外點，接在前面仍依日期排序。
-  const foreignCosts = [
-    ...backfillForeignCost(
-      foreignSeries[0],
-      inputs.foreignTrades,
-      inputs.ratesToTwd,
-    ),
-    ...foreignSeries,
-  ];
+  const foreignCosts = [...foreignBackfill, ...foreignSeries];
   const dates = [
     ...new Set([...taiwan, ...foreignCosts].map(([date]) => date)),
   ].sort();
@@ -153,17 +151,22 @@ export function buildStockCostHistory(inputs: StockCostInputs) {
     const taiwanCost = taiwan.length > 0 ? latest(taiwan, date) : 0;
     if (taiwanCost === undefined) return [];
     const foreignCost = latest(foreignCosts, date) ?? 0;
+    const cost = {
+      date,
+      netWorth: Math.round(taiwanCost + foreignCost),
+      assetType: "stock_cost",
+      source: "cost",
+    };
+    if (foreignBackfill.length === 0 || foreignValueStart === undefined)
+      return [cost];
+    // 與成本同樣逐點輸出，海外市值進入走勢那天起為 0；前端依日期沿用前值。
     return [
+      cost,
       {
         date,
-        netWorth: Math.round(taiwanCost + foreignCost),
-        assetType: "stock_cost",
-        source:
-          foreignValueStart !== undefined &&
-          date < foreignValueStart &&
-          Math.round(foreignCost) > 0
-            ? STOCK_COST_AHEAD_OF_VALUE_SOURCE
-            : "cost",
+        netWorth: date < foreignValueStart ? Math.round(foreignCost) : 0,
+        assetType: STOCK_COST_UNVALUED_ASSET_TYPE,
+        source: "cost",
       },
     ];
   });

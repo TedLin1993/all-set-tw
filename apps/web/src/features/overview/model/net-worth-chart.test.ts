@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildNetWorthChartData,
+  getStockUnrealizedPnl,
   restoreIncludedNetWorthAssets,
 } from "./net-worth-chart";
 
@@ -88,29 +89,29 @@ describe("淨資產走勢的加密貨幣系列", () => {
     ]);
   });
 
-  it("成本已含美股買進、美股市值還沒進入走勢的日期另外標示，不與市值相減", () => {
+  it("美股市值還沒進入走勢時，未實現損益扣掉成本中的美股，台股損益照常計算", () => {
+    const cost = (date: string, netWorth: number, assetType: string) => ({
+      date,
+      netWorth,
+      assetType,
+      source: "cost",
+    });
     const rows = [
-      {
-        date: "2026-10-20",
-        netWorth: 1300,
-        assetType: "stock_cost",
-        source: "cost_ahead_of_value",
-      },
+      // 成本線已含美股買進 300，但市值只有台股。
+      cost("2026-10-20", 1300, "stock_cost"),
+      cost("2026-10-20", 300, "stock_cost_unvalued"),
       {
         date: "2026-10-21",
-        netWorth: 1000,
+        netWorth: 1100,
         assetType: "stock",
         source: "tdcc",
       },
+      // 美股市值進入走勢：尚無市值的成本歸零。
+      cost("2026-10-22", 1350, "stock_cost"),
+      cost("2026-10-22", 0, "stock_cost_unvalued"),
       {
         date: "2026-10-22",
-        netWorth: 1350,
-        assetType: "stock_cost",
-        source: "cost",
-      },
-      {
-        date: "2026-10-22",
-        netWorth: 1500,
+        netWorth: 400,
         assetType: "stock",
         source: "sinotrade",
       },
@@ -122,14 +123,24 @@ describe("淨資產走勢的加密貨幣系列", () => {
       new Date("2026-10-22T12:00:00+08:00"),
     );
     expect(
-      points.map(({ date, stockCost, stockCostAheadOfValue }) => ({
-        date,
-        stockCost,
-        stockCostAheadOfValue,
+      points.map((point) => ({
+        date: point.date,
+        stockCost: point.stockCost,
+        pnl: getStockUnrealizedPnl(point),
       })),
     ).toEqual([
-      { date: "2026-10-21", stockCost: 1300, stockCostAheadOfValue: true },
-      { date: "2026-10-22", stockCost: 1350, stockCostAheadOfValue: undefined },
+      {
+        date: "2026-10-21",
+        stockCost: 1300,
+        // 1,100 −（1,300 − 300）：只算台股。
+        pnl: { pnl: 100, percent: 10, excludesUnvalued: true },
+      },
+      {
+        date: "2026-10-22",
+        stockCost: 1350,
+        // 台股 1,100 沿用前值 + 美股 400 − 1,350。
+        pnl: { pnl: 150, percent: (150 / 1350) * 100, excludesUnvalued: false },
+      },
     ]);
   });
 

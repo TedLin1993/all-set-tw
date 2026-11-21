@@ -162,16 +162,16 @@ describe("股票投入成本回推", () => {
       amount,
       currency: "USD",
     });
-    const withSource = (inputs: Inputs) =>
-      buildStockCostHistory(inputs).map(({ date, netWorth, source }) => [
+    const series = (inputs: Inputs) =>
+      buildStockCostHistory(inputs).map(({ date, netWorth, assetType }) => [
         date,
         netWorth,
-        source,
+        assetType,
       ]);
 
-    it("成交能完整解釋第一個點的成本時回補，這段成本標示為市值尚未進入走勢", () => {
+    it("成交能完整解釋第一個點的成本時回補，另外輸出其中尚無市值的海外成本", () => {
       expect(
-        withSource({
+        series({
           ...foreign,
           foreignTrades: [
             buy("2025-02-06", -3_000),
@@ -181,18 +181,24 @@ describe("股票投入成本回推", () => {
           ],
         }),
       ).toEqual([
-        // 第一筆買進以前沒有海外成本，市值與成本範圍一致，照常算未實現損益。
-        ["1900-01-01", 900_000, "cost"],
-        ["2025-02-06", 900_000 + 3_000 * 32, "cost_ahead_of_value"],
-        ["2025-06-01", 900_000 + 3_100 * 32, "cost_ahead_of_value"],
-        ["2026-11-10", 900_000 + 3_100 * 32, "cost"],
+        // 第一筆買進以前沒有海外成本。
+        ["1900-01-01", 900_000, "stock_cost"],
+        ["1900-01-01", 0, "stock_cost_unvalued"],
+        // 成本線含海外買進；算未實現損益時扣掉尚無市值的部分，台股損益照常計算。
+        ["2025-02-06", 900_000 + 3_000 * 32, "stock_cost"],
+        ["2025-02-06", 3_000 * 32, "stock_cost_unvalued"],
+        ["2025-06-01", 900_000 + 3_100 * 32, "stock_cost"],
+        ["2025-06-01", 3_100 * 32, "stock_cost_unvalued"],
+        // 海外市值進入走勢那天起歸零，前端不再沿用回補的值。
+        ["2026-11-10", 900_000 + 3_100 * 32, "stock_cost"],
+        ["2026-11-10", 0, "stock_cost_unvalued"],
       ]);
     });
 
     it("有海外賣出、缺匯率，或有成交以外取得的持股時不回補", () => {
       const unchanged = [
-        ["1900-01-01", 900_000, "cost"],
-        ["2026-11-10", 900_000 + 3_100 * 32, "cost"],
+        ["1900-01-01", 900_000, "stock_cost"],
+        ["2026-11-10", 900_000 + 3_100 * 32, "stock_cost"],
       ];
       for (const foreignTrades of [
         // 海外賣出沒有原始成本，無法回推。
@@ -204,7 +210,7 @@ describe("股票投入成本回推", () => {
         // 成交只解釋 3,000 USD：另外 100 USD 的持股不知道何時取得。
         [buy("2025-02-06", -3_000)],
       ])
-        expect(withSource({ ...foreign, foreignTrades })).toEqual(unchanged);
+        expect(series({ ...foreign, foreignTrades })).toEqual(unchanged);
     });
   });
 
