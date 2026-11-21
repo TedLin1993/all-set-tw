@@ -9,7 +9,7 @@
   import { Dialog } from "bits-ui";
   import { currentVersion, type Release } from "@/data/releases/queries";
   import { cn } from "@/shared/utils/cn";
-  import { cloudflareUpdateUrl } from "../model/release-update";
+  import { cloudflareUpdateTarget } from "../model/release-update";
 
   let {
     history,
@@ -25,7 +25,6 @@
     history[0].version === currentVersion ? undefined : history[0].version,
   );
   const updateMethod = __BUILD_INFO__.updateMethod;
-  const updateUrl = cloudflareUpdateUrl(window.location.hostname);
   const triggerStyles = {
     sidebar:
       "w-full border border-transparent text-white/85 hover:bg-white/5 focus-visible:outline-white data-[update-available]:border-cyan-200/25 data-[update-available]:bg-cyan-200/10 data-[update-available]:text-white data-[update-available]:hover:bg-cyan-200/15",
@@ -91,27 +90,49 @@
         </Dialog.Close>
       </header>
       {#if newVersion && updateMethod === "cloudflare"}
+        {@const target = cloudflareUpdateTarget(
+          window.location.hostname,
+          __BUILD_INFO__,
+        )}
         <section
           aria-label="更新版本"
           class="shrink-0 border-b border-border bg-muted/50 px-4 py-3 md:px-5"
         >
           <p class="text-sm font-semibold">可更新至 v{newVersion}</p>
           <p class="mt-1 text-sm leading-6 text-muted-foreground">
-            在 Cloudflare 的 build 紀錄中，點擊最近一次 build 右側的
-            <strong class="font-semibold text-foreground">⋯</strong>，選擇
-            <strong class="font-semibold text-foreground">Retry build</strong
-            >。完成後重新整理此頁面。
+            {#if target.page === "workers"}
+              選擇你的 Worker，開啟 Deployments → View build history。
+            {/if}
+            {#if target.page === "details"}
+              在 Build Details 按
+            {:else}
+              在最近一次正式分支的 build 右側點 ⋯，選擇
+            {/if}
+            <strong class="font-semibold text-foreground">Retry build</strong>。
+            建置成功後，重新整理此頁。
           </p>
           <a
-            href={updateUrl}
+            href={target.url}
             target="_blank"
             rel="noreferrer"
             class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-xs transition-colors hover:bg-primary/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            >前往 Cloudflare 更新<ExternalLink
+            >{target.page === "details"
+              ? "前往 Cloudflare 更新"
+              : "查看 Cloudflare 建置紀錄"}<ExternalLink
               aria-hidden="true"
               class="size-4"
             /></a
           >
+          <details class="mt-2 text-sm text-muted-foreground">
+            <summary class="cursor-pointer">找不到 Retry build？</summary>
+            <p class="mt-1 leading-6">
+              Cloudflare 保留建置紀錄 90 天，首次一鍵部署也可能無法重試。可到
+              Deployments → View build history
+              選其他正式分支的建置。若沒有可重試的紀錄，在部署用 GitHub
+              repository 的正式分支提交一筆小修改（例如在 README
+              加一行文字），即可觸發新建置。
+            </p>
+          </details>
         </section>
       {:else if newVersion && updateMethod === "repository"}
         <p
