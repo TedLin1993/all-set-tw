@@ -557,6 +557,16 @@ async function openLoginAndFill(
   } finally {
     page.off("requestfailed", onRequestFailed);
   }
+  // 登入頁的 load handler 會重設 #USERID 與 #NICKNAME；readyState 仍為
+  // interactive 時就填入，送出前會被清空，網銀跳出「請輸入代號」。
+  await page
+    .waitForFunction(() => document.readyState === "complete", {
+      timeout: 20_000,
+    })
+    .catch(() => undefined);
+  await page
+    .waitForNetworkIdle({ idleTime: 800, timeout: 15_000 })
+    .catch(() => undefined);
   await fillInput(page, "#USERIDTEXT", config.userId ?? "");
   await withActionTimeout(
     page.evaluate(() => {
