@@ -554,6 +554,9 @@ async function reloginSinotradePlatform(
  * （403、5xx、格式不符）不重送帳密。查詢前的確認（`check`）與之後的查詢（`query`）都適用：
  * 官方的登入約 24 小時失效，確認通過後幾秒的查詢仍可能收到 401。同一次同步每個平台最多
  * 重新登入一次，已重新登入過的平台再回應未登入就照原錯誤停止，不送第二次帳密。
+ *
+ * 只有重新登入後的確認仍回應未登入，才視為登入沒有生效（`not_authenticated`，之後的同步
+ * 等使用者重新連線）；確認通過後重試的查詢再回應未登入，照原錯誤停止，不把平台存成未連線。
  */
 async function withSessionRelogin<T>(
   page: Page,
@@ -561,7 +564,10 @@ async function withSessionRelogin<T>(
   session: { config: SinotradeConfig; relogins: Set<SinotradePlatform> },
   stage: SinotradeReloginStage,
   run: () => Promise<T>,
-  /** 重新登入後、重試 `run` 前恢復查詢需要的狀態，例如換用新 token 或回到總覽頁。 */
+  /**
+   * 重新登入後確認登入生效，並恢復重試 `run` 需要的狀態，例如換用新 token 或回到總覽頁。
+   * 省略時以重試的 `run` 本身作為確認。
+   */
   restore?: () => Promise<unknown>,
 ): Promise<T> {
   try {
@@ -576,8 +582,8 @@ async function withSessionRelogin<T>(
   session.relogins.add(platform);
   await reloginSinotradePlatform(page, platform, session.config, stage);
   try {
-    await restore?.();
-    return await run();
+    if (!restore) return await run();
+    await restore();
   } catch (error) {
     if (!isSinotradeAuthenticationRequiredError(error)) throw error;
     throw new SinotradeUnattendedLoginError(
@@ -586,6 +592,7 @@ async function withSessionRelogin<T>(
       "登入後官方仍回應未登入",
     );
   }
+  return run();
 }
 
 export async function readSinotradeSavingsOverview(page: Page) {

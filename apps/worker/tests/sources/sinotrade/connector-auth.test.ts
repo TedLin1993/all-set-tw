@@ -445,25 +445,34 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
     });
 
     it("這次同步已重新登入過的平台，查詢又回應未登入時照原錯誤停止，不送第二次帳密", async () => {
-      newwebBrowser(
+      const unauthorized = { httpStatus: 401, payload: null };
+      const verified = { httpStatus: 200, payload: { success: "True" } };
+      for (const evaluations of [
+        // 確認時就重新登入過，之後的查詢收到 401。
+        [{ token: null, accounts: null }, undefined, storedSession, verified],
+        // 查詢途中重新登入、登入後的確認通過，重試的查詢仍收到 401。
         [
-          { token: null, accounts: null },
-          undefined,
           storedSession,
-          { httpStatus: 200, payload: { success: "True" } },
-          { httpStatus: 401, payload: null },
+          verified,
+          unauthorized,
+          undefined,
+          { ...storedSession, token: "renewed-token" },
+          verified,
         ],
-        savingsPage(),
-      );
-      loginMocks.credentials.mockResolvedValue(challenge("ready"));
-      const failure = await fetchSinotradeSnapshot(
-        { fetch: vi.fn() },
-        config,
-      ).catch((error: unknown) => error);
-      expect(failure).toBeInstanceOf(SinotradeAuthenticationRequiredError);
-      // 不把平台標成未連線：下次同步仍會先確認、必要時重新登入。
-      expect(failure).not.toBeInstanceOf(SinotradeUnattendedLoginError);
-      expect(loginMocks.credentials).toHaveBeenCalledOnce();
+      ]) {
+        loginMocks.credentials
+          .mockReset()
+          .mockResolvedValue(challenge("ready"));
+        newwebBrowser([...evaluations, unauthorized], savingsPage());
+        const failure = await fetchSinotradeSnapshot(
+          { fetch: vi.fn() },
+          config,
+        ).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(SinotradeAuthenticationRequiredError);
+        // 不把平台標成未連線：下次同步仍會先確認、必要時重新登入。
+        expect(failure).not.toBeInstanceOf(SinotradeUnattendedLoginError);
+        expect(loginMocks.credentials).toHaveBeenCalledOnce();
+      }
     });
 
     it("權限、官方暫停服務或其他查詢錯誤不重送帳密", async () => {
