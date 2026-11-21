@@ -178,6 +178,11 @@ async function loginWithBrowser(
 
 async function loginMobilePage(page: Page, config: EsunConfig) {
   await page.waitForSelector('input[name="id"]', { timeout: 30000 });
+  // 表單出現後入口網站仍會延遲載入 JS chunk；在那之前輸入或點擊，登入按鈕尚未綁定
+  // 處理函式，不會送出 doAction，最後只會等到逾時。網路較慢時特別容易發生。
+  await page
+    .waitForNetworkIdle({ idleTime: 800, timeout: 20000 })
+    .catch(() => undefined);
   await page.type('input[name="id"]', config.userId!.toUpperCase());
   await page.type('input[name="userName"]', config.account!);
   await page.type('input[name="pxssword"]', config.password!);
