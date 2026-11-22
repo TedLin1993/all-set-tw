@@ -51,7 +51,7 @@ Cloudflare 會先建立 Worker，再於背景執行 build；頁面會自動跳�
 
 部署按鈕從 `wrangler.toml` 建立 Worker 與部署用 repository。執行 `npm run deploy` 時，script 會讀取該 Worker 的線上 bindings。新站的 D1 與同步 Queue 使用由 Worker 唯一識別碼產生的專屬名稱；即使刪除舊站再以同名建立 Worker，也會取得另一組資源。若名稱已被使用，部署會自動換下一組，並將選定的名稱記在 Worker 標籤。首次部署中斷時，重試可繼續使用這次安裝已分配的資源。
 
-更新既有站台時，部署會使用該 Worker 已綁定的 D1 ID 與 Queue 名稱，包括舊版安裝的自訂名稱。部署 script 以 `wrangler.app.toml` 產生暫存設定，資料庫 migration、Worker 的 DB binding、Queue producer 與 consumer 都使用這次確認的資源。
+更新既有站台時，Workers Builds 與本機部署都會讀取正在接收正式流量的版本，沿用其 D1 ID 與 Queue 名稱，包括舊版安裝的自訂名稱。只上傳的版本不參與判斷。正式版本缺少綁定、分流版本使用不同資源，或查詢失敗時，部署會在寫入前停止。只有查到部署歷史為空的 Worker 才進入首次安裝流程。部署 script 以 `wrangler.app.toml` 產生暫存設定，資料庫 migration、Worker 的 DB binding、Queue producer 與 consumer 都使用這次確認的資源。
 
 部署 script 會保留既有 VAPID 金鑰，初次部署則自動產生。Cloudflare [每個 Queue 只能綁定一個 consumer Worker](https://developers.cloudflare.com/queues/get-started/#connect-the-consumer-worker-to-your-queue)，因此已有其他 consumer 的 Queue 無法同時提供新 Worker 的背景同步。
 

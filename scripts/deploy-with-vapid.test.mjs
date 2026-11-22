@@ -421,7 +421,9 @@ test("新站避開既有資源，失敗重試與舊站更新都用同一組 bind
   ]);
   const queues = new Set(["taiwan-fin-hub-sync", `${occupied}-sync`]);
   let tags = ["unrelated"];
-  let bindings = [];
+  let deployments = [];
+  let activeBindings = [];
+  let writes = 0;
   const events = [];
   const options = {
     environment: {
@@ -436,11 +438,25 @@ test("新站避開既有資源，失敗重試與舊站更新都用同一組 bind
       const { pathname, searchParams } = new URL(url);
       const body = options.body && JSON.parse(options.body);
       const filter = searchParams.get("name");
+      if (options.method !== "GET") writes++;
       let result;
       if (pathname.endsWith("/services/second-site")) {
         result = { default_environment: { script: { tag, tags } } };
+      } else if (pathname.endsWith("/second-site/deployments")) {
+        result = { deployments };
+      } else if (pathname.endsWith("/versions/active")) {
+        result = { resources: { bindings: activeBindings } };
+      } else if (pathname.endsWith("/versions/other")) {
+        result = {
+          resources: {
+            bindings: activeBindings.map((binding) =>
+              binding.name === "DB" ? { ...binding, id: "other-db" } : binding,
+            ),
+          },
+        };
       } else if (pathname.endsWith("/second-site/settings")) {
-        result = { bindings };
+        // The latest upload has no stateful bindings.
+        result = { bindings: [] };
       } else if (pathname.endsWith("/second-site/script-settings")) {
         assert.equal(options.method, "PATCH");
         tags = body.tags;
@@ -494,7 +510,9 @@ test("新站避開既有資源，失敗重試與舊站更新都用同一組 bind
   assert.equal(await deploy(["--migrate"], options), 1);
   assert.equal(await deploy(["--migrate"], options), 0);
   assert.deepEqual(tags, ["unrelated", reserved]);
-  bindings = [
+  deployments = [{ versions: [{ version_id: "active", percentage: 100 }] }];
+  const installWrites = writes;
+  activeBindings = [
     { name: "DB", type: "d1", id: "legacy-db" },
     { name: "SYNC_QUEUE", type: "queue", queue_name: "taiwan-fin-hub-sync" },
   ];
@@ -509,6 +527,22 @@ test("新站避開既有資源，失敗重試與舊站更新都用同一組 bind
       consumer: index < 3 ? `${reserved}-sync` : "taiwan-fin-hub-sync",
     })),
   );
+  const completedEvents = events.length;
+  deployments[0].versions = [
+    { version_id: "active", percentage: 50 },
+    { version_id: "other", percentage: 50 },
+  ];
+  await assert.rejects(
+    deploy(["--migrate"], options),
+    /different resource bindings/,
+  );
+  activeBindings = activeBindings.slice(0, 1);
+  await assert.rejects(
+    deploy(["--migrate"], options),
+    /missing a required live binding/,
+  );
+  assert.equal(writes, installWrites);
+  assert.equal(events.length, completedEvents);
   assert.equal(databases.size, 3);
   assert.equal(queues.size, 3);
 });
