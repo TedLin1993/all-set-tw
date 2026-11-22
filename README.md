@@ -92,13 +92,13 @@
 
 首次使用時，依畫面透過 **Git account → New Github Connection → Install & Authorize** 授權 Cloudflare 存取 GitHub。
 
-資源名稱可保留預填值。關閉 **Enable Preview builds**，再開啟 **Protect with Cloudflare Access**，設定：
+確認 **Deploy command** 為 `npm run deploy`，關閉 **Enable Preview builds**，再開啟 **Protect with Cloudflare Access**，設定：
 
 - **Scope：All traffic**，保護正式與預覽部署
 - **Authentication policy：Cloudflare account**，限定你的 Cloudflare 帳戶成員登入
 - **Session duration**：可保留預設 **24 hours**；想延長可選 **7 days**
 
-<img src="images/deploy-access-on-create.png" alt="部署頁開啟 Cloudflare Access，選擇 All traffic 與 Cloudflare account" width="700">
+<img src="images/deploy-access-on-create.png" alt="部署指令為 npm run deploy，Preview builds 已關閉，Access 套用至 All traffic 並選擇 Cloudflare account" width="700">
 
 確認後點擊 **Deploy**，頁面會自動跳轉至 **Builds**。登入驗證設定會自動取得，後續更新也會沿用。
 

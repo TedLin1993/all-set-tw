@@ -29,7 +29,11 @@ Cloudflare Secret 寫入後無法從 Dashboard 或 API 讀回，網站也不提�
 
 ### 2. 執行 Deploy to Cloudflare
 
-點擊 **Deploy to Cloudflare**，授權 Cloudflare 存取 GitHub，將 `CONFIG_ENCRYPTION_KEY` 保留為 `auto`（或填入自己的金鑰），將 **Build command** 設為 `npm run build`、**Deploy command** 設為 `npm run deploy`。在同一頁關閉 **Enable Preview builds**，再開啟 **Protect with Cloudflare Access**，選擇 **All traffic** 與 **Cloudflare account**，確認後點擊 **Deploy**。
+點擊 **Deploy to Cloudflare**，授權 Cloudflare 存取 GitHub。在 **Project name** 輸入這次要建立的站名。同一帳戶建立第二站時請使用新名稱，部署指令會自動為它分配 D1 和 Queue。
+
+<img src="../images/deploy-setup.png" alt="部署表單的 Project name 欄位，圖中為站名範例" width="432">
+
+將 `CONFIG_ENCRYPTION_KEY` 保留為 `auto`（或填入自己的金鑰），將 **Build command** 設為 `npm run build`、**Deploy command** 設為 `npm run deploy`。在同一頁關閉 **Enable Preview builds**，再開啟 **Protect with Cloudflare Access**，選擇 **All traffic** 與 **Cloudflare account**，確認後點擊 **Deploy**。
 
 Cloudflare 會先建立 Worker，再於背景執行 build；頁面會自動跳轉至 **Builds**。GUI 會建立登入保護；部署 script 自動取得 Team domain 與 AUD，再部署包含 `TEAM_DOMAIN`、`POLICY_AUD` 的版本。在這兩個值完成前，API 的登入驗證不會成功。請等待該次 build 顯示成功，再點擊右上角的 **Visit** 開啟網站；若未出現 **Visit** 按鈕，請先重新整理 Worker 頁面。
 
@@ -37,15 +41,17 @@ Cloudflare 會先建立 Worker，再於背景執行 build；頁面會自動跳�
 
 [Deploy to Cloudflare](https://developers.cloudflare.com/workers/platform/deploy-buttons/) 會從 repository 根目錄的 `.dev.vars.example` 讀取部署時需要填寫的 Secret，並從 `package.json` 取得欄位說明。本專案將正式部署範例與 `apps/worker/.dev.vars.example` 的本機開發設定分開，初始表單只保留預設為 `auto` 的 `CONFIG_ENCRYPTION_KEY`；自動產生的金鑰、多 Application、Demo、本機開發與 VAPID 參數不需在首次部署填寫。
 
-`.dev.vars.example` 定義 Worker Secret 欄位；Access 的開關、Scope、登入政策及期限需在 Cloudflare GUI 選擇。部署頁的登入期限最多可選 **7 days**，後續可在 Zero Trust [延長登入期限](#延長登入期限)。**Project name** 預設為 `all-set-tw`，由 `wrangler.toml` 的 `name` 定義；D1／Queue 的預填名稱也定義於同一檔案。請確認 **Deploy command** 為 `npm run deploy`；若 GUI 預填 `npx wrangler deploy`，需改為本專案的指令，才能執行完整設定。
+`.dev.vars.example` 定義 Worker Secret 欄位；Access 的開關、Scope、登入政策及期限需在 Cloudflare GUI 選擇。部署頁的登入期限最多可選 **7 days**，後續可在 Zero Trust [延長登入期限](#延長登入期限)。**Project name** 預設為 `all-set-tw`，由 `wrangler.toml` 的 `name` 定義。請確認 **Deploy command** 為 `npm run deploy`；若 GUI 預填 `npx wrangler deploy`，需改為本專案的指令，才能執行完整設定。
 
 **Enable Preview builds** 是 [Workers Builds 的分支建置設定](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/)，目前沒有官方支援的 Wrangler 設定或一鍵部署參數可指定其預設值，請在部署頁手動關閉。若已部署，可在 **Worker → Settings → Builds → Branch control** 關閉。`wrangler.toml` 的 `preview_urls = false` 只關閉 Version URLs，不會停止非正式分支的自動建置。
 
-既有 Workers Builds 與部署 script 的 Secret 查詢會沿用已連接的 Worker 名稱，因此更新會保留原本的 Worker、加密金鑰、Access 驗證值與 VAPID 金鑰。本機更新舊 Worker 時，請在私人 Wrangler 設定保留原本的 `name`，或於部署時指定 `--name`。
+既有 Workers Builds 與部署 script 的 Secret 查詢會沿用已連接的 Worker 名稱，因此更新會保留原本的 Worker、加密金鑰、Access 驗證值與 VAPID 金鑰。本機更新既有 Worker 可用 `npm run deploy -- --name <Worker 名稱>`。預設設定會透過 Wrangler 讀取正式版本的 D1 和 Queue；若缺少綁定、無法讀取，或接收流量的版本綁定不同，指令會在寫入前停止。
 
 `TEAM_DOMAIN` 與 `POLICY_AUD` 可以存入私人 `.dev.vars` 作本機測試，但 `.dev.vars` 不會自動同步到正式 Worker；首次建立 Access Application 時，仍需先取得該帳戶的 Team domain 與新產生的 AUD。
 
-Deploy to Cloudflare 會建立部署用 repository、D1 並設定 Workers Builds。本專案的 build 與 deploy script 會依 `wrangler.toml` 檢查 Queue，缺少時自動建立。同名的排程同步 Queue 若沒有 consumer，或 consumer 就是目前部署的 Worker，會直接沿用；若已由另一個 Worker 或 HTTP consumer 使用，部署 script 會自動選用 `<Worker 名稱>-sync`，名稱仍被占用時加上流水號。後續更新會沿用已分配的 Queue，原部署的 consumer 保持不變。producer 與 consumer 的名稱會在當次部署的暫存設定一併切換，不會修改 repository 原始設定。
+部署按鈕從 `wrangler.toml` 建立 Worker 與部署用 repository。執行 `npm run deploy` 時，script 會讀取該 Worker 的線上 bindings。新站的 D1 與同步 Queue 使用由 Worker 唯一識別碼產生的專屬名稱；即使刪除舊站再以同名建立 Worker，也會取得另一組資源。若名稱已被使用，部署會自動換下一組，並將選定的名稱記在 Worker 標籤。首次部署中斷時，重試可繼續使用這次安裝已分配的資源。
+
+更新既有站台時，部署會使用該 Worker 已綁定的 D1 ID 與 Queue 名稱，包括舊版安裝的自訂名稱。部署 script 以 `wrangler.app.toml` 產生暫存設定，資料庫 migration、Worker 的 DB binding、Queue producer 與 consumer 都使用這次確認的資源。
 
 部署 script 會保留既有 VAPID 金鑰，初次部署則自動產生。Cloudflare [每個 Queue 只能綁定一個 consumer Worker](https://developers.cloudflare.com/queues/get-started/#connect-the-consumer-worker-to-your-queue)，因此已有其他 consumer 的 Queue 無法同時提供新 Worker 的背景同步。
 
@@ -86,7 +92,7 @@ Cloudflare GUI 的 **Deploy command：`npm run deploy`** 會執行 `scripts/depl
 
 ### 部署成功但缺少 Access 驗證值
 
-檢查 build log 的 **Executing user deploy command**。若為 `npx wrangler deploy`，只會部署 Worker，會跳過本專案的資料庫 migration、自動加密金鑰、VAPID 金鑰與 Access 驗證值設定。前往 **Worker → Settings → Builds**，將 **Deploy command** 改為 `npm run deploy`，再重試 build。首次 Access 自動設定成功時，log 會出現 `[deploy] TEAM_DOMAIN and POLICY_AUD configured automatically.`。
+檢查 build log 的 **Executing user deploy command**。若為 `npx wrangler deploy`，Wrangler 會使用按鈕範本，跳過正式 Worker 設定、D1 與 Queue 分配、資料庫 migration 及金鑰設定。前往 **Worker → Settings → Builds**，將 **Deploy command** 改為 `npm run deploy`，再重試 build。首次 Access 自動設定成功時，log 會出現 `[deploy] TEAM_DOMAIN and POLICY_AUD configured automatically.`。
 
 ### 啟用登入保護
 
@@ -180,7 +186,7 @@ Cloudflare Access 預設可能使用 Email OTP。如要限定 Cloudflare 帳號�
 Build command `npm run build` 執行 `scripts/cloudflare-build.mjs`。在 Workers Builds（`WORKERS_CI=1`）中，且 repository 沒有 `.github/workflows` 時，會：
 
 1. 以 `git fetch --depth=1` 取得 `TedLin1993/all-set-tw` 的最新 `main`，並將這次 build 的 checkout 重設為該版本。只影響建置環境的暫存檔案，不會推送到部署 repository。
-2. 沿用部署 repository `wrangler.toml` 中的 Worker `name`、D1 `database_name`／`database_id` 與 Queue 名稱，避免改連到另一個空的 D1 或 Queue。
+2. 保留部署 repository 的 Worker 名稱。部署時從該 Worker 的線上 bindings 取得 D1 與 Queue。
 3. 依新版的 lockfile 重新執行 `npm ci`，再執行新版的 `npm run build:app`。後續的 Deploy command `npm run deploy` 也使用新版檔案，並套用新版的 D1 migrations。
 
 有新版時，在網站的「更新紀錄」點 **前往 Cloudflare 更新**，即可前往產生目前版本的 Build Details。按 **Retry build**，等建置成功後重新整理網站。
@@ -254,7 +260,7 @@ workflow 會：
 - **無法推送更新**：確認 Workflow permissions 允許寫入 repository。
 - **合併衝突**：從該次 Actions log 查看衝突檔案，手動合併後再重新執行。
 - **`fatal: refusing to merge unrelated histories`**：部署 repository 仍在使用舊版 workflow，請重新複製最新的 [`deploy/github/sync-upstream.yml`](../deploy/github/sync-upstream.yml)。
-- **Queue 權限錯誤**：替 Workers Builds API token 增加帳戶層級的 Queues Read 與 Queues Edit。
+- **資源權限錯誤**：確認 Workers Builds API token 具有該帳戶的 D1 Edit 與 Queues Edit 權限，並可讀取及部署該 Worker。
 
 更新流程會保留部署 repository 目前安裝的 workflow，因此上游若修正更新流程，仍需手動替換 workflow 檔案。
 
@@ -305,22 +311,24 @@ npm run dev
 
 範例設定中的 D1 與 Workers AI 使用 remote binding，會連到 Cloudflare 資源。請使用獨立的開發 D1，不要直接操作正式資料。
 
-兆豐對外請求使用 `MegabankEgress` Durable Object。根目錄 `wrangler.toml` 與 `apps/worker/wrangler.local.toml.example` 都有這個 binding 與 SQLite migration；已存在的私人 `wrangler.local.toml` 要自行補上相同設定，否則本機同步缺少 binding。部署時 Wrangler 會建立物件，不需要額外 Secret。Workers 免費方案可使用 SQLite Durable Objects。
+兆豐對外請求使用 `MegabankEgress` Durable Object。根目錄 `wrangler.app.toml` 與 `apps/worker/wrangler.local.toml.example` 都有這個 binding 與 SQLite migration；已存在的私人 `wrangler.local.toml` 要自行補上相同設定，否則本機同步缺少 binding。部署時 Wrangler 會建立物件，不需要額外 Secret。Workers 免費方案可使用 SQLite Durable Objects。
 
-台北富邦網銀拒絕 Browser Run 的對外連線，網銀請求改由 `FubonEgress` Durable Object 代發（migration tag `v2`）。設定方式與 `MegabankEgress` 相同：根目錄 `wrangler.toml` 與 `apps/worker/wrangler.local.toml.example` 已包含 binding 與 SQLite migration，既有私人 `wrangler.local.toml` 需自行補上 `FUBON_EGRESS` binding 與 `v2` migration。
+台北富邦網銀拒絕 Browser Run 的對外連線，網銀請求改由 `FubonEgress` Durable Object 代發（migration tag `v2`）。設定方式與 `MegabankEgress` 相同：根目錄 `wrangler.app.toml` 與 `apps/worker/wrangler.local.toml.example` 已包含 binding 與 SQLite migration，既有私人 `wrangler.local.toml` 需自行補上 `FUBON_EGRESS` binding 與 `v2` migration。
 
 Binance 與 MAX 的 API 請求由 `CryptoBrowserEgress` Durable Object 開 Browser Run 代發（migration tag `v3`），設定方式相同；既有私人 `wrangler.local.toml` 需自行補上 `CRYPTO_BROWSER_EGRESS` binding 與 `v3` migration。
 
 本機 `apps/worker/.dev.vars.example` 保留手動金鑰設定；請填入開發用隨機金鑰。若需解密正式資料，正式部署也必須在最初自行提供並保存相同金鑰；公開部署範例的 `auto` 只會由部署 script 初始化。
 
-SQL migrations 位於 `apps/worker/migrations/`。根目錄 `wrangler.toml` 的 `migrations_dir` 使用 `apps/worker/migrations`；`apps/worker/wrangler.local.toml` 使用相對於該設定檔的 `migrations`。若已建立私人 Wrangler 設定，請同步更新其 migration 路徑；既有 migration 檔名與內容維持原樣。
+SQL migrations 位於 `apps/worker/migrations/`。根目錄 `wrangler.app.toml` 的 `migrations_dir` 使用 `apps/worker/migrations`；`apps/worker/wrangler.local.toml` 使用相對於該設定檔的 `migrations`。若已建立私人 Wrangler 設定，請同步更新其 migration 路徑；既有 migration 檔名與內容維持原樣。
 
 常用資料庫遷移指令：
 
 ```bash
 npm run db:migrate:local -w @taiwan-fin-hub/worker
-npm run db:migrate:remote
+npm run db:migrate:remote -- --name example-worker
 ```
+
+請將 `example-worker` 換成要遷移的 Worker 名稱。遠端 migration 會使用該 Worker 的線上 DB 綁定。根目錄與 Worker workspace 指令的行為相同。若要使用私人設定，請傳入 `--config` 並在 DB 綁定填寫 `database_id`。
 
 中信行動銀行的 TLS endpoint 無法由 local workerd 直接連線，因此 `npm run dev` 會自動啟動只監聽 `127.0.0.1`、限制目的端點並使用單次隨機 token 的 Node relay；正式 Worker 不使用此 relay。
 
@@ -333,7 +341,7 @@ Demo 模式下任何人都能讀取該 Worker 綁定的 D1 資料，因此必須
 
 ## 部署至既有 D1
 
-若要從本機部署至既有 D1，可在 repository 根目錄複製 `wrangler.toml` 為被忽略的 `wrangler.private.toml`，填入正確的 `database_id`，再執行：
+若要從本機部署至既有 D1，可在 repository 根目錄複製 `wrangler.app.toml` 為被忽略的 `wrangler.private.toml`，填入正確的 `database_id`，再執行：
 
 ```bash
 XDG_CONFIG_HOME=.wrangler-config npx wrangler d1 migrations apply DB \

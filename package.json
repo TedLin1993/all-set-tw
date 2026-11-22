@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "node scripts/cloudflare-build.mjs",
-    "build:app": "node scripts/prepare-cloudflare-build.mjs && npm run build --workspaces",
+    "build:app": "npm run build --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "oxlint",
@@ -20,9 +20,9 @@
     "test:e2e": "npm run test:e2e -w @taiwan-fin-hub/web",
     "verify:web": "npm run typecheck -w @taiwan-fin-hub/web && npm run test:unit -w @taiwan-fin-hub/web && npm run test:e2e -w @taiwan-fin-hub/web && npm run build -w @taiwan-fin-hub/web",
     "dev": "npm run dev -w @taiwan-fin-hub/worker",
-    "deploy": "npm run db:migrate:remote && XDG_CONFIG_HOME=.wrangler-config node scripts/deploy-with-vapid.mjs",
-    "db:migrate:local": "XDG_CONFIG_HOME=.wrangler-config wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "XDG_CONFIG_HOME=.wrangler-config wrangler d1 migrations apply DB --remote",
+    "deploy": "XDG_CONFIG_HOME=.wrangler-config node scripts/deploy-with-vapid.mjs --migrate",
+    "db:migrate:local": "XDG_CONFIG_HOME=.wrangler-config wrangler d1 migrations apply DB --local -c wrangler.app.toml",
+    "db:migrate:remote": "XDG_CONFIG_HOME=.wrangler-config node scripts/deploy-with-vapid.mjs --migrate-only",
     "db:schema:docs": "node scripts/generate-database-schema.mjs"
   },
   "cloudflare": {

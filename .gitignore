@@ -17,6 +17,7 @@ dist/
 !.env.example
 
 # Private Cloudflare resource bindings
+.wrangler-deploy-*.json
 wrangler.private.toml
 apps/worker/wrangler.local.toml
 

@@ -8,10 +8,10 @@
     "typecheck": "node ../../node_modules/@typescript/native/bin/tsc -p tsconfig.json",
     "test": "vitest run tests",
     "dev": "npm run db:migrate:local && node ../../scripts/dev-worker.mjs",
-    "dev:remote": "XDG_CONFIG_HOME=../../.wrangler-config wrangler dev -c ../../wrangler.toml --remote",
-    "deploy": "npm run build -w @taiwan-fin-hub/web && npm run db:migrate:remote && XDG_CONFIG_HOME=../../.wrangler-config node ../../scripts/deploy-with-vapid.mjs -c ../../wrangler.toml",
+    "dev:remote": "XDG_CONFIG_HOME=../../.wrangler-config wrangler dev -c ../../wrangler.app.toml --remote",
+    "deploy": "npm run build -w @taiwan-fin-hub/web && XDG_CONFIG_HOME=../../.wrangler-config node ../../scripts/deploy-with-vapid.mjs --migrate",
     "db:migrate:local": "XDG_CONFIG_HOME=../../.wrangler-config wrangler d1 migrations apply DB --local -c wrangler.local.toml",
-    "db:migrate:remote": "XDG_CONFIG_HOME=../../.wrangler-config wrangler d1 migrations apply DB --remote -c ../../wrangler.toml"
+    "db:migrate:remote": "XDG_CONFIG_HOME=../../.wrangler-config node ../../scripts/deploy-with-vapid.mjs --migrate-only"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.4.0",
