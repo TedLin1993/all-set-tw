@@ -5,7 +5,7 @@ import type {
 } from "./api/bank";
 
 /** 從今天起算，幾天內到期的應繳款會列入提醒（含今天）。 */
-export const PAYMENT_REMINDER_DAYS = 5;
+export const PAYMENT_REMINDER_DAYS = 3;
 /** 明確待繳但已過期限時，最多再提醒幾天，避免停用來源的舊帳單一直留著。 */
 const OVERDUE_REMINDER_DAYS = 7;
 /** 帳戶快照超過此時間未更新時，不直接判定為待繳，改提示請確認。 */

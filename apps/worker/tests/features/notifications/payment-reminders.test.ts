@@ -108,16 +108,16 @@ describe("collectPaymentReminders", () => {
     ]);
   });
 
-  it("以台北日期計算 5 天內到期，並只採用同一期限的帳單狀態", () => {
+  it("以台北日期計算 3 天內到期，並只採用同一期限的帳單狀態", () => {
     const { reminders } = collectPaymentReminders(
       [
-        card({ id: "day-5", paymentDueDate: "2026-10-26" }),
-        card({ id: "day-6", paymentDueDate: "2026-10-27" }),
+        card({ id: "day-3", paymentDueDate: "2026-10-24" }),
+        card({ id: "day-4", paymentDueDate: "2026-10-25" }),
         card({ id: "new-cycle", paymentDueDate: "2026-10-24" }),
       ],
       [
-        bill({ accountId: "day-5", paymentDueDate: "2026-10-26" }),
-        bill({ accountId: "day-6", paymentDueDate: "2026-10-27" }),
+        bill({ accountId: "day-3", paymentDueDate: "2026-10-24" }),
+        bill({ accountId: "day-4", paymentDueDate: "2026-10-25" }),
         // 上一期已繳，本期帳單尚未同步：不能沿用上一期的已繳狀態。
         bill({
           accountId: "new-cycle",
@@ -132,7 +132,7 @@ describe("collectPaymentReminders", () => {
     expect(
       reminders.map((item) => [item.accountId, item.daysUntilDue, item.state]),
     ).toEqual([
-      ["day-5", 5, "due"],
+      ["day-3", 3, "due"],
       ["new-cycle", 3, "confirm"],
     ]);
   });
@@ -265,6 +265,14 @@ describe("collectPaymentReminders", () => {
           paymentAccount: "台新銀行 末五碼 12345",
         },
       ]);
+    });
+
+    it("第 4 天才扣款的貸款不列入提醒與扣款帳戶應扣總額", () => {
+      const result = run(deposit({ availableBalance: 12_800 }), {
+        paymentDueDate: "2026-10-25",
+      });
+      expect(result.reminders).toEqual([]);
+      expect(result.covered.map((item) => item.accountId)).toEqual(["card"]);
     });
 
     it("扣款帳戶資料過舊、金額未知或幣別不同時不判斷，維持原提醒並標示未比對原因", () => {
