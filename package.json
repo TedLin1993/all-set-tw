@@ -22,7 +22,7 @@
     "dev": "npm run dev -w @taiwan-fin-hub/worker",
     "deploy": "XDG_CONFIG_HOME=.wrangler-config node scripts/deploy-with-vapid.mjs --migrate",
     "db:migrate:local": "XDG_CONFIG_HOME=.wrangler-config wrangler d1 migrations apply DB --local -c wrangler.app.toml",
-    "db:migrate:remote": "XDG_CONFIG_HOME=.wrangler-config wrangler d1 migrations apply DB --remote -c wrangler.app.toml",
+    "db:migrate:remote": "XDG_CONFIG_HOME=.wrangler-config node scripts/deploy-with-vapid.mjs --migrate-only",
     "db:schema:docs": "node scripts/generate-database-schema.mjs"
   },
   "cloudflare": {

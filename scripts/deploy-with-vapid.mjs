@@ -12,6 +12,7 @@ const scriptPath = fileURLToPath(import.meta.url);
 const scriptDirectory = dirname(scriptPath);
 const repositoryDirectory = resolve(scriptDirectory, "..");
 const invocationDirectory = process.cwd();
+const appConfigPath = join(repositoryDirectory, "wrangler.app.toml");
 const wranglerScript = join(
   repositoryDirectory,
   "node_modules",
@@ -264,9 +265,8 @@ export async function ensureRequiredQueues(
 
 export async function prepareDeploymentQueues(
   argumentsToDeploy,
-  { run, environment, readConfig = readDeploymentConfig },
+  { run, environment, config },
 ) {
-  const config = await readConfig(argumentsToDeploy);
   const contextArguments = queueContextArguments(argumentsToDeploy);
   await ensureRequiredQueues(contextArguments, run, config);
   const producer = config.queues?.producers?.find(
@@ -551,9 +551,7 @@ export async function readDeploymentConfig(argumentsToDeploy) {
     const last = selected.at(-1);
     return last?.includes("=") ? last.slice(last.indexOf("=") + 1) : last;
   };
-  const configFile =
-    valueOf(["--config", "-c"]) ??
-    resolve(repositoryDirectory, "wrangler.app.toml");
+  const configFile = valueOf(["--config", "-c"]) ?? appConfigPath;
   const config = unstable_readConfig(
     {
       config: resolve(effectiveDirectory, configFile),
@@ -763,12 +761,68 @@ async function deployPrepared(
   }
 }
 
-async function prepareWorkersBuild(
+async function readLiveResources(
+  workerName,
   argumentsToDeploy,
-  { environment, readConfig, fetchApi },
+  run,
+  migrationOnly,
+) {
+  const context = [
+    ...queueContextArguments(argumentsToDeploy),
+    "--name",
+    workerName,
+    "--json",
+  ];
+  async function inspect(args) {
+    const result = await run([...args, ...context], { captureOutput: true });
+    if (result.exitCode !== 0)
+      throw new Error(
+        `Cannot read the current deployment of Worker '${workerName}'. Check the Worker name and Wrangler login.`,
+      );
+    return JSON.parse(result.stdout);
+  }
+
+  const deployment = await inspect(["deployments", "status"]);
+  const versions = deployment.versions?.filter(
+    (version) => version.percentage > 0,
+  );
+  if (!versions?.length)
+    throw new Error("No active Worker version to inspect.");
+  let resources;
+  for (const { version_id } of versions) {
+    const version = await inspect(["versions", "view", version_id]);
+    const bindings = version.resources?.bindings ?? [];
+    const databaseId = bindings.find(
+      (binding) => binding.type === "d1" && binding.name === "DB",
+    )?.id;
+    const queueName = migrationOnly
+      ? undefined
+      : bindings.find(
+          (binding) =>
+            binding.type === "queue" && binding.name === "SYNC_QUEUE",
+        )?.queue_name;
+    if (!databaseId || (!migrationOnly && !queueName))
+      throw new Error(
+        `Worker '${workerName}' is missing a required live binding.`,
+      );
+    if (
+      resources &&
+      (databaseId !== resources.databaseId || queueName !== resources.queueName)
+    ) {
+      throw new Error(
+        `Active versions of Worker '${workerName}' have different resource bindings.`,
+      );
+    }
+    resources = { databaseId, queueName };
+  }
+  return resources;
+}
+
+async function prepareRemoteConfig(
+  argumentsToDeploy,
+  { environment, config, fetchApi, run, migrationOnly },
 ) {
   const { experimental_readRawConfig } = await import("wrangler");
-  const config = await readConfig(argumentsToDeploy);
   const { rawConfig } = experimental_readRawConfig({
     config: config.configPath,
   });
@@ -777,30 +831,35 @@ async function prepareWorkersBuild(
   });
   const workerName =
     environment.WRANGLER_CI_OVERRIDE_NAME ??
-    (optionArguments(argumentsToDeploy, ["--name", "--env", "-e"]).length ||
-    config.configPath !== join(repositoryDirectory, "wrangler.app.toml")
+    (optionArguments(argumentsToDeploy, ["--name", "--env", "-e"]).length
       ? config.name
       : template.rawConfig.name);
-  rawConfig.name = workerName;
-  const { databaseId, queueName } = await resolveWorkerResources(
-    environment,
-    workerName,
-    fetchApi,
-  );
+  const { databaseId, queueName } =
+    environment.WORKERS_CI === "1" && !migrationOnly
+      ? await resolveWorkerResources(environment, workerName, fetchApi)
+      : await readLiveResources(
+          workerName,
+          argumentsToDeploy,
+          run,
+          migrationOnly,
+        );
   const target = config.targetEnvironment
     ? rawConfig.env[config.targetEnvironment]
     : rawConfig;
+  target.name = workerName;
   const db = target.d1_databases.find((binding) => binding.binding === "DB");
   db.database_id = databaseId;
   delete db.database_name;
-  const producer = target.queues.producers.find(
-    (binding) => binding.binding === "SYNC_QUEUE",
-  );
-  const consumer = target.queues.consumers.find(
-    (binding) => binding.queue === producer.queue,
-  );
-  producer.queue = queueName;
-  consumer.queue = queueName;
+  if (!migrationOnly) {
+    const producer = target.queues.producers.find(
+      (binding) => binding.binding === "SYNC_QUEUE",
+    );
+    const consumer = target.queues.consumers.find(
+      (binding) => binding.queue === producer.queue,
+    );
+    producer.queue = queueName;
+    consumer.queue = queueName;
+  }
   return temporaryDeploymentConfig(
     argumentsToDeploy,
     config.configPath,
@@ -818,26 +877,54 @@ export async function deploy(
     fetchPublic,
   } = {},
 ) {
-  const migrate = argumentsToDeploy.includes("--migrate");
+  const migrationOnly = argumentsToDeploy.includes("--migrate-only");
+  const migrate = migrationOnly || argumentsToDeploy.includes("--migrate");
   argumentsToDeploy = argumentsToDeploy.filter(
-    (argument) => argument !== "--migrate",
+    (argument) => argument !== "--migrate" && argument !== "--migrate-only",
   );
+  if (
+    migrationOnly &&
+    queueContextArguments(argumentsToDeploy).length +
+      optionArguments(argumentsToDeploy, ["--name"]).length !==
+      argumentsToDeploy.length
+  ) {
+    throw new Error(
+      "Remote migration accepts only Worker name and Wrangler configuration options.",
+    );
+  }
   if (booleanOptionEnabled(argumentsToDeploy, "--dry-run")) {
     const result = await run(["deploy", ...argumentsToDeploy]);
     return result.exitCode ?? 1;
   }
-  const prepared =
-    environment.WORKERS_CI === "1" && migrate
-      ? await prepareWorkersBuild(argumentsToDeploy, {
-          environment,
-          readConfig,
-          fetchApi,
-        })
+  const config = await readConfig(argumentsToDeploy);
+  let prepared;
+  if (config.configPath === appConfigPath) {
+    prepared = await prepareRemoteConfig(argumentsToDeploy, {
+      environment,
+      config,
+      fetchApi,
+      run,
+      migrationOnly,
+    });
+  } else {
+    if (
+      migrate &&
+      !config.d1_databases
+        ?.find((db) => db.binding === "DB")
+        ?.database_id?.trim()
+    ) {
+      throw new Error(
+        "Remote migration requires a database_id for DB in the supplied Wrangler config.",
+      );
+    }
+    prepared = migrationOnly
+      ? { argumentsToDeploy, temporaryConfig: null }
       : await prepareDeploymentQueues(argumentsToDeploy, {
           run,
           environment,
-          readConfig,
+          config,
         });
+  }
   try {
     if (migrate) {
       const migration = await run([
@@ -848,7 +935,8 @@ export async function deploy(
         "--remote",
         ...queueContextArguments(prepared.argumentsToDeploy),
       ]);
-      if (migration.exitCode !== 0) return migration.exitCode ?? 1;
+      if (migrationOnly || migration.exitCode !== 0)
+        return migration.exitCode ?? 1;
     }
     return await deployPrepared(prepared.argumentsToDeploy, {
       run,
@@ -868,11 +956,7 @@ if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
   try {
     const args = optionArguments(deployArguments, ["--config", "-c"]).length
       ? deployArguments
-      : [
-          ...deployArguments,
-          "--config",
-          resolve(repositoryDirectory, "wrangler.app.toml"),
-        ];
+      : [...deployArguments, "--config", appConfigPath];
     process.exitCode = await deploy(args);
   } catch (error) {
     console.error(`[deploy] ${error.message}`);

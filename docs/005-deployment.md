@@ -45,7 +45,7 @@ Cloudflare 會先建立 Worker，再於背景執行 build；頁面會自動跳�
 
 **Enable Preview builds** 是 [Workers Builds 的分支建置設定](https://developers.cloudflare.com/workers/ci-cd/builds/build-branches/)，目前沒有官方支援的 Wrangler 設定或一鍵部署參數可指定其預設值，請在部署頁手動關閉。若已部署，可在 **Worker → Settings → Builds → Branch control** 關閉。`wrangler.toml` 的 `preview_urls = false` 只關閉 Version URLs，不會停止非正式分支的自動建置。
 
-既有 Workers Builds 與部署 script 的 Secret 查詢會沿用已連接的 Worker 名稱，因此更新會保留原本的 Worker、加密金鑰、Access 驗證值與 VAPID 金鑰。本機更新舊 Worker 時，請在私人 Wrangler 設定保留原本的 `name`，或於部署時指定 `--name`。
+既有 Workers Builds 與部署 script 的 Secret 查詢會沿用已連接的 Worker 名稱，因此更新會保留原本的 Worker、加密金鑰、Access 驗證值與 VAPID 金鑰。本機更新既有 Worker 可用 `npm run deploy -- --name <Worker 名稱>`。預設設定會透過 Wrangler 讀取正式版本的 D1 和 Queue；若缺少綁定、無法讀取，或接收流量的版本綁定不同，指令會在寫入前停止。
 
 `TEAM_DOMAIN` 與 `POLICY_AUD` 可以存入私人 `.dev.vars` 作本機測試，但 `.dev.vars` 不會自動同步到正式 Worker；首次建立 Access Application 時，仍需先取得該帳戶的 Team domain 與新產生的 AUD。
 
@@ -325,8 +325,10 @@ SQL migrations 位於 `apps/worker/migrations/`。根目錄 `wrangler.app.toml` 
 
 ```bash
 npm run db:migrate:local -w @taiwan-fin-hub/worker
-npm run db:migrate:remote
+npm run db:migrate:remote -- --name example-worker
 ```
+
+請將 `example-worker` 換成要遷移的 Worker 名稱。遠端 migration 會使用該 Worker 的線上 DB 綁定。根目錄與 Worker workspace 指令的行為相同。若要使用私人設定，請傳入 `--config` 並在 DB 綁定填寫 `database_id`。
 
 中信行動銀行的 TLS endpoint 無法由 local workerd 直接連線，因此 `npm run dev` 會自動啟動只監聽 `127.0.0.1`、限制目的端點並使用單次隨機 token 的 Node relay；正式 Worker 不使用此 relay。
 

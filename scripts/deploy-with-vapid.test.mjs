@@ -512,3 +512,90 @@ test("新站避開既有資源，失敗重試與舊站更新都用同一組 bind
   assert.equal(databases.size, 3);
   assert.equal(queues.size, 3);
 });
+
+test("本機部署與單獨 migration 依指定 Worker 的正式版本選擇資源", async () => {
+  const args = ["--name", "second-site"];
+  const runner = deploymentRunner({
+    initialSecrets: {
+      ...vapidSecrets,
+      GENERATED_CONFIG_ENCRYPTION_KEY: "example",
+    },
+  });
+  const writes = [];
+  let versions = [{ version_id: "active", percentage: 100 }];
+  let liveBindings = [
+    { name: "DB", type: "d1", id: "dedicated-db" },
+    { name: "SYNC_QUEUE", type: "queue", queue_name: "dedicated-queue" },
+  ];
+  const options = {
+    environment: {},
+    async run(command) {
+      if (["deployments", "versions"].includes(command[0])) {
+        assert.equal(command[command.indexOf("--name") + 1], "second-site");
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify(
+            command[0] === "deployments"
+              ? { versions }
+              : {
+                  resources: {
+                    bindings:
+                      command[2] === "other"
+                        ? [{ type: "d1", name: "DB", id: "other-db" }]
+                        : liveBindings,
+                  },
+                },
+          ),
+        };
+      }
+      if (command[0] !== "secret") {
+        const config = JSON.parse(
+          await readFile(command[command.indexOf("--config") + 1], "utf8"),
+        );
+        assert.equal(config.name, "second-site");
+        assert.equal(config.d1_databases[0].database_id, "dedicated-db");
+        if (command[0] === "deploy") {
+          assert.equal(config.queues.producers[0].queue, "dedicated-queue");
+          assert.equal(config.queues.consumers[0].queue, "dedicated-queue");
+        }
+        writes.push(command[0]);
+      }
+      return runner.run(command);
+    },
+  };
+  assert.equal(await deploy([...args, "--migrate"], options), 0);
+  liveBindings = liveBindings.slice(0, 1);
+  assert.equal(await deploy([...args, "--migrate-only"], options), 0);
+  await assert.rejects(
+    deploy([...args, "--migrate"], options),
+    /missing a required live binding/,
+  );
+  versions = [
+    { version_id: "active", percentage: 50 },
+    { version_id: "other", percentage: 50 },
+  ];
+  await assert.rejects(
+    deploy([...args, "--migrate-only"], options),
+    /different resource bindings/,
+  );
+  liveBindings = [];
+  await assert.rejects(
+    deploy([...args, "--migrate-only"], options),
+    /missing a required live binding/,
+  );
+  assert.deepEqual(writes, ["d1", "deploy", "d1"]);
+});
+
+test("私人設定的單獨 migration 需要明確的 DB ID，且只執行 migration", async () => {
+  const runner = deploymentRunner();
+  const args = ["--migrate-only", "--config", "private.toml"];
+  await assert.rejects(deploy(args, runner.options), /requires a database_id/);
+  assert.deepEqual(runner.calls, []);
+  runner.options.readConfig = async () => ({
+    d1_databases: [{ binding: "DB", database_id: "private-db" }],
+  });
+  assert.equal(await deploy(args, runner.options), 0);
+  assert.deepEqual(runner.calls, [
+    ["d1", "migrations", "apply", "DB", "--remote", "--config", "private.toml"],
+  ]);
+});
