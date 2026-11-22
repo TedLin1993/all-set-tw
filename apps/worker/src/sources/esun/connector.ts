@@ -178,10 +178,16 @@ async function loginWithBrowser(
 
 async function loginMobilePage(page: Page, config: EsunConfig) {
   await page.waitForSelector('input[name="id"]', { timeout: 30000 });
-  // 表單出現後入口網站仍會延遲載入 JS chunk；在那之前輸入或點擊，登入按鈕尚未綁定
-  // 處理函式，不會送出 doAction，最後只會等到逾時。網路較慢時特別容易發生。
+  // 表單出現後，入口網站仍在背景載入 mib-header / mib-footer 共用子服務的 JS chunk。
+  // 在它們完成前點擊登入，不會送出 doAction，最後只會等到逾時。這些 chunk 執行完畢時
+  // 會渲染 header.mib-header 與 footer.mib-footer，因此以兩者出現作為可以登入的條件。
   await page
-    .waitForNetworkIdle({ idleTime: 800, timeout: 20000 })
+    .waitForFunction(
+      () =>
+        Boolean(document.querySelector("header.mib-header")) &&
+        Boolean(document.querySelector("footer.mib-footer")),
+      { timeout: 20000 },
+    )
     .catch(() => undefined);
   await page.type('input[name="id"]', config.userId!.toUpperCase());
   await page.type('input[name="userName"]', config.account!);

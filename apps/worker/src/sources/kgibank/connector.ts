@@ -824,13 +824,13 @@ async function findLoginFrame(page: Page): Promise<Frame> {
       if (ready) return frame;
       // 瀏覽器版本不在凱基支援清單時，會先顯示版本提醒頁並提供「仍要繼續使用」；
       // 點擊後才會載入登入表單。
-      await frame
-        .evaluate(() => {
+      await withActionTimeout(
+        frame.evaluate(() => {
           Array.from(document.querySelectorAll<HTMLElement>("button, a"))
             .find((element) => element.textContent?.trim() === "仍要繼續使用")
             ?.click();
-        })
-        .catch(() => undefined);
+        }),
+      ).catch(() => undefined);
     }
     await delay(LOGIN_RESULT_POLL_MS);
   }
