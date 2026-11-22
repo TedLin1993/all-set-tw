@@ -3,7 +3,11 @@ import {
   McpServer,
   originValidationResponse,
 } from "@modelcontextprotocol/server";
-import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
+import {
+  connectorCatalog,
+  PAYMENT_REMINDER_DAYS,
+  type ConnectorId,
+} from "@taiwan-fin-hub/shared";
 import { z } from "zod";
 import { sanitizeDatabaseError } from "../../db";
 import type { Env } from "../../platform/env";
@@ -198,8 +202,7 @@ function createServer(
   server.registerTool(
     "get_upcoming_payments",
     {
-      description:
-        "5 天內到期或已逾期、尚未付清的信用卡與貸款款項，依緊急程度排序。state：collection_failed 扣款未完成、insufficient_funds 扣款帳戶餘額不足（shortfall 為差額）、overdue 已過期限、due 待繳、confirm 狀態不明請確認、covered 扣款帳戶餘額足夠，預計自動扣款，不需處理（排在最後）。balanceCheck 為扣款帳戶餘額比對結果：covered、insufficient、stale 扣款帳戶資料超過 48 小時未更新而未比對、unknown 金額或餘額不明、not_set 未設定扣款帳戶。stale 為 true 表示款項本身的資料過舊。資料過舊時可經使用者同意後以 sync_sources 同步對應的 connectorId（款項或 paymentAccount），完成後再重新查詢。已繳清的帳單不列出，需要時以 query_api 讀取 GET /bank/bills 的 isPaid。",
+      description: `${PAYMENT_REMINDER_DAYS} 天內到期或已逾期、尚未付清的信用卡與貸款款項，依緊急程度排序。state：collection_failed 扣款未完成、insufficient_funds 扣款帳戶餘額不足（shortfall 為差額）、overdue 已過期限、due 待繳、confirm 狀態不明請確認、covered 扣款帳戶餘額足夠，預計自動扣款，不需處理（排在最後）。balanceCheck 為扣款帳戶餘額比對結果：covered、insufficient、stale 扣款帳戶資料超過 48 小時未更新而未比對、unknown 金額或餘額不明、not_set 未設定扣款帳戶。stale 為 true 表示款項本身的資料過舊。資料過舊時可經使用者同意後以 sync_sources 同步對應的 connectorId（款項或 paymentAccount），完成後再重新查詢。已繳清的帳單不列出，需要時以 query_api 讀取 GET /bank/bills 的 isPaid。`,
       annotations: READ_ONLY,
     },
     () => jsonResult("get_upcoming_payments", () => getUpcomingPayments(db)),
