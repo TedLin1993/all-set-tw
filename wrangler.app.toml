@@ -1,0 +1,66 @@
+name = "all-set-tw"
+main = "apps/worker/src/index.ts"
+compatibility_date = "2026-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = true
+preview_urls = false
+
+assets = { directory = "apps/web/dist", binding = "ASSETS" }
+browser = { binding = "BROWSER" }
+ai = { binding = "AI" }
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[[queues.producers]]
+binding = "SYNC_QUEUE"
+queue = "taiwan-fin-hub-sync"
+
+[[queues.consumers]]
+queue = "taiwan-fin-hub-sync"
+max_batch_size = 1
+max_batch_timeout = 1
+max_concurrency = 1
+
+[[d1_databases]]
+binding = "DB"
+database_name = "taiwan-fin-hub"
+# database_id is intentionally omitted from this public configuration.
+# Workers Builds supplies the resolved database ID before running migrations.
+migrations_dir = "apps/worker/migrations"
+
+[[durable_objects.bindings]]
+name = "MEGABANK_EGRESS"
+class_name = "MegabankEgress"
+
+[[durable_objects.bindings]]
+name = "FUBON_EGRESS"
+class_name = "FubonEgress"
+
+[[durable_objects.bindings]]
+name = "CRYPTO_BROWSER_EGRESS"
+class_name = "CryptoBrowserEgress"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MegabankEgress"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["FubonEgress"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["CryptoBrowserEgress"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+[observability.traces]
+enabled = true

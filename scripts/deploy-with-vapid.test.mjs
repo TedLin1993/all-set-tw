@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import {
   mkdtemp,
@@ -393,16 +394,12 @@ console.log(JSON.stringify({
         assert.deepEqual(
           calls.map(({ command, args }) => ({ command, args })),
           name === "build:app"
-            ? [
+            ? [{ command: "npm", args: ["run", "build", "--workspaces"] }]
+            : [
                 {
                   command: "node",
-                  args: ["scripts/prepare-cloudflare-build.mjs"],
+                  args: ["scripts/deploy-with-vapid.mjs", "--migrate"],
                 },
-                { command: "npm", args: ["run", "build", "--workspaces"] },
-              ]
-            : [
-                { command: "npm", args: ["run", "db:migrate:remote"] },
-                { command: "node", args: ["scripts/deploy-with-vapid.mjs"] },
               ],
         );
         assert.ok(!`${stdout}${stderr}`.includes(newToken));
@@ -411,4 +408,107 @@ console.log(JSON.stringify({
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("新站避開既有資源，失敗重試與舊站更新都用同一組 bindings 執行 migration 與部署", async () => {
+  const tag = "1".repeat(32);
+  const installId = createHash("sha256").update(tag).digest("hex").slice(0, 32);
+  const occupied = `all-set-resources-${installId}-1`;
+  const reserved = `all-set-resources-${installId}-2`;
+  const databases = new Map([
+    ["taiwan-fin-hub", "legacy-db"],
+    [`${occupied}-db`, "unrelated-db"],
+  ]);
+  const queues = new Set(["taiwan-fin-hub-sync", `${occupied}-sync`]);
+  let tags = ["unrelated"];
+  let bindings = [];
+  const events = [];
+  const options = {
+    environment: {
+      WORKERS_CI: "1",
+      CLOUDFLARE_ACCOUNT_ID: "example",
+      CLOUDFLARE_API_TOKEN: "example",
+      WRANGLER_CI_OVERRIDE_NAME: "second-site",
+      WRANGLER_CI_MATCH_TAG: tag,
+      ACCESS_AUTO_SETUP: "false",
+    },
+    async fetchApi(url, options) {
+      const { pathname, searchParams } = new URL(url);
+      const body = options.body && JSON.parse(options.body);
+      const filter = searchParams.get("name");
+      let result;
+      if (pathname.endsWith("/services/second-site")) {
+        result = { default_environment: { script: { tag, tags } } };
+      } else if (pathname.endsWith("/second-site/settings")) {
+        result = { bindings };
+      } else if (pathname.endsWith("/second-site/script-settings")) {
+        assert.equal(options.method, "PATCH");
+        tags = body.tags;
+      } else if (pathname.endsWith("/d1/database")) {
+        if (body) {
+          assert.equal(body.name, `${reserved}-db`);
+          assert.ok(!databases.has(body.name));
+          databases.set(body.name, "new-db");
+          result = { uuid: "new-db" };
+        } else {
+          result = databases.has(filter)
+            ? [{ name: filter, uuid: databases.get(filter) }]
+            : [];
+        }
+      } else if (pathname.endsWith("/queues")) {
+        if (body) {
+          assert.equal(body.queue_name, `${reserved}-sync`);
+          assert.ok(!queues.has(body.queue_name));
+          queues.add(body.queue_name);
+          result = body;
+        } else {
+          result = queues.has(filter) ? [{ queue_name: filter }] : [];
+        }
+      } else assert.fail(pathname);
+      return Response.json({ success: true, result });
+    },
+    async run(args) {
+      if (args[0] === "secret")
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify(
+            [
+              ...Object.keys(vapidSecrets),
+              "GENERATED_CONFIG_ENCRYPTION_KEY",
+            ].map((name) => ({ name })),
+          ),
+        };
+      const config = JSON.parse(
+        await readFile(args[args.indexOf("--config") + 1], "utf8"),
+      );
+      events.push({
+        command: args[0],
+        db: config.d1_databases[0].database_id,
+        producer: config.queues.producers[0].queue,
+        consumer: config.queues.consumers[0].queue,
+        worker: config.name,
+      });
+      return { exitCode: events.length === 1 ? 1 : 0 };
+    },
+  };
+  assert.equal(await deploy(["--migrate"], options), 1);
+  assert.equal(await deploy(["--migrate"], options), 0);
+  assert.deepEqual(tags, ["unrelated", reserved]);
+  bindings = [
+    { name: "DB", type: "d1", id: "legacy-db" },
+    { name: "SYNC_QUEUE", type: "queue", queue_name: "taiwan-fin-hub-sync" },
+  ];
+  assert.equal(await deploy(["--migrate"], options), 0);
+  assert.deepEqual(
+    events,
+    ["d1", "d1", "deploy", "d1", "deploy"].map((command, index) => ({
+      command,
+      db: index < 3 ? "new-db" : "legacy-db",
+      worker: "second-site",
+      producer: index < 3 ? `${reserved}-sync` : "taiwan-fin-hub-sync",
+      consumer: index < 3 ? `${reserved}-sync` : "taiwan-fin-hub-sync",
+    })),
+  );
+  assert.equal(databases.size, 3);
+  assert.equal(queues.size, 3);
 });

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { parseEnv } from "node:util";
+import { resolveWorkerResources } from "./cloudflare-resources.mjs";
 import { prepareAccessSetup } from "./cloudflare-access.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -358,6 +359,21 @@ export async function prepareDeploymentQueues(
       ? { ...consumer, queue: selectedQueue }
       : consumer,
   );
+  console.log(
+    `[deploy] Using dedicated Queue '${selectedQueue}' for Worker '${workerName}'.`,
+  );
+  return temporaryDeploymentConfig(
+    argumentsToDeploy,
+    config.configPath,
+    rawConfig,
+  );
+}
+
+async function temporaryDeploymentConfig(
+  argumentsToDeploy,
+  configPath,
+  rawConfig,
+) {
   const withoutLongConfig = removeSingleOption(
     argumentsToDeploy,
     "--config",
@@ -365,15 +381,12 @@ export async function prepareDeploymentQueues(
   const withoutConfig = removeSingleOption(withoutLongConfig, "-c").remaining;
   // Keeping the file beside the source config preserves relative paths.
   const temporaryConfig = join(
-    dirname(config.configPath),
-    `.wrangler-queue-${randomUUID()}.json`,
+    dirname(configPath),
+    `.wrangler-deploy-${randomUUID()}.json`,
   );
   await writeFile(temporaryConfig, `${JSON.stringify(rawConfig)}\n`, {
     mode: 0o600,
   });
-  console.log(
-    `[deploy] Using dedicated Queue '${selectedQueue}' for Worker '${workerName}'.`,
-  );
   return {
     argumentsToDeploy: [...withoutConfig, "--config", temporaryConfig],
     temporaryConfig,
@@ -538,7 +551,9 @@ export async function readDeploymentConfig(argumentsToDeploy) {
     const last = selected.at(-1);
     return last?.includes("=") ? last.slice(last.indexOf("=") + 1) : last;
   };
-  const configFile = valueOf(["--config", "-c"]) ?? "wrangler.toml";
+  const configFile =
+    valueOf(["--config", "-c"]) ??
+    resolve(repositoryDirectory, "wrangler.app.toml");
   const config = unstable_readConfig(
     {
       config: resolve(effectiveDirectory, configFile),
@@ -748,6 +763,51 @@ async function deployPrepared(
   }
 }
 
+async function prepareWorkersBuild(
+  argumentsToDeploy,
+  { environment, readConfig, fetchApi },
+) {
+  const { experimental_readRawConfig } = await import("wrangler");
+  const config = await readConfig(argumentsToDeploy);
+  const { rawConfig } = experimental_readRawConfig({
+    config: config.configPath,
+  });
+  const template = experimental_readRawConfig({
+    config: join(repositoryDirectory, "wrangler.toml"),
+  });
+  const workerName =
+    environment.WRANGLER_CI_OVERRIDE_NAME ??
+    (optionArguments(argumentsToDeploy, ["--name", "--env", "-e"]).length ||
+    config.configPath !== join(repositoryDirectory, "wrangler.app.toml")
+      ? config.name
+      : template.rawConfig.name);
+  rawConfig.name = workerName;
+  const { databaseId, queueName } = await resolveWorkerResources(
+    environment,
+    workerName,
+    fetchApi,
+  );
+  const target = config.targetEnvironment
+    ? rawConfig.env[config.targetEnvironment]
+    : rawConfig;
+  const db = target.d1_databases.find((binding) => binding.binding === "DB");
+  db.database_id = databaseId;
+  delete db.database_name;
+  const producer = target.queues.producers.find(
+    (binding) => binding.binding === "SYNC_QUEUE",
+  );
+  const consumer = target.queues.consumers.find(
+    (binding) => binding.queue === producer.queue,
+  );
+  producer.queue = queueName;
+  consumer.queue = queueName;
+  return temporaryDeploymentConfig(
+    argumentsToDeploy,
+    config.configPath,
+    rawConfig,
+  );
+}
+
 export async function deploy(
   argumentsToDeploy = deployArguments,
   {
@@ -758,16 +818,38 @@ export async function deploy(
     fetchPublic,
   } = {},
 ) {
+  const migrate = argumentsToDeploy.includes("--migrate");
+  argumentsToDeploy = argumentsToDeploy.filter(
+    (argument) => argument !== "--migrate",
+  );
   if (booleanOptionEnabled(argumentsToDeploy, "--dry-run")) {
     const result = await run(["deploy", ...argumentsToDeploy]);
     return result.exitCode ?? 1;
   }
-  const prepared = await prepareDeploymentQueues(argumentsToDeploy, {
-    run,
-    environment,
-    readConfig,
-  });
+  const prepared =
+    environment.WORKERS_CI === "1" && migrate
+      ? await prepareWorkersBuild(argumentsToDeploy, {
+          environment,
+          readConfig,
+          fetchApi,
+        })
+      : await prepareDeploymentQueues(argumentsToDeploy, {
+          run,
+          environment,
+          readConfig,
+        });
   try {
+    if (migrate) {
+      const migration = await run([
+        "d1",
+        "migrations",
+        "apply",
+        "DB",
+        "--remote",
+        ...queueContextArguments(prepared.argumentsToDeploy),
+      ]);
+      if (migration.exitCode !== 0) return migration.exitCode ?? 1;
+    }
     return await deployPrepared(prepared.argumentsToDeploy, {
       run,
       environment,
@@ -784,7 +866,14 @@ export async function deploy(
 
 if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
   try {
-    process.exitCode = await deploy();
+    const args = optionArguments(deployArguments, ["--config", "-c"]).length
+      ? deployArguments
+      : [
+          ...deployArguments,
+          "--config",
+          resolve(repositoryDirectory, "wrangler.app.toml"),
+        ];
+    process.exitCode = await deploy(args);
   } catch (error) {
     console.error(`[deploy] ${error.message}`);
     process.exitCode = 1;
