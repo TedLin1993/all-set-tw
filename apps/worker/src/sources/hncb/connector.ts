@@ -575,10 +575,14 @@ async function openLoginAndFill(
 
 async function waitForHncbLoginReady(page: Page, timeoutMs: number) {
   await withActionTimeout(
+    // 登入頁的 load handler 會重設 #USERID 與 #NICKNAME；readyState 仍為
+    // interactive 時就填入，送出前會被清空，網銀跳出「請輸入代號」。
     page.waitForFunction(
       () =>
+        document.readyState === "complete" &&
         typeof (window as unknown as { doSubmit?: () => void }).doSubmit ===
-          "function" && Boolean(document.getElementById("USERIDTEXT")),
+          "function" &&
+        Boolean(document.getElementById("USERIDTEXT")),
       { timeout: timeoutMs },
     ),
     timeoutMs + 1_000,
