@@ -5,7 +5,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { parseEnv } from "node:util";
-import { resolveWorkerResources } from "./cloudflare-resources.mjs";
+import {
+  readActiveResources,
+  resolveWorkerResources,
+} from "./cloudflare-resources.mjs";
 import { prepareAccessSetup } from "./cloudflare-access.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -783,39 +786,12 @@ async function readLiveResources(
   }
 
   const deployment = await inspect(["deployments", "status"]);
-  const versions = deployment.versions?.filter(
-    (version) => version.percentage > 0,
+  return readActiveResources(
+    deployment,
+    (versionId) => inspect(["versions", "view", versionId]),
+    workerName,
+    migrationOnly,
   );
-  if (!versions?.length)
-    throw new Error("No active Worker version to inspect.");
-  let resources;
-  for (const { version_id } of versions) {
-    const version = await inspect(["versions", "view", version_id]);
-    const bindings = version.resources?.bindings ?? [];
-    const databaseId = bindings.find(
-      (binding) => binding.type === "d1" && binding.name === "DB",
-    )?.id;
-    const queueName = migrationOnly
-      ? undefined
-      : bindings.find(
-          (binding) =>
-            binding.type === "queue" && binding.name === "SYNC_QUEUE",
-        )?.queue_name;
-    if (!databaseId || (!migrationOnly && !queueName))
-      throw new Error(
-        `Worker '${workerName}' is missing a required live binding.`,
-      );
-    if (
-      resources &&
-      (databaseId !== resources.databaseId || queueName !== resources.queueName)
-    ) {
-      throw new Error(
-        `Active versions of Worker '${workerName}' have different resource bindings.`,
-      );
-    }
-    resources = { databaseId, queueName };
-  }
-  return resources;
 }
 
 async function prepareRemoteConfig(

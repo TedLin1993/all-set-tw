@@ -1,5 +1,47 @@
 import { createHash } from "node:crypto";
 
+// An upload may be newer than the version receiving production traffic.
+export async function readActiveResources(
+  deployment,
+  readVersion,
+  workerName,
+  migrationOnly = false,
+) {
+  const versions = deployment.versions?.filter(
+    (version) => version.percentage > 0,
+  );
+  if (!versions?.length)
+    throw new Error("No active Worker version to inspect.");
+  let resources;
+  for (const { version_id } of versions) {
+    const version = await readVersion(version_id);
+    const bindings = version.resources?.bindings ?? [];
+    const databaseId = bindings.find(
+      (binding) => binding.type === "d1" && binding.name === "DB",
+    )?.id;
+    const queueName = migrationOnly
+      ? undefined
+      : bindings.find(
+          (binding) =>
+            binding.type === "queue" && binding.name === "SYNC_QUEUE",
+        )?.queue_name;
+    if (!databaseId || (!migrationOnly && !queueName))
+      throw new Error(
+        `Worker '${workerName}' is missing a required live binding.`,
+      );
+    if (
+      resources &&
+      (databaseId !== resources.databaseId || queueName !== resources.queueName)
+    ) {
+      throw new Error(
+        `Active versions of Worker '${workerName}' have different resource bindings.`,
+      );
+    }
+    resources = { databaseId, queueName };
+  }
+  return resources;
+}
+
 // Workers Builds creates the Worker before running the deploy command. Its
 // immutable script tag also distinguishes a deleted and recreated Worker.
 export async function resolveWorkerResources(
@@ -45,7 +87,21 @@ export async function resolveWorkerResources(
   ) {
     throw new Error("Cannot verify the deployment Worker identity.");
   }
-  const { bindings } = await request(`/workers/scripts/${name}/settings`);
+  const scriptPath = `/workers/scripts/${name}`;
+  const { deployments } = await request(`${scriptPath}/deployments`);
+  if (!Array.isArray(deployments))
+    throw new Error("Cannot read Worker deployment history.");
+  // The deployments API returns the newest deployment first, including rollbacks.
+  if (deployments.length) {
+    return readActiveResources(
+      deployments[0],
+      (id) => request(`${scriptPath}/versions/${encodeURIComponent(id)}`),
+      workerName,
+    );
+  }
+
+  // No deployments yet. Preserve bindings provisioned by the install template.
+  const { bindings } = await request(`${scriptPath}/settings`);
   if (!Array.isArray(bindings))
     throw new Error("Cannot read deployed Worker bindings.");
   const db = bindings.find((binding) => binding.name === "DB");
