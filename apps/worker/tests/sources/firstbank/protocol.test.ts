@@ -91,4 +91,44 @@ describe("第一銀行交易明細", () => {
       { accountId: accountIdFor(result, MAIN_ACCOUNT), amount: 72000 },
     ]);
   });
+
+  it("明細頁沒有回顯帳號時，依每次查詢選取的帳號歸戶", () => {
+    const result = parseFirstbankData(
+      {
+        depositOverviewHtml,
+        transactionHistoryHtml: [
+          transactionPage("", "5"),
+          transactionPage("", "72,000"),
+        ],
+        transactionAccounts: [
+          { label: `iLEO ${ILEO_ACCOUNT}`, value: "opaque-option-1" },
+          { label: "主要帳戶", value: MAIN_ACCOUNT },
+        ],
+      },
+      NOW,
+    );
+    expect(
+      result.bankTransactions.map(({ accountId, amount }) => ({
+        accountId,
+        amount,
+      })),
+    ).toEqual([
+      { accountId: accountIdFor(result, ILEO_ACCOUNT), amount: 5 },
+      { accountId: accountIdFor(result, MAIN_ACCOUNT), amount: 72000 },
+    ]);
+    expect(JSON.stringify(result)).not.toContain(ILEO_ACCOUNT);
+    expect(JSON.stringify(result)).not.toContain(MAIN_ACCOUNT);
+  });
+
+  it("多帳戶且頁面與查詢皆無帳號識別時，不猜測交易歸戶", () => {
+    expect(() =>
+      parseFirstbankData(
+        {
+          depositOverviewHtml,
+          transactionHistoryHtml: transactionPage("", "5"),
+        },
+        NOW,
+      ),
+    ).toThrow("第一銀行交易明細找不到對應的存款帳戶。");
+  });
 });
