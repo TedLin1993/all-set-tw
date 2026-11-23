@@ -90,7 +90,6 @@
 - 若變更使文件描述不再正確，必須在同一個 PR 更新相關文件；純重構且不影響文件描述時，不必為了更新而更新。
 - Schema 變更須同步維護 `apps/worker/schema-metadata.json`，並從 repo root 執行 `npm run db:schema:docs`，提交重新產生的 `docs/database-schema.md`；不得直接手改產生的文件。
 - 提交前對照 diff 檢查文件是否仍符合實作。PR 說明須列出文件更新項目；不需更新其他文件時，簡述原因。
-- `docs/001-cron-sync-design.md` 是歷史設計，不作為現行實作依據；現行排程與同步行為維護於 `docs/002-backend-architecture.md`。
 - 架構判斷以實際程式碼及各 workspace 的 `package.json` 為最終依據。
 - 技術棧、目錄責任或主要驗證指令改變時，應同步更新本文件。
 - `README.md` 用於產品介紹、部署與使用說明；本文件維持精簡，作為開發工作的快速架構索引。

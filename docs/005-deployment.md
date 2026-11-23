@@ -1,6 +1,6 @@
 # 進階部署與更新
 
-首次部署請從 [README 的免費部署步驟](../README.md#免費部署)開始。已有站台可直接看[版本更新](#版本更新)、[Access 驗證失敗](#access-驗證失敗)或[本機開發](#本機開發)。
+首次部署請從 [README 的免費部署步驟](../README.md#免費部署)開始。已有站台可直接看[版本更新](#版本更新)、[Access 驗證失敗](#access-驗證失敗)、[本機開發](#本機開發)或[從較早版本升級](#從較早版本升級)。
 
 ## 一鍵部署細節
 
@@ -49,7 +49,7 @@ openssl rand -hex 32
 
 自動化只在 **Workers Builds（`WORKERS_CI=1`）** 執行。本機部署、`--dry-run` 與已知 `DEMO_MODE=true` 的部署會略過 Access 自動化；預覽 build 使用 Cloudflare 預設的 preview command，不會執行 `npm run deploy`。
 
-需要自行維護 Access 驗證值時，可在 **Settings → Builds → Build variables and secrets** 設定 `ACCESS_AUTO_SETUP=false`，再使用下方的手動設定。若舊安裝的 Access Secrets 仍是暫填值，可在相同位置暫時設 `ACCESS_AUTO_SETUP=true` 並重試 build，重新取得正式網址的驗證值；成功後移除此變數。透過 Wrangler `vars` 或 `--secrets-file` 明確提供的手動 Access 驗證值應以手動流程維護。
+需要自行維護 Access 驗證值時，可在 **Settings → Builds → Build variables and secrets** 設定 `ACCESS_AUTO_SETUP=false`，再使用下方的手動設定。透過 Wrangler `vars` 或 `--secrets-file` 明確提供的手動 Access 驗證值應以手動流程維護。
 
 ### 部署成功但缺少 Access 驗證值
 
@@ -97,7 +97,7 @@ AUD 的官方取得方式請參考 [Get your AUD tag](https://developers.cloudfl
 
 本專案仍由 Worker 驗證 Access JWT，因此需要 `TEAM_DOMAIN` 與 `POLICY_AUD`。Cloudflare 提供的 `ctx.access` 目前無法通過 Static Assets 的內部 router 傳入本專案的 Worker，詳見官方的 [`ctx.access` limitations](https://developers.cloudflare.com/workers/configuration/cloudflare-access/#ctxaccess-limitations)。
 
-若使用舊版部署範例，請把暫填的 `TEAM_DOMAIN`／`POLICY_AUD` 換成實際值；只有單一 Application 時，可刪除暫填的 `POLICY_AUDS`。`DEMO_MODE`、`LOCAL_DEV_MODE` 在私人部署應為 `false` 或未設定。
+`DEMO_MODE`、`LOCAL_DEV_MODE` 在私人部署應為 `false` 或未設定。
 
 ### Access 驗證失敗
 
@@ -111,7 +111,7 @@ AUD 的官方取得方式請參考 [Get your AUD tag](https://developers.cloudfl
 4. 兩個值是否已存入 **Runtime variables and secrets** 並部署生效；Build variables 不會提供給 API runtime。
 5. 若曾重建 Access Application 或改變保護範圍，重新複製 AUD，登出 Access 並重新登入以取得新 token。
 
-程式會合併 `POLICY_AUD` 與 `POLICY_AUDS`，接受其中任一相符的 AUD。殘留 `POLICY_AUDS=temporary-placeholder` 不會覆蓋正確的 `POLICY_AUD`，但仍應清除不再使用的暫填設定。
+程式會合併 `POLICY_AUD` 與 `POLICY_AUDS`，接受其中任一相符的 AUD。
 
 ### 使用 Cloudflare 帳號登入
 
@@ -126,7 +126,7 @@ Cloudflare Access 預設可能使用 Email OTP。如要限定 Cloudflare 帳號�
 
 部署頁的 **Session duration** 最多可選 **7 days**。若要延長至一個月，部署完成後在 **Zero Trust → Access controls → Applications** 找到保護此 Worker 的 Application，再依下列方式調整：
 
-若頁面顯示 **Finish your account setup**，先點擊 **Choose a plan**，完成 **Zero Trust Free** 方案設定；這是進入 Zero Trust 管理介面的步驟，無須列為一鍵部署的前置設定。
+若頁面顯示 **Finish your account setup**，先點擊 **Choose a plan**，完成 **Zero Trust Free** 方案設定。
 
 1. 點擊該 Application 的 **Configure**，開啟 **Application details**。
 2. 點擊頁面上方與 **All、Destinations、Policies** 同一排的 **Details** 按鈕，或直接向下捲到頁面最下方。
@@ -164,16 +164,6 @@ Build command `npm run build` 執行 `scripts/cloudflare-build.mjs`。在 Worker
 
 - 本機或 GitHub Actions 等非 Workers Builds 環境。
 - repository 有 `.github/workflows`：官方 repository、fork，或已安裝同步 workflow 的部署，由 repository 自己管理版本。
-
-較早的部署 repository 沒有 `cloudflare-build.mjs`，Retry build 後「目前版本」不會改變，需切換一次：在 Worker 的 **Settings → Builds** 編輯 build 設定，將 **Build command** 改為下方指令並儲存，再 Retry build。之後保留這個 Build command，**Deploy command** 維持 `npm run deploy`；已安裝同步 workflow 的部署不需要切換。
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/TedLin1993/all-set-tw/main/scripts/cloudflare-build.mjs -o /tmp/cloudflare-build.mjs && node /tmp/cloudflare-build.mjs
-```
-
-該指令下載官方 `main` 的同一個 script 執行，行為與 `npm run build` 相同。
-
-舊部署的 `cloudflare-build.mjs` 會在新版目錄執行 `npm run build:app`，並以 `TAIWAN_FIN_HUB_UPDATE_METHOD` 告知更新方式，因此往後版本必須保留 `build:app` script 與這個變數名稱；`cloudflare-build.mjs` 也可能以 curl 下載執行，只能 import Node 內建模組。
 
 ### 同步 workflow（選用）
 
@@ -272,15 +262,11 @@ npm run dev
 
 範例設定中的 D1 與 Workers AI 使用 remote binding，會連到 Cloudflare 資源。請使用獨立的開發 D1，不要直接操作正式資料。
 
-兆豐對外請求使用 `MegabankEgress` Durable Object。根目錄 `wrangler.app.toml` 與 `apps/worker/wrangler.local.toml.example` 都有這個 binding 與 SQLite migration；已存在的私人 `wrangler.local.toml` 要自行補上相同設定，否則本機同步缺少 binding。部署時 Wrangler 會建立物件，不需要額外 Secret。Workers 免費方案可使用 SQLite Durable Objects。
-
-台北富邦網銀拒絕 Browser Run 的對外連線，網銀請求改由 `FubonEgress` Durable Object 代發（migration tag `v2`）。設定方式與 `MegabankEgress` 相同：根目錄 `wrangler.app.toml` 與 `apps/worker/wrangler.local.toml.example` 已包含 binding 與 SQLite migration，既有私人 `wrangler.local.toml` 需自行補上 `FUBON_EGRESS` binding 與 `v2` migration。
-
-Binance 與 MAX 的 API 請求由 `CryptoBrowserEgress` Durable Object 開 Browser Run 代發（migration tag `v3`），設定方式相同；既有私人 `wrangler.local.toml` 需自行補上 `CRYPTO_BROWSER_EGRESS` binding 與 `v3` migration。
+兆豐、台北富邦與加密貨幣交易所的對外請求，透過 `MegabankEgress`、`FubonEgress`、`CryptoBrowserEgress` 三個 SQLite Durable Object 代發。範例設定已包含 binding 與 migration，部署時由 Wrangler 建立，不需要額外 Secret。
 
 本機 `apps/worker/.dev.vars.example` 保留手動金鑰設定；請填入開發用隨機金鑰。若需解密正式資料，正式部署也必須在最初自行提供並保存相同金鑰；公開部署範例的 `auto` 只會由部署 script 初始化。
 
-SQL migrations 位於 `apps/worker/migrations/`。根目錄 `wrangler.app.toml` 的 `migrations_dir` 使用 `apps/worker/migrations`；`apps/worker/wrangler.local.toml` 使用相對於該設定檔的 `migrations`。若已建立私人 Wrangler 設定，請同步更新其 migration 路徑；既有 migration 檔名與內容維持原樣。
+SQL migrations 位於 `apps/worker/migrations/`。根目錄 `wrangler.app.toml` 的 `migrations_dir` 使用 `apps/worker/migrations`；`apps/worker/wrangler.local.toml` 使用相對於該設定檔的 `migrations`。
 
 常用資料庫遷移指令：
 
@@ -315,4 +301,34 @@ XDG_CONFIG_HOME=.wrangler-config node scripts/deploy-with-vapid.mjs \
 
 若既有 D1 已儲存加密資料，部署時必須沿用原本的實際金鑰。手動模式使用相同的 `CONFIG_ENCRYPTION_KEY`；自動模式需要原 Worker 的 `GENERATED_CONFIG_ENCRYPTION_KEY`，不能只在新 Worker 填入 `auto`。新的隨機金鑰無法解密既有資料，部署 script 也不會為已有加密資料的 D1 建立替代金鑰。
 
-若自動金鑰遺失，需還原原本的 Secret；無法還原時，既有加密資料無法解密。舊版手動金鑰部署即使沒有 `GENERATED_CONFIG_ENCRYPTION_KEY`，仍會使用原本的金鑰並可繼續更新。
+若自動金鑰遺失，需還原原本的 Secret；無法還原時，既有加密資料無法解密。
+
+## 從較早版本升級
+
+以下只適用於較早建立的部署或本機設定。
+
+### Retry build 後版本沒有改變
+
+較早的部署 repository 沒有 `cloudflare-build.mjs`，Retry build 只會重建原本的版本。在 Worker 的 **Settings → Builds** 將 **Build command** 改為下方指令並儲存，再 Retry build；之後保留這個 Build command，**Deploy command** 維持 `npm run deploy`。已安裝同步 workflow 的部署不需要切換。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TedLin1993/all-set-tw/main/scripts/cloudflare-build.mjs -o /tmp/cloudflare-build.mjs && node /tmp/cloudflare-build.mjs
+```
+
+這個指令下載官方 `main` 的同一個 script 執行，行為與 `npm run build` 相同。
+
+### Access 驗證值仍是暫填值
+
+舊版部署範例會暫填 `TEAM_DOMAIN`、`POLICY_AUD` 與 `POLICY_AUDS`。可在 **Settings → Builds → Build variables and secrets** 暫時設定 `ACCESS_AUTO_SETUP=true` 並重試 build，重新取得正式網址的驗證值，成功後移除此變數；也可以依[設定 Worker 的 Access 驗證值](#設定-worker-的-access-驗證值)手動替換。只有單一 Application 時可刪除暫填的 `POLICY_AUDS`；殘留的 `POLICY_AUDS=temporary-placeholder` 不會覆蓋正確的 `POLICY_AUD`，但仍應清除。
+
+### 手動金鑰部署
+
+舊版以手動金鑰部署的站台沒有 `GENERATED_CONFIG_ENCRYPTION_KEY`，更新時仍使用原本的 `CONFIG_ENCRYPTION_KEY`，可以照常更新。
+
+### 本機私人設定
+
+較早建立的 `apps/worker/wrangler.local.toml` 需自行補上範例設定中的 `MEGABANK_EGRESS`、`FUBON_EGRESS`（migration tag `v2`）與 `CRYPTO_BROWSER_EGRESS`（migration tag `v3`）binding 及 SQLite migration，否則本機同步缺少 binding。既有的私人 Wrangler 設定也要依[本機開發](#本機開發)說明的路徑更新 migration 設定。
+
+### 維護者注意
+
+舊部署的 `cloudflare-build.mjs` 會在新版目錄執行 `npm run build:app`，並以 `TAIWAN_FIN_HUB_UPDATE_METHOD` 告知更新方式，因此往後版本必須保留 `build:app` script 與這個變數名稱。`cloudflare-build.mjs` 也可能以 curl 下載執行，只能 import Node 內建模組。
