@@ -15,6 +15,8 @@ import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const databaseName = process.env.D1_DATABASE ?? "DB";
+// wrangler.toml 只供一鍵部署讀取；D1 binding 與 migrations_dir 定義在 wrangler.app.toml。
+const appConfigPath = join(projectRoot, "wrangler.app.toml");
 const outputPath = join(projectRoot, "docs", "database-schema.md");
 const migrationsPath = join(projectRoot, "apps", "worker", "migrations");
 const metadataPath = join(
@@ -65,15 +67,19 @@ function runWrangler(args) {
   };
 
   try {
-    return execFileSync(process.execPath, [getWranglerEntry(), ...args], {
-      cwd: projectRoot,
-      env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      // Wrangler 在非 TTY 環境會重複輸出 migration 進度表，輸出量隨 migration
-      // 數量成長；超過預設 1 MiB 上限時 execFileSync 會以 ENOBUFS 失敗。
-      maxBuffer: 64 * 1024 * 1024,
-    });
+    return execFileSync(
+      process.execPath,
+      [getWranglerEntry(), ...args, "--config", appConfigPath],
+      {
+        cwd: projectRoot,
+        env,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        // Wrangler 在非 TTY 環境會重複輸出 migration 進度表，輸出量隨 migration
+        // 數量成長；超過預設 1 MiB 上限時 execFileSync 會以 ENOBUFS 失敗。
+        maxBuffer: 64 * 1024 * 1024,
+      },
+    );
   } catch (error) {
     const stderr = error?.stderr?.toString().trim();
     const stdout = error?.stdout?.toString().trim();

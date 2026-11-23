@@ -110,44 +110,11 @@
 
 <a href="images/deploy-success.png"><img src="images/deploy-success.png" alt="Cloudflare build 成功畫面與右上角的 Visit 按鈕" width="700"></a>
 
-### 延長登入期限（選用）
-
-部署頁的 **Session duration** 最多可選 **7 days**。若要延長至一個月，部署完成後前往 **Cloudflare One／Zero Trust → Access controls → Applications**，找到保護此 Worker 的 Application：
-
-若頁面顯示 **Finish your account setup**，先點擊 **Choose a plan**，完成 **Zero Trust Free** 方案設定。
-
-1. 點擊該 Application 的 **Configure**，開啟 **Application details**。
-2. 點擊頁面上方與 **All、Destinations、Policies** 同一排的 **Details** 按鈕，或直接向下捲到頁面最下方。
-3. 在 **Details** 區塊的 **Name** 欄位旁，將 **Session Duration** 設為 **1 month**，再點擊 **Save**。
-
-後續自動部署與更新會沿用這些登入設定。
-
-部署與登入故障排查，以及版本更新方式（含較早部署的一次性切換），請參考[進階部署與更新](docs/005-deployment.md)。
+部署後可[延長登入期限](docs/005-deployment.md#延長登入期限)。登入遇到問題或需要更新版本時，請參考[進階部署與更新](docs/005-deployment.md)。
 
 ## 本機開發
 
-建立不納入版本控制的私人設定，將 `wrangler.local.toml` 的 D1 Database ID 換成開發用資料庫，並在 `.dev.vars` 設定自己的 `CONFIG_ENCRYPTION_KEY`：
-
-```bash
-cp apps/worker/wrangler.local.toml.example apps/worker/wrangler.local.toml
-cp apps/worker/.dev.vars.example apps/worker/.dev.vars
-npm install
-npx wrangler login
-npm run dev
-```
-
-範例設定的 D1 與 Workers AI 會連到 Cloudflare remote binding，請勿使用正式資料庫。常用驗證指令：
-
-```bash
-npm run format:check
-npm run lint
-npm run typecheck
-npm run verify:web
-npm run test:backend
-npm run build
-```
-
-本機 relay、資料庫遷移與既有 D1 部署方式請參考[進階部署與更新](docs/005-deployment.md)。
+請依[本機開發指南](docs/005-deployment.md#本機開發)建立私人設定、指定開發用 D1 並啟動服務。提交變更前請見[專案驗證指令](AGENTS.md#提交與-pr-前必跑檢查)。
 
 ## 技術架構
 
@@ -155,11 +122,7 @@ npm run build
 
 後端執行於 Cloudflare Workers，以 Hono 提供 API，並整合 D1、Access、Browser Run、Workers AI、Cron Triggers 與 Queues。
 
-專案以 npm workspaces 管理 `apps/web`、`apps/worker` 與根目錄的 `shared/`。`shared/` 以 `@taiwan-fin-hub/shared` 提供前後端共用的型別、契約與純邏輯。資料庫程式位於 `apps/worker/src/db`，SQL migrations 位於 `apps/worker/migrations`；各銀行、集保與電子發票的同步、connector、API client 及資料解析集中於 `apps/worker/src/sources/<connectorId>`，共用同步管理位於 `apps/worker/src/features/sync`。
-
-前後端與共用套件皆使用 TypeScript 7 型別檢查；Svelte 前端透過 `svelte-check --tsgo` 執行，並保留工具所需的 TypeScript 6 相依。
-
-詳細設計請參考[後端架構](docs/002-backend-architecture.md)、[前端架構](docs/003-frontend-architecture.md)與[連接器開發](docs/004-connector-development.md)。
+程式結構與開發約定請參考[後端架構](docs/002-backend-architecture.md)、[前端架構](docs/003-frontend-architecture.md)與[連接器開發](docs/004-connector-development.md)。
 
 ## 安全機制
 

@@ -347,7 +347,7 @@
     },
     "invoice_transaction_preferences": {
       "description": "使用者對電子發票與銀行交易是否關聯的決策。",
-      "notes": "invoice_id 與非 NULL 的 transaction_id 分別以 FK 參照 invoices、bank_transactions，採 NO ACTION 保留使用者決策；linked 必須指定交易，separate 可為 NULL。0045 不清除孤兒偏好，套用前須先查核並處理。",
+      "notes": "invoice_id 與非 NULL 的 transaction_id 分別以 FK 參照 invoices、bank_transactions，採 NO ACTION 保留使用者決策；linked 必須指定交易，separate 可為 NULL。",
       "columns": {
         "invoice_id": "套用決策的 invoices 記錄識別碼。",
         "transaction_id": "被關聯的 bank_transactions 識別碼；separate 時為 NULL。",
