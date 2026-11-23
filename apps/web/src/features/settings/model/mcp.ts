@@ -235,7 +235,7 @@ export function mcpClientGuides(endpoint: string): McpClientGuide[] {
   ];
 }
 
-/** 接上後的範例問題，取自 docs/006-mcp.md 開頭。 */
+/** 接上後的範例問題，取自 docs/006-mcp.md「連線後可以做什麼」。 */
 export const MCP_EXAMPLE_PROMPTS = [
   "這個月餐飲花多少？跟上個月比呢？",
   "最近有哪些信用卡要繳？扣款帳戶餘額夠嗎？",
