@@ -797,6 +797,84 @@ describe("只有信用卡的使用者", () => {
   });
 });
 
+describe("沒有信用卡的使用者", () => {
+  function depositResponses() {
+    return [
+      Response.json({
+        code: "0000",
+        rsData: {
+          twdAcctSummaryResponse: {
+            demDepBalSummaryResponse: {
+              infoList: [{ accountId: "123456789012", balance: 100.25 }],
+            },
+          },
+        },
+      }),
+      Response.json({ code: "0000", rsData: {} }),
+      ...Array.from({ length: 3 }, () =>
+        Response.json({ code: "0000", rsData: { detailList: [] } }),
+      ),
+    ];
+  }
+
+  function cardResources(fetcher: CtbcFetch) {
+    return vi
+      .mocked(fetcher)
+      .mock.calls.slice(3)
+      .map(([, init]) => JSON.parse(String(init?.body)).resource)
+      .filter((resource) => String(resource).startsWith("/twrbm-card/"));
+  }
+
+  it("登入回應 haveCC 為 0 時不查詢信用卡，照常回傳存款", async () => {
+    const fetcher = bankApi([
+      loginResponse({
+        code: "0000",
+        rsData: { isTwoStageLogin: false, haveCC: "0" },
+      }),
+      ...depositResponses(),
+      Response.json({ code: "0000" }),
+    ]);
+
+    const result = await createCtbcConnector(fetcher).sync(credentials);
+
+    expect(result.bankAccounts).toHaveLength(1);
+    expect(cardResources(fetcher)).toEqual([]);
+  });
+
+  it("帳單查詢回 SVC 9902 時視為無卡，略過其餘信用卡查詢並回傳存款", async () => {
+    const fetcher = bankApi([
+      loginResponse({ code: "0000", rsData: { isTwoStageLogin: false } }),
+      ...depositResponses(),
+      Response.json({ sys: "SVC", code: "9902", message: privateValue }),
+      Response.json({ code: "0000" }),
+    ]);
+
+    const result = await createCtbcConnector(fetcher).sync(credentials);
+
+    expect(result.bankAccounts).toHaveLength(1);
+    expect(cardResources(fetcher)).toEqual(["/twrbm-card/qu002/010"]);
+  });
+
+  it("登入回應 haveCC 為 1 時，帳單查詢回 SVC 9902 仍視為失敗", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetcher = bankApi([
+      loginResponse({
+        code: "0000",
+        rsData: { isTwoStageLogin: false, haveCC: "1" },
+      }),
+      ...depositResponses(),
+      Response.json({ sys: "SVC", code: "9902", message: privateValue }),
+      Response.json({ code: "0000" }),
+    ]);
+
+    await expect(
+      createCtbcConnector(fetcher).sync(credentials),
+    ).rejects.toMatchObject({ message: "中國信託資料同步暫時無法完成。" });
+    expect(cardResources(fetcher)).toEqual(["/twrbm-card/qu002/010"]);
+  });
+});
+
 describe("外幣查詢的重新驗證與失敗隔離", () => {
   const stages = [
     "/twrbm-fx/qu001/010",
