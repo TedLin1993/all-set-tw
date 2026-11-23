@@ -1,6 +1,6 @@
 # Connector 開發規範
 
-本文件定義 Taiwan Fin Hub 新增與維護 connector 的共同流程。目標是讓 connector 的識別資訊、設定欄位、同步執行、敏感狀態、前端表單與測試保持同步，避免只完成其中一層便上線。前半段是共通規範與新增流程，各來源的特殊行為集中在文末。
+新增資料來源先看[新增流程](#新增流程)。維護既有來源時，可直接查[各來源特殊行為](#各來源特殊行為)的帳務規則與限制。
 
 ## 共同註冊點
 
@@ -76,87 +76,23 @@ Schema 需要涵蓋同步期間會持久化的 secret state，否則 Zod parse �
 
 ## Protocols 與 Worker adapter 邊界
 
-同一來源目錄保留明確的責任邊界。`protocol.ts` 與純 API client 可包含：
+在 `sources/<connectorId>/` 依需要選擇檔案：
 
-- 外部 API client。
-- Signing、encryption、protocol parsing。
-- Config schema 與 response normalization。
-- 不依賴 Worker binding 的 connector。
+- `protocol.ts` 與 client 負責協定、設定 schema、解析與正規化，可獨立於 Worker 執行。
+- `connector.ts` 管理 Browser、AI 等 runtime binding，僅在需要時建立。
+- `sync.ts` 組合 adapter、共用寫入流程與來源專用 repository。D1 存取留在這一層及 repository。
 
-來源的 `connector.ts` 放需要下列 runtime object 的 adapter；只使用純 HTTP client 的來源不必建立這個檔案：
+來源之間透過共用工具協作，不引用彼此的內部實作。新增不同命名的 protocol 或 client 時，需讓根目錄 `.oxlintrc.json` 的相依檢查涵蓋它。
 
-- `BROWSER`、Puppeteer page 或 browser lifecycle。
-- `AI` CAPTCHA recognition。
-- Worker-specific session acquisition 或 capacity handling。
+### 瀏覽器與重試
 
-Protocol／client 不得依賴 Hono、D1、Worker `Env`、adapter 或 `sync.ts`，也不得直接寫入資料庫；adapter 不直接讀寫 D1。`sync.ts` 負責呼叫它們，並組合共用 persistence 與來源 repository。來源不引用另一來源的內部實作。Connector 測試與 fixtures 放在 `apps/worker/tests/sources/<connectorId>/`，由 `npm run test:backend` 執行；跨來源的同步完整性測試留在 `tests/features/sync`。
+| 階段         | 可以重試的範圍                                                                                                                                                  | 何時停止                                                                                        |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 取得瀏覽器   | 由 `sources/browser.ts` 的 `launchBrowserWithRetry` 建立。建立請求回應 503 時等待 2 秒、5 秒再試；明確的暫時性 429 依 `Retry-After` 等待。                      | 每日額度耗盡、剩餘期限不足或無法確認是否已建立 session 時停止。額度於台灣時間早上 8 點重置。    |
+| 準備登入頁   | 使用 `prepareBrowserLoginWithRetry` 的來源，只在送出登入前復原分頁、表單或驗證碼載入。每次最多 60 秒，最多三次，取得與等待共用 180 秒預算，來源較短的期限優先。 | 先確認舊 session 已關閉才重開。人工驗證沿用原 session，帳密遭拒、登入結果不明或已知維護時停止。 |
+| 已登入後查詢 | `retryPostLoginStep` 在同一 session 內，對可重入的讀取步驟遇到暫時逾時或網路錯誤時補試一次。                                                                    | 需要重新登入、人工操作、session 已關閉或資料格式不符時結束。                                    |
 
-上述 import 邊界由 `npm run lint` 檢查，對象為 `sources/<connectorId>/` 下的 `*protocol.ts`、`*client.ts` 與 `connector.ts`；新增其他命名的 protocol／client 檔案時，須同步調整根目錄的 `.oxlintrc.json`。
-
-電子發票的 config、同步 primitive 與正規化實作位於 `sources/einvoice/protocol.ts`，API client 位於同一目錄；各來源的 config 註冊集中於 `sources/config-registry.ts`。Worker 與測試直接引用需要的來源檔案，不使用跨來源的實作匯出入口。
-
-所有 Browser adapter 建立新瀏覽器時，統一呼叫
-`apps/worker/src/sources/browser.ts` 的 `launchBrowserWithRetry`，不得直接呼叫
-`puppeteer.launch`。共用 adapter 在 binding `fetch` 層僅針對建立瀏覽器的
-`POST /v1/devtools/browser` 請求依 HTTP status `503` 判斷重試，不比對錯誤文案。
-預設等待 2 秒、5 秒後重試，最多嘗試 3 次；`503` 耗盡後保留原始錯誤。
-結構化 log 只記錄狀態碼、嘗試次數與重試延遲。建立請求回應 `429` 時，在 binding
-層辨識每日額度，並保留 `Retry-After` 的秒數或 HTTP 日期；暫時限流缺少有效 header
-時預設 20 秒，避免 Puppeteer SDK 丟失 header。回應本文不寫入 log。建立瀏覽器時遇到 Browser Run
-每日額度或限流，`classifyBrowserRunCapacityError` 會轉成共用的
-`BrowserRunCapacityError`；不相關錯誤原樣傳遞。每日額度依 Cloudflare 的 UTC
-隔日重置，使用者訊息說明「每日台灣時間早上 8 點重置」，`Retry-After` 為距離
-下一次重置的秒數。五家原有的 `puppeteer.limits` 啟動頻率預先檢查也使用共用錯誤，
-並保留當下取得的等待秒數。
-
-每日額度、補試耗盡或剩餘期限不足時，手動同步與驗證碼 route 對共用錯誤回應
-`429 BROWSER_BUSY`；同步紀錄維持 `failed`，排程在下一輪照常重試。
-銀行專屬 capacity error 只處理驗證碼作業或
-session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session 重連與銀行回應不在
-上述 capacity 辨識及建立重試範圍內。
-
-玉山、國泰世華、永豐、台新、華南、第一銀行、凱基與樂天的自動瀏覽器登入，
-另使用 `prepareBrowserLoginWithRetry` 復原尚未送出登入的頁面停滯。準備 callback
-只做分頁設定、cookie 還原、登入表單與第一張驗證碼載入；OCR、送出登入與金融
-資料查詢都在 callback 外，第一輪 OCR 重用準備好的圖片，不再重新導覽。
-可復用的登入 cookie 只在首次嘗試還原；若首次準備失敗，後續新 session 直接載入
-登入頁，避免每次都耗時重走失效的 session。國泰的信任裝置 cookie 仍在每次新建時還原。
-
-- 最多三次頁面嘗試（含首次）；每次頁面準備硬逾時 60 秒，共用流程使用固定的 180 秒
-  預算，取得瀏覽器與限流等待也算入預算。來源原有同步期限與取消 signal 繼續生效；
-  樂天另外預留 OCR／登入時間，重試不重設整次同步期限。
-- 查詢 `puppeteer.limits` 與每次取得瀏覽器各自最多 15 秒，受整體剩餘期限限制。
-  限流等待在取得操作之外計時，因此 20 秒等待不會被 15 秒取得逾時截斷。
-  首次取得與已確認關閉舊 session 的重開流程都會等待暫時限流。
-  每次等待後重新查詢額度，尚無額度就繼續等待至剩餘預算不足。
-  取得的暫時性 `429` 依 `Retry-After` 等待後重試（包含首次建立的 `503` 重試後收到
-  `429`），每輪最多三次取得嘗試；每日額度立即停止。
-  只有建立請求明確回應 `429` 才能重試；CDP 連線失敗即使含有 `429`
-  也停止重開，避免重複建立狀態不明的 session。其他取得錯誤與取得逾時不觸發新一輪登入頁重試，未知取得
-  逾時也會停止尚未發出的 HTTP 重試；遲到的 session 仍須關閉。
-- 只重試載入逾時、分頁失去回應及暫時性網路錯誤。帳密遭拒、已辨識的銀行維護、
-  登入結果不明與送出登入後的錯誤沿用來源原有政策。人工 CAPTCHA／OTP 重連保留
-  原 session，不套用自動重開。
-- 失敗取樣最多一秒，隨後清理最多四秒；先呼叫 `browser.close()`，並透過 binding
-  `DELETE /v1/devtools/browser/:sessionId` 確認遠端關閉。清理不能確認成功就停止，
-  不再開新 session。重開時等待下一次 acquisition 額度只會發生在舊 session 已關閉後；
-  診斷與最後清理可在準備預算外收尾。
-- `browser_login_preparation_failed` 記錄固定的準備階段（分頁初始化／設定、session
-  還原、導覽、表單、驗證碼）、逾時來源（共用操作、整體預算、來源期限或來源內部操作）、
-  頁面準備耗時、每輪與累計耗時。`browser_login_acquisition_wait` 與
-  `browser_login_acquisition_failed` 記錄取得階段、額度查詢結果、等待時間、取得次數
-  與 capacity 類型，供區分限流與頁面載入問題。其他診斷只記去除 query／fragment 的
-  host/path、HTTP 狀態、網路錯誤代碼、CDP 是否回應、維護判斷與關閉結果，最多八筆
-  失敗請求；不保存完整 HTML、頁面文字、截圖、帳密、cookie 或 token。
-
-登入成功後的頁面步驟使用 `sources/post-login-retry.ts` 的 `retryPostLoginStep`：
-在同一個已登入的工作階段內，步驟遇到暫時性載入錯誤時整段重跑一次（含首次最多兩次），
-不重新登入、不重送帳密、不重新取得驗證碼或 OTP，也不重設整次同步期限。預設只重試
-Puppeteer `TimeoutError` 與暫時性 `net::ERR_*` 網路錯誤；被登出、需要使用者處理、
-分頁或 session 已關閉及回應內容不符等錯誤立即失敗。來源可用 `isRetryable` 限縮為
-自己的逾時錯誤。被包裝的步驟必須可重入：每次從導覽或重新開啟功能頁開始，只回傳本次
-收集的資料。重試記錄 `post_login_step_retry` 的來源、固定步驟名稱、嘗試次數與錯誤
-類型，不記錄帳號或頁面內容。目前套用於國泰世華與第一銀行信用卡查詢，見各來源說明。
+容量錯誤使用共用的 `BROWSER_BUSY` 與等待秒數。登入頁準備與登入後查詢沿用整次同步期限。診斷只記錄階段、耗時、狀態碼與已去除敏感資訊的路徑。
 
 ## 正規化資料契約
 
@@ -262,8 +198,8 @@ promotion 放在同一 D1 batch，沿用來源的 lock 與設定版本 guard。�
 5. 在 Worker runtime registry 註冊 sync／challenge handler；需要接續參數時一併宣告 `syncBody`，手動同步路由會自動註冊。
    前端需要依代碼接續流程或顯示專屬提示的錯誤，在 `shared/api/errors.ts` 宣告代碼，並讓錯誤類別實作 `sources/sync-error.ts` 的 `toSyncError()`；需要使用者回來處理的錯誤同時宣告 `needsUserAction: true`。不在 `features/sync/error-response.ts` 或 `features/sync/errors.ts` 新增來源判斷。
 6. 在前端補上必要的 challenge UI；一般帳密表單由 catalog 的 `credentialFields` 產生，不需另外新增欄位。
-7. 新增 sync job migration。
-8. 依上述核心風險完成必要驗證，並更新 `README.md` 支援資料來源表。
+7. 透過 migration 建立預設停用的 `all` sync job。
+8. 依上述核心風險驗證，更新 README 的支援資料來源表。
 9. 執行：
 
 ```bash
@@ -314,25 +250,7 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 
 ### 集保 e 存摺
 
-#### 分段同步
-
-集保與電子發票同樣使用 durable run。手動與排程入口呼叫 `startTdccSyncRun`，
-並 enqueue `run-tdcc-chunk`，不以一般單次同步流程取代分段處理。
-
-- `tdcc_sync_runs` 保存 run lifecycle、scope、設定版本及加密認證／session；
-  `tdcc_sync_run_items` 保存 `bank_page`、`trade_page` 工作與結果。
-- 手動啟動先取得 run lease 並初始化登入以處理 OTP；排程初始化不主動寄送 OTP。
-- 同一 connector 的所有 scope 共用 active run 限制與 canonical lock；每個 chunk
-  另取得 owner-scoped run lease，每次最多 claim 一個分頁 item，以 claim token
-  更新或釋放該 item，尚有工作時 enqueue continuation。
-- run lease 為 3 分鐘、每分鐘續租，整體期限與停滯恢復沿用電子發票；手動重試同 scope 的既有排程 run 可補送 continuation，保留原批次。
-- 分頁結果完成後彙整，透過一般 staging 與 promotion 寫入金融資料，並檢查設定版本、
-  更新 cursor；後續完成排程結果、手動完整同步的報告修復與 run 結案。
-- 金融資料與 cursor 使用同一 batch 的 connector／chunk owner guard；結果與結案寫入完成前保留 connector lock。失敗結案、結果、staging 清理與清鎖必須原子提交。
-- 暫時錯誤交給 Queue retry；需要互動或重試耗盡時終止。不得把每段 run lease 的
-  釋放當成整個 connector 同步完成。
-
-詳細流程與檔案責任參考[後端架構](002-backend-architecture.md#集保分段同步)。
+集保的銀行與投資交易按頁擷取，每段最多處理一頁。同一來源的不同 scope 共用鎖及進行中的 run。排程需要 OTP 時，以 `needs_user_action` 結案。使用者提交 OTP 後，在該次手動請求內驗證。[集保分段同步](002-backend-architecture.md#集保分段同步)說明排隊、續跑、寫入與失敗結案。
 
 ### 玉山銀行
 
@@ -932,7 +850,7 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 部分失敗容錯與台北富邦、遠東商銀相同：登入、工作階段結束與瀏覽器斷線使整次同步失敗；登入後單一查詢失敗只略過該項，連續三項失敗即停止，結束時記錄 `chb_sync_summary` 與 `chb_sync_result`。明細只寫入餘額回應中已出現的帳戶。Log 只記事件、分類、回覆代碼與筆數，不記帳密、帳號、姓名、餘額或頁面文字。
 - 信用卡（帳單 `CA01002`、未出帳明細）尚未接入。
 
-## 將來銀行
+### 將來銀行
 
 使用網銀帳密，直接呼叫網銀內部 Web API 登入與查詢；圖形驗證碼支援 AI 自動辨識或人工輸入。自動辨識依共用自動驗證碼重試政策（最多辨識六張、送出三次登入），只有 `CAPTCHA_ERROR`／`CAPTCHA_EXPIRED` 會換新驗證碼重試；每個驗證碼只送出一次。單次登入、查詢後登出，不接管其他工作階段。主帳戶查詢最近三個月，活存口袋讀取所有分頁後依日期篩選；定存口袋同步餘額，基金與美股未接入。排程建立時停用，首次成功同步後自動啟用。設定 CAS 與原子寫入 guard 防止查詢期間變更帳密後仍寫入舊結果。
 
@@ -940,7 +858,7 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 
 寫入前由 `nextbank/transactions.ts` 比對已保存的交易：本次完整回應有列出的「帳戶、日期、金額」組合，以回應為準，回應不再對應的舊列（舊版 `tradeID` 識別或重新編號留下的重複）依建立時間逐一併入回傳列，沿用共用的 `mergeLegacyTransactionStatements` 搬移分類、計算偏好、備註與發票連結後刪除；兩端設定衝突（不同分類、不同計算偏好或都已連結發票）時保留不合併。每次同步每筆回傳列最多併入五筆舊列，其餘留待下次。回應未涵蓋的日期不處理。已入帳交易只剩日期時，保留先前已知的交易時間。升級後第一次同步會把既有交易視為新紀錄計數。
 
-## 聯邦 New New Bank
+### 聯邦 New New Bank
 
 使用聯邦數位銀行行動 App API（`https://newnewbank.ubot.com.tw/NNBank/svc/<API_NAME>`，`connectionMode: "api_credentials"`）直接登入與查詢，不依賴 Browser Rendering 或圖形驗證碼：
 
@@ -952,7 +870,7 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - **信用卡交易完整性**：信用卡清單、未出帳明細、帳單清單及清單列出的近三期帳單明細必須查詢成功；未出帳與帳單明細的清單欄位缺失、帳單期別格式錯誤或已列出期別回傳 `B060` 時，中止整次聯邦同步，保留既有金融資料與 cursor。成功回傳的空清單仍可接受；不將查詢失敗當作無資料，以免共用 occurrence 重新編號後覆寫其他消費。信用卡清單外層成功但內層 `ErCode_1` 為未知錯誤（含 `NSCRD` 搭配非允許的 `ErCode_2`）也必須中止，不得視為無卡並更新 cursor。
 - **帳單金額**：帳單優先取 `NNBC010104` 回應的 `HeaderInfo`（`CurrBal`、`DueAmt`、`CTDPayAmt`、`DueDate`、`StmtDate`）。明細未附表頭金額時，若 `NNBC010101` 的 `HasBill` 為 `Y` 且有 `CurrBal`，以帳務總覽的本期應繳、已繳與繳款期限建立帳單清單中最新一期的帳單，讓繳款提醒取得應繳金額；較舊期別缺表頭時不建立帳單。
 
-## 加密貨幣交易所（Binance、MAX）
+### 加密貨幣交易所（Binance、MAX）
 
 兩者都是 `api_credentials`、純 HTTP 的單次同步，沒有 `connector.ts`。使用者只需填唯讀 API Key／Secret Key，不保存 session、cursor 或衍生 secret state（`noSession`）。共用的持倉正規化與 HMAC 簽章在 `sources/crypto-holdings.ts`，MAX 公開報價在 `sources/crypto-prices.ts`，寫入在 `features/sync/crypto-holdings-write.ts`。
 
@@ -965,7 +883,7 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - **封鎖診斷**：Binance 回 451 或沒有錯誤碼的 403 時拋出地區封鎖錯誤；MAX 回沒有 MAX 錯誤碼的 403／451 時拋出 `MaxAccessBlockedError`，與金鑰錯誤分開。兩者都在訊息附上對方回應的邊緣節點代碼（Binance 取 CloudFront `x-amz-cf-pop` 前三碼、MAX 取 Cloudflare `cf-ray` 尾碼），只含機場代碼；CloudFront 依 DNS 解析位置選節點，這個代碼不等於實際出口位置，只供參考。錯誤訊息中的端點只保留最後兩段路徑，避免被同步錯誤的 token 脫敏規則整段遮蔽。
 - **錯誤分類**：必要的現貨帳戶端點回報金鑰錯誤時標記 `needs_user_action`。選用錢包（Binance Funding、Earn、合約、`wallet/balance`；MAX M 錢包）只有明確的未開通或權限不足才視為沒有該錢包：Binance 為金鑰／權限錯誤，或 400、401、403、404 帶非暫時性錯誤碼；MAX 為 400、401、403、404。429 限流、418 IP 封鎖、暫時性錯誤碼（如 `-1003`、`-1021`）、網路錯誤、逾時與 5xx 都使整次同步失敗，避免少算資產或漏扣借款。理財分頁超過上限仍未取完時同樣失敗，不默默截斷。所有請求都傳遞同步的取消 signal。
 
-### Binance
+#### Binance
 
 - 簽章：`HMAC-SHA256(secret, 參數字串)` hex 放在 `signature`，header `X-MBX-APIKEY`，參數含毫秒 `timestamp` 與 `recvWindow=10000`。
 - 錢包：Spot `GET /api/v3/account?omitZeroBalances=true`（`free + locked`）、Funding `POST /sapi/v1/asset/get-funding-asset`（`free + locked + freeze + withdrawing`）、Simple Earn 活期 `/sapi/v1/simple-earn/flexible/position`（`totalAmount`）與定期 `/sapi/v1/simple-earn/locked/position`（`amount`），理財分頁每頁 100 筆、取完 `total` 為止。現貨餘額中 `LD` + 幣種代碼的資產視為活期理財憑證並略過（已由理財明細或 Earn 總值計入）：該幣種在活期理財出現，或改用 Earn 總值時憑證本身沒有報價、去掉 `LD` 後的幣種有報價；`LDO` 等有自己報價的真實幣種照常計入。兩者都沒有計入時保留憑證（無法估值），不讓部位無聲消失。活期與定期都取得時採用逐幣明細；只取得其中一個時捨棄這次的理財明細、改用 `wallet/balance` 的 Earn 總值，避免少算也避免重複計入；連 Earn 總值都取不到時才保留取得的那一半明細。
@@ -973,6 +891,12 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 其他帳戶：`GET /sapi/v1/asset/wallet/balance?quoteAsset=USDT` 取得每個錢包的 USDT 總值。本次確實逐一取得的錢包（名稱只保留英文字母後為 `spot`、`funding`、`earn`、`usdmfutures`、`coinmfutures`）略過，避免重複計入；逐一端點未開通或無權限時，該錢包改以總值補上，避免兩邊都不計入（Earn 的規則見上一點）。其他已開通且餘額不為 0 的錢包（例如期權、交易機器人、跟單、全倉／逐倉槓桿）各列一筆 `wallet-<名稱>`，以 `usdttwd` 換算台幣，不展開幣種明細。已知名稱顯示中文，未知名稱沿用 Binance 原始英文，方便發現名稱與預期不符。端點的錯誤分類與其他選用錢包相同：未開通或無權限時不補上這些帳戶，限流、5xx 與網路錯誤使整次同步失敗。錢包名稱與槓桿帳戶的總值是否已扣除借款，尚待以真實帳號確認。
 - 報價：`GET /api/v3/ticker/price`，依序使用 `XUSDT`、反向 `USDTX`、`XBTC × BTCUSDT`。
 - 錯誤：`-2014`、`-2015`、`-1022` 為金鑰錯誤。HTTP 451 與沒有 Binance 錯誤碼的 403 視為地區封鎖，顯示明確訊息，並觸發改用西歐備援。成功狀態但回應不是 JSON（例如 HTML 維護頁或空回應），或格式不符（現貨 `balances`、理財 `rows`（空帳戶省略 `rows` 且 `total` 為 0 時視為沒有部位）、資金、`wallet/balance` 不是陣列，合約缺少 `assets` 陣列）時同步失敗；訊息只保留端點最後兩段並保留前一次快照，不當成空錢包。
+
+#### MAX
+
+- 簽章（v3）：`payload = base64(JSON.stringify({ nonce, ...params, path }))`，headers `X-MAX-ACCESSKEY`、`X-MAX-PAYLOAD`、`X-MAX-SIGNATURE = hex(HMAC-SHA256(secret, payload))`；GET 參數同時附在網址。nonce 為毫秒且不可重複，平行請求會遞增。
+- 錢包：`GET /api/v3/wallet/spot/accounts` 取 `balance + locked + staked`；`GET /api/v3/wallet/m/accounts` 取 `balance + locked + staked − principal − interest`，與現貨合併。任一錢包回應不是 JSON 陣列（例如 HTML 維護頁、空回應或錯誤物件）時同步失敗，不當成沒有持倉或未開通的 M 錢包。借款大於持有的幣種輸出負數量、負市值的一筆，`name` 為「MAX（借款）」，讓淨資產正確扣除。HTTP 401 為金鑰錯誤。
+- 報價：先查 `GET /api/v3/markets`，只對存在的 `xxxtwd`、`xxxusdt` 與 `usdttwd` 呼叫 `GET /api/v3/tickers`（任一 market 無效會整批 400）。有台幣市場直接換算，否則 `xxxusdt × usdttwd`；台幣餘額市值等於餘額。
 
 ### 永豐金證券（sinotrade）
 
@@ -990,9 +914,3 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 每次成功同步原子替換同一天的本來源快照，並為每帳戶／市場的 stock、etf scope 建立 `empty:*` 零值 marker，避免全部賣出後回退舊庫存；marker 不列為持倉。所有查詢、解析與帳戶核對均成功後才 promotion，設定版本 guard 與刪除／寫入在同一個 D1 batch。原幣金額與碎股保留小數，`raw` 不存完整帳號或原始回應。
 - 投資最新資料的跨來源去重由 DB 共用查詢完成；同券商、帳戶、市場與資產類型按快照日期選來源，同日以直接券商優先。未知識別不猜測配對。成本與來源損益另行展示，不再加進市值或淨資產。
 - 同一次 promotion 另寫入股票走勢的 `net_worth_history`（`source = sinotrade`，四捨五入到元）：台股帳戶市值寫 `asset_type = tw_stock`，海外帳戶市值以同步當下 `exchange_rates` 換算台幣寫 `asset_type = stock`。集保的資產趨勢只有台股，`GET /history/net-worth/chart` 將集保台股與 `tw_stock` 合併為同一個 `tw-stock` 序列：集保有資料的日期以集保為準（涵蓋所有券商），集保最後一天之後或未連接集保時才用券商台股（同日各券商相加）；美股的 `stock` 直接相加。沒有該市場帳戶時不寫，全數賣出時寫 0；任一非零外幣缺少匯率時不寫該日美股，不以 0 或原幣代替。歷史從開始寫入的那天累積，不回補。集保包含其他券商持股而永豐不含時，集保尚未更新的最後一兩天會只計永豐的台股。
-
-### MAX
-
-- 簽章（v3）：`payload = base64(JSON.stringify({ nonce, ...params, path }))`，headers `X-MAX-ACCESSKEY`、`X-MAX-PAYLOAD`、`X-MAX-SIGNATURE = hex(HMAC-SHA256(secret, payload))`；GET 參數同時附在網址。nonce 為毫秒且不可重複，平行請求會遞增。
-- 錢包：`GET /api/v3/wallet/spot/accounts` 取 `balance + locked + staked`；`GET /api/v3/wallet/m/accounts` 取 `balance + locked + staked − principal − interest`，與現貨合併。任一錢包回應不是 JSON 陣列（例如 HTML 維護頁、空回應或錯誤物件）時同步失敗，不當成沒有持倉或未開通的 M 錢包。借款大於持有的幣種輸出負數量、負市值的一筆，`name` 為「MAX（借款）」，讓淨資產正確扣除。HTTP 401 為金鑰錯誤。
-- 報價：先查 `GET /api/v3/markets`，只對存在的 `xxxtwd`、`xxxusdt` 與 `usdttwd` 呼叫 `GET /api/v3/tickers`（任一 market 無效會整批 400）。有台幣市場直接換算，否則 `xxxusdt × usdttwd`；台幣餘額市值等於餘額。

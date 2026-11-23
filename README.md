@@ -110,44 +110,11 @@
 
 <a href="images/deploy-success.png"><img src="images/deploy-success.png" alt="Cloudflare build 成功畫面與右上角的 Visit 按鈕" width="700"></a>
 
-### 延長登入期限（選用）
-
-部署頁的 **Session duration** 最多可選 **7 days**。若要延長至一個月，部署完成後前往 **Cloudflare One／Zero Trust → Access controls → Applications**，找到保護此 Worker 的 Application：
-
-若頁面顯示 **Finish your account setup**，先點擊 **Choose a plan**，完成 **Zero Trust Free** 方案設定。
-
-1. 點擊該 Application 的 **Configure**，開啟 **Application details**。
-2. 點擊頁面上方與 **All、Destinations、Policies** 同一排的 **Details** 按鈕，或直接向下捲到頁面最下方。
-3. 在 **Details** 區塊的 **Name** 欄位旁，將 **Session Duration** 設為 **1 month**，再點擊 **Save**。
-
-後續自動部署與更新會沿用這些登入設定。
-
-部署與登入故障排查，以及版本更新方式（含較早部署的一次性切換），請參考[進階部署與更新](docs/005-deployment.md)。
+部署後可[延長登入期限](docs/005-deployment.md#延長登入期限)。登入遇到問題或需要更新版本時，請參考[進階部署與更新](docs/005-deployment.md)。
 
 ## 本機開發
 
-建立不納入版本控制的私人設定，將 `wrangler.local.toml` 的 D1 Database ID 換成開發用資料庫，並在 `.dev.vars` 設定自己的 `CONFIG_ENCRYPTION_KEY`：
-
-```bash
-cp apps/worker/wrangler.local.toml.example apps/worker/wrangler.local.toml
-cp apps/worker/.dev.vars.example apps/worker/.dev.vars
-npm install
-npx wrangler login
-npm run dev
-```
-
-範例設定的 D1 與 Workers AI 會連到 Cloudflare remote binding，請勿使用正式資料庫。常用驗證指令：
-
-```bash
-npm run format:check
-npm run lint
-npm run typecheck
-npm run verify:web
-npm run test:backend
-npm run build
-```
-
-本機 relay、資料庫遷移與既有 D1 部署方式請參考[進階部署與更新](docs/005-deployment.md)。
+請依[本機開發指南](docs/005-deployment.md#本機開發)建立私人設定、指定開發用 D1 並啟動服務。提交變更前請見[專案驗證指令](AGENTS.md#提交與-pr-前必跑檢查)。
 
 ## 技術架構
 
