@@ -1057,7 +1057,7 @@ CREATE TABLE "invoice_line_items" (
 ### `invoice_transaction_preferences`
 
 > 用途：使用者對電子發票與銀行交易是否關聯的決策。
-> 注意：invoice_id 與非 NULL 的 transaction_id 分別以 FK 參照 invoices、bank_transactions，採 NO ACTION 保留使用者決策；linked 必須指定交易，separate 可為 NULL。0045 不清除孤兒偏好，套用前須先查核並處理。
+> 注意：invoice_id 與非 NULL 的 transaction_id 分別以 FK 參照 invoices、bank_transactions，採 NO ACTION 保留使用者決策；linked 必須指定交易，separate 可為 NULL。
 
 #### Columns
 
