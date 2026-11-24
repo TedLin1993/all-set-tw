@@ -182,7 +182,7 @@
                 {#each release.changes as change, changeIndex (changeIndex)}
                   <li>
                     {change}
-                    {#each release.images?.filter((image) => image.change === changeIndex) ?? [] as image (image.src)}
+                    {#each release.images?.filter((image) => image.change === changeIndex) ?? [] as image}
                       <img
                         src={upstreamFileUrl(image.src)}
                         alt={image.alt}
