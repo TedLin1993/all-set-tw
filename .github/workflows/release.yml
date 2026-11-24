@@ -37,11 +37,26 @@ jobs:
               and (.version | type == "string" and test("\\A[0-9]+[.][0-9]+[.][0-9]+\\z"))
               and (.date | type == "string" and test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}\\z"))
               and (.changes | type == "array" and all(.[]; type == "string"))
+              and ((has("images") | not) or ((.changes | length) as $change_count
+                | .images | type == "array" and all(.[];
+                  type == "object"
+                  and (.change | type == "number" and . == floor and . >= 0 and . < $change_count)
+                  and (.src | type == "string" and test("\\Aimages/releases/[A-Za-z0-9._-]+[.](png|jpg|webp)\\z"))
+                  and (.alt | type == "string" and length > 0)
+                )))
             ))
           ' releases.json > /dev/null; then
-            echo "::error file=releases.json::每筆紀錄需包含 X.Y.Z 版號、YYYY-MM-DD 日期與字串陣列的 changes。"
+            echo "::error file=releases.json::每筆紀錄需包含 X.Y.Z 版號、YYYY-MM-DD 日期與字串陣列的 changes；images 需以 change 對應 changes 的索引，src 為 images/releases/ 內的圖片並附 alt。"
             exit 1
           fi
+
+          # 圖片由各部署從上游載入，路徑錯誤時所有站台都會顯示破圖。
+          jq -r '.[].images[]?.src' releases.json | while read -r image; do
+            if [ ! -f "$image" ]; then
+              echo "::error file=releases.json::找不到更新圖片 ${image}。"
+              exit 1
+            fi
+          done
 
   publish:
     name: Publish GitHub Release
@@ -101,7 +116,14 @@ jobs:
           esac
 
           notes="$RUNNER_TEMP/release-notes.md"
-          jq -r '.[0].changes[] | "- " + .' releases.json > "$notes"
+          # 圖片接在對應摘要下方，以本次 commit 的檔案顯示，之後改動 main 也不影響已發布的說明。
+          jq -r --arg image_base "https://raw.githubusercontent.com/$GH_REPO/$GITHUB_SHA/" '
+            .[0] as $release
+            | $release.changes | to_entries[] | .key as $index
+            | "- " + .value,
+              ($release.images // [] | .[] | select(.change == $index)
+                | "\n  ![" + .alt + "](" + $image_base + .src + ")")
+          ' releases.json > "$notes"
           gh release create "$tag" \
             --target "$GITHUB_SHA" \
             --title "$tag" \

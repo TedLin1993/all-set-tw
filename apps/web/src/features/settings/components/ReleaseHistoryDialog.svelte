@@ -7,7 +7,11 @@
     X,
   } from "@lucide/svelte";
   import { Dialog } from "bits-ui";
-  import { currentVersion, type Release } from "@/data/releases/queries";
+  import {
+    currentVersion,
+    upstreamFileUrl,
+    type Release,
+  } from "@/data/releases/queries";
   import { cn } from "@/shared/utils/cn";
   import { cloudflareUpdateTarget } from "../model/release-update";
 
@@ -176,7 +180,18 @@
                 class="list-disc space-y-1 pr-2 pb-3 pl-7 text-sm leading-6 wrap-break-word"
               >
                 {#each release.changes as change, changeIndex (changeIndex)}
-                  <li>{change}</li>
+                  <li>
+                    {change}
+                    {#each release.images?.filter((image) => image.change === changeIndex) ?? [] as image}
+                      <img
+                        src={upstreamFileUrl(image.src)}
+                        alt={image.alt}
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                        class="mt-2 mb-1 w-full rounded-lg border border-border"
+                      />
+                    {/each}
+                  </li>
                 {/each}
               </ul>
             </details>
