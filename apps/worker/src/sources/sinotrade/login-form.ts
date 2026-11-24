@@ -83,6 +83,10 @@ const SUBMIT_LABEL =
   /^(?:確認|確定|驗證|送出|下一步|確認送出|確認驗證|驗證並繼續)$/;
 const CHANNEL_LABEL =
   /^(?:手機|行動電話|簡訊|SMS|E-?mail|電子(?:信箱|郵件)|信箱)/i;
+// 只有一個選項時，必須是完整的收取方式名稱；避免「手機號碼變更」這類
+// 以「手機」開頭但其實不是 OTP 管道的單選題被誤判。
+const SINGLE_CHANNEL_LABEL =
+  /^(?:手機|行動電話|簡訊|SMS|E-?mail(?:信箱)?|電子(?:信箱|郵件)|信箱)(?:驗證碼|認證碼|OTP)?$/i;
 const OFFICIAL_ERROR_PREFIX = "永豐證券官方回應錯誤：";
 const REJECTED_OR_FINAL = /reCAPTCHA|日期格式|未接受|尚未登記|官方回應錯誤/;
 // Raised while a page is navigating or closing; the next poll sees the settled page.
@@ -525,11 +529,11 @@ export function describeSinotradeLoginForm(
   }
   for (const members of radioGroups.values()) {
     const labels = members.map((member) => cleanLabel(member.label));
-    if (
-      result.inputs.otpChannel ||
-      members.length < 2 ||
-      !labels.every((label) => CHANNEL_LABEL.test(label))
-    )
+    const labelMatches =
+      members.length === 1
+        ? SINGLE_CHANNEL_LABEL.test(labels[0]!)
+        : labels.every((label) => CHANNEL_LABEL.test(label));
+    if (result.inputs.otpChannel || members.length === 0 || !labelMatches)
       return result;
     recognized += members.length;
     result.inputs.otpChannel = { control: members[0]!, members };
