@@ -228,6 +228,9 @@ export async function searchActivities(
       source: item.source,
       title: item.title,
       detail: item.subtitle || null,
+      ...(item.matchedInvoiceLines && {
+        matchedInvoiceLines: item.matchedInvoiceLines,
+      }),
       institution: item.institutionName ?? null,
       account: item.accountName ?? null,
       amount: activityDisplayAmount(item) ?? null,

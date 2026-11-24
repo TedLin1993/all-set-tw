@@ -585,6 +585,9 @@
     observer.observe(searchSentinel);
     return () => observer.disconnect();
   });
+  const hasProductMatches = $derived(
+    filtered.some((item) => item.matchedInvoiceLines?.length),
+  );
   const filteredGroups = $derived(groupActivitiesByDate(filtered));
   const mappingCandidates = $derived.by(() => {
     if (!mappingDialog) return [];
@@ -988,6 +991,29 @@
   }
 </script>
 
+{#snippet invoiceLineMatches(item: ActivityItem)}
+  <div class="col-span-2 grid gap-2 pr-5">
+    {#each item.matchedInvoiceLines ?? [] as line}
+      <div
+        class="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-0.5"
+      >
+        <span class="break-words text-sm font-semibold">
+          <SearchHighlight text={line.description} query={submittedSearch} />
+        </span>
+        <span class="whitespace-nowrap text-base font-semibold tabular-nums">
+          {formatCurrency(line.amount)}
+        </span>
+        {#if line.quantity != null}
+          <span class="text-xs text-subtle"
+            >{line.quantity} 件{#if line.quantity > 1 && line.unitPrice != null && line.quantity * line.unitPrice === line.amount}
+              × {formatCurrency(line.unitPrice)}{/if}</span
+          >
+        {/if}
+      </div>
+    {/each}
+  </div>
+{/snippet}
+
 {#if !searching && (bank.isPending || invoices.isPending || invoiceMappings.isPending || linkedTransactions.isLoading || trades.isPending)}
   <EmptyState title="載入活動中" body="正在整理銀行、投資與發票資料。" />
 {:else}
@@ -1303,7 +1329,7 @@
           </p>{/if}
       </header>
       <div class="min-w-0">
-        <div class="min-w-0 md:hidden">
+        <div class="min-w-0" class:md:hidden={!hasProductMatches}>
           {#if filteredGroups.length === 0}<p
               class="p-8 text-center text-sm text-subtle"
             >
@@ -1329,12 +1355,21 @@
                     activityDisplayAmount(item)}{@const time =
                     formatActivityTime(item)}
                   <button
-                    aria-label={`查看 ${item.title} 活動詳情`}
-                    class={`flex w-full min-w-0 items-center gap-3 py-3.5 text-left transition hover:bg-ink/3 ${item.excludedFromCalculation ? "bg-ink/[0.025]" : ""}`}
+                    aria-label={item.matchedInvoiceLines?.length
+                      ? undefined
+                      : `查看 ${item.title} 活動詳情`}
+                    class={`grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 py-3.5 text-left transition hover:bg-ink/3 ${item.excludedFromCalculation ? "bg-ink/[0.025]" : ""}`}
                     onclick={() => openDetail(item)}
                   >
-                    <div class="min-w-0 flex-1">
-                      <p class="truncate text-sm font-semibold">
+                    {#if item.matchedInvoiceLines?.length}
+                      {@render invoiceLineMatches(item)}
+                    {/if}
+                    <div class="min-w-0">
+                      <p
+                        class={item.matchedInvoiceLines?.length
+                          ? "truncate text-caption text-subtle"
+                          : "truncate text-sm font-semibold"}
+                      >
                         <SearchHighlight
                           text={item.title}
                           query={submittedSearch}
@@ -1384,8 +1419,13 @@
                     <div class="flex shrink-0 items-center gap-1.5">
                       <div class="max-w-[40vw] text-right">
                         <p
-                          class={`truncate text-sm font-semibold tabular-nums ${item.excludedFromCalculation ? "text-subtle line-through" : (amount ?? 0) < 0 ? "text-coral" : item.source !== "invoice" ? "text-moss" : ""}`}
+                          class={item.matchedInvoiceLines?.length
+                            ? "flex flex-wrap justify-end gap-x-1 text-caption text-subtle tabular-nums"
+                            : `truncate text-sm font-semibold tabular-nums ${item.excludedFromCalculation ? "text-subtle line-through" : (amount ?? 0) < 0 ? "text-coral" : item.source !== "invoice" ? "text-moss" : ""}`}
                         >
+                          {#if item.matchedInvoiceLines?.length}<span
+                              >活動總額</span
+                            >{/if}
                           <ActivityAmount
                             {item}
                             rates={rateValues}
@@ -1401,7 +1441,7 @@
                   </button>{/each}
               </div>{/each}{/if}
         </div>
-        <div class="hidden overflow-x-auto md:block">
+        <div class="hidden overflow-x-auto" class:md:block={!hasProductMatches}>
           {#if filteredGroups.length === 0}<p
               class="p-8 text-center text-sm text-subtle"
             >

@@ -40,7 +40,10 @@ export function filterActivities(
       !normalizedSearch ||
       `${item.title} ${item.subtitle} ${item.institutionName ?? ""} ${item.accountName ?? ""} ${item.category} ${item.searchText ?? ""} ${item.note ?? ""}`
         .toLowerCase()
-        .includes(normalizedSearch);
+        .includes(normalizedSearch) ||
+      item.matchedInvoiceLines?.some((line) =>
+        line.description.toLowerCase().includes(normalizedSearch),
+      );
     const matchesCategory =
       !filters.category ||
       (item.category === filters.category.category &&
