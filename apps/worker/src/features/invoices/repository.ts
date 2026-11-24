@@ -125,7 +125,11 @@ export async function listInvoicesByIds(db: D1Database, ids: string[]) {
     .all();
 }
 
-export async function listInvoiceItems(db: D1Database, invoiceIds: string[]) {
+export async function listInvoiceItems(
+  db: D1Database,
+  invoiceIds: string[],
+  keyword?: string,
+) {
   if (invoiceIds.length === 0) return [];
   return createDrizzle(db)
     .select({
@@ -140,7 +144,12 @@ export async function listInvoiceItems(db: D1Database, invoiceIds: string[]) {
     })
     .from(invoiceLineItems)
     .where(
-      sql`${invoiceLineItems.invoiceId} IN (SELECT value FROM json_each(${JSON.stringify(invoiceIds)}))`,
+      and(
+        sql`${invoiceLineItems.invoiceId} IN (SELECT value FROM json_each(${JSON.stringify(invoiceIds)}))`,
+        keyword
+          ? sql`instr(lower(${invoiceLineItems.description}), ${keyword.toLowerCase()}) > 0`
+          : undefined,
+      ),
     )
     .orderBy(
       asc(invoiceLineItems.invoiceId),

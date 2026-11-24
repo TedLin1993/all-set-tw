@@ -31,7 +31,11 @@ export async function findActivitySearchDays(
   // UNION ALL + DISTINCT keeps cross-source day dedupe; the bank CASE must
   // stay identical to idx_bank_transactions_transaction_day.
   const rows = await createDrizzle(db).all<{ day: string }>(sql`
-    WITH candidates AS (
+    WITH matching_invoices AS (
+      SELECT id, invoice_date FROM invoices
+      WHERE instr(lower(COALESCE(seller_name, '') || ' ' || COALESCE(invoice_number, '') || ' 電子發票'), ${q}) > 0
+        OR id IN (SELECT invoice_id FROM invoice_line_items WHERE ${q} <> '' AND instr(lower(description), ${q}) > 0)
+    ), candidates AS (
       SELECT CASE WHEN length(txn.authorized_at) > 10
         THEN COALESCE(date(txn.authorized_at, '+8 hours'), substr(txn.authorized_at, 1, 10))
         ELSE substr(COALESCE(txn.authorized_at, txn.posted_date), 1, 10) END AS day
@@ -49,18 +53,16 @@ export async function findActivitySearchDays(
       SELECT CASE WHEN length(invoice_date) > 10
         THEN COALESCE(date(invoice_date, '+8 hours'), substr(invoice_date, 1, 10))
         ELSE invoice_date END AS day
-      FROM invoices
-      WHERE instr(lower(COALESCE(seller_name, '') || ' ' || COALESCE(invoice_number, '') || ' 電子發票'), ${q}) > 0
+      FROM matching_invoices
       UNION ALL
       -- 跨日手動配對的活動在交易日期，命中發票時一併回傳該交易日期。
       SELECT CASE WHEN length(txn.authorized_at) > 10
         THEN COALESCE(date(txn.authorized_at, '+8 hours'), substr(txn.authorized_at, 1, 10))
         ELSE substr(COALESCE(txn.authorized_at, txn.posted_date), 1, 10) END AS day
-      FROM invoices
+      FROM matching_invoices
       JOIN invoice_transaction_preferences link
-        ON link.invoice_id = invoices.id AND link.decision = 'linked'
+        ON link.invoice_id = matching_invoices.id AND link.decision = 'linked'
       JOIN bank_transactions txn ON txn.id = link.transaction_id
-      WHERE instr(lower(COALESCE(invoices.seller_name, '') || ' ' || COALESCE(invoices.invoice_number, '') || ' 電子發票'), ${q}) > 0
       UNION ALL
       SELECT substr(effective_date, 1, 10) AS day FROM investment_transactions
       WHERE instr(lower(COALESCE(name, '') || ' ' || COALESCE(symbol, '') || ' ' ||

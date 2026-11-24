@@ -34,6 +34,13 @@ export interface ActivityItem {
   refund?: boolean;
   invoiceId?: string;
   invoiceAmount?: number;
+  matchedInvoiceLines?: Array<{
+    description: string;
+    quantity: number | null;
+    unitPrice: number | null;
+    /** 發票品項小計，可能已含折扣。 */
+    amount: number;
+  }>;
   /** 這筆銀行交易是交割款時，配對到的證券成交；該成交不再另列一筆投資活動。 */
   trade?: ActivityItemTrade;
   status: string;

@@ -46,6 +46,29 @@ describe("跨日手動配對的發票（隔離 D1）", () => {
            VALUES ('invoice-1', 'einvoice', 'invoice-1', 'AB00000001', '2026-08-31T02:30:00.000Z', '範例商店', 500, ?, ?)`,
         )
         .bind(stamp, stamp),
+      ...[
+        ["line-1", 1, "範例補充包 A", 2, 120, 200],
+        ["line-2", 2, "範例補充包 B", null, null, 150],
+        ["line-3", 3, "其他商品", 1, 150, 150],
+      ].map(([id, number, description, quantity, price, amount]) =>
+        db
+          .prepare(
+            `INSERT INTO invoice_line_items
+          (id, invoice_id, connector_id, invoice_source_id, source_id, line_number, description, quantity, unit_price, amount, created_at, updated_at)
+          VALUES (?, 'invoice-1', 'einvoice', 'invoice-1', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .bind(
+            id,
+            id,
+            number,
+            description,
+            quantity,
+            price,
+            amount,
+            stamp,
+            stamp,
+          ),
+      ),
     ]);
     // 發票日後第 44 天：不同金額拒絕，同額可配對。
     await expect(
@@ -129,6 +152,24 @@ describe("跨日手動配對的發票（隔離 D1）", () => {
       transactionId: "delayed-debit",
       invoiceId: "invoice-1",
     };
+
+    const byProduct = await searchActivity(db, {
+      q: "補充包",
+      from: "2026-10-01",
+    });
+    expect(linked(byProduct.items)).toEqual([expected]);
+    expect(byProduct.items[0]?.matchedInvoiceLines).toEqual([
+      { description: "範例補充包 A", quantity: 2, unitPrice: 120, amount: 200 },
+      {
+        description: "範例補充包 B",
+        quantity: null,
+        unitPrice: null,
+        amount: 150,
+      },
+    ]);
+    expect(
+      (await searchActivity(db, { q: "補充包", to: "2026-09-30" })).items,
+    ).toEqual([]);
 
     expect(linked((await searchActivity(db, { q: "範例商店" })).items)).toEqual(
       [expected],

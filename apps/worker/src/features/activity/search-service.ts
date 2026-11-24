@@ -13,6 +13,7 @@ import { z } from "zod";
 import { listBankAccounts } from "../bank/repository";
 import { normalizeBankAccountDisplay } from "../bank/display";
 import { getBankRange } from "../bank/service";
+import { listInvoiceItems } from "../invoices/repository";
 import { getInvoicesRange } from "../invoices/service";
 import { getInvestmentTransactionsRange } from "../investments/service";
 import { encodePageCursor } from "../../platform/http";
@@ -111,6 +112,34 @@ export async function searchActivity(
       accountMap,
       invoiceMatches,
     );
+    if (input.q && batchInvoices.length) {
+      const lines = await listInvoiceItems(
+        db,
+        batchInvoices.map(({ id }) => id),
+        input.q,
+      );
+      const byInvoice = new Map(
+        items
+          .filter((item) => item.invoiceId)
+          .map((item) => [item.invoiceId, item]),
+      );
+      for (const {
+        invoiceId,
+        description,
+        quantity,
+        unitPrice,
+        amount,
+      } of lines) {
+        const item = byInvoice.get(invoiceId);
+        if (item)
+          (item.matchedInvoiceLines ??= []).push({
+            description,
+            quantity,
+            unitPrice,
+            amount,
+          });
+      }
+    }
     matches.push(
       ...filterActivities(items, {
         month: "",
