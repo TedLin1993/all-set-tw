@@ -7,6 +7,7 @@
     TrendingUp,
   } from "@lucide/svelte";
   import { Area, LineChart, Spline } from "layerchart";
+  import { taipeiDateKey } from "@taiwan-fin-hub/shared";
   import TabsList from "@/shared/ui/TabsList.svelte";
   import TabsTrigger from "@/shared/ui/TabsTrigger.svelte";
   import {
@@ -69,6 +70,15 @@
   );
   const firstValue = $derived(chartData[0]?.selectedTotal ?? 0);
   const latestValue = $derived(chartData.at(-1)?.selectedTotal ?? 0);
+  const latestDate = $derived(chartData.at(-1)?.date);
+  /**
+   * 今天寫入的最後一點是同步當下的最新值：券商在開盤前同步時其實是前一交易日的收盤，
+   * 不代表今天收盤，因此標成「目前」而不是日期。
+   */
+  let today = $state(taipeiDateKey(new Date()));
+  const latestIsCurrent = $derived(
+    latestDate !== undefined && latestDate === today,
+  );
   const changeValue = $derived(latestValue - firstValue);
   const changePercent = $derived(
     firstValue === 0 ? 0 : (changeValue / Math.abs(firstValue)) * 100,
@@ -158,6 +168,17 @@
     }
   });
 
+  // 頁面跨過台北午夜仍開著，或隔天從背景恢復時，更新「今天」，讓舊資料改回顯示日期。
+  onMount(() => {
+    const refreshToday = () => (today = taipeiDateKey(new Date()));
+    const timer = setInterval(refreshToday, 60_000);
+    document.addEventListener("visibilitychange", refreshToday);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshToday);
+    };
+  });
+
   function toggleAsset(asset: NetWorthAssetType) {
     if (!availableAssets.has(asset)) return;
     const next = includedAssets.includes(asset)
@@ -170,6 +191,10 @@
       knownStorageKey,
       JSON.stringify(NET_WORTH_ASSET_SERIES.map(({ key }) => key)),
     );
+  }
+
+  function pointLabel(date: string | undefined) {
+    return latestIsCurrent && date === latestDate ? "目前" : formatDate(date);
   }
 
   /** 提示框的未實現損益：該日市值減投入成本；美股市值還沒進入走勢時不含美股。 */
@@ -191,6 +216,11 @@
   function formatAxisDate(value: unknown) {
     const date = value instanceof Date ? value : new Date(String(value));
     if (Number.isNaN(date.getTime())) return "";
+    if (
+      latestIsCurrent &&
+      date.getTime() === new Date(`${latestDate}T00:00:00`).getTime()
+    )
+      return "目前";
     return new Intl.DateTimeFormat("zh-TW", {
       month: "numeric",
       day: "numeric",
@@ -202,8 +232,7 @@
   <ChartTooltip
     focusedKey={activeFocus}
     indicator={displayMode === "sum" ? "dot" : "line"}
-    labelFormatter={(value) =>
-      formatDate(value instanceof Date ? value.toISOString() : String(value))}
+    titleFormatter={(point) => pointLabel((point as NetWorthChartPoint).date)}
     valueFormatter={(value) => formatCurrency(Number(value))}
     footer={showCost ? pnlFooter : undefined}
   />
@@ -337,7 +366,7 @@
           {/if}
         </div>
         <span class="pb-1 text-caption text-subtle">
-          {formatDate(chartData.at(-1)?.date)}
+          {pointLabel(latestDate)}
         </span>
       </div>
       <ChartContainer
