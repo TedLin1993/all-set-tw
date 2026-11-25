@@ -75,7 +75,7 @@
    * 今天寫入的最後一點是同步當下的最新值：券商在開盤前同步時其實是前一交易日的收盤，
    * 不代表今天收盤，因此標成「目前」而不是日期。
    */
-  const today = taipeiDateKey(new Date());
+  let today = $state(taipeiDateKey(new Date()));
   const latestIsCurrent = $derived(
     latestDate !== undefined && latestDate === today,
   );
@@ -166,6 +166,17 @@
     } catch {
       /* keep defaults */
     }
+  });
+
+  // 頁面跨過台北午夜仍開著，或隔天從背景恢復時，更新「今天」，讓舊資料改回顯示日期。
+  onMount(() => {
+    const refreshToday = () => (today = taipeiDateKey(new Date()));
+    const timer = setInterval(refreshToday, 60_000);
+    document.addEventListener("visibilitychange", refreshToday);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshToday);
+    };
   });
 
   function toggleAsset(asset: NetWorthAssetType) {
