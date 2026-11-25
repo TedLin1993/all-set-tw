@@ -1,30 +1,43 @@
 import { createHash } from "node:crypto";
 
 // An upload may be newer than the version receiving production traffic.
+// Returns null only when no active version has DB or SYNC_QUEUE and
+// isFirstInstall confirms that the Worker has never been installed.
 export async function readActiveResources(
   deployment,
   readVersion,
   workerName,
-  migrationOnly = false,
+  { migrationOnly = false, isFirstInstall } = {},
 ) {
   const versions = deployment.versions?.filter(
     (version) => version.percentage > 0,
   );
   if (!versions?.length)
     throw new Error("No active Worker version to inspect.");
-  let resources;
+  const active = [];
   for (const { version_id } of versions) {
     const version = await readVersion(version_id);
     const bindings = version.resources?.bindings ?? [];
-    const databaseId = bindings.find(
-      (binding) => binding.type === "d1" && binding.name === "DB",
-    )?.id;
-    const queueName = migrationOnly
-      ? undefined
-      : bindings.find(
-          (binding) =>
-            binding.type === "queue" && binding.name === "SYNC_QUEUE",
-        )?.queue_name;
+    active.push({
+      databaseId: bindings.find(
+        (binding) => binding.type === "d1" && binding.name === "DB",
+      )?.id,
+      queueName: bindings.find(
+        (binding) => binding.type === "queue" && binding.name === "SYNC_QUEUE",
+      )?.queue_name,
+    });
+  }
+  if (
+    isFirstInstall &&
+    active.every(({ databaseId, queueName }) => !databaseId && !queueName) &&
+    (await isFirstInstall())
+  ) {
+    return null;
+  }
+  let resources;
+  for (const binding of active) {
+    const { databaseId } = binding;
+    const queueName = migrationOnly ? undefined : binding.queueName;
     if (!databaseId || (!migrationOnly && !queueName))
       throw new Error(
         `Worker '${workerName}' is missing a required live binding.`,
@@ -93,14 +106,26 @@ export async function resolveWorkerResources(
     throw new Error("Cannot read Worker deployment history.");
   // The deployments API returns the newest deployment first, including rollbacks.
   if (deployments.length) {
-    return readActiveResources(
+    const resources = await readActiveResources(
       deployments[0],
       (id) => request(`${scriptPath}/versions/${encodeURIComponent(id)}`),
       workerName,
+      {
+        // Deploy to Cloudflare may deploy the button template, which has no
+        // stateful bindings, before this command runs. The first successful
+        // deployment stores VAPID keys, so their absence marks a new install.
+        async isFirstInstall() {
+          const secrets = await request(`${scriptPath}/secrets`);
+          if (!Array.isArray(secrets))
+            throw new Error("Cannot read Worker secret names.");
+          return !secrets.some(({ name }) => name.startsWith("VAPID_"));
+        },
+      },
     );
+    if (resources) return resources;
   }
 
-  // No deployments yet. Preserve bindings provisioned by the install template.
+  // New install. Preserve bindings provisioned by the install template.
   const { bindings } = await request(`${scriptPath}/settings`);
   if (!Array.isArray(bindings))
     throw new Error("Cannot read deployed Worker bindings.");

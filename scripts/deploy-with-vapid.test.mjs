@@ -421,8 +421,11 @@ test("新站避開既有資源，失敗重試與舊站更新都用同一組 bind
   ]);
   const queues = new Set(["taiwan-fin-hub-sync", `${occupied}-sync`]);
   let tags = ["unrelated"];
-  let deployments = [];
-  let activeBindings = [];
+  // Deploy to Cloudflare 先部署沒有 D1 與 Queue 的按鈕範本。
+  let deployments = [{ versions: [{ version_id: "active", percentage: 100 }] }];
+  const templateBindings = [{ name: "AI", type: "ai" }];
+  let activeBindings = templateBindings;
+  let secretNames = ["CONFIG_ENCRYPTION_KEY"];
   let writes = 0;
   const events = [];
   const options = {
@@ -457,6 +460,8 @@ test("新站避開既有資源，失敗重試與舊站更新都用同一組 bind
       } else if (pathname.endsWith("/second-site/settings")) {
         // The latest upload has no stateful bindings.
         result = { bindings: [] };
+      } else if (pathname.endsWith("/second-site/secrets")) {
+        result = secretNames.map((name) => ({ name, type: "secret_text" }));
       } else if (pathname.endsWith("/second-site/script-settings")) {
         assert.equal(options.method, "PATCH");
         tags = body.tags;
@@ -511,6 +516,7 @@ test("新站避開既有資源，失敗重試與舊站更新都用同一組 bind
   assert.equal(await deploy(["--migrate"], options), 0);
   assert.deepEqual(tags, ["unrelated", reserved]);
   deployments = [{ versions: [{ version_id: "active", percentage: 100 }] }];
+  secretNames = [...secretNames, ...Object.keys(vapidSecrets)];
   const installWrites = writes;
   activeBindings = [
     { name: "DB", type: "d1", id: "legacy-db" },
@@ -537,6 +543,13 @@ test("新站避開既有資源，失敗重試與舊站更新都用同一組 bind
     /different resource bindings/,
   );
   activeBindings = activeBindings.slice(0, 1);
+  await assert.rejects(
+    deploy(["--migrate"], options),
+    /missing a required live binding/,
+  );
+  // 已安裝過的站台即使正式版本沒有 D1 與 Queue，也不得改用新資源。
+  deployments[0].versions = [{ version_id: "active", percentage: 100 }];
+  activeBindings = templateBindings;
   await assert.rejects(
     deploy(["--migrate"], options),
     /missing a required live binding/,
