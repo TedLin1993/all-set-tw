@@ -790,7 +790,7 @@ async function readLiveResources(
     deployment,
     (versionId) => inspect(["versions", "view", versionId]),
     workerName,
-    migrationOnly,
+    { migrationOnly },
   );
 }
 
