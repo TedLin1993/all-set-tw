@@ -27,6 +27,11 @@ import { parseNextbankMainAccount } from "../../../src/sources/nextbank/protocol
 import { prepareNextbankTransactionWrite } from "../../../src/sources/nextbank/transactions";
 import { prepareCardAuthorizationWrite } from "../../../src/features/sync/card-authorization-write";
 import { parseFirstbankData } from "../../../src/sources/firstbank/protocol";
+import {
+  parseChbData,
+  type ChbPayloads,
+} from "../../../src/sources/chb/protocol";
+import { deactivateMissingChbLoanAccountsStatement } from "../../../src/sources/chb/repository";
 import { parseHncbData } from "../../../src/sources/hncb/protocol";
 import { parseMegabankData } from "../../../src/sources/megabank/protocol";
 import {
@@ -2083,6 +2088,167 @@ describe("同步資料完整性（隔離 D1）", () => {
     expect((await listBankTransactions(db, 20))[0].authorizedAt).toBe(
       "2026-10-05T09:15:30+08:00",
     );
+  });
+
+  it("彰化銀行：信用卡明細在帳單視窗移動、缺期與分期下不重複也不互相覆寫；還清的貸款停用、再出現時恢復", async () => {
+    await db
+      .prepare(
+        "INSERT INTO connector_settings (id, connector_id, encrypted_config, sync_cursor, created_at, updated_at) VALUES ('chb', 'chb', 'config', 'old-cursor', 't', 't')",
+      )
+      .run();
+    // 合成資料，欄位依實機回應。
+    const row = (
+      trxnDate: string,
+      postDate: string,
+      memo: string,
+      billAmt: string,
+    ) => ({
+      trxnDate,
+      postDate,
+      memo,
+      trxnAmt: billAmt,
+      trxnCurr: "TWD",
+      billAmt,
+      chNO: "1234",
+    });
+    const statement = (stmtDate: string, info: unknown[]) => ({
+      stmtDate,
+      dueDate: "",
+      begBal: "0",
+      pmtBal: "0",
+      adjustBal: "0",
+      prinBal: "0",
+      totalCurrentBal: "0",
+      minRepay: "0",
+      info,
+    });
+    const loan = {
+      accTypeName: "信用貸款",
+      account: "0000-99-12345-6-0001",
+      moneyType: "TWD",
+      actBal: "2,000.00",
+      key: "0000991234560001~~~00~~~",
+    };
+    const write = async (
+      payload: Partial<ChbPayloads>,
+      encryptedConfig = "config",
+    ) => {
+      const data = parseChbData(
+        { twTransactions: [], fcTransactions: [], ...payload },
+        new Date("2026-10-01T04:00:00Z"),
+      );
+      const guard = { connectorId: "chb", encryptedConfig } as const;
+      return persistStagedSyncWrite(db, {
+        records: [
+          ...data.bankAccounts.map((item) =>
+            bankAccountRecord("chb", item, now),
+          ),
+          ...data.bankBalanceSnapshots.map((item) =>
+            bankBalanceSnapshotRecord("chb", item, now),
+          ),
+          ...data.bankTransactions.map((item) =>
+            bankTransactionRecord("chb", item, now),
+          ),
+          ...data.creditCardBills.map((item) =>
+            creditCardBillRecord("chb", item, now),
+          ),
+        ],
+        settingsGuard: guard,
+        afterPromoteStatements: [
+          linkCanonicalBankAccountsStatement(db, guard),
+          ...(data.loanSourceIds
+            ? [
+                deactivateMissingChbLoanAccountsStatement(
+                  db,
+                  data.loanSourceIds,
+                  now,
+                  guard,
+                ),
+              ]
+            : []),
+        ],
+      });
+    };
+    const stored = async () =>
+      (
+        await db
+          .prepare(
+            "SELECT amount, posted_date, description FROM bank_transactions WHERE connector_id = 'chb' ORDER BY source_id",
+          )
+          .all<Record<string, unknown>>()
+      ).results;
+
+    // 同卡、同消費日、同金額的兩筆真實消費：X 在九月帳單，Y 在十月帳單。
+    const x = statement("2026/09/30", [
+      row("2026/09/28", "2026/09/29", "X", "100.00"),
+    ]);
+    const y = statement("2026/10/31", [
+      row("2026/09/28", "2026/10/02", "Y", "100.00"),
+    ]);
+    const both = [
+      { amount: -100, posted_date: "2026-09-29", description: "X" },
+      { amount: -100, posted_date: "2026-10-02", description: "Y" },
+    ];
+    await write({ card: { bills: [y, x] } });
+    expect(await stored()).toEqual(both);
+    // 重抓相同資料不增加交易；九月帳單沒有取得或已離開視窗時，Y 不會改用 X 的 ID 覆寫 X。
+    expect((await write({ card: { bills: [y, x] } })).bankTransactions).toBe(0);
+    await write({ card: { bills: [y] } });
+    expect(await stored()).toEqual(both);
+
+    // 分期：每期一列，消費日與金額相同。每次同步只帶最近三期，六期後要有六筆。
+    const months = ["03", "04", "05", "06", "07", "08"];
+    const installment = (month: string) =>
+      statement(`2026/${month}/28`, [
+        row("2026/03/10", `2026/${month}/11`, `分期 ${month}`, "1,000.00"),
+      ]);
+    for (let end = 1; end <= months.length; end += 1) {
+      await write({
+        card: {
+          bills: months
+            .slice(Math.max(0, end - 3), end)
+            .map(installment)
+            .reverse(),
+        },
+      });
+    }
+    const rows = await stored();
+    expect(
+      rows
+        .filter((item) => item.amount === -1000)
+        .map((item) => item.description),
+    ).toEqual(months.map((month) => `分期 ${month}`));
+    expect(rows.reduce((sum, item) => sum + Number(item.amount), 0)).toBe(
+      -6200,
+    );
+
+    // 貸款：清單完整且沒有這筆時停用，保留快照；查無資料（不完整）時不動；再出現時恢復。
+    const loanState = async () =>
+      (
+        await db
+          .prepare(
+            "SELECT inactive_at FROM bank_accounts WHERE connector_id = 'chb' AND account_type = 'loan'",
+          )
+          .all<{ inactive_at: string | null }>()
+      ).results.map((item) => item.inactive_at);
+    await write({
+      loans: { generalLoanSuccess: true, generalLoanData: [loan] },
+    });
+    expect(await loanState()).toEqual([null]);
+    await write({ loans: {} });
+    expect(await loanState()).toEqual([null]);
+    await write({ loans: { generalLoanSuccess: true, generalLoanData: [] } });
+    expect(await loanState()).toEqual([now]);
+    await write({
+      loans: { generalLoanSuccess: true, generalLoanData: [loan] },
+    });
+    expect(await loanState()).toEqual([null]);
+    // 同步期間設定已變更：暫存資料被丟棄，也不停用貸款。
+    await write(
+      { loans: { generalLoanSuccess: true, generalLoanData: [] } },
+      "changed",
+    );
+    expect(await loanState()).toEqual([null]);
   });
 
   it("台新 promotion 失敗一起回滾配對與 cursor，憑證變更後舊同步也不能移動偏好", async () => {

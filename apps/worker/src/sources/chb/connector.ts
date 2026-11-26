@@ -21,7 +21,12 @@ import {
   ChbApiError,
   ChbProtocolError,
   ChbSyncReport,
+  chbCardBillListRows,
+  chbCardBillMatchesListRow,
+  chbCardCreditLimit,
+  chbCardStatusShowsCard,
   chbDataCheckSum,
+  chbDepositsUnavailable,
   chbFcItemAccount,
   chbQueryRange,
   chbRequestBody,
@@ -35,6 +40,7 @@ import {
   parseChbRestResponse,
   pickChbAllAccountItem,
   summarizeChbResult,
+  type ChbCardPayload,
   type ChbConfig,
   type ChbLoginOutcome,
   type ChbPayloads,
@@ -80,6 +86,8 @@ const REST_TIMEOUT_MS = 45_000;
 const LOGOUT_TIMEOUT_MS = 15_000;
 const POLL_MS = 300;
 const MAX_FC_ACCOUNTS = 40;
+/** 貸款與信用卡查詢開始後，超過這個時間就不再送出新查詢（正常情況每個查詢約一兩秒）。 */
+const CHB_EXTRAS_BUDGET_MS = 90_000;
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -132,7 +140,7 @@ export class ChbConnectionError extends Error implements SourceSyncErrorSource {
   }
 }
 
-/** 網銀工作階段已結束（被登出、逾時）；不可略過，整次同步失敗。 */
+/** 網銀工作階段已結束（被登出、逾時）；不可略過。存款階段遇到時整次同步失敗。 */
 export class ChbSessionEndedError extends ChbConnectionError {
   constructor(message = "彰化銀行網銀工作階段已結束，請重新同步。") {
     super(message);
@@ -215,7 +223,9 @@ export function createChbConnector(
     async sync(
       config: ChbConfig,
       _cursor?: string,
-    ): Promise<SyncResult<unknown> & { syncWarning?: string }> {
+    ): Promise<
+      SyncResult<unknown> & { syncWarning?: string; loanSourceIds?: string[] }
+    > {
       requireCredentials(config);
       if (!browserFetcher) {
         throw new ChbConnectionError("Browser binding is unavailable.");
@@ -307,7 +317,7 @@ export function createChbConnector(
               ...report.summary(),
             });
             summaryLogged = true;
-            if (report.failedCount > 0 && data.bankAccounts.length === 0) {
+            if (chbDepositsUnavailable(data, report)) {
               throw new ChbConnectionError(
                 `彰化銀行同步未取得任何資料。${report.userMessage() ?? ""}`,
               );
@@ -318,6 +328,8 @@ export function createChbConnector(
               bankAccounts: data.bankAccounts,
               bankBalanceSnapshots: data.bankBalanceSnapshots,
               bankTransactions: data.bankTransactions,
+              creditCardBills: data.creditCardBills,
+              loanSourceIds: data.loanSourceIds,
               syncWarning: report.userMessage(),
               cursor: JSON.stringify({ syncedAt: new Date().toISOString() }),
             };
@@ -858,7 +870,10 @@ async function logoutChb(page: Page): Promise<ChbLogoutResult> {
 // 登入後資料擷取（已登入頁面內依序呼叫 /chbnib/rest；全部為唯讀查詢）
 // ---------------------------------------------------------------------------
 
-/** 會讓整次同步失敗、不可略過的錯誤：工作階段結束、瀏覽器斷線、需要使用者處理。 */
+/**
+ * 不可略過、會中止目前階段的錯誤：工作階段結束、瀏覽器斷線、需要使用者處理。
+ * 存款階段遇到時整次同步失敗；貸款與信用卡階段的工作階段結束由 fetchChbExtras 處理。
+ */
 export function isChbFatalFetchError(error: unknown) {
   if (
     error instanceof ChbSessionEndedError ||
@@ -904,7 +919,10 @@ export class ChbStepRunner {
       this.consecutiveFailures = 0;
       return value;
     } catch (error) {
-      if (isChbFatalFetchError(error)) throw error;
+      if (isChbFatalFetchError(error)) {
+        this.report.fail(category, stage, error);
+        throw error;
+      }
       this.report.fail(category, stage, error);
       logChbEvent("chb_step_failed", {
         category,
@@ -978,7 +996,8 @@ async function chbRest(page: Page, request: ChbRestRequest): Promise<unknown> {
   try {
     return parseChbRestResponse(result.text);
   } catch (error) {
-    if (error instanceof ChbApiError) {
+    // 「查無資料」是正常結果（該查詢沒有資料列），不記成錯誤。
+    if (error instanceof ChbApiError && !error.noData) {
       logChbEvent("chb_api_error", {
         api: request.url,
         httpStatus: result.status,
@@ -1128,7 +1147,162 @@ async function fetchChbPayloads(
       payloads.fcTransactions.push({ accountNo, currency, data });
     });
   }
+
+  // 存款餘額都沒有取得時網銀多半異常，同步本來就會失敗，不再送附加查詢。
+  if (payloads.twBalance === undefined && payloads.fcBalance === undefined) {
+    return payloads;
+  }
+  Object.assign(
+    payloads,
+    await fetchChbExtras(report, (request) => chbRest(page, request)),
+  );
   return payloads;
+}
+
+/**
+ * 貸款與信用卡：存款之後才查的附加資料，不能讓已取得的存款受影響。
+ * - 用獨立的連續失敗計數：存款查詢連續失敗不會讓它們整段被略過。
+ * - 開始 CHB_EXTRAS_BUDGET_MS 之後不再送出新查詢（已送出的查詢仍可等到單次逾時），記為失敗。
+ * - 途中工作階段結束或瀏覽器斷線時，逐項擷取已記一筆失敗；這裡保留已取得的資料（存款與已查到的貸款），
+ *   不讓整次同步失敗。需要使用者處理的錯誤照常拋出。
+ */
+export async function fetchChbExtras(
+  report: ChbSyncReport,
+  rest: (request: ChbRestRequest) => Promise<unknown>,
+  budgetMs = CHB_EXTRAS_BUDGET_MS,
+): Promise<Pick<ChbPayloads, "loans" | "card">> {
+  const steps = new ChbStepRunner(report);
+  const deadline = Date.now() + budgetMs;
+  const limited = (request: ChbRestRequest) =>
+    Date.now() > deadline
+      ? Promise.reject(
+          new ChbConnectionError(
+            "彰化銀行貸款與信用卡查詢超過時間上限，已略過。",
+          ),
+        )
+      : rest(request);
+  const extras: Pick<ChbPayloads, "loans" | "card"> = {};
+  try {
+    // 貸款：View 一次回傳全部貸款，不需要 Action。查無資料是沒有貸款。
+    await steps.run("loans", "fetch", async () => {
+      const loans = await chbUnlessNoData(() =>
+        limited({
+          url: "LO01001/lo01001_1_View",
+          method: "GET",
+          taskID: "lo01001",
+          data: {},
+        }),
+      );
+      // 查無資料的回應 `data` 是空字串；成功但沒有內容時也當成沒有貸款。
+      extras.loans = loans === null || loans === "" ? {} : loans;
+    });
+    extras.card = await fetchChbCard(steps, limited);
+  } catch (error) {
+    if (
+      !isChbFatalFetchError(error) ||
+      error instanceof ChbVerificationRequiredError
+    ) {
+      throw error;
+    }
+    logChbEvent("chb_extras_aborted", { ...describeChbError(error) });
+  }
+  return extras;
+}
+
+/**
+ * 信用卡的查詢（本期繳款、額度、帳單清單與各期帳單），一次一個。
+ * 「查無資料」只表示該查詢沒有資料列（實機：持卡人沒有未出帳消費時，未出帳明細就是這個回應），
+ * 不能當成沒有信用卡。本期繳款顯示持卡（有結帳日或金額不是 0）、信用額度大於 0、或帳單清單至少一期，
+ * 才算持有信用卡；都沒有時回傳 undefined。
+ * 清單已列出的帳單若查不到，或回應的結帳日不是要查的那一期，記為失敗，不靜默略過。
+ * TODO(chb-live): 沒有信用卡的帳號預期三個 View 都回「查無資料」，實機尚未確認。
+ */
+export async function fetchChbCard(
+  steps: ChbStepRunner,
+  rest: (request: ChbRestRequest) => Promise<unknown>,
+): Promise<ChbCardPayload | undefined> {
+  let empty = 0;
+  const view = async (code: string) => {
+    const data = await chbUnlessNoData(() =>
+      rest({
+        url: `${code}/${code.toLowerCase()}_1_View`,
+        method: "GET",
+        taskID: code.toLowerCase(),
+        data: {},
+      }),
+    );
+    // 成功但內容是空字串時和查無資料相同（與貸款查詢一致）。
+    if (data === null || data === "") {
+      empty += 1;
+      return null;
+    }
+    return data;
+  };
+  const card: ChbCardPayload = { bills: [] };
+  let found = false;
+  await steps.run("cardStatus", "fetch", async () => {
+    const status = await view("CA01021");
+    if (status === null) return;
+    card.status = status;
+    // 成功但內容是空的或全為 0 的回應不能證明持有信用卡。
+    found ||= chbCardStatusShowsCard(status);
+  });
+  await steps.run("cardLimit", "fetch", async () => {
+    const limit = await view("CA01001");
+    if (limit === null) return;
+    card.limit = limit;
+    found ||= (chbCardCreditLimit(limit) ?? 0) > 0;
+  });
+  // 帳單清單之後緊接著查各期帳單；Action 要帶清單的原始列。
+  const list = await steps.run("cardBills", "list", async () => {
+    const list = await view("CA01002");
+    return list === null ? undefined : chbCardBillListRows(list);
+  });
+  if (list?.sameMonthSkipped) {
+    // TODO(chb-live): 確認實機是否出現同月兩期。
+    logChbEvent("chb_card_bill_same_month", {
+      skipped: list.sameMonthSkipped,
+    });
+  }
+  for (const row of list?.rows ?? []) {
+    found = true;
+    await steps.run("cardBills", "fetch", async () => {
+      const bill = await rest({
+        url: "CA01002/ca01002_1_Action",
+        method: "POST",
+        taskID: "ca01002",
+        data: { data: row },
+      });
+      if (!chbCardBillMatchesListRow(bill, row)) {
+        throw new ChbProtocolError(
+          "彰化銀行信用卡帳單的結帳日與查詢的期別不同。",
+        );
+      }
+      card.bills.push(bill);
+    });
+  }
+  if (!found) {
+    // 三個 View 都回查無資料才是沒有信用卡；有查詢失敗時只是這次沒有取得。
+    if (empty === 3) logChbEvent("chb_no_credit_card", {});
+    return undefined;
+  }
+  return card;
+}
+
+/**
+ * 查詢回覆「查無資料」時回傳 null（該功能沒有資料，不算失敗）；其他錯誤照常拋出，由逐項擷取記為失敗。
+ * 實機：信用卡未出帳明細、已刷卡未請款明細沒有資料時回 `E005`「查無資料」。
+ * TODO(chb-live): 沒有貸款的帳號預期也回「查無資料」，實機尚未確認。
+ */
+async function chbUnlessNoData(
+  request: () => Promise<unknown>,
+): Promise<unknown> {
+  try {
+    return await request();
+  } catch (error) {
+    if (!(error instanceof ChbApiError && error.noData)) throw error;
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

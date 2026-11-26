@@ -612,7 +612,13 @@ export const connectorCatalog = {
     bankCode: "009",
     connectionMode: "browser_captcha_session",
     scopes: ["all"],
-    capabilities: ["bank_account", "bank_balance_snapshot", "bank_transaction"],
+    capabilities: [
+      "bank_account",
+      "bank_balance_snapshot",
+      "bank_transaction",
+      "credit_card_bill",
+      "loan",
+    ],
     publicFields: [],
     credentialFields: [
       { key: "nationalId", label: "身分證字號", type: "text" },

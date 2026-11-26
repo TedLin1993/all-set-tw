@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { connectorCatalog } from "@taiwan-fin-hub/shared";
 import {
+  CHB_CREDIT_ACCOUNT_ID,
   ChbApiError,
   ChbSyncReport,
   chbBalanceMismatches,
   chbDataCheckSum,
+  chbDepositsUnavailable,
   chbDepositTransactions,
   chbDepositSourceId,
   chbFcItemAccount,
+  chbLoanSourceId,
   chbQueryRange,
   chbRequestBody,
   chbTwItemAccountNo,
@@ -109,6 +112,33 @@ describe("彰化銀行 REST 回應", () => {
       expect(error).toBeInstanceOf(ChbApiError);
       expect((error as ChbApiError).returnCode).toBe("E005");
       expect((error as Error).message).not.toMatch(/巧翎|1234567890/);
+      // 「查無資料」只留下判斷結果，讓沒有貸款的帳號不被當成查詢失敗。
+      expect((error as ChbApiError).noData).toBe(true);
+    }
+    try {
+      parseChbRestResponse(
+        JSON.stringify({
+          isSuccess: false,
+          returnCode: "E005",
+          returnMessage: "系統忙碌中",
+        }),
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ChbApiError).noData).toBe(false);
+    }
+    // 其他回覆代碼就算訊息含「查無資料」也是失敗，不可當成沒有資料。
+    try {
+      parseChbRestResponse(
+        JSON.stringify({
+          isSuccess: false,
+          returnCode: "E999",
+          returnMessage: "系統異常，查無資料",
+        }),
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ChbApiError).noData).toBe(false);
     }
     expect(() => parseChbRestResponse("<html>")).toThrow(ChbApiError);
   });
@@ -460,6 +490,627 @@ describe("彰化銀行帳戶與資料正規化", () => {
     expect(summary.twBalanceChecked).toBe(2);
   });
 
+  // 貸款與信用卡回應的欄位與格式依實機回應，數值為合成值。
+  const loanRow = {
+    accTypeName: "信用貸款",
+    account: "0000-99-12345-6-0001",
+    startDate: "2024/04/30",
+    endDate: "2031/04/30",
+    moneyType: "TWD",
+    apAmt: "400,000.00",
+    actBal: "357,738.00",
+    fitIrt: "2.19%",
+    total: "2,052.00",
+    date: "2026/11/25",
+    // 扣帳帳號是同一位客戶的彰銀臺幣存款帳號。
+    payActno: "0000-12-34567-8-90",
+    key: "0000991234560001~~~00~~~",
+  };
+  const parseLoans = (loans: unknown) => {
+    const report = new ChbSyncReport();
+    const data = parseChbData(
+      { ...payloads, loans },
+      new Date("2026-10-31T04:00:00Z"),
+      report,
+    );
+    return {
+      data,
+      report,
+      loans: data.bankAccounts.filter((a) => a.accountType === "loan"),
+      snapshots: data.bankBalanceSnapshots.filter((snapshot) =>
+        snapshot.accountId.startsWith("loan:"),
+      ),
+    };
+  };
+
+  it("有貸款：負值餘額、分類、利率、應繳資訊與扣款帳戶；清單完整時回報本次的貸款", () => {
+    const { data, report, loans, snapshots } = parseLoans({
+      generalLoanSuccess: true,
+      generalLoanErrorMessage: "",
+      generalLoanData: [
+        loanRow,
+        // 房貸在彰銀顯示為「擔保貸款」；利率有三位小數；頁面沒有顯示扣帳帳號。
+        {
+          ...loanRow,
+          accTypeName: "擔保貸款",
+          account: "0000-98-12345-6-0001",
+          endDate: "2064/04/25",
+          actBal: "10,000,000.00",
+          fitIrt: "2.275%",
+          total: "14,791.00",
+          payActno: "",
+          key: "0000981234560001~~~00~~~",
+        },
+      ],
+      trancheLoanData: [],
+    });
+    const creditId = chbLoanSourceId("0000991234560001");
+    const securedId = chbLoanSourceId("0000981234560001");
+    expect(loans).toMatchObject([
+      {
+        sourceId: creditId,
+        accountName: "信用貸款 末四碼 0001",
+        loanCategory: "personal",
+        loanInterestRate: 2.19,
+        currency: "TWD",
+        openedDate: "2024-04-30",
+        maturityDate: "2031-04-30",
+        autopayAccount: {
+          bankCode: "009",
+          last4: "7890",
+          depositSourceId: chbDepositSourceId(twAccountNo),
+        },
+      },
+      {
+        sourceId: securedId,
+        accountName: "房屋貸款 末四碼 0001",
+        loanCategory: "housing",
+        loanInterestRate: 2.275,
+        autopayAccount: null,
+      },
+    ]);
+    expect(snapshots).toMatchObject([
+      {
+        sourceId: `snapshot:${creditId}:2026-10-31`,
+        balance: -357738,
+        loanPaymentAmount: 2052,
+        paymentDueDate: "2026-11-25",
+      },
+      { accountId: securedId, balance: -10000000, loanPaymentAmount: 14791 },
+    ]);
+    // 存款不受影響；清單完整，本次的貸款可用來停用已消失的貸款。
+    expect(
+      data.bankAccounts.filter((a) => a.accountType === "savings"),
+    ).toHaveLength(2);
+    expect(data.loanSourceIds).toEqual([creditId, securedId]);
+    expect(report.failedCount).toBe(1); // 既有 fixture 的一筆存款明細失敗
+    expect(JSON.stringify(data)).not.toContain("0000991234560001");
+  });
+
+  it("貸款邊界：同帳號不同序號各自一筆，重複列與格式不符的列拒絕，有拒絕時不停用任何貸款", () => {
+    const { data, report, loans, snapshots } = parseLoans({
+      generalLoanSuccess: true,
+      generalLoanData: [
+        { ...loanRow, actBal: "0.00", fitIrt: "999%" },
+        // 帳號與序號都相同：拒絕，不覆蓋第一列。
+        { ...loanRow, actBal: "100,000.00" },
+        // 同帳號、不同序號：另一筆撥款。扣帳帳號不是字串：無法辨識。
+        {
+          ...loanRow,
+          actBal: "5,000.00",
+          key: "0000991234560001~~~01~~~",
+          payActno: {},
+        },
+        { ...loanRow, account: "0000-99-12345-6-0002", actBal: "" },
+        { ...loanRow, account: "0000-99-12345-6-0003", moneyType: "新臺幣" },
+        // 產品名稱帶完整帳號時遮罩。
+        {
+          ...loanRow,
+          account: "0000-99-12345-6-0004",
+          accTypeName: "擔保貸款 0000991234560004",
+          fitIrt: "２．２７５％",
+          payActno: "7000-01-23456-7-89",
+        },
+      ],
+    });
+    expect(loans.map((loan) => loan.sourceId)).toEqual([
+      chbLoanSourceId("0000991234560001"),
+      chbLoanSourceId("0000991234560001", "01"),
+      chbLoanSourceId("0000991234560004"),
+    ]);
+    expect(report.counts.loans).toEqual({ ok: 3, failed: 0, rowsRejected: 3 });
+    // 餘額 0 不是 -0；荒謬的利率不寫入，全形照常解析；他行扣帳帳號只留末四碼。
+    expect(Object.is(snapshots[0]?.balance, 0)).toBe(true);
+    expect(loans.map((loan) => loan.loanInterestRate)).toEqual([
+      undefined,
+      2.19,
+      2.275,
+    ]);
+    expect(loans[2]?.autopayAccount).toEqual({ last4: "6789" });
+    // 無法辨識的扣帳帳號不寫，保留既有資料（不是 null 的「未設定」）。
+    expect(loans[1]?.autopayAccount).toBeUndefined();
+    // 有被拒絕的列時清單不完整，不能據此停用貸款。
+    expect(data.loanSourceIds).toBeUndefined();
+    const serialized = JSON.stringify(data);
+    for (const full of ["0000991234560004", "70000123456789"]) {
+      expect(serialized).not.toContain(full);
+    }
+  });
+
+  it("沒有貸款：不寫入任何貸款、不算失敗，存款照常；查詢未成功則記為貸款失敗", () => {
+    const depositOnly = parseLoans(undefined);
+    for (const [loans, completeIds] of [
+      // 銀行明確回覆成功且清單為空：可停用全部舊貸款。
+      [
+        { generalLoanSuccess: true, generalLoanData: [], trancheLoanData: [] },
+        [],
+      ],
+      // E005「查無資料」（connector 轉成空物件）與回應內的查無資料訊息：沒有實機樣本，不停用。
+      [{}, undefined],
+      [
+        { generalLoanSuccess: false, generalLoanErrorMessage: "查無資料" },
+        undefined,
+      ],
+      // 成功旗標但缺少清單、或附帶錯誤訊息：不能當成完整的空清單而停用全部貸款。
+      [{ generalLoanSuccess: true }, undefined],
+      [{ generalLoanSuccess: true, generalLoanData: null }, undefined],
+      [{ generalLoanSuccess: true, generalLoanList: [] }, undefined],
+      [
+        {
+          generalLoanSuccess: true,
+          generalLoanErrorMessage: "系統忙碌",
+          generalLoanData: [],
+        },
+        undefined,
+      ],
+    ] as const) {
+      const { data, report, loans: rows } = parseLoans(loans);
+      expect(rows).toEqual([]);
+      expect(data.bankAccounts).toEqual(depositOnly.data.bankAccounts);
+      expect(report.failedCount).toBe(depositOnly.report.failedCount);
+      expect(data.loanSourceIds).toEqual(completeIds);
+    }
+    // 不是查無資料的未成功回應：記一筆貸款失敗，存款仍寫入，不停用貸款。
+    const failed = parseLoans({
+      generalLoanSuccess: false,
+      generalLoanErrorMessage: "系統忙碌",
+    });
+    expect(failed.data.bankAccounts).toEqual(depositOnly.data.bankAccounts);
+    expect(failed.report.counts.loans.failed).toBe(1);
+    expect(failed.data.loanSourceIds).toBeUndefined();
+  });
+
+  const cardRow = (
+    trxnDate: string,
+    postDate: string,
+    memo: string,
+    billAmt: string,
+    chNO = "1234",
+  ) => ({
+    trxnDate,
+    postDate,
+    memo,
+    trxnAmt: billAmt,
+    trxnCurr: "TWD",
+    billAmt,
+    chNO,
+  });
+  const cardPayload = {
+    status: {
+      settleAccountDayOfMonth: "2026/10/31",
+      payBillDeadLine: "2026/11/18",
+      minimumPayAmount: "500",
+      stmtBillAmt: "1,200",
+      notSendBillBal: "470",
+      accuBillAmt: "1,670",
+      autoDeductAccount: "0000-12-34567-8-90",
+      atm: "98765432109876",
+    },
+    limit: { creditLine: "20,000", refBalance: "18,330" },
+    bills: [
+      {
+        stmtDate: "2026/10/31",
+        dueDate: "2026/11/18",
+        begBal: "800",
+        pmtBal: "800",
+        adjustBal: "0",
+        prinBal: "1,500",
+        totalCurrentBal: "1,500",
+        minRepay: "500",
+        // 最近一次繳款，不屬於這一期。
+        billAmt: "300",
+        postDate: "2026/11/05",
+        info: [
+          cardRow(
+            "2026/10/12",
+            "2026/10/15",
+            "虛構電信　０９１２３＊＊＊４５",
+            "1,500.00",
+          ),
+          cardRow(
+            "2026/10/19",
+            "2026/10/20",
+            "彰銀自動扣繳",
+            "-800.00",
+            "****",
+          ),
+        ],
+      },
+      {
+        stmtDate: "2026/09/30",
+        dueDate: "2026/10/19",
+        begBal: "0",
+        pmtBal: "0",
+        adjustBal: "0",
+        prinBal: "800",
+        totalCurrentBal: "800",
+        minRepay: "800",
+        info: [cardRow("2026/09/08", "2026/09/10", "虛構商店", "800.00")],
+      },
+      {
+        stmtDate: "2026/08/31",
+        dueDate: "2026/09/18",
+        begBal: "0",
+        pmtBal: "0",
+        adjustBal: "0",
+        prinBal: "0",
+        totalCurrentBal: "0",
+        minRepay: "0",
+        info: [
+          {
+            ...cardRow("2026/08/10", "2026/08/13", "FAKE STORE", "320.00"),
+            trxnAmt: "10.00",
+            trxnCurr: "USD",
+          },
+          cardRow("2026/08/20", "2026/08/22", "FAKE STORE 退款", "-320.00"),
+          // 沒有台幣金額的列只略過這一筆。
+          { ...cardRow("2026/08/21", "2026/08/22", "虛構", ""), billAmt: "" },
+        ],
+      },
+    ],
+  };
+  // 交易 ID 的摘要雜湊不在測試裡寫死，以 `#` 代替。
+  const idShape = (id: string) => id.replace(/:[0-9a-f]{8}:(\d+)$/, ":#:$1");
+  const parseCard = (card: unknown, base: ChbPayloads = payloads) => {
+    const report = new ChbSyncReport();
+    const data = parseChbData(
+      { ...base, card: card as ChbPayloads["card"] },
+      new Date("2026-11-06T04:00:00Z"),
+      report,
+    );
+    return {
+      data,
+      report,
+      cardTx: data.bankTransactions.filter(
+        (tx) => tx.accountId === CHB_CREDIT_ACCOUNT_ID,
+      ),
+      account: data.bankAccounts.find((a) => a.accountType === "credit"),
+      snapshot: data.bankBalanceSnapshots.find(
+        (snapshot) => snapshot.accountId === CHB_CREDIT_ACCOUNT_ID,
+      ),
+    };
+  };
+
+  it("有信用卡：帳戶、負債快照、近三期帳單與帳單明細，且不影響存款", () => {
+    const { data, report, cardTx, account, snapshot } = parseCard(cardPayload);
+    expect(account).toEqual({
+      sourceId: CHB_CREDIT_ACCOUNT_ID,
+      institutionName: "彰化銀行",
+      accountName: "彰化銀行信用卡",
+      accountType: "credit",
+      currency: "TWD",
+      creditLimit: 20000,
+      autopayAccount: {
+        bankCode: "009",
+        last4: "7890",
+        depositSourceId: chbDepositSourceId(twAccountNo),
+      },
+    });
+    // 負債 = 本期帳單剩餘應繳 1,200 + 未寄帳單 470，以負值保存。
+    expect(snapshot).toMatchObject({
+      sourceId: "snapshot:chb:credit:2026-11-06",
+      balance: -1670,
+      statementBalance: 1500,
+      statementClosingDate: "2026-10-31",
+      paymentDueDate: "2026-11-18",
+      noPaymentNeeded: false,
+    });
+    // 本期看剩餘應繳；上一期由本期的上期帳單金額與上期繳款推得；應繳 0 為已繳。
+    expect(
+      data.creditCardBills.map((bill) => [
+        bill.sourceId,
+        bill.statementAmount,
+        bill.minimumPayment,
+        bill.paymentDueDate,
+        bill.isPaid,
+        bill.paidAmount,
+      ]),
+    ).toEqual([
+      ["chb:card:bill:2026-10", 1500, 500, "2026-11-18", false, 300],
+      ["chb:card:bill:2026-09", 800, 800, "2026-10-19", true, 800],
+      ["chb:card:bill:2026-08", 0, 0, "2026-09-18", true, undefined],
+    ]);
+    // 消費為負、繳款與退款為正，一律已入帳；ID 不含卡號，繳款列沒有 cardLast4。
+    expect(
+      cardTx.map((tx) => [
+        idShape(tx.sourceId),
+        tx.amount,
+        tx.status,
+        tx.cardLast4,
+      ]),
+    ).toEqual([
+      ["chb:card:tx:v1:2026-08-10:2026-08-13:-320:#:1", -320, "posted", "1234"],
+      ["chb:card:tx:v1:2026-08-20:2026-08-22:320:#:1", 320, "posted", "1234"],
+      ["chb:card:tx:v1:2026-09-08:2026-09-10:-800:#:1", -800, "posted", "1234"],
+      [
+        "chb:card:tx:v1:2026-10-12:2026-10-15:-1500:#:1",
+        -1500,
+        "posted",
+        "1234",
+      ],
+      [
+        "chb:card:tx:v1:2026-10-19:2026-10-20:800:#:1",
+        800,
+        "posted",
+        undefined,
+      ],
+    ]);
+    expect(cardTx[3]).toMatchObject({
+      authorizedAt: "2026-10-12",
+      postedDate: "2026-10-15",
+      // 摘要裡的電話號碼遮罩為末四碼。
+      description: "虛構電信 ****2345",
+    });
+    expect(cardTx[0]?.raw).toMatchObject({
+      foreignCurrency: "USD",
+      foreignAmount: 10,
+    });
+    expect(report.counts.cardTransactions).toEqual({
+      ok: 5,
+      failed: 0,
+      rowsRejected: 1,
+    });
+    expect(summarizeChbResult(data, report)).toMatchObject({
+      twAccounts: 1,
+      fcAccounts: 1,
+      cardBills: 3,
+      cardTransactions: 5,
+      transactions: 4,
+    });
+    expect(JSON.stringify(data)).not.toContain("98765432109876");
+  });
+
+  it("沒有信用卡：不建立信用卡帳戶、帳單或明細，也不算失敗；持卡但沒有消費時只有帳戶與 0 元快照", () => {
+    const none = parseCard(undefined);
+    expect(none.account).toBeUndefined();
+    expect(none.data.creditCardBills).toEqual([]);
+    // 成功但內容是空的或全為 0 的回應不能證明持卡。
+    // 額度回應讀不懂：記一筆失敗，不無聲清空額度。
+    expect(
+      parseCard({ ...cardPayload, limit: { creditLine: "N/A" } }).report.counts
+        .cardLimit.failed,
+    ).toBe(1);
+    for (const empty of [
+      { limit: { creditLine: "0" }, bills: [] },
+      { status: { stmtBillAmt: "0", notSendBillBal: "0" }, bills: [] },
+    ]) {
+      const result = parseCard(empty);
+      expect(result.account).toBeUndefined();
+      expect(result.report.failedCount).toBe(none.report.failedCount);
+    }
+    // 持卡但沒有消費：負債 0、不需繳款、不寫繳款期限；扣款帳號空白為未設定。
+    const idle = parseCard({
+      status: {
+        ...cardPayload.status,
+        stmtBillAmt: "0",
+        notSendBillBal: "0",
+        autoDeductAccount: "",
+      },
+      limit: cardPayload.limit,
+      bills: [],
+    });
+    expect(idle.account).toMatchObject({ autopayAccount: null });
+    expect(idle.snapshot).toMatchObject({ balance: 0, noPaymentNeeded: true });
+    expect(idle.snapshot?.paymentDueDate).toBeUndefined();
+    expect(idle.report.failedCount).toBe(none.report.failedCount);
+    // 繳款資訊格式不符：記一筆失敗、不建立負債快照，帳單照常寫入。
+    const broken = parseCard({
+      status: { settleAccountDayOfMonth: "2026/10/31" },
+      bills: [cardPayload.bills[1]],
+    });
+    expect(broken.report.counts.cardStatus.failed).toBe(1);
+    expect(broken.snapshot).toBeUndefined();
+    expect(broken.data.creditCardBills).toHaveLength(1);
+    // 整體格式不符（connector 不會產生）：只略過信用卡，存款照常。
+    for (const hostile of ["abc", 5, [1]]) {
+      const result = parseCard(hostile);
+      expect(result.account).toBeUndefined();
+      expect(result.data.bankAccounts).toEqual(none.data.bankAccounts);
+    }
+  });
+
+  it("信用卡明細 ID：消費日、入帳日、金額與摘要都相同才用序號區分，順序對調不互換，缺入帳日時以結帳日代替", () => {
+    const bill = (info: unknown[]) => ({ ...cardPayload.bills[2], info });
+    const txs = (info: unknown[]) =>
+      parseCard({ bills: [bill(info)] }).cardTx.map((tx) => [
+        idShape(tx.sourceId),
+        tx.description,
+      ]);
+    const ids = (info: unknown[]) =>
+      new Map(
+        parseCard({ bills: [bill(info)] }).cardTx.map((tx) => [
+          tx.description,
+          tx.sourceId,
+        ]),
+      );
+    const x = cardRow("2026/08/10", "2026/08/13", "虛構商店", "100.00");
+    // 兩張卡、同日同額同入帳日同摘要：兩筆都保留。卡號只供顯示，不在 ID 內。
+    expect(txs([x, { ...x, chNO: "5678" }])).toEqual([
+      ["chb:card:tx:v1:2026-08-10:2026-08-13:-100:#:1", "虛構商店"],
+      ["chb:card:tx:v1:2026-08-10:2026-08-13:-100:#:2", "虛構商店"],
+    ]);
+    // 摘要不同的兩筆：銀行回應的順序對調時，各自的 ID 不變。
+    const y = { ...x, memo: "虛構咖啡" };
+    expect(ids([x, y])).toEqual(ids([y, x]));
+    expect(ids([x, y]).get("虛構商店")).not.toBe(ids([x, y]).get("虛構咖啡"));
+    // 分期：入帳日相同時，摘要帶的期數也能區分，各自是序號 1。
+    const installment = (n: number) => ({ ...x, memo: `虛構分期 ${n}/12` });
+    expect(
+      [...ids([installment(3), installment(4)]).values()].map(idShape),
+    ).toEqual([
+      "chb:card:tx:v1:2026-08-10:2026-08-13:-100:#:1",
+      "chb:card:tx:v1:2026-08-10:2026-08-13:-100:#:1",
+    ]);
+    expect(txs([{ ...x, postDate: "" }])).toEqual([
+      ["chb:card:tx:v1:2026-08-10:2026-08-31:-100:#:1", "虛構商店"],
+    ]);
+  });
+
+  it("信用卡帳單是否已繳：只用緊接的下一期推算，缺期、金額對不上或算式不成立為未知，已繳金額不超過帳單金額", () => {
+    // 每期都符合網銀算式：上期帳單金額 − 上期繳款 − 退款 + 本期新增 = 本期應繳總金額。
+    const bill = (
+      stmtDate: string,
+      total: string,
+      rest: Record<string, string | undefined> = {},
+    ) => ({
+      stmtDate,
+      dueDate: "",
+      begBal: "0",
+      pmtBal: "0",
+      adjustBal: "0",
+      prinBal: total,
+      totalCurrentBal: total,
+      minRepay: total,
+      info: [],
+      ...rest,
+    });
+    const august = bill("2026/08/31", "800");
+    const paid = (card: object) =>
+      parseCard({ bills: [], ...card }).data.creditCardBills.map((b) => [
+        b.billingPeriod,
+        b.isPaid,
+        b.paidAmount,
+      ]);
+    const older = (next: object) => paid({ bills: [next, august] })[1];
+
+    // 本期（結帳日與繳款資訊相同）看剩餘應繳；溢繳時已繳金額只算到帳單金額。
+    for (const [remaining, expected] of [
+      ["0", [true, 800]],
+      ["300", [false, 500]],
+      ["900", [false, 0]],
+      ["-100", [true, 800]],
+    ] as const) {
+      expect(
+        paid({
+          status: {
+            settleAccountDayOfMonth: "2026/08/31",
+            stmtBillAmt: remaining,
+            notSendBillBal: "0",
+          },
+          bills: [august],
+        }),
+      ).toEqual([["2026-08", ...expected]]);
+    }
+    // 較早期別。
+    const sept = (rest: Record<string, string | undefined>) =>
+      bill("2026/09/30", "0", { begBal: "800", pmtBal: "800", ...rest });
+    expect(older(sept({}))).toEqual(["2026-08", true, 800]);
+    expect(older(sept({ pmtBal: "500", adjustBal: "300" }))).toEqual([
+      "2026-08",
+      true,
+      800,
+    ]);
+    expect(
+      older(sept({ pmtBal: "1,000", prinBal: "200", totalCurrentBal: "0" })),
+    ).toEqual(["2026-08", true, 800]);
+    expect(
+      older(sept({ pmtBal: "500", totalCurrentBal: "300", prinBal: "0" })),
+    ).toEqual(["2026-08", false, 500]);
+    // 退款正負號與算式不合、缺本期新增金額、上期金額對不上：未知。
+    for (const rest of [
+      { pmtBal: "500", adjustBal: "-300" },
+      { prinBal: undefined },
+      { begBal: "700", pmtBal: "700" },
+    ]) {
+      expect(older(sept(rest))).toEqual(["2026-08", undefined, undefined]);
+    }
+    // 中間缺九月：不拿十月推算八月。跨年的相鄰期別可以。
+    expect(
+      older(bill("2026/10/31", "0", { begBal: "800", pmtBal: "800" })),
+    ).toEqual(["2026-08", undefined, undefined]);
+    expect(
+      paid({
+        bills: [
+          bill("2027/01/31", "0", { begBal: "800", pmtBal: "800" }),
+          bill("2026/12/31", "800"),
+        ],
+      })[1],
+    ).toEqual(["2026-12", true, 800]);
+    // 同一個月出現兩期：記一筆帳單失敗，不靜默覆蓋。
+    const duplicated = parseCard({
+      bills: [bill("2026/10/31", "500"), bill("2026/10/01", "900")],
+    });
+    expect(duplicated.report.counts.cardBills).toMatchObject({
+      ok: 1,
+      failed: 1,
+    });
+    expect(
+      duplicated.data.creditCardBills.map((b) => b.statementAmount),
+    ).toEqual([500]);
+  });
+
+  it("扣款帳號只在對得上本次同步的彰銀臺幣存款時標為彰銀，無法辨識時保留既有資料", () => {
+    const autopay = (
+      autoDeductAccount: unknown,
+      base: ChbPayloads = payloads,
+    ) =>
+      parseCard(
+        { status: { ...cardPayload.status, autoDeductAccount }, bills: [] },
+        base,
+      ).account?.autopayAccount;
+    expect(autopay("0000 1234 5678 90")).toMatchObject({
+      bankCode: "009",
+      last4: "7890",
+    });
+    // 他行或非本人帳號只留末四碼。
+    expect(autopay("7000-01-23456-7-89")).toEqual({ last4: "6789" });
+    // 這次沒有取得臺幣存款（例如臺幣餘額查詢失敗）時無從比對，不寫，避免蓋掉上次正確的扣款帳戶。
+    expect(
+      autopay("0000-12-34567-8-90", { ...payloads, twBalance: undefined }),
+    ).toBeUndefined();
+    expect(autopay("")).toBeNull();
+    for (const unreadable of [
+      "無法取得",
+      "****",
+      "0000-12-*****-8-90",
+      "12345",
+    ]) {
+      expect(autopay(unreadable)).toBeUndefined();
+    }
+    // 本次沒有取得存款帳戶時無從比對。
+    expect(
+      autopay("0000-12-34567-8-90", { twTransactions: [], fcTransactions: [] }),
+    ).toBeUndefined();
+  });
+
+  it("存款完全沒有取得時，貸款或信用卡成功也不能讓同步算成功", () => {
+    const check = (base: ChbPayloads, failDeposits: boolean) => {
+      const report = new ChbSyncReport();
+      if (failDeposits) report.fail("twBalance", "fetch", new Error("x"));
+      const data = parseChbData(
+        { ...base, loans: { generalLoanData: [loanRow] }, card: cardPayload },
+        undefined,
+        report,
+      );
+      return chbDepositsUnavailable(data, report);
+    };
+    const noDeposits = { twTransactions: [], fcTransactions: [] };
+    expect(check(noDeposits, true)).toBe(true);
+    // 客戶沒有存款帳戶但查詢沒有失敗，或失敗但仍取得存款：不算。
+    expect(check(noDeposits, false)).toBe(false);
+    expect(check(payloads, true)).toBe(false);
+  });
+
   it("同一查詢內完全相同的兩筆以序號區分，不會被當成重複而遺失", () => {
     const row = {
       amount: -500,
@@ -529,6 +1180,8 @@ describe("彰化銀行設定與憑證", () => {
 
     const entry = connectorCatalog.chb;
     expect(entry.bankCode).toBe("009");
+    expect(entry.capabilities).toContain("loan");
+    expect(entry.capabilities).toContain("credit_card_bill");
     expect(entry.connectionMode).toBe("browser_captcha_session");
     expect(entry.publicFields).toEqual([]);
     expect(entry.credentialFields.map((field) => field.key)).toEqual([

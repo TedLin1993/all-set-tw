@@ -20,6 +20,7 @@ import {
 import { decryptJson, encryptJson } from "../../platform/crypto";
 import { configEncryptionKey } from "../../platform/config";
 import { parseChbConfig, type ChbConfig } from "./protocol";
+import { deactivateMissingChbLoanAccountsStatement } from "./repository";
 import {
   createChbConnector,
   ChbAutoCaptchaFailedError,
@@ -44,6 +45,7 @@ import {
   bankAccountRecord,
   bankBalanceSnapshotRecord,
   bankTransactionRecord,
+  creditCardBillRecord,
 } from "../../features/sync/record-mapper";
 import {
   rebuildBankDepositHistory,
@@ -212,6 +214,7 @@ export async function syncChb(
   const bankAccounts = result.bankAccounts ?? [];
   const bankBalanceSnapshots = result.bankBalanceSnapshots ?? [];
   const bankTransactions = result.bankTransactions ?? [];
+  const creditCardBills = result.creditCardBills ?? [];
   const now = new Date().toISOString();
   const records: SyncWriteRecord[] = [
     ...bankAccounts.map((account) =>
@@ -222,6 +225,9 @@ export async function syncChb(
     ),
     ...bankTransactions.map((transaction) =>
       bankTransactionRecord(connectorId, transaction, now),
+    ),
+    ...creditCardBills.map((bill) =>
+      creditCardBillRecord(connectorId, bill, now),
     ),
   ];
 
@@ -247,18 +253,38 @@ export async function syncChb(
     ),
   ];
 
-  // 只有存款：沒有信用卡授權 feed，不接共用授權配對。
+  // 信用卡明細只有帳單明細（已入帳），沒有授權可配對，不接共用授權配對。
   const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
     settingsGuard,
-    afterPromoteStatements:
-      bankAccounts.length > 0
+    afterPromoteStatements: [
+      ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB, settingsGuard)]
-        : [],
+        : []),
+      ...(result.loanSourceIds
+        ? [
+            deactivateMissingChbLoanAccountsStatement(
+              env.DB,
+              result.loanSourceIds,
+              now,
+              settingsGuard,
+            ),
+          ]
+        : []),
+    ],
     finalizeStatements,
   });
 
-  if (bankBalanceSnapshots.length > 0) {
+  if (
+    bankBalanceSnapshots.some((snapshot) =>
+      bankAccounts.some(
+        (account) =>
+          account.sourceId === snapshot.accountId &&
+          account.accountType !== "credit" &&
+          account.accountType !== "loan",
+      ),
+    )
+  ) {
     await rebuildBankDepositHistory(env.DB, [dateFromIso(now)]);
   }
 
