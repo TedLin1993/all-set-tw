@@ -1254,17 +1254,19 @@ export async function fetchChbCard(
     found ||= (chbCardCreditLimit(limit) ?? 0) > 0;
   });
   // 帳單清單之後緊接著查各期帳單；Action 要帶清單的原始列。
-  const rows = await steps.run("cardBills", "list", async () => {
+  const list = await steps.run("cardBills", "list", async () => {
     const list = await view("CA01002");
-    return list === null ? [] : chbCardBillListRows(list);
+    return list === null ? undefined : chbCardBillListRows(list);
   });
-  // 帳單以月份識別。同月有兩期（例如變更結帳日）而較新的一期沒有取得時，不查同月較舊的一期，
-  // 以免它覆寫已存的帳單。
-  const missedPeriods = new Set<string>();
-  for (const { row, period } of rows ?? []) {
+  if (list?.sameMonthSkipped) {
+    // TODO(chb-live): 確認實機是否出現同月兩期。
+    logChbEvent("chb_card_bill_same_month", {
+      skipped: list.sameMonthSkipped,
+    });
+  }
+  for (const row of list?.rows ?? []) {
     found = true;
-    if (missedPeriods.has(period)) continue;
-    const fetched = await steps.run("cardBills", "fetch", async () => {
+    await steps.run("cardBills", "fetch", async () => {
       const bill = await rest({
         url: "CA01002/ca01002_1_Action",
         method: "POST",
@@ -1277,9 +1279,7 @@ export async function fetchChbCard(
         );
       }
       card.bills.push(bill);
-      return true;
     });
-    if (!fetched) missedPeriods.add(period);
   }
   if (!found) {
     // 三個 View 都回查無資料才是沒有信用卡；有查詢失敗時只是這次沒有取得。

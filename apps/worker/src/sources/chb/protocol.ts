@@ -945,11 +945,13 @@ function parseChbLoans(
 
 /**
  * 帳單清單 `CA01002/ca01002_1_View` 的 `list[]`（`stmtDate` 為 `YYYYMMDD`、`stmtBal` 為帳單金額）：
- * 由新到舊取最近 CHB_STATEMENT_MONTHS 期，各帶帳單期別 `YYYY-MM`。查詢單期帳單時要把該列原樣放進 Action 的 `data`。
+ * 由新到舊取最近 CHB_STATEMENT_MONTHS 個月。查詢單期帳單時要把該列原樣放進 Action 的 `data`。
+ * 帳單以月份識別，同月有兩期（例如變更結帳日）時只取較新的一期，較舊的一期不查，以免它覆寫已存的帳單；
+ * `sameMonthSkipped` 是略過的列數。
  * 任何一列的結帳日無法解析時整個清單視為格式不符，不靜默少查一期。
  */
 export function chbCardBillListRows(data: unknown) {
-  return asRows(asRecord(data)?.list)
+  const entries = asRows(asRecord(data)?.list)
     .map((row) => {
       const closingDate = parseChbDate(row.stmtDate);
       if (!closingDate) {
@@ -957,12 +959,16 @@ export function chbCardBillListRows(data: unknown) {
       }
       return { row, closingDate };
     })
-    .sort((a, b) => b.closingDate.localeCompare(a.closingDate))
-    .slice(0, CHB_STATEMENT_MONTHS)
-    .map((entry) => ({
-      row: entry.row,
-      period: entry.closingDate.slice(0, 7),
-    }));
+    .sort((a, b) => b.closingDate.localeCompare(a.closingDate));
+  const latest = new Map<string, Record<string, unknown>>();
+  for (const { row, closingDate } of entries) {
+    const period = closingDate.slice(0, 7);
+    if (!latest.has(period)) latest.set(period, row);
+  }
+  return {
+    rows: [...latest.values()].slice(0, CHB_STATEMENT_MONTHS),
+    sameMonthSkipped: entries.length - latest.size,
+  };
 }
 
 /** 單期帳單回應的結帳日是否就是清單列要查的那一期。 */

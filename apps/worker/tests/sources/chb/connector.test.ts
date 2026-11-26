@@ -151,7 +151,7 @@ describe("彰化銀行逐項擷取", () => {
     }
   });
 
-  it("有信用卡：本期繳款查無資料不代表沒有卡；帳單由新到舊查三期並帶回清單的原始列", async () => {
+  it("有信用卡：本期繳款查無資料不代表沒有卡；帳單由新到舊查三個月並帶回清單的原始列，同月兩期只查較新的一期", async () => {
     const bill = (stmtDate: string) => ({ stmtDate, info: [] });
     const full = await runCard({
       [STATUS_VIEW]: status,
@@ -175,6 +175,24 @@ describe("彰化銀行逐項擷取", () => {
         data: { data: row },
       })),
     );
+    // 同月兩期：只查較新的一期，仍查滿三個月。較新的一期解析失敗（`bill()` 沒有金額）時，
+    // 較舊的一期也不會取代它而覆寫已存的帳單。
+    const sameMonth = await runCard({
+      [LIST_VIEW]: { list: [...list.list, { stmtDate: "20261001" }] },
+      "CA01002/ca01002_1_Action:20261031": bill("2026/10/31"),
+      "CA01002/ca01002_1_Action:20261001": {
+        ...bill("2026/10/01"),
+        totalCurrentBal: "1,000",
+      },
+      "CA01002/ca01002_1_Action:20260930": bill("2026/09/30"),
+      "CA01002/ca01002_1_Action:20260831": bill("2026/08/31"),
+    });
+    expect(sameMonth.card?.bills).toEqual([
+      bill("2026/10/31"),
+      bill("2026/09/30"),
+      bill("2026/08/31"),
+    ]);
+    expect(sameMonth.report.failedCount).toBe(0);
     // 新卡：本期繳款與帳單清單都查無資料，只有額度。
     const fresh = await runCard({ [LIMIT_VIEW]: { creditLine: "20,000" } });
     expect(fresh.card).toEqual({ limit: { creditLine: "20,000" }, bills: [] });
@@ -200,19 +218,6 @@ describe("彰化銀行逐項擷取", () => {
     expect(badList.card).toEqual({ status, bills: [] });
     expect(badList.report.counts.cardBills.failed).toBe(1);
     expect(badList.requests.some((r) => r.method === "POST")).toBe(false);
-    // 同月兩期：較新的一期查詢失敗時，不查同月較舊的一期，以免它覆寫已存的帳單。
-    const sameMonth = await runCard({
-      [LIST_VIEW]: {
-        list: [{ stmtDate: "20261001" }, { stmtDate: "20261031" }],
-      },
-      "CA01002/ca01002_1_Action:20261031": new ChbApiError("E999", "x"),
-      "CA01002/ca01002_1_Action:20261001": { stmtDate: "2026/10/01" },
-    });
-    expect(sameMonth.card).toEqual({ bills: [] });
-    expect(sameMonth.requests.filter((r) => r.method === "POST")).toHaveLength(
-      1,
-    );
-    expect(sameMonth.report.counts.cardBills.failed).toBe(1);
   });
 
   it("貸款與信用卡是附加資料：不受存款連續失敗影響，中斷或超時都保留已取得的資料", async () => {
