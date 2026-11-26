@@ -410,30 +410,33 @@ async function openIescCardPage(browser: Browser, portalPage: Page) {
 }
 
 async function clickVisibleControl(page: Page, label: string) {
+  // 玉山 2026-11 改版後，首頁「刷卡明細」改為 div[role="link"]，不再是 button。
   await page.waitForFunction(
     (expected) =>
-      Array.from(document.querySelectorAll("button, a")).some((element) => {
-        const box = element.getBoundingClientRect();
-        return (
-          element.textContent?.trim() === expected &&
-          box.width > 0 &&
-          box.height > 0
-        );
-      }),
+      Array.from(document.querySelectorAll('button, a, [role="link"]')).some(
+        (element) => {
+          const box = element.getBoundingClientRect();
+          return (
+            element.textContent?.trim() === expected &&
+            box.width > 0 &&
+            box.height > 0
+          );
+        },
+      ),
     { timeout: 15000 },
     label,
   );
   await page.evaluate((expected) => {
-    const item = Array.from(document.querySelectorAll("button, a")).find(
-      (element) => {
-        const box = element.getBoundingClientRect();
-        return (
-          element.textContent?.trim() === expected &&
-          box.width > 0 &&
-          box.height > 0
-        );
-      },
-    );
+    const item = Array.from(
+      document.querySelectorAll('button, a, [role="link"]'),
+    ).find((element) => {
+      const box = element.getBoundingClientRect();
+      return (
+        element.textContent?.trim() === expected &&
+        box.width > 0 &&
+        box.height > 0
+      );
+    });
     (item as HTMLElement | undefined)?.click();
   }, label);
 }
