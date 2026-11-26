@@ -5,9 +5,11 @@ import {
   ChbSyncReport,
   chbBalanceMismatches,
   chbDataCheckSum,
+  chbDepositsUnavailable,
   chbDepositTransactions,
   chbDepositSourceId,
   chbFcItemAccount,
+  chbLoanSourceId,
   chbQueryRange,
   chbRequestBody,
   chbTwItemAccountNo,
@@ -109,6 +111,33 @@ describe("彰化銀行 REST 回應", () => {
       expect(error).toBeInstanceOf(ChbApiError);
       expect((error as ChbApiError).returnCode).toBe("E005");
       expect((error as Error).message).not.toMatch(/巧翎|1234567890/);
+      // 「查無資料」只留下判斷結果，讓沒有貸款的帳號不被當成查詢失敗。
+      expect((error as ChbApiError).noData).toBe(true);
+    }
+    try {
+      parseChbRestResponse(
+        JSON.stringify({
+          isSuccess: false,
+          returnCode: "E005",
+          returnMessage: "系統忙碌中",
+        }),
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ChbApiError).noData).toBe(false);
+    }
+    // 其他回覆代碼就算訊息含「查無資料」也是失敗，不可當成沒有資料。
+    try {
+      parseChbRestResponse(
+        JSON.stringify({
+          isSuccess: false,
+          returnCode: "E999",
+          returnMessage: "系統異常，查無資料",
+        }),
+      );
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ChbApiError).noData).toBe(false);
     }
     expect(() => parseChbRestResponse("<html>")).toThrow(ChbApiError);
   });
@@ -460,6 +489,207 @@ describe("彰化銀行帳戶與資料正規化", () => {
     expect(summary.twBalanceChecked).toBe(2);
   });
 
+  // 貸款回應的欄位與格式依實機回應，數值為合成值。
+  const loanRow = {
+    accTypeName: "信用貸款",
+    account: "0000-99-12345-6-0001",
+    startDate: "2024/04/30",
+    endDate: "2031/04/30",
+    moneyType: "TWD",
+    apAmt: "400,000.00",
+    actBal: "357,738.00",
+    fitIrt: "2.19%",
+    total: "2,052.00",
+    date: "2026/11/25",
+    // 扣帳帳號是同一位客戶的彰銀臺幣存款帳號。
+    payActno: "0000-12-34567-8-90",
+    key: "0000991234560001~~~00~~~",
+  };
+  const parseLoans = (loans: unknown) => {
+    const report = new ChbSyncReport();
+    const data = parseChbData(
+      { ...payloads, loans },
+      new Date("2026-10-31T04:00:00Z"),
+      report,
+    );
+    return {
+      data,
+      report,
+      loans: data.bankAccounts.filter((a) => a.accountType === "loan"),
+      snapshots: data.bankBalanceSnapshots.filter((snapshot) =>
+        snapshot.accountId.startsWith("loan:"),
+      ),
+    };
+  };
+
+  it("有貸款：負值餘額、分類、利率、應繳資訊與扣款帳戶；清單完整時回報本次的貸款", () => {
+    const { data, report, loans, snapshots } = parseLoans({
+      generalLoanSuccess: true,
+      generalLoanErrorMessage: "",
+      generalLoanData: [
+        loanRow,
+        // 房貸在彰銀顯示為「擔保貸款」；利率有三位小數；頁面沒有顯示扣帳帳號。
+        {
+          ...loanRow,
+          accTypeName: "擔保貸款",
+          account: "0000-98-12345-6-0001",
+          endDate: "2064/04/25",
+          actBal: "10,000,000.00",
+          fitIrt: "2.275%",
+          total: "14,791.00",
+          payActno: "",
+          key: "0000981234560001~~~00~~~",
+        },
+      ],
+      trancheLoanData: [],
+    });
+    const creditId = chbLoanSourceId("0000991234560001");
+    const securedId = chbLoanSourceId("0000981234560001");
+    expect(loans).toMatchObject([
+      {
+        sourceId: creditId,
+        accountName: "信用貸款 末四碼 0001",
+        loanCategory: "personal",
+        loanInterestRate: 2.19,
+        currency: "TWD",
+        openedDate: "2024-04-30",
+        maturityDate: "2031-04-30",
+        autopayAccount: {
+          bankCode: "009",
+          last4: "7890",
+          depositSourceId: chbDepositSourceId(twAccountNo),
+        },
+      },
+      {
+        sourceId: securedId,
+        accountName: "房屋貸款 末四碼 0001",
+        loanCategory: "housing",
+        loanInterestRate: 2.275,
+        autopayAccount: null,
+      },
+    ]);
+    expect(snapshots).toMatchObject([
+      {
+        sourceId: `snapshot:${creditId}:2026-10-31`,
+        balance: -357738,
+        loanPaymentAmount: 2052,
+        paymentDueDate: "2026-11-25",
+      },
+      { accountId: securedId, balance: -10000000, loanPaymentAmount: 14791 },
+    ]);
+    // 存款不受影響；清單完整，本次的貸款可用來停用已消失的貸款。
+    expect(
+      data.bankAccounts.filter((a) => a.accountType === "savings"),
+    ).toHaveLength(2);
+    expect(data.loanSourceIds).toEqual([creditId, securedId]);
+    expect(report.failedCount).toBe(1); // 既有 fixture 的一筆存款明細失敗
+    expect(JSON.stringify(data)).not.toContain("0000991234560001");
+  });
+
+  it("貸款邊界：同帳號不同序號各自一筆，重複列與格式不符的列拒絕，有拒絕時不停用任何貸款", () => {
+    const { data, report, loans, snapshots } = parseLoans({
+      generalLoanSuccess: true,
+      generalLoanData: [
+        { ...loanRow, actBal: "0.00", fitIrt: "999%" },
+        // 帳號與序號都相同：拒絕，不覆蓋第一列。
+        { ...loanRow, actBal: "100,000.00" },
+        // 同帳號、不同序號：另一筆撥款。
+        { ...loanRow, actBal: "5,000.00", key: "0000991234560001~~~01~~~" },
+        { ...loanRow, account: "0000-99-12345-6-0002", actBal: "" },
+        { ...loanRow, account: "0000-99-12345-6-0003", moneyType: "新臺幣" },
+        // 產品名稱帶完整帳號時遮罩。
+        {
+          ...loanRow,
+          account: "0000-99-12345-6-0004",
+          accTypeName: "擔保貸款 0000991234560004",
+          fitIrt: "２．２７５％",
+          payActno: "7000-01-23456-7-89",
+        },
+      ],
+    });
+    expect(loans.map((loan) => loan.sourceId)).toEqual([
+      chbLoanSourceId("0000991234560001"),
+      chbLoanSourceId("0000991234560001", "01"),
+      chbLoanSourceId("0000991234560004"),
+    ]);
+    expect(report.counts.loans).toEqual({ ok: 3, failed: 0, rowsRejected: 3 });
+    // 餘額 0 不是 -0；荒謬的利率不寫入，全形照常解析；他行扣帳帳號只留末四碼。
+    expect(Object.is(snapshots[0]?.balance, 0)).toBe(true);
+    expect(loans.map((loan) => loan.loanInterestRate)).toEqual([
+      undefined,
+      2.19,
+      2.275,
+    ]);
+    expect(loans[2]?.autopayAccount).toEqual({ last4: "6789" });
+    // 有被拒絕的列時清單不完整，不能據此停用貸款。
+    expect(data.loanSourceIds).toBeUndefined();
+    const serialized = JSON.stringify(data);
+    for (const full of ["0000991234560004", "70000123456789"]) {
+      expect(serialized).not.toContain(full);
+    }
+  });
+
+  it("沒有貸款：不寫入任何貸款、不算失敗，存款照常；查詢未成功則記為貸款失敗", () => {
+    const depositOnly = parseLoans(undefined);
+    for (const [loans, completeIds] of [
+      // 銀行明確回覆成功且清單為空：可停用全部舊貸款。
+      [
+        { generalLoanSuccess: true, generalLoanData: [], trancheLoanData: [] },
+        [],
+      ],
+      // E005「查無資料」（connector 轉成空物件）與回應內的查無資料訊息：沒有實機樣本，不停用。
+      [{}, undefined],
+      [
+        { generalLoanSuccess: false, generalLoanErrorMessage: "查無資料" },
+        undefined,
+      ],
+      // 成功旗標但缺少清單、或附帶錯誤訊息：不能當成完整的空清單而停用全部貸款。
+      [{ generalLoanSuccess: true }, undefined],
+      [{ generalLoanSuccess: true, generalLoanData: null }, undefined],
+      [{ generalLoanSuccess: true, generalLoanList: [] }, undefined],
+      [
+        {
+          generalLoanSuccess: true,
+          generalLoanErrorMessage: "系統忙碌",
+          generalLoanData: [],
+        },
+        undefined,
+      ],
+    ] as const) {
+      const { data, report, loans: rows } = parseLoans(loans);
+      expect(rows).toEqual([]);
+      expect(data.bankAccounts).toEqual(depositOnly.data.bankAccounts);
+      expect(report.failedCount).toBe(depositOnly.report.failedCount);
+      expect(data.loanSourceIds).toEqual(completeIds);
+    }
+    // 不是查無資料的未成功回應：記一筆貸款失敗，存款仍寫入，不停用貸款。
+    const failed = parseLoans({
+      generalLoanSuccess: false,
+      generalLoanErrorMessage: "系統忙碌",
+    });
+    expect(failed.data.bankAccounts).toEqual(depositOnly.data.bankAccounts);
+    expect(failed.report.counts.loans.failed).toBe(1);
+    expect(failed.data.loanSourceIds).toBeUndefined();
+  });
+
+  it("存款完全沒有取得時，貸款成功也不能讓同步算成功", () => {
+    const check = (base: ChbPayloads, failDeposits: boolean) => {
+      const report = new ChbSyncReport();
+      if (failDeposits) report.fail("twBalance", "fetch", new Error("x"));
+      const data = parseChbData(
+        { ...base, loans: { generalLoanData: [loanRow] } },
+        undefined,
+        report,
+      );
+      return chbDepositsUnavailable(data, report);
+    };
+    const noDeposits = { twTransactions: [], fcTransactions: [] };
+    expect(check(noDeposits, true)).toBe(true);
+    // 客戶沒有存款帳戶但查詢沒有失敗，或失敗但仍取得存款：不算。
+    expect(check(noDeposits, false)).toBe(false);
+    expect(check(payloads, true)).toBe(false);
+  });
+
   it("同一查詢內完全相同的兩筆以序號區分，不會被當成重複而遺失", () => {
     const row = {
       amount: -500,
@@ -529,6 +759,7 @@ describe("彰化銀行設定與憑證", () => {
 
     const entry = connectorCatalog.chb;
     expect(entry.bankCode).toBe("009");
+    expect(entry.capabilities).toContain("loan");
     expect(entry.connectionMode).toBe("browser_captcha_session");
     expect(entry.publicFields).toEqual([]);
     expect(entry.credentialFields.map((field) => field.key)).toEqual([

@@ -1,4 +1,5 @@
 import type {
+  AutopayAccountHint,
   BankAccount,
   BankBalanceSnapshot,
   BankTransaction,
@@ -6,6 +7,7 @@ import type {
 import forge from "node-forge";
 import { z } from "zod";
 import { depositAccountName } from "../deposit-account-name";
+import { loanAccountName } from "../loan-account-name";
 import { BANK_SYNC_MONTHS } from "../sync-window";
 
 // 彰化銀行個人網路銀行（www.chb.com.tw/chbnib）。登入由頁面自己加密密碼後送出；
@@ -52,11 +54,15 @@ export class ChbRowRejectedError extends ChbProtocolError {
   }
 }
 
-/** `/chbnib/rest` 回覆 `isSuccess: false` 或非 `S001`；只帶回覆代碼，不帶回覆內容。 */
+/**
+ * `/chbnib/rest` 回覆 `isSuccess: false` 或非 `S001`；只帶回覆代碼，不帶回覆內容。
+ * `noData` 表示回覆是 `E005`「查無資料」（該查詢沒有資料列），只保留這個判斷結果。
+ */
 export class ChbApiError extends ChbProtocolError {
   constructor(
     readonly returnCode: string,
     message: string,
+    readonly noData = false,
   ) {
     super(message);
     this.name = "ChbApiError";
@@ -172,10 +178,17 @@ export function parseChbRestResponse(text: string): unknown {
     throw new ChbApiError(
       code || "NO_CODE",
       `彰化銀行查詢失敗（回覆代碼 ${safeCode(code)}）。`,
+      code === NO_DATA_CODE &&
+        typeof body.returnMessage === "string" &&
+        NO_DATA_MESSAGE.test(body.returnMessage),
     );
   }
   return body.data;
 }
+
+/** 銀行以回覆代碼 `E005` 加上這段文字表示該查詢沒有任何資料列（實機：信用卡未出帳明細）。 */
+const NO_DATA_CODE = "E005";
+const NO_DATA_MESSAGE = /查無資料/;
 
 function safeCode(code: string) {
   return /^[A-Za-z0-9_-]{1,16}$/.test(code) ? code : "unknown";
@@ -190,6 +203,7 @@ export const CHB_SYNC_CATEGORIES = {
   twTransactions: "台幣明細",
   fcBalance: "外幣餘額",
   fcTransactions: "外幣明細",
+  loans: "貸款",
 } as const;
 
 export type ChbSyncCategory = keyof typeof CHB_SYNC_CATEGORIES;
@@ -729,6 +743,194 @@ export function parseChbFcBalance(data: unknown) {
 }
 
 // ---------------------------------------------------------------------------
+// 貸款
+// ---------------------------------------------------------------------------
+
+/**
+ * 貸款帳戶 sourceId：`loan:chb:<完整帳號 SHA-256 前 16 碼>`；不保存完整帳號。
+ * `subNumber` 是回應 `key`（`<帳號>~~~<序號>~~~`）的第二段；實機都是 `00`，只有不是 `00` 時才納入雜湊，
+ * 用來區分同一個帳號底下的多筆撥款。
+ * TODO(chb-live): 同帳號多筆撥款的回應沒有實機樣本。
+ */
+export function chbLoanSourceId(accountNo: string, subNumber = "00") {
+  const normalized = digitsOnly(toHalfWidth(accountNo));
+  const identity =
+    subNumber === "00" ? normalized : `${normalized}:${subNumber}`;
+  return `loan:chb:${stableHash(`chb:loan:${identity}`)}`;
+}
+
+/**
+ * 帳戶別 `accTypeName` 對應系統分類。實機只看到「信用貸款」與「擔保貸款」，房貸也顯示為
+ * 「擔保貸款」，沒有另外的房貸名稱，所以擔保類一律視為 `housing`。
+ */
+function chbLoanCategory(
+  typeName: string,
+): NonNullable<BankAccount["loanCategory"]> {
+  if (/信用|信貸|無擔保/.test(typeName)) return "personal";
+  if (/擔保|房|住宅/.test(typeName)) return "housing";
+  return "other";
+}
+
+/**
+ * 網銀顯示的扣款帳號（貸款 `payActno`）。不保存完整帳號。
+ * - 14 碼且就是本次同步到的彰銀臺幣存款帳戶：寫入銀行代碼、末四碼與存款 sourceId。
+ * - 其他帳號（可能是他行帳號）：只留末四碼，不標銀行、不算雜湊。
+ * - 空字串：頁面沒有顯示扣款帳號，為 null。
+ * - 欄位不存在、內容含遮罩或其他文字而無法辨識，或本次沒有取得臺幣存款帳戶而無從比對：undefined，保留既有資料
+ *   （寫入只有末四碼的值會蓋掉上次正確對應的扣款帳戶）。
+ */
+function chbAutopayAccount(
+  value: unknown,
+  depositSourceIds: ReadonlySet<string>,
+): { autopayAccount?: AutopayAccountHint | null } {
+  if (value === undefined || value === null) return {};
+  const raw = text(value);
+  if (raw === "") return { autopayAccount: null };
+  const display = toHalfWidth(raw);
+  const accountNo = digitsOnly(display);
+  // 含遮罩或其他文字的值無法得到正確末四碼，視為無法辨識。
+  if (
+    !/^[\d\s-]+$/.test(display) ||
+    accountNo.length < 6 ||
+    depositSourceIds.size === 0
+  ) {
+    return {};
+  }
+  const depositSourceId = chbDepositSourceId(accountNo);
+  return {
+    autopayAccount:
+      accountNo.length === 14 && depositSourceIds.has(depositSourceId)
+        ? {
+            bankCode: CHB_BANK_CODE,
+            last4: accountNo.slice(-4),
+            depositSourceId,
+          }
+        : { last4: accountNo.slice(-4) },
+  };
+}
+
+/** 選填欄位：無值或格式不符都回傳 undefined，不因此拒絕整筆資料。 */
+function optionalChbAmount(value: unknown) {
+  try {
+    return parseChbAmount(value);
+  } catch {
+    return undefined;
+  }
+}
+
+/** 利率字串（如 `2.275%`）的百分點數值；不走金額解析，避免被四捨五入到小數兩位。 */
+function parseChbRatePct(value: unknown) {
+  const matched = toHalfWidth(text(value)).match(/^(\d+(?:\.\d+)?)\s*%?$/);
+  const rate = matched ? Number(matched[1]) : Number.NaN;
+  return rate >= 0 && rate <= 100 ? rate : undefined;
+}
+
+type ChbLoan = {
+  account: Omit<BankAccount, "id" | "connectorId">;
+  snapshot: Omit<BankBalanceSnapshot, "id" | "connectorId">;
+};
+
+/**
+ * 貸款帳戶查詢 `LO01001/lo01001_1_View` 的一般貸款 `generalLoanData[]`（欄位依實機回應）：
+ * `account` 帳號、`accTypeName` 帳戶別、`actBal` 貸款餘額（以負值保存）、`apAmt` 初放金額、
+ * `fitIrt` 利率（`2.19%`，百分點）、`startDate`／`endDate` 初放日與到期日、`total` 應繳本息、
+ * `date` 繳款日、`payActno` 扣帳帳號（彰銀存款帳號）。額度貸款 `trancheLoanData[]` 尚未接入，只回報筆數。
+ * `complete`：銀行明確回覆成功（`generalLoanSuccess: true`、沒有錯誤訊息、`generalLoanData` 是陣列）且每一列都解析成功，
+ * 才能據此停用已消失的貸款。
+ * TODO(chb-live): 沒有貸款時的回應未經實機確認；`generalLoanSuccess: false` 且訊息含「查無資料」視為沒有貸款。
+ */
+function parseChbLoans(
+  data: unknown,
+  now = new Date(),
+  depositSourceIds: ReadonlySet<string>,
+) {
+  const record = asRecord(data);
+  if (!record) throw new ChbProtocolError("彰化銀行貸款查詢回應格式不符。");
+  if (
+    record.generalLoanSuccess === false &&
+    !NO_DATA_MESSAGE.test(text(record.generalLoanErrorMessage))
+  ) {
+    throw new ChbProtocolError("彰化銀行貸款查詢未成功。");
+  }
+  const asOfAt = now.toISOString();
+  const snapshotDate = taipeiDate(now);
+  const loans: ChbLoan[] = [];
+  const rejected: string[] = [];
+  for (const row of asRows(record.generalLoanData)) {
+    try {
+      const accountNo = validAccountNo(row.account);
+      const currency = text(row.moneyType).toUpperCase();
+      if (!/^[A-Z]{3}$/.test(currency)) {
+        throw new ChbRowRejectedError("貸款的幣別不符。");
+      }
+      const balance = parseChbAmount(row.actBal);
+      if (balance === undefined) {
+        throw new ChbRowRejectedError("貸款缺少餘額。");
+      }
+      const subNumber = digitsOnly(text(row.key).split("~~~")[1] ?? "");
+      const sourceId = chbLoanSourceId(accountNo, subNumber || "00");
+      if (loans.some((loan) => loan.account.sourceId === sourceId)) {
+        // 帳號與序號都相同的兩列無法區分，後一列會覆蓋前一列的餘額；拒絕並記錄。
+        throw new ChbRowRejectedError("貸款帳號重複。");
+      }
+      const productName = maskChbText(text(row.accTypeName));
+      const loanCategory = chbLoanCategory(productName);
+      const loanInterestRate = parseChbRatePct(row.fitIrt);
+      const paymentAmount = optionalChbAmount(row.total);
+      const paymentDueDate = parseChbDate(row.date);
+      const remaining = balance === 0 ? 0 : -Math.abs(balance);
+      loans.push({
+        account: {
+          sourceId,
+          institutionName: CHB_INSTITUTION_NAME,
+          accountName: loanAccountName(loanCategory, accountNo),
+          accountType: "loan",
+          loanCategory,
+          ...(loanInterestRate !== undefined ? { loanInterestRate } : {}),
+          currency,
+          openedDate: parseChbDate(row.startDate),
+          maturityDate: parseChbDate(row.endDate),
+          ...chbAutopayAccount(row.payActno, depositSourceIds),
+          raw: {
+            bankCode: CHB_BANK_CODE,
+            accountLast4: accountNo.slice(-4),
+            productName: productName || undefined,
+            initialAmount: optionalChbAmount(row.apAmt),
+            annualRatePct: loanInterestRate,
+          },
+        },
+        snapshot: {
+          accountId: sourceId,
+          sourceId: `snapshot:${sourceId}:${snapshotDate}`,
+          balance: remaining,
+          ...(paymentDueDate ? { paymentDueDate } : {}),
+          ...(paymentAmount !== undefined
+            ? { loanPaymentAmount: paymentAmount }
+            : {}),
+          currency,
+          asOfAt,
+          raw: { balance: remaining },
+        },
+      });
+    } catch (error) {
+      rejected.push(error instanceof Error ? error.message : "列格式不符。");
+    }
+  }
+  return {
+    loans,
+    rejected,
+    complete:
+      record.generalLoanSuccess === true &&
+      text(record.generalLoanErrorMessage) === "" &&
+      Array.isArray(record.generalLoanData) &&
+      rejected.length === 0,
+    trancheSkipped: Array.isArray(record.trancheLoanData)
+      ? record.trancheLoanData.length
+      : 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 交易明細
 // ---------------------------------------------------------------------------
 
@@ -941,6 +1143,8 @@ export type ChbPayloads = {
     currency: string;
     data: unknown;
   }>;
+  /** 貸款帳戶查詢 View 回應的 `data`；沒有貸款時為空物件。 */
+  loans?: unknown;
 };
 
 export type ChbBalanceCheck = {
@@ -957,6 +1161,10 @@ export type ChbData = {
   balanceChecks: { tw: ChbBalanceCheck[]; fc: ChbBalanceCheck[] };
   /** 回應 `totalCount` 大於實際解析筆數的查詢數（可能被截斷）。 */
   truncationSuspected: number;
+  /** 尚未接入而略過的額度貸款筆數。 */
+  trancheLoansSkipped: number;
+  /** 貸款清單完整時，本次出現的貸款 sourceId（可能為空陣列）；不完整時為 undefined，不停用任何貸款。 */
+  loanSourceIds?: string[];
 };
 
 /**
@@ -1085,23 +1293,72 @@ export function parseChbData(
     addTransactions("fc", entry.accountNo, entry.currency, entry.data);
   }
 
+  // 扣款帳號只對應本次同步到的臺幣存款帳戶；沒有臺幣帳戶時無從比對，保留既有資料。
+  const depositSourceIds = new Set(
+    [...accounts.values()]
+      .filter((account) => account.currency === "TWD")
+      .map((account) => account.sourceId),
+  );
+
+  // 貸款是附加資料：解析失敗只略過貸款，存款照常回傳。
+  let trancheLoansSkipped = 0;
+  let loanSourceIds: string[] | undefined;
+  if (payloads.loans !== undefined) {
+    try {
+      const parsed = parseChbLoans(payloads.loans, now, depositSourceIds);
+      for (const reason of parsed.rejected) {
+        report.rejectRow("loans", new ChbRowRejectedError(reason));
+      }
+      for (const loan of parsed.loans) {
+        bankAccounts.push(loan.account);
+        bankBalanceSnapshots.push(loan.snapshot);
+        report.ok("loans");
+      }
+      trancheLoansSkipped = parsed.trancheSkipped;
+      if (parsed.complete) {
+        loanSourceIds = parsed.loans.map((loan) => loan.account.sourceId);
+      }
+    } catch (error) {
+      report.fail("loans", "parse", error);
+    }
+  }
+
   return {
     bankAccounts,
     bankBalanceSnapshots,
     bankTransactions: dedupeBySourceId(bankTransactions),
     balanceChecks,
     truncationSuspected,
+    trancheLoansSkipped,
+    loanSourceIds,
   };
+}
+
+/**
+ * 存款查詢有失敗，而且沒有取得任何存款帳戶：整次同步應視為失敗。
+ * 貸款是附加資料，不能讓它的成功蓋過存款完全沒有取得。
+ */
+export function chbDepositsUnavailable(data: ChbData, report: ChbSyncReport) {
+  const failed = (
+    ["twBalance", "twTransactions", "fcBalance", "fcTransactions"] as const
+  ).some(
+    (key) => report.counts[key].failed + report.counts[key].rowsRejected > 0,
+  );
+  return failed && !data.bankAccounts.some((a) => a.accountType === "savings");
 }
 
 /** `chb_sync_result` 記錄內容：只含筆數，不含帳號、金額或名稱。 */
 export function summarizeChbResult(data: ChbData, report: ChbSyncReport) {
   const sum = (checks: ChbBalanceCheck[], key: "checked" | "mismatched") =>
     checks.reduce((total, check) => total + check[key], 0);
+  const deposits = data.bankAccounts.filter((a) => a.accountType === "savings");
   return {
     status: report.failedCount > 0 ? "partial" : "complete",
-    twAccounts: data.bankAccounts.filter((a) => a.currency === "TWD").length,
-    fcAccounts: data.bankAccounts.filter((a) => a.currency !== "TWD").length,
+    twAccounts: deposits.filter((a) => a.currency === "TWD").length,
+    fcAccounts: deposits.filter((a) => a.currency !== "TWD").length,
+    loans: data.bankAccounts.filter((a) => a.accountType === "loan").length,
+    trancheLoansSkipped: data.trancheLoansSkipped,
+    loansComplete: data.loanSourceIds !== undefined,
     transactions: data.bankTransactions.length,
     twBalanceChecked: sum(data.balanceChecks.tw, "checked"),
     twBalanceMismatch: sum(data.balanceChecks.tw, "mismatched"),

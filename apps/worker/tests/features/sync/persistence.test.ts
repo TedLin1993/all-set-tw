@@ -27,6 +27,11 @@ import { parseNextbankMainAccount } from "../../../src/sources/nextbank/protocol
 import { prepareNextbankTransactionWrite } from "../../../src/sources/nextbank/transactions";
 import { prepareCardAuthorizationWrite } from "../../../src/features/sync/card-authorization-write";
 import { parseFirstbankData } from "../../../src/sources/firstbank/protocol";
+import {
+  parseChbData,
+  type ChbPayloads,
+} from "../../../src/sources/chb/protocol";
+import { deactivateMissingChbLoanAccountsStatement } from "../../../src/sources/chb/repository";
 import { parseHncbData } from "../../../src/sources/hncb/protocol";
 import { parseMegabankData } from "../../../src/sources/megabank/protocol";
 import {
@@ -2083,6 +2088,74 @@ describe("同步資料完整性（隔離 D1）", () => {
     expect((await listBankTransactions(db, 20))[0].authorizedAt).toBe(
       "2026-10-05T09:15:30+08:00",
     );
+  });
+
+  it("彰化銀行：還清的貸款停用、再出現時恢復；貸款清單不完整時不停用", async () => {
+    await db
+      .prepare(
+        "INSERT INTO connector_settings (id, connector_id, encrypted_config, sync_cursor, created_at, updated_at) VALUES ('chb', 'chb', 'config', 'old-cursor', 't', 't')",
+      )
+      .run();
+    // 合成資料，欄位依實機回應。
+    const loan = {
+      accTypeName: "信用貸款",
+      account: "0000-99-12345-6-0001",
+      moneyType: "TWD",
+      actBal: "2,000.00",
+      key: "0000991234560001~~~00~~~",
+    };
+    const write = async (payload: Partial<ChbPayloads>) => {
+      const data = parseChbData(
+        { twTransactions: [], fcTransactions: [], ...payload },
+        new Date("2026-10-01T04:00:00Z"),
+      );
+      const guard = { connectorId: "chb", encryptedConfig: "config" } as const;
+      return persistStagedSyncWrite(db, {
+        records: [
+          ...data.bankAccounts.map((item) =>
+            bankAccountRecord("chb", item, now),
+          ),
+          ...data.bankBalanceSnapshots.map((item) =>
+            bankBalanceSnapshotRecord("chb", item, now),
+          ),
+        ],
+        settingsGuard: guard,
+        afterPromoteStatements: [
+          linkCanonicalBankAccountsStatement(db, guard),
+          ...(data.loanSourceIds
+            ? [
+                deactivateMissingChbLoanAccountsStatement(
+                  db,
+                  data.loanSourceIds,
+                  now,
+                ),
+              ]
+            : []),
+        ],
+      });
+    };
+
+    // 清單完整且沒有這筆時停用，保留快照；查無資料（不完整）時不動；再出現時恢復。
+    const loanState = async () =>
+      (
+        await db
+          .prepare(
+            "SELECT inactive_at FROM bank_accounts WHERE connector_id = 'chb' AND account_type = 'loan'",
+          )
+          .all<{ inactive_at: string | null }>()
+      ).results.map((item) => item.inactive_at);
+    await write({
+      loans: { generalLoanSuccess: true, generalLoanData: [loan] },
+    });
+    expect(await loanState()).toEqual([null]);
+    await write({ loans: {} });
+    expect(await loanState()).toEqual([null]);
+    await write({ loans: { generalLoanSuccess: true, generalLoanData: [] } });
+    expect(await loanState()).toEqual([now]);
+    await write({
+      loans: { generalLoanSuccess: true, generalLoanData: [loan] },
+    });
+    expect(await loanState()).toEqual([null]);
   });
 
   it("台新 promotion 失敗一起回滾配對與 cursor，憑證變更後舊同步也不能移動偏好", async () => {

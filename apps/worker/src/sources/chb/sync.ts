@@ -20,6 +20,7 @@ import {
 import { decryptJson, encryptJson } from "../../platform/crypto";
 import { configEncryptionKey } from "../../platform/config";
 import { parseChbConfig, type ChbConfig } from "./protocol";
+import { deactivateMissingChbLoanAccountsStatement } from "./repository";
 import {
   createChbConnector,
   ChbAutoCaptchaFailedError,
@@ -247,18 +248,36 @@ export async function syncChb(
     ),
   ];
 
-  // 只有存款：沒有信用卡授權 feed，不接共用授權配對。
+  // 存款與貸款：沒有信用卡授權 feed，不接共用授權配對。
   const newRecords = await persistStagedSyncWrite(env.DB, {
     records,
     settingsGuard,
-    afterPromoteStatements:
-      bankAccounts.length > 0
+    afterPromoteStatements: [
+      ...(bankAccounts.length > 0
         ? [linkCanonicalBankAccountsStatement(env.DB, settingsGuard)]
-        : [],
+        : []),
+      ...(result.loanSourceIds
+        ? [
+            deactivateMissingChbLoanAccountsStatement(
+              env.DB,
+              result.loanSourceIds,
+              now,
+            ),
+          ]
+        : []),
+    ],
     finalizeStatements,
   });
 
-  if (bankBalanceSnapshots.length > 0) {
+  if (
+    bankBalanceSnapshots.some((snapshot) =>
+      bankAccounts.some(
+        (account) =>
+          account.sourceId === snapshot.accountId &&
+          account.accountType !== "loan",
+      ),
+    )
+  ) {
     await rebuildBankDepositHistory(env.DB, [dateFromIso(now)]);
   }
 

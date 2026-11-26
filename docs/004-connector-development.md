@@ -587,7 +587,7 @@ Email 驗證與部署環境的同步尚未驗證。網銀的「信任此瀏覽�
 
 ### 彰化銀行
 
-目前只同步台幣與外幣活存，信用卡（帳單 `CA01002`、未出帳明細）尚未接入。Fixture 與測試資料皆為合成值。
+目前同步台幣與外幣活存與一般貸款；額度貸款與信用卡（帳單 `CA01002`、未出帳明細）尚未接入。Fixture 與測試資料皆為合成值。
 
 #### 登入
 
@@ -600,7 +600,7 @@ Email 驗證與部署環境的同步尚未驗證。網銀的「信任此瀏覽�
 
 - 登入後所有資料都經 `POST /chbnib/rest`，body 為 `JSON.stringify({ url, method, taskID, data })`，在已登入的頁面內以 XMLHttpRequest 送出，讓頁面的反爬蟲腳本照常附加參數；一次一個、不可並行，因為伺服器會在回應時更新 session。不從 Worker 直接發 HTTP。
 - `DataCheckSum` 標頭為 `crc32(base64(utf8(body)))` 的十進位字串，由 Worker 計算（`protocol.ts` 的 `chbDataCheckSum`），使用標準 CRC-32（IEEE 802.3）與標準 Base64。
-- 回應為 `{ isSuccess, data, returnCode, returnMessage }`，只有 `S001` 視為成功；其餘以 `chb_api_error` 記錄，不記回覆內文。HTTP 401、403，或回覆代碼含 session、timeout、login、expire 時視為工作階段結束。
+- 回應為 `{ isSuccess, data, returnCode, returnMessage }`，只有 `S001` 視為成功；其餘以 `chb_api_error` 記錄，不記回覆內文。`E005` 且訊息含「查無資料」表示該查詢沒有資料列（實機：信用卡未出帳明細），不記 `chb_api_error`；貸款查詢視為沒有貸款，存款查詢仍算失敗。其他代碼即使訊息相同也是失敗。HTTP 401、403，或回覆代碼含 session、timeout、login、expire 時視為工作階段結束。
 - 每個功能先呼叫 View（`GET`）再呼叫 Action（`POST`）：
 
 | 用途     | View／Action                        | taskID    | 備註                                                                                                                 |
@@ -609,6 +609,7 @@ Email 驗證與部署環境的同步尚未驗證。網銀的「信任此瀏覽�
 | 台幣明細 | `TW01002/tw01002_1_View`／`_Action` | `tw01002` | View 帶 `accountData: "none"`（空物件會回 `E000`）；每個帳號各查一次；`inqType: "2"`、`range: "0"`（指定區間）       |
 | 外幣餘額 | `FC01001/fc01001_1_View`／`_Action` | `fc01001` | 有「全部」選項時一次查，否則逐項查詢並合併（log `chb_fc_balance_mode`）                                              |
 | 外幣明細 | `FC01002/fc01002_1_View`／`_Action` | `fc01002` | 每個帳號與幣別各查一次；選單 value 為 `<帳號>$$$<幣別>`                                                              |
+| 貸款     | `LO01001/lo01001_1_View`            | `lo01001` | 只呼叫 View，一次回傳全部一般貸款                                                                                    |
 
 - **日期**：Action 的起迄日格式照 View 回應的迄日（台幣 `queryEndDate`、外幣 `endDate`）：3 位數年份為民國年，沿用相同分隔符；起日為迄日往前 3 個月。View 沒有可解析的迄日時該功能失敗，不猜格式。
 - **金額方向**：台幣明細的支出 `expenseBetr`、存入 `depositedBetr` 分欄，須恰有一欄有非零金額；`hcode == "1"` 為更正交易（保留於 `raw.adjustment`），方向與所在欄位相反。外幣明細的 `expense == 1` 為支出，其餘為存入。同步結束的 `chb_sync_result` 記錄「上一筆餘額＋本筆金額＝本筆餘額」不一致的筆數（`twBalanceMismatch`、`fcBalanceMismatch`），用來驗證方向判斷；回應 `totalCount` 大於解析筆數時累計 `truncationSuspected`。
@@ -618,9 +619,11 @@ Email 驗證與部署環境的同步尚未驗證。網銀的「信任此瀏覽�
 
 - 存款帳戶為 `bank:chb:<末四碼>:<完整帳號 SHA-256 前 16 碼>`，外幣再加 `:<幣別>`；銀行代碼 `009`，已加入直接存款來源。不保存完整帳號；快照依台灣日期每天一筆。
 - 交易 sourceId 為 `chb:deposit:tx:v1:<hash>:<序號>`，hash 由帳號、幣別、交易日、記帳日、交易時間、帶正負號金額（更正列取反轉前的方向，方向修正不改 sourceId）、交易後餘額與摘要組成。交易時間可解析時以 `+08:00` 保存為 `authorizedAt`，記帳日為 `postedDate`。
-- **部分失敗**：與台北富邦、遠東商銀相同，登入後單一查詢失敗只略過該項，連續三項失敗即停止，結束時記錄 `chb_sync_summary` 與 `chb_sync_result`。明細只寫入餘額回應中已出現的帳戶。
+- **貸款**：每筆輸出 `loan:chb:<帳號 SHA-256 前 16 碼>` 帳戶與每日快照；`key`（`<帳號>~~~<序號>~~~`）的序號不是 `00` 時一併納入雜湊。`actBal` 以負值保存；`fitIrt` 為百分點利率（超過 100 或格式不符不寫）；`startDate`／`endDate`、`total`（應繳本息）、`date`（繳款日）分別為開戶日／到期日、`loan_payment_amount`、`payment_due_date`。`accTypeName` 含信用、信貸或無擔保為 `personal`，含擔保、房或住宅為 `housing`（彰銀的房貸顯示為「擔保貸款」），其他為 `other`。帳號與序號重複、缺餘額或幣別不符的列拒絕並記錄。`E005` 查無資料，或 `generalLoanSuccess: false` 且訊息含「查無資料」，視為沒有貸款，不算失敗。只有 `generalLoanSuccess: true`、沒有錯誤訊息、`generalLoanData` 是陣列且每列都解析成功時，才停用這次沒出現的舊貸款（`inactive_at`，保留快照）；貸款再出現時恢復。額度貸款 `trancheLoanData[]` 只在 `chb_sync_result` 記錄筆數。
+- **自動扣繳帳戶**（貸款 `payActno`）：等於本次同步到的彰銀臺幣存款帳號時，寫入銀行代碼、末四碼與存款 sourceId；其他帳號只留末四碼；空字串為 `null`；含遮罩或文字、或本次沒有取得臺幣存款帳戶時不寫，保留既有資料。
+- **部分失敗**：登入後單一查詢失敗只略過該項，連續三項失敗即停止，結束時記錄 `chb_sync_summary` 與 `chb_sync_result`。明細只寫入餘額回應中已出現的帳戶。存款查詢有失敗且沒有取得任何存款帳戶時，整次同步失敗。貸款在存款之後查詢：存款餘額都沒取得時不查；用另一個連續失敗計數；途中工作階段結束或瀏覽器斷線時記一筆失敗（`chb_extras_aborted`），保留已取得的存款，不讓整次同步失敗。
 
-登入失敗訊息的分類與工作階段失效的回覆代碼尚未確認，程式中以 `TODO(chb-live)` 標示。
+登入失敗訊息的分類、工作階段失效的回覆代碼，以及沒有貸款、同帳號多筆撥款時的回應尚未確認，程式中以 `TODO(chb-live)` 標示。
 
 ### 將來銀行
 
