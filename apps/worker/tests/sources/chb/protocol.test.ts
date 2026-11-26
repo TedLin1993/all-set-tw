@@ -594,8 +594,13 @@ describe("彰化銀行帳戶與資料正規化", () => {
         { ...loanRow, actBal: "0.00", fitIrt: "999%" },
         // 帳號與序號都相同：拒絕，不覆蓋第一列。
         { ...loanRow, actBal: "100,000.00" },
-        // 同帳號、不同序號：另一筆撥款。
-        { ...loanRow, actBal: "5,000.00", key: "0000991234560001~~~01~~~" },
+        // 同帳號、不同序號：另一筆撥款。扣帳帳號不是字串：無法辨識。
+        {
+          ...loanRow,
+          actBal: "5,000.00",
+          key: "0000991234560001~~~01~~~",
+          payActno: {},
+        },
         { ...loanRow, account: "0000-99-12345-6-0002", actBal: "" },
         { ...loanRow, account: "0000-99-12345-6-0003", moneyType: "新臺幣" },
         // 產品名稱帶完整帳號時遮罩。
@@ -622,6 +627,8 @@ describe("彰化銀行帳戶與資料正規化", () => {
       2.275,
     ]);
     expect(loans[2]?.autopayAccount).toEqual({ last4: "6789" });
+    // 無法辨識的扣帳帳號不寫，保留既有資料（不是 null 的「未設定」）。
+    expect(loans[1]?.autopayAccount).toBeUndefined();
     // 有被拒絕的列時清單不完整，不能據此停用貸款。
     expect(data.loanSourceIds).toBeUndefined();
     const serialized = JSON.stringify(data);

@@ -267,6 +267,7 @@ export async function syncChb(
               env.DB,
               result.loanSourceIds,
               now,
+              settingsGuard,
             ),
           ]
         : []),

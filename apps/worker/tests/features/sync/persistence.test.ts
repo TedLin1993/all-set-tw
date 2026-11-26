@@ -2129,12 +2129,15 @@ describe("同步資料完整性（隔離 D1）", () => {
       actBal: "2,000.00",
       key: "0000991234560001~~~00~~~",
     };
-    const write = async (payload: Partial<ChbPayloads>) => {
+    const write = async (
+      payload: Partial<ChbPayloads>,
+      encryptedConfig = "config",
+    ) => {
       const data = parseChbData(
         { twTransactions: [], fcTransactions: [], ...payload },
         new Date("2026-10-01T04:00:00Z"),
       );
-      const guard = { connectorId: "chb", encryptedConfig: "config" } as const;
+      const guard = { connectorId: "chb", encryptedConfig } as const;
       return persistStagedSyncWrite(db, {
         records: [
           ...data.bankAccounts.map((item) =>
@@ -2159,6 +2162,7 @@ describe("同步資料完整性（隔離 D1）", () => {
                   db,
                   data.loanSourceIds,
                   now,
+                  guard,
                 ),
               ]
             : []),
@@ -2238,6 +2242,12 @@ describe("同步資料完整性（隔離 D1）", () => {
     await write({
       loans: { generalLoanSuccess: true, generalLoanData: [loan] },
     });
+    expect(await loanState()).toEqual([null]);
+    // 同步期間設定已變更：暫存資料被丟棄，也不停用貸款。
+    await write(
+      { loans: { generalLoanSuccess: true, generalLoanData: [] } },
+      "changed",
+    );
     expect(await loanState()).toEqual([null]);
   });
 

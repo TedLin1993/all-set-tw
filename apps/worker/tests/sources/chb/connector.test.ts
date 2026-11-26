@@ -200,6 +200,19 @@ describe("彰化銀行逐項擷取", () => {
     expect(badList.card).toEqual({ status, bills: [] });
     expect(badList.report.counts.cardBills.failed).toBe(1);
     expect(badList.requests.some((r) => r.method === "POST")).toBe(false);
+    // 同月兩期：較新的一期查詢失敗時，不查同月較舊的一期，以免它覆寫已存的帳單。
+    const sameMonth = await runCard({
+      [LIST_VIEW]: {
+        list: [{ stmtDate: "20261001" }, { stmtDate: "20261031" }],
+      },
+      "CA01002/ca01002_1_Action:20261031": new ChbApiError("E999", "x"),
+      "CA01002/ca01002_1_Action:20261001": { stmtDate: "2026/10/01" },
+    });
+    expect(sameMonth.card).toEqual({ bills: [] });
+    expect(sameMonth.requests.filter((r) => r.method === "POST")).toHaveLength(
+      1,
+    );
+    expect(sameMonth.report.counts.cardBills.failed).toBe(1);
   });
 
   it("貸款與信用卡是附加資料：不受存款連續失敗影響，中斷或超時都保留已取得的資料", async () => {

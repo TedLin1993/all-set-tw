@@ -1258,9 +1258,13 @@ export async function fetchChbCard(
     const list = await view("CA01002");
     return list === null ? [] : chbCardBillListRows(list);
   });
-  for (const row of rows ?? []) {
+  // 帳單以月份識別。同月有兩期（例如變更結帳日）而較新的一期沒有取得時，不查同月較舊的一期，
+  // 以免它覆寫已存的帳單。
+  const missedPeriods = new Set<string>();
+  for (const { row, period } of rows ?? []) {
     found = true;
-    await steps.run("cardBills", "fetch", async () => {
+    if (missedPeriods.has(period)) continue;
+    const fetched = await steps.run("cardBills", "fetch", async () => {
       const bill = await rest({
         url: "CA01002/ca01002_1_Action",
         method: "POST",
@@ -1273,7 +1277,9 @@ export async function fetchChbCard(
         );
       }
       card.bills.push(bill);
+      return true;
     });
+    if (!fetched) missedPeriods.add(period);
   }
   if (!found) {
     // 三個 View 都回查無資料才是沒有信用卡；有查詢失敗時只是這次沒有取得。

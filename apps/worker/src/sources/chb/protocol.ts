@@ -785,15 +785,15 @@ function chbLoanCategory(
  * - 14 碼且就是本次同步到的彰銀臺幣存款帳戶：寫入銀行代碼、末四碼與存款 sourceId。
  * - 其他帳號（可能是他行帳號）：只留末四碼，不標銀行、不算雜湊。
  * - 空字串：頁面沒有顯示扣款帳號，為 null。
- * - 欄位不存在、內容含遮罩或其他文字而無法辨識，或本次沒有取得臺幣存款帳戶而無從比對：undefined，保留既有資料
+ * - 欄位不存在或不是字串、內容含遮罩或其他文字而無法辨識，或本次沒有取得臺幣存款帳戶而無從比對：undefined，保留既有資料
  *   （寫入只有末四碼的值會蓋掉上次正確對應的扣款帳戶）。
  */
 function chbAutopayAccount(
   value: unknown,
   depositSourceIds: ReadonlySet<string>,
 ): { autopayAccount?: AutopayAccountHint | null } {
-  if (value === undefined || value === null) return {};
-  const raw = text(value);
+  if (typeof value !== "string") return {};
+  const raw = value.trim();
   if (raw === "") return { autopayAccount: null };
   const display = toHalfWidth(raw);
   const accountNo = digitsOnly(display);
@@ -945,7 +945,7 @@ function parseChbLoans(
 
 /**
  * 帳單清單 `CA01002/ca01002_1_View` 的 `list[]`（`stmtDate` 為 `YYYYMMDD`、`stmtBal` 為帳單金額）：
- * 由新到舊取最近 CHB_STATEMENT_MONTHS 期。查詢單期帳單時要把該列原樣放進 Action 的 `data`。
+ * 由新到舊取最近 CHB_STATEMENT_MONTHS 期，各帶帳單期別 `YYYY-MM`。查詢單期帳單時要把該列原樣放進 Action 的 `data`。
  * 任何一列的結帳日無法解析時整個清單視為格式不符，不靜默少查一期。
  */
 export function chbCardBillListRows(data: unknown) {
@@ -959,7 +959,10 @@ export function chbCardBillListRows(data: unknown) {
     })
     .sort((a, b) => b.closingDate.localeCompare(a.closingDate))
     .slice(0, CHB_STATEMENT_MONTHS)
-    .map((entry) => entry.row);
+    .map((entry) => ({
+      row: entry.row,
+      period: entry.closingDate.slice(0, 7),
+    }));
 }
 
 /** 單期帳單回應的結帳日是否就是清單列要查的那一期。 */
