@@ -230,6 +230,7 @@ npm run build
 - **登入**：新版網銀走 `/esb/`，欄位為 `input[name="id"]`、`input[name="userName"]`、`input[name="pxssword"]`。重複登入代碼 `9005` 時再送一次「確定登入」。
 - **資料端點**：信用卡即時消費與近一年明細來自 `iesc.esunbank.com` 的 `realTime/getDetailResult` 與 `creditLastYear/getFilterResult`；存款明細須先呼叫任務 `home/init` 再查詢。
 - **沒有信用卡或存款帳戶**：先呼叫 IESC `common/isCardholder`，只有成功回傳 `rtnCode: "S"` 且 `credit: false` 才略過全部信用卡請求，其他回應照常查詢。外幣存款查詢回 `S001` 且說明為「查無外幣帳號，或您尚未開立外幣帳戶」時視為沒有外幣帳戶，臺幣的對應說明同理；`S001` 也用於其他提示頁，說明不符該幣別時仍使同步失敗。
+- **帳單月份尚未結帳**：`cardBill/getLastBillYearMonth` 可能回傳尚未結帳的月份，查詢該月 `creditBill/getSummaryResult` 會回 `status: "CARD-2026"`（本月尚未結帳），此時改查前一期，帳單月份也記為前一期。IESC 的業務錯誤沒有 `body`，錯誤訊息會附上回應的 `status` 與 `msg`。
 - **頁面就緒**：刷卡明細頁要同時有 IESC `accessToken`，以及「未入帳」選單或「尚未持有本行信用卡」提示，才開始查詢，避免在頁面初始化輪替 token 時送出額外請求。
 - **繳款狀態**：`getCardOverview` 的 `creditCardFeePaid` 為 `true` 時本期帳單標為已繳，否則維持未知。已繳的正額帳單不再計入負債，仍保留未出帳消費與負額帳單的溢繳；帳單保留原應繳金額。
 - **交易識別**：即時授權與之後的入帳沿用消費日期、商店、金額與卡片組成 `sourceId`，授權時間只補在 `authorizedAt`。`raw.esunFeed` 標記來源為 `realtime` 或 `history`；同名的即時紀錄併入明細並補上時間。

@@ -220,3 +220,45 @@ describe("E.SUN deposit accounts", () => {
       );
   });
 });
+
+function unclosedBillApi(lastBillYearMonth: string): EsunPortalApi {
+  return {
+    ...depositApi(noTwdAccount, noForeignAccount),
+    postIesc: async (path, body) => {
+      if (path === "common/isCardholder")
+        return { body: { rtnCode: "S", credit: true } };
+      if (path === "cardBill/getLastBillYearMonth")
+        return { body: { rtnCode: "S", lastBillYearMonth } };
+      if (path === "creditBill/getSummaryResult")
+        return body.billPeriod === lastBillYearMonth
+          ? { status: "CARD-2026", msg: ["本月尚未結帳"] }
+          : {
+              status: "200",
+              body: { rtnCode: "S", requestedPeriod: body.billPeriod },
+            };
+      return { body: { rtnCode: "S" } };
+    },
+    readRealtime: async () => ({
+      body: "{}",
+      payload: { body: { rtnCode: "S" } },
+    }),
+  };
+}
+
+describe("E.SUN latest bill", () => {
+  it.each([
+    ["202611", "202610", "2026-10"],
+    ["202601", "202512", "2025-12"],
+  ])(
+    "uses the previous statement when %s has not closed yet",
+    async (latest, previous, billingPeriod) => {
+      const snapshot = await collectEsunSnapshot(unclosedBillApi(latest));
+
+      expect(snapshot.billPeriod).toBe(previous);
+      expect(snapshot.billSummary).toMatchObject({
+        body: { requestedPeriod: previous },
+      });
+      expect(readEsunCardBalances(snapshot).billingPeriod).toBe(billingPeriod);
+    },
+  );
+});

@@ -6,6 +6,8 @@ import {
 } from "./connector.js";
 
 const IESC_ORIGIN = "https://iesc.esunbank.com";
+// 「最新帳單月份」可能指向尚未結帳的月份，查詢該月帳單會回此代碼（本月尚未結帳）。
+const BILL_NOT_CLOSED_STATUS = "CARD-2026";
 const CARD_OVERVIEW_INIT_PATH = "mib-ccm-portal/ccmB1/ccmB1001/home/init";
 const CARD_OVERVIEW_PATH = "mib-ccm-portal/ccmB1/ccmB1001/home/getCardOverview";
 const DEPOSIT_TASK_INIT_PATH = "mib-ctw-portal/ctw01/ctw01002/home/init";
@@ -80,7 +82,8 @@ interface PortalEnvelope<T> {
 }
 
 interface IescEnvelope<T> {
-  status?: number;
+  status?: string;
+  msg?: string[];
   body?: T;
 }
 
@@ -233,11 +236,7 @@ export async function collectEsunSnapshot(
   assertIescOk(realtime, "realtime");
   const creditHistory = await loadCreditHistory(api);
   logEsunStep("credit-history-loaded");
-  const billPeriod = await loadBillPeriod(api);
-  const billSummary = billPeriod
-    ? await api.postIesc("creditBill/getSummaryResult", { billPeriod })
-    : null;
-  if (billSummary) assertIescOk(billSummary, "bill");
+  const { billPeriod, billSummary } = await loadLatestBill(api);
 
   let cardOverview: unknown = null;
   try {
@@ -608,6 +607,35 @@ async function loadBillPeriod(api: EsunPortalApi) {
     : null;
 }
 
+/** 最新帳單月份尚未結帳時改查前一期，帳單月份也跟著使用前一期。 */
+async function loadLatestBill(api: EsunPortalApi) {
+  let billPeriod = await loadBillPeriod(api);
+  if (!billPeriod) return { billPeriod, billSummary: null };
+  let billSummary = await api.postIesc("creditBill/getSummaryResult", {
+    billPeriod,
+  });
+  if (
+    (billSummary as IescEnvelope<unknown>).status === BILL_NOT_CLOSED_STATUS
+  ) {
+    logEsunStep("bill-period-not-closed");
+    billPeriod = previousBillPeriod(billPeriod);
+    billSummary = await api.postIesc("creditBill/getSummaryResult", {
+      billPeriod,
+    });
+  }
+  assertIescOk(billSummary, "bill");
+  return { billPeriod, billSummary };
+}
+
+/** 帳單月份格式為 YYYYMM，與玉山信用卡網頁的解析方式相同。 */
+function previousBillPeriod(period: string) {
+  const monthIndex =
+    Number(period.slice(0, 4)) * 12 + Number(period.slice(4, 6)) - 2;
+  const year = Math.floor(monthIndex / 12);
+  const month = String((monthIndex % 12) + 1).padStart(2, "0");
+  return `${year}${month}`;
+}
+
 async function loadDeposits(
   api: EsunPortalApi,
   options: {
@@ -902,10 +930,13 @@ function assertPortalOk(value: unknown, label: string) {
 }
 
 function assertIescOk(value: unknown, label: string) {
-  const code = iescData(value)?.rtnCode;
-  if (code !== "S") {
-    throw new Error(`E.SUN card ${label} failed (${code ?? "unknown"}).`);
-  }
+  const envelope = value as IescEnvelope<IescCardBody>;
+  if (envelope.body?.rtnCode === "S") return;
+  // 業務錯誤沒有 body，代碼與訊息放在 status 與 msg（玉山網頁顯示為「(代碼) 訊息」）。
+  const reason =
+    envelope.body?.rtnCode ??
+    [envelope.status, envelope.msg?.join(",")].filter(Boolean).join(" ");
+  throw new Error(`E.SUN card ${label} failed (${reason || "unknown"}).`);
 }
 
 function portalData<T>(value: unknown) {
