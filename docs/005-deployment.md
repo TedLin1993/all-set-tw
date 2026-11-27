@@ -8,6 +8,8 @@
 
 一般部署保留 `CONFIG_ENCRYPTION_KEY=auto`。首次部署會產生隨機金鑰，存入 `GENERATED_CONFIG_ENCRYPTION_KEY`，同一個 Worker 更新時沿用。
 
+Worker 未設定 `CONFIG_ENCRYPTION_KEY`（例如不是由部署表單建立）且 D1 尚無加密資料時，部署程式會補上 `auto`；D1 已有加密資料時則停止部署，需先還原原本的金鑰。
+
 **若要自行備份金鑰、搬移 D1 或在本機解密資料，請在首次部署時自訂金鑰。** 可用以下指令產生並另存於密碼管理器。Cloudflare Secret 寫入後無法讀回。
 
 ```bash

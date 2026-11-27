@@ -129,6 +129,35 @@ test("first auto deployment creates a private random key and later updates prese
   );
 });
 
+test("Worker 缺少 CONFIG_ENCRYPTION_KEY 且 D1 沒有加密資料時補上 auto", async (t) => {
+  t.mock.method(console, "log", () => {});
+  const missingBoth = deploymentRunner({ initialSecrets: vapidSecrets });
+  assert.equal(await deploy([], missingBoth.options), 0);
+  const key = missingBoth.runtimeSecrets.GENERATED_CONFIG_ENCRYPTION_KEY;
+  assert.match(key, /^[0-9a-f]{64}$/);
+  assert.deepEqual(missingBoth.uploads[0].secrets, {
+    GENERATED_CONFIG_ENCRYPTION_KEY: key,
+    CONFIG_ENCRYPTION_KEY: "auto",
+  });
+  assert.equal(await deploy([], missingBoth.options), 0);
+  assert.deepEqual(missingBoth.uploads[1].secrets, {});
+
+  const missingPrimary = deploymentRunner({
+    initialSecrets: {
+      GENERATED_CONFIG_ENCRYPTION_KEY: "synthetic-generated-key",
+      ...vapidSecrets,
+    },
+  });
+  assert.equal(await deploy([], missingPrimary.options), 0);
+  assert.deepEqual(missingPrimary.uploads[0].secrets, {
+    CONFIG_ENCRYPTION_KEY: "auto",
+  });
+  assert.equal(
+    missingPrimary.runtimeSecrets.GENERATED_CONFIG_ENCRYPTION_KEY,
+    "synthetic-generated-key",
+  );
+});
+
 test("initialization preserves manual and auto secrets supplied as JSON or dotenv", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "encryption-secret-test-"));
   try {
@@ -253,6 +282,19 @@ test("existing encrypted D1 data blocks key replacement while legacy manual upda
           /Refusing to generate a replacement/,
         );
         assert.equal(missingPrimary.uploads.length, 0);
+
+        const missingPrimaryWithGeneratedKey = deploymentRunner({
+          ...options,
+          initialSecrets: {
+            GENERATED_CONFIG_ENCRYPTION_KEY: "synthetic-generated-key",
+            ...vapidSecrets,
+          },
+        });
+        await assert.rejects(
+          deploy([], missingPrimaryWithGeneratedKey.options),
+          /CONFIG_ENCRYPTION_KEY is missing/,
+        );
+        assert.equal(missingPrimaryWithGeneratedKey.uploads.length, 0);
       });
     }
     db.exec(
@@ -495,6 +537,7 @@ test("新站避開既有資源，失敗重試與舊站更新都用同一組 bind
           stdout: JSON.stringify(
             [
               ...Object.keys(vapidSecrets),
+              "CONFIG_ENCRYPTION_KEY",
               "GENERATED_CONFIG_ENCRYPTION_KEY",
             ].map((name) => ({ name })),
           ),
@@ -565,6 +608,7 @@ test("本機部署與單獨 migration 依指定 Worker 的正式版本選擇資�
   const runner = deploymentRunner({
     initialSecrets: {
       ...vapidSecrets,
+      CONFIG_ENCRYPTION_KEY: "auto",
       GENERATED_CONFIG_ENCRYPTION_KEY: "example",
     },
   });
