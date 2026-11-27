@@ -565,20 +565,23 @@ export async function readDeploymentConfig(argumentsToDeploy) {
   return { ...config, name: valueOf(["--name"]) ?? config.name };
 }
 
-async function needsGeneratedConfigEncryptionKey(
+async function initialConfigEncryptionSecrets(
   argumentsToDeploy,
   { run, config, existingSecrets, suppliedSecrets },
 ) {
-  if (
+  const hasGeneratedKey = Boolean(
     existingSecrets?.has("GENERATED_CONFIG_ENCRYPTION_KEY") ||
-    suppliedSecrets?.GENERATED_CONFIG_ENCRYPTION_KEY
-  ) {
-    return false;
-  }
+    suppliedSecrets?.GENERATED_CONFIG_ENCRYPTION_KEY,
+  );
   const configuredKey =
     suppliedSecrets?.CONFIG_ENCRYPTION_KEY ??
     config.vars?.CONFIG_ENCRYPTION_KEY;
-  if (configuredKey && configuredKey !== "auto") return false;
+  if (configuredKey && configuredKey !== "auto") return {};
+  // The Worker refuses to encrypt without CONFIG_ENCRYPTION_KEY. Workers not
+  // created by Deploy to Cloudflare lack the form's auto default.
+  const missingConfiguredKey =
+    !configuredKey && !existingSecrets?.has("CONFIG_ENCRYPTION_KEY");
+  if (hasGeneratedKey && !missingConfiguredKey) return {};
 
   // Inspect only existence, never encrypted records or credentials. A lost
   // key must not be replaced with a new one once encrypted data exists.
@@ -616,8 +619,20 @@ async function needsGeneratedConfigEncryptionKey(
       "Unable to inspect encrypted D1 data. Refusing to initialize GENERATED_CONFIG_ENCRYPTION_KEY; check the DB binding and apply migrations before deploying.",
     );
   }
-  if (hasEncryptedData === 0) return true;
+  if (hasEncryptedData === 0) {
+    return {
+      ...(hasGeneratedKey
+        ? {}
+        : { GENERATED_CONFIG_ENCRYPTION_KEY: randomBytes(32).toString("hex") }),
+      ...(missingConfiguredKey ? { CONFIG_ENCRYPTION_KEY: "auto" } : {}),
+    };
+  }
 
+  if (hasGeneratedKey) {
+    throw new Error(
+      "D1 already contains encrypted data, but CONFIG_ENCRYPTION_KEY is missing. Refusing to choose an encryption mode; restore the original CONFIG_ENCRYPTION_KEY before deploying.",
+    );
+  }
   if (
     configuredKey === "auto" ||
     !existingSecrets?.has("CONFIG_ENCRYPTION_KEY")
@@ -631,7 +646,7 @@ async function needsGeneratedConfigEncryptionKey(
   console.warn(
     "[deploy] D1 contains encrypted data; keeping the existing CONFIG_ENCRYPTION_KEY without generating a new key. If it is auto, restore the original GENERATED_CONFIG_ENCRYPTION_KEY.",
   );
-  return false;
+  return {};
 }
 
 async function deployPrepared(
@@ -662,7 +677,7 @@ async function deployPrepared(
   }
 
   const config = await readConfig(argumentsToDeploy);
-  const needsEncryptionKey = await needsGeneratedConfigEncryptionKey(
+  const encryptionSecrets = await initialConfigEncryptionSecrets(
     argumentsToDeploy,
     {
       run,
@@ -671,6 +686,7 @@ async function deployPrepared(
       suppliedSecrets: suppliedSecrets?.values,
     },
   );
+  const needsEncryptionSecrets = Object.keys(encryptionSecrets).length > 0;
 
   let accessSetup = null;
   if (
@@ -688,20 +704,18 @@ async function deployPrepared(
   }
 
   const temporaryDirectory =
-    needsInitialKeys || needsEncryptionKey || accessSetup
+    needsInitialKeys || needsEncryptionSecrets || accessSetup
       ? await mkdtemp(join(tmpdir(), "taiwan-fin-hub-deploy-"))
       : null;
 
   try {
     let argumentsForUpload = argumentsToDeploy;
-    if (needsInitialKeys || needsEncryptionKey) {
+    if (needsInitialKeys || needsEncryptionSecrets) {
       const initialSecrets = {
         ...(needsInitialKeys && !suppliedSecrets?.vapidKeys
           ? generateVapidSecrets()
           : {}),
-        ...(needsEncryptionKey
-          ? { GENERATED_CONFIG_ENCRYPTION_KEY: randomBytes(32).toString("hex") }
-          : {}),
+        ...encryptionSecrets,
       };
       const secretsFile = await createInitialSecretsFile(
         temporaryDirectory,
@@ -715,9 +729,14 @@ async function deployPrepared(
             : "[deploy] No VAPID key pair found; generating one for this Worker.",
         );
       }
-      if (needsEncryptionKey) {
+      if (encryptionSecrets.GENERATED_CONFIG_ENCRYPTION_KEY) {
         console.log(
           "[deploy] Initializing GENERATED_CONFIG_ENCRYPTION_KEY for this Worker; future deployments will preserve it.",
+        );
+      }
+      if (encryptionSecrets.CONFIG_ENCRYPTION_KEY) {
+        console.log(
+          "[deploy] CONFIG_ENCRYPTION_KEY is not set; using auto mode with GENERATED_CONFIG_ENCRYPTION_KEY.",
         );
       }
       argumentsForUpload = [
