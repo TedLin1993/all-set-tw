@@ -1,19 +1,31 @@
 import type { Hono } from "hono";
-import type { ConnectorSettingsResponse } from "@taiwan-fin-hub/shared";
+import type {
+  ConnectorDataSummaryResponse,
+  ConnectorSettingsResponse,
+  ConnectorUnlinkResponse,
+} from "@taiwan-fin-hub/shared";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import type { AppBindings } from "../../platform/env";
 import { honoFactory } from "../../platform/hono";
+import { jsonError } from "../../platform/http";
 import { validationHook } from "../../platform/validation";
 import {
   ConnectorConfigMissingError,
+  ConnectorSyncRunningError,
+  getConnectorDataSummary,
   getConnectorSettingsView,
   InvalidConnectorConfigError,
+  unlinkConnector,
   updateConnectorSettings,
 } from "./service";
 
 const settingsBodySchema = z.object({
   config: z.record(z.string(), z.unknown()),
+});
+
+const unlinkQuerySchema = z.object({
+  deleteData: z.enum(["true", "false"]).optional(),
 });
 
 export const connectorRoutes = honoFactory.createApp();
@@ -78,5 +90,42 @@ function registerConnectorSettingsRoutes(api: Hono<AppBindings>) {
         throw error;
       }
     },
+  );
+
+  api.delete(
+    "/connectors/:connectorId/settings",
+    zValidator(
+      "query",
+      unlinkQuerySchema,
+      validationHook("INVALID_REQUEST", "deleteData must be true or false."),
+    ),
+    async (c) => {
+      try {
+        return c.json(
+          (await unlinkConnector(
+            c.env.DB,
+            c.get("connectorId"),
+            c.req.valid("query").deleteData === "true",
+          )) satisfies ConnectorUnlinkResponse,
+        );
+      } catch (error) {
+        if (error instanceof ConnectorSyncRunningError)
+          return jsonError(
+            "SYNC_ALREADY_RUNNING",
+            "Cannot unlink a connector while it is syncing.",
+            409,
+          );
+        throw error;
+      }
+    },
+  );
+
+  api.get("/connectors/:connectorId/data-summary", async (c) =>
+    c.json(
+      (await getConnectorDataSummary(
+        c.env.DB,
+        c.get("connectorId"),
+      )) satisfies ConnectorDataSummaryResponse,
+    ),
   );
 }

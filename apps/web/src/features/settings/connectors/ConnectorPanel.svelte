@@ -17,6 +17,7 @@
   import ConnectionProgress from "./ConnectionProgress.svelte";
   import CtbcVerification from "./CtbcVerification.svelte";
   import SinotradeConnection from "./SinotradeConnection.svelte";
+  import UnlinkConnector from "./UnlinkConnector.svelte";
   import Card from "@/shared/ui/Card.svelte";
   import Button from "@/shared/ui/Button.svelte";
   import Input from "@/shared/ui/Input.svelte";
@@ -75,12 +76,15 @@
     demoMode,
     title,
     embedded = false,
+    onUnlinked,
   }: {
     api: ApiClient;
     connectorId: ConnectorId;
     demoMode: boolean;
     title: string;
     embedded?: boolean;
+    /** 解除連結完成後關閉面板，來源回到「新增資料來源」清單。 */
+    onUnlinked: () => void;
   } = $props();
   const fields = $derived(connectorCatalog[connectorId].credentialFields);
   const qc = useQueryClient();
@@ -2151,5 +2155,19 @@
       {CONNECTOR_NOTES[connectorId] ??
         "輸入完帳號密碼後，請先按「儲存設定」，再按「同步」。"}
     </p>
+  {/if}
+  {#if settings.data?.configured}
+    <UnlinkConnector
+      {api}
+      {connectorId}
+      {title}
+      {demoMode}
+      syncBusy={Boolean(job?.running)}
+      credentialBusy={save.isPending ||
+        connectTdcc.isPending ||
+        sinotradeStartBusy ||
+        sinotradeVerificationBusy}
+      {onUnlinked}
+    />
   {/if}
 </Card>

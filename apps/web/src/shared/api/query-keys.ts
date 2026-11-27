@@ -37,5 +37,6 @@ export const queryKeys = {
   aiClassification: ["ai-classification"] as const,
   mcpAuthStatus: ["mcp-auth-status"] as const,
   connectorSettings: (id: string) => ["connector-settings", id] as const,
+  connectorDataSummary: (id: string) => ["connector-data-summary", id] as const,
   manualAssetHistory: (id: string) => ["manualAssetHistory", id] as const,
 };

@@ -200,6 +200,7 @@ Feature 專用的查詢放在 feature 的 `repository.ts`，不要持續擴大 `
 | staging JSON upsert、promotion 與 lifecycle 合併 | cursor、finalize 與 cleanup 必須在同一個 batch                        |
 | 電子發票／集保 durable item 寫入與 create-or-get | item claim、JSON merge、計數、設定版本 CAS 與 partial unique 衝突處理 |
 | 排程批次、通知 claim、報告寫入與財務 CTE         | 固定成員快照、通知發送權、報告修復與跨資產最新值計算                  |
+| 資料來源解除連結與資料刪除                       | 同步中 guard、引用清理與刪除同一個 batch，筆數預覽共用範圍子查詢      |
 
 - 修改上表範圍時，以 `persistence.test.ts`、`preference-fk-reconciliation.test.ts` 與 `drizzle-runtime.test.ts` 的隔離 D1 測試確認去重、使用者決定與回滾。
 - Lease 的取得與續租使用單次條件 UPDATE，以影響列數判斷成功。不要拆成 SELECT 後 UPDATE，也不要以循序 await 或 `Promise.all` 取代原子 batch。
@@ -675,6 +676,16 @@ Connector 不直接寫入金融資料表。同步 service 依序執行：
 - 讀取帳戶或帳單失敗只記錄 log，照常送出原本的同步摘要。
 
 同一則摘要也附上台北時間今天到期的定存（同受 `paymentDue` 控制），例如「王道銀行 2 筆定存今天到期」，一律視為緊急，同步成功通知關閉時也會送出。到期當天才被同步標為 `inactive_at` 的定存仍會列入；提前解約，或已自動續存並換成新到期日的定存不會提醒。目前只有提供 `maturity_date` 的王道、將來、聯邦會產生定存提醒。
+
+## 解除連結資料來源
+
+`features/connectors` 提供 `DELETE /api/connectors/:connectorId/settings` 解除連結，`?deleteData=true` 時一併刪除資料；確認畫面先以 `GET /api/connectors/:connectorId/data-summary` 取得會刪除的筆數。設定狀態只看 `connector_settings` 是否存在，因此刪除後來源回到「新增資料來源」清單，排程也不再挑選。
+
+- **同步中不處理**：與 `GET /api/sync-jobs` 的 `running` 相同（有效的 connector lock、電子發票與集保的 active run、排隊中的背景手動 run）時回 `SYNC_ALREADY_RUNNING`（409）。Worker 無法中斷執行中的 invocation，因此不取消同步；batch 第一個 statement 以無效 JSON 的 guard 再檢查一次，避免檢查後才開始的同步寫回資料。
+- **只解除連結**：刪除 `connector_settings`（含加密帳密、session 與 cursor）、電子發票與集保 run（保存憑證與 session 副本）與背景手動 run，`sync_jobs` 回到新來源的狀態（關閉排程、清除鎖與最近結果），首次同步成功後再自動開啟。已同步的資料、同步報告與活動明細保留。
+- **刪除資料**：範圍為該來源的 `connector_id`，帳戶下的交易、餘額與帳單另以 `account_id` 納入。交易引用依[交易引用與使用者決定](#交易引用與使用者決定)處理，規則與刪除手動記錄相同：其他來源交易的 `transfer_peer_id`／`matched_transaction_id` 清空，「保持分開」的發票決定保留但清掉交易引用，已連結的發票回到自動配對；交易偏好、分類覆寫與 AI 結果刪除。扣款帳戶設定涉及這些帳戶時刪除（改回銀行資料，重新連結時不會悄悄恢復），其他來源合併到這些帳戶的 `canonical_account_id` 清空，該來源下次同步時重新比對。另刪除該來源的淨資產歷史、報告活動明細（含資料快照）與排程批次結果；批次的資產前後總額跨來源加總，保留不動。
+- **存款歷史**：`source = bank` 的存款歷史是所有銀行的合計，在同一個 batch 以 `bankDepositHistoryRebuildStatements` 重算。起日取被刪帳戶與解除合併帳戶中最早的餘額日期，因為解除合併的帳戶改為計入存款，較早的日期也會變動；規則與 `calculateBankDepositValue` 相同；早於剩餘最早餘額的日期移除。以單一 statement 計算，不逐日查詢，免費方案的每次請求查詢數限制下也能完成。
+- 所有步驟與憑證刪除位於同一個 D1 batch，依外鍵順序排列；任一步失敗時整批回滾。
 
 ## 新增一般功能
 

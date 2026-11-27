@@ -130,6 +130,10 @@ const ENDPOINT_NOTES: Record<string, string> = {
     "資料來源設定狀態（不含帳密）。connectorId 見 connectors。",
   "PUT /connectors/:connectorId/settings":
     "儲存資料來源設定。body：config（物件，帳密欄位見 connectors 的 credentialFields）。",
+  "DELETE /connectors/:connectorId/settings":
+    "解除連結：刪除帳密與登入狀態並停止排程，同步中回 409。query：deleteData?（true 時一併刪除該來源的帳戶、交易、餘額、帳單、發票、投資資料與相關的分類、備註、發票配對，無法復原）。須先以 GET /connectors/:connectorId/data-summary 讓使用者確認筆數並明確同意後才呼叫。",
+  "GET /connectors/:connectorId/data-summary":
+    "解除連結並刪除資料時會刪除的筆數：data 為同步取得的資料，userEdits 為使用者做過、無法重建的調整。",
   "POST /connectors/einvoice/sync": "開始電子發票同步（Queue 背景執行）。",
   "POST /connectors/tdcc/sync":
     "開始集保同步（Queue 背景執行）。body：otp?、otpChannel?（email、sms）。",
