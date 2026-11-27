@@ -9,6 +9,9 @@ import {
   type NetWorthPageCursor,
 } from "./repository";
 
+// 刪除資料來源時，存款歷史的重算須與刪除位於同一個 batch，因此提供 statements 給呼叫端組合。
+export { bankDepositHistoryRebuildStatements } from "./repository";
+
 type StockCostInputs = Awaited<ReturnType<typeof loadStockCostInputs>>;
 
 /**

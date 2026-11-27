@@ -73,3 +73,32 @@ export interface ConnectorSettingsResponse extends ConnectorSessionState {
   publicConfig: Record<string, unknown> | null;
   credentialsComplete: boolean;
 }
+
+/** `GET /api/connectors/:connectorId/data-summary`：解除連結並刪除資料時會刪除的筆數。 */
+export interface ConnectorDataSummaryResponse {
+  connectorId: ConnectorId;
+  /** 同步取得的資料；重新連結後只能補回來源仍可查詢的期間。 */
+  data: {
+    accounts: number;
+    transactions: number;
+    balanceSnapshots: number;
+    creditCardBills: number;
+    invoices: number;
+    investmentPositions: number;
+    investmentTransactions: number;
+  };
+  /** 使用者對這些資料做過的調整，刪除後無法從來源重建。 */
+  userEdits: {
+    categoryOverrides: number;
+    transactionPreferences: number;
+    invoiceLinks: number;
+    paymentAccounts: number;
+  };
+}
+
+/** `DELETE /api/connectors/:connectorId/settings`（`?deleteData=true` 一併刪除資料）的結果。 */
+export interface ConnectorUnlinkResponse {
+  connectorId: ConnectorId;
+  configured: false;
+  dataDeleted: boolean;
+}

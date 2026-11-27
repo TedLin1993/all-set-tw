@@ -3,15 +3,91 @@ import {
   describeConnectorSession,
   parseConnectorConfig,
 } from "../../sources/config-registry";
-import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
+import {
+  connectorCatalog,
+  type ConnectorDataSummaryResponse,
+  type ConnectorId,
+  type ConnectorUnlinkResponse,
+} from "@taiwan-fin-hub/shared";
 import { clearConnectorCursor } from "../../db";
 import { configEncryptionKey } from "../../platform/config";
 import { decryptJson, encryptJson } from "../../platform/crypto";
 import type { Env } from "../../platform/env";
-import { findConnectorSettings, saveConnectorSettings } from "./repository";
+import { bankDepositHistoryRebuildStatements } from "../net-worth/service";
+import {
+  connectorDataDeletionStatements,
+  connectorIdleGuardStatement,
+  connectorUnlinkStatements,
+  countConnectorData,
+  findConnectorBalanceStartDate,
+  findConnectorSettings,
+  isConnectorSyncRunning,
+  saveConnectorSettings,
+} from "./repository";
 
 export class ConnectorConfigMissingError extends Error {}
 export class InvalidConnectorConfigError extends Error {}
+export class ConnectorSyncRunningError extends Error {}
+
+export async function getConnectorDataSummary(
+  db: D1Database,
+  connectorId: ConnectorId,
+): Promise<ConnectorDataSummaryResponse> {
+  const counts = await countConnectorData(db, connectorId);
+  const count = (key: string) => counts[key] ?? 0;
+  return {
+    connectorId,
+    data: {
+      accounts: count("accounts"),
+      transactions: count("transactions"),
+      balanceSnapshots: count("balanceSnapshots"),
+      creditCardBills: count("creditCardBills"),
+      invoices: count("invoices"),
+      investmentPositions: count("investmentPositions"),
+      investmentTransactions: count("investmentTransactions"),
+    },
+    userEdits: {
+      categoryOverrides: count("categoryOverrides"),
+      transactionPreferences: count("transactionPreferences"),
+      invoiceLinks: count("invoiceLinks"),
+      paymentAccounts: count("paymentAccounts"),
+    },
+  };
+}
+
+/**
+ * 解除連結：刪除憑證、session 與同步狀態；`deleteData` 時一併刪除這個來源同步的資料，
+ * 並重算受影響的存款歷史。同步中不處理，檢查與刪除在同一個 batch，避免檢查後才開始的同步寫回資料。
+ */
+export async function unlinkConnector(
+  db: D1Database,
+  connectorId: ConnectorId,
+  deleteData: boolean,
+): Promise<ConnectorUnlinkResponse> {
+  const now = new Date().toISOString();
+  if (await isConnectorSyncRunning(db, connectorId, now))
+    throw new ConnectorSyncRunningError();
+  const depositHistoryFrom = deleteData
+    ? await findConnectorBalanceStartDate(db, connectorId)
+    : null;
+  try {
+    await db.batch([
+      connectorIdleGuardStatement(db, connectorId, now),
+      ...(deleteData
+        ? connectorDataDeletionStatements(db, connectorId, now)
+        : []),
+      ...(depositHistoryFrom
+        ? bankDepositHistoryRebuildStatements(db, depositHistoryFrom, now)
+        : []),
+      ...connectorUnlinkStatements(db, connectorId, now),
+    ]);
+  } catch (error) {
+    if (await isConnectorSyncRunning(db, connectorId, new Date().toISOString()))
+      throw new ConnectorSyncRunningError();
+    throw error;
+  }
+  return { connectorId, configured: false, dataDeleted: deleteData };
+}
 
 export async function getConnectorSettingsView(
   env: Env,

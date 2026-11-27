@@ -220,6 +220,51 @@ export async function upsertBankDepositHistory(
   }
 }
 
+/**
+ * 以一個 statement 重算 `from` 起既有的存款歷史，規則與 calculateBankDepositValue 相同。
+ * 刪除資料來源時與刪除放在同一個 D1 batch，不逐日查詢（免費方案每次請求的 D1 查詢數有限）。
+ * 早於剩餘最早餘額的日期已沒有存款資料，直接移除而不留下 0。保留原生 SQL：相關子查詢。
+ */
+export function bankDepositHistoryRebuildStatements(
+  db: D1Database,
+  from: string,
+  now: string,
+) {
+  return [
+    db.prepare(
+      `DELETE FROM net_worth_history
+       WHERE source = 'bank' AND asset_type = 'deposit'
+         AND date < COALESCE((SELECT MIN(substr(as_of_at, 1, 10)) FROM bank_balance_snapshots), '9999-12-31')`,
+    ),
+    db
+      .prepare(
+        `UPDATE net_worth_history
+         SET net_worth = (
+           SELECT CAST(ROUND(COALESCE(SUM(CASE
+             WHEN COALESCE(NULLIF(latest.currency, ''), 'TWD') = 'TWD' THEN latest.balance
+             WHEN rate.rate_to_twd IS NOT NULL THEN latest.balance * rate.rate_to_twd
+             ELSE 0
+           END), 0)) AS INTEGER)
+           FROM bank_accounts account
+           JOIN bank_balance_snapshots latest ON latest.id = (
+             SELECT snapshot.id
+             FROM bank_balance_snapshots snapshot
+             WHERE snapshot.account_id = account.id
+               AND substr(snapshot.as_of_at, 1, 10) <= net_worth_history.date
+             ORDER BY snapshot.as_of_at DESC, snapshot.updated_at DESC
+             LIMIT 1
+           )
+           LEFT JOIN exchange_rates rate ON rate.currency = latest.currency
+           WHERE account.canonical_account_id IS NULL
+             AND COALESCE(account.account_type, 'unknown') NOT IN ('credit', 'loan')
+         ),
+         snapshotted_at = ?2
+         WHERE source = 'bank' AND asset_type = 'deposit' AND date >= ?1`,
+      )
+      .bind(from, now),
+  ];
+}
+
 const COST_CONNECTORS_CTE = `cost_connectors AS MATERIALIZED (
   SELECT DISTINCT connector_id FROM investment_positions WHERE cost_basis IS NOT NULL
 )`;

@@ -351,6 +351,7 @@
                 {demoMode}
                 title={selectedSource?.title ?? "連接器"}
                 embedded
+                onUnlinked={() => navigate("data-sources")}
               />{/key}
           {:else}
             <div class="grid min-h-[480px] place-items-center text-center">
@@ -386,6 +387,7 @@
                   {demoMode}
                   title={mobileSource?.title ?? "連接器"}
                   embedded
+                  onUnlinked={() => navigate("data-sources")}
                 />{/key}
             </div>
           </section>

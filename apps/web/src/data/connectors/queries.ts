@@ -2,6 +2,7 @@ import { queryOptions } from "@tanstack/svelte-query";
 import type { ApiClient } from "@/shared/api/client";
 import { queryKeys } from "@/shared/api/query-keys";
 import type {
+  ConnectorDataSummary,
   ConnectorSettings,
   SyncJobRow,
   SyncScheduleSettings,
@@ -36,4 +37,19 @@ export const connectorSettingsQuery = (
       getApi().get<ConnectorSettings>(
         `/api/connectors/${connectorId}/settings`,
       ),
+  });
+
+/** 解除連結確認時才讀取；每次打開都重新計算，筆數須反映當下的資料。 */
+export const connectorDataSummaryQuery = (
+  getApi: ApiProvider,
+  connectorId: string,
+) =>
+  queryOptions({
+    queryKey: queryKeys.connectorDataSummary(connectorId),
+    queryFn: () =>
+      getApi().get<ConnectorDataSummary>(
+        `/api/connectors/${connectorId}/data-summary`,
+      ),
+    staleTime: 0,
+    gcTime: 0,
   });
