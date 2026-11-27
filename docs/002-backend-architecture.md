@@ -684,7 +684,7 @@ Connector 不直接寫入金融資料表。同步 service 依序執行：
 - **同步中不處理**：與 `GET /api/sync-jobs` 的 `running` 相同（有效的 connector lock、電子發票與集保的 active run、排隊中的背景手動 run）時回 `SYNC_ALREADY_RUNNING`（409）。Worker 無法中斷執行中的 invocation，因此不取消同步；batch 第一個 statement 以無效 JSON 的 guard 再檢查一次，避免檢查後才開始的同步寫回資料。
 - **只解除連結**：刪除 `connector_settings`（含加密帳密、session 與 cursor）、電子發票與集保 run（保存憑證與 session 副本）與背景手動 run，`sync_jobs` 回到新來源的狀態（關閉排程、清除鎖與最近結果），首次同步成功後再自動開啟。已同步的資料、同步報告與活動明細保留。
 - **刪除資料**：範圍為該來源的 `connector_id`，帳戶下的交易、餘額與帳單另以 `account_id` 納入。交易引用依[交易引用與使用者決定](#交易引用與使用者決定)處理，規則與刪除手動記錄相同：其他來源交易的 `transfer_peer_id`／`matched_transaction_id` 清空，「保持分開」的發票決定保留但清掉交易引用，已連結的發票回到自動配對；交易偏好、分類覆寫與 AI 結果刪除。扣款帳戶設定涉及這些帳戶時刪除（改回銀行資料，重新連結時不會悄悄恢復），其他來源合併到這些帳戶的 `canonical_account_id` 清空，該來源下次同步時重新比對。另刪除該來源的淨資產歷史、報告活動明細（含資料快照）與排程批次結果；批次的資產前後總額跨來源加總，保留不動。
-- **存款歷史**：`source = bank` 的存款歷史是所有銀行的合計，在同一個 batch 以 `bankDepositHistoryRebuildStatements` 從被刪帳戶最早的餘額日期起重算，規則與 `calculateBankDepositValue` 相同；早於剩餘最早餘額的日期移除。以單一 statement 計算，不逐日查詢，免費方案的每次請求查詢數限制下也能完成。
+- **存款歷史**：`source = bank` 的存款歷史是所有銀行的合計，在同一個 batch 以 `bankDepositHistoryRebuildStatements` 重算。起日取被刪帳戶與解除合併帳戶中最早的餘額日期，因為解除合併的帳戶改為計入存款，較早的日期也會變動；規則與 `calculateBankDepositValue` 相同；早於剩餘最早餘額的日期移除。以單一 statement 計算，不逐日查詢，免費方案的每次請求查詢數限制下也能完成。
 - 所有步驟與憑證刪除位於同一個 D1 batch，依外鍵順序排列；任一步失敗時整批回滾。
 
 ## 新增一般功能

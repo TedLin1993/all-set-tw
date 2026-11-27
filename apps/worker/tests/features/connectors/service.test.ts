@@ -498,8 +498,16 @@ describe("解除連結資料來源（隔離 D1）", () => {
     await snapshot("taishin:deposit", "taishin", "2026-01-01", 1000);
     await snapshot("taishin:deposit", "taishin", "2026-01-03", 1500);
     await snapshot("firstbank:deposit", "firstbank", "2026-01-02", 500);
-    await snapshot("tdcc:mirror", "tdcc", "2026-01-02", 1500);
-    for (const date of ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"])
+    // 合併帳戶的餘額早於被刪帳戶；解除合併後，這段較早的歷史也要重算。
+    await snapshot("tdcc:mirror", "tdcc", "2025-12-31", 1500);
+    for (const date of [
+      "2025-12-30",
+      "2025-12-31",
+      "2026-01-01",
+      "2026-01-02",
+      "2026-01-03",
+      "2026-01-04",
+    ])
       await run(
         "INSERT INTO net_worth_history (id, date, net_worth, asset_type, source, snapshotted_at) VALUES (?, ?, 99999, 'deposit', 'bank', ?)",
         `bank:deposit:${date}`,
@@ -695,13 +703,17 @@ describe("解除連結資料來源（隔離 D1）", () => {
         .all<{ date: string; net_worth: number }>()
     ).results;
     expect(history.map(({ date }) => date)).toEqual([
+      "2025-12-31",
+      "2026-01-01",
       "2026-01-02",
       "2026-01-03",
       "2026-01-04",
     ]);
     for (const { date, net_worth } of history)
       expect(net_worth).toBe(await calculateBankDepositValue(db, date));
-    expect(history[0]!.net_worth).toBe(2000);
+    expect(history.map(({ net_worth }) => net_worth)).toEqual([
+      1500, 1500, 2000, 2000, 2000,
+    ]);
 
     expect(await getConnectorDataSummary(db, "taishin")).toMatchObject({
       data: { accounts: 0, transactions: 0, balanceSnapshots: 0 },

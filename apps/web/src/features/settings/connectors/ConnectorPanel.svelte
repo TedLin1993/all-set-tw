@@ -2163,6 +2163,10 @@
       {title}
       {demoMode}
       syncBusy={Boolean(job?.running)}
+      credentialBusy={save.isPending ||
+        connectTdcc.isPending ||
+        sinotradeStartBusy ||
+        sinotradeVerificationBusy}
       {onUnlinked}
     />
   {/if}

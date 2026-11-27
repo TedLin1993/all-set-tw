@@ -24,6 +24,7 @@
     title,
     demoMode,
     syncBusy,
+    credentialBusy,
     onUnlinked,
   }: {
     api: ApiClient;
@@ -31,6 +32,8 @@
     title: string;
     demoMode: boolean;
     syncBusy: boolean;
+    /** 儲存或連線流程正在寫入憑證；此時解除連結，稍後完成的寫入會把憑證建回來。 */
+    credentialBusy: boolean;
     onUnlinked: () => void;
   } = $props();
 
@@ -95,9 +98,9 @@
       void qc.invalidateQueries({ queryKey: queryKeys.syncJobs });
     },
   }));
+  // 刪除模式即使七類資料都是 0，也會刪除同步紀錄與淨資產歷史，因此一律要求確認。
   const canConfirm = $derived(
-    !unlink.isPending &&
-      (!deleteData || (summary.isSuccess && (!hasData || acknowledged))),
+    !unlink.isPending && (!deleteData || (summary.isSuccess && acknowledged)),
   );
 
   function reset() {
@@ -122,7 +125,7 @@
       size="sm"
       variant="outline"
       class="border-coral/40 text-coral hover:bg-coral/10 hover:text-coral"
-      disabled={demoMode || syncBusy}
+      disabled={demoMode || syncBusy || credentialBusy}
       onclick={() => {
         reset();
         open = true;
@@ -189,30 +192,32 @@
             <p class="text-muted-foreground">正在計算會刪除的資料…</p>
           {:else if summary.isError}
             <p class="text-coral">無法取得資料筆數，請稍後再試。</p>
-          {:else if !hasData}
-            <p class="text-muted-foreground">
-              目前沒有這個來源同步的資料，只會刪除登入資訊。
-            </p>
           {:else}
-            <p class="font-semibold">會刪除下列資料：</p>
-            <ul class="mt-2 grid list-disc gap-1 pl-5 text-subtle">
-              {#each dataLines.filter(([, value]) => value > 0) as [label, value, unit] (label)}
-                <li>{label} {formatNumber(value)} {unit}</li>
-              {/each}
-            </ul>
-            {#if hasEdits}
-              <p class="mt-3 font-semibold">
-                你手動做過的調整也會一併刪除，無法復原：
+            {#if !hasData}
+              <p class="text-muted-foreground">
+                沒有同步進來的帳戶、交易、帳單、發票或投資資料；會刪除登入資訊與這個來源的同步紀錄。
               </p>
+            {:else}
+              <p class="font-semibold">會刪除下列資料：</p>
               <ul class="mt-2 grid list-disc gap-1 pl-5 text-subtle">
-                {#each editLines.filter(([, value]) => value > 0) as [label, value] (label)}
-                  <li>{label} {formatNumber(value)} 筆</li>
+                {#each dataLines.filter(([, value]) => value > 0) as [label, value, unit] (label)}
+                  <li>{label} {formatNumber(value)} {unit}</li>
                 {/each}
               </ul>
+              {#if hasEdits}
+                <p class="mt-3 font-semibold">
+                  你手動做過的調整也會一併刪除，無法復原：
+                </p>
+                <ul class="mt-2 grid list-disc gap-1 pl-5 text-subtle">
+                  {#each editLines.filter(([, value]) => value > 0) as [label, value] (label)}
+                    <li>{label} {formatNumber(value)} 筆</li>
+                  {/each}
+                </ul>
+              {/if}
+              <p class="mt-3 text-muted-foreground">
+                重新連結後只能補回來源仍可查詢的期間，更早的紀錄無法再取得。
+              </p>
             {/if}
-            <p class="mt-3 text-muted-foreground">
-              重新連結後只能補回來源仍可查詢的期間，更早的紀錄無法再取得。
-            </p>
             <label class="mt-3 flex items-start gap-2 font-medium">
               <Checkbox
                 class="mt-0.5"

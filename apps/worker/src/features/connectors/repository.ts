@@ -28,6 +28,8 @@ const ACCOUNT_IDS = "SELECT id FROM bank_accounts WHERE connector_id = ?1";
 const ACCOUNT_DATA_SCOPE = `(connector_id = ?1 OR account_id IN (${ACCOUNT_IDS}))`;
 const TRANSACTION_IDS = `SELECT id FROM bank_transactions WHERE ${ACCOUNT_DATA_SCOPE}`;
 const INVOICE_IDS = "SELECT id FROM invoices WHERE connector_id = ?1";
+// 其他來源合併到這個來源帳戶的帳戶；刪除資料時解除合併，改為獨立計算。
+const MERGED_ACCOUNT_IDS = `SELECT id FROM bank_accounts WHERE connector_id != ?1 AND canonical_account_id IN (${ACCOUNT_IDS})`;
 
 // 與 `GET /api/sync-jobs` 的 running 相同：有效的 connector lock、電子發票與集保的
 // active run，或排隊中的背景手動同步。?2 為現在時間。
@@ -91,14 +93,18 @@ export async function countConnectorData(
   return row ?? {};
 }
 
-/** 這個來源最早的餘額日期；刪除資料後，存款歷史從這天起重算。 */
+/**
+ * 刪除資料後存款歷史的重算起日：被刪帳戶與解除合併的帳戶中最早的餘額日期。
+ * 解除合併的帳戶改為計入存款，它們較早的日期也要重算；兩者都沒有餘額時存款不變，不需重算。
+ */
 export async function findConnectorBalanceStartDate(
   db: D1Database,
   connectorId: ConnectorId,
 ) {
   const row = await db
     .prepare(
-      `SELECT MIN(substr(as_of_at, 1, 10)) AS date FROM bank_balance_snapshots WHERE ${ACCOUNT_DATA_SCOPE}`,
+      `SELECT MIN(substr(as_of_at, 1, 10)) AS date FROM bank_balance_snapshots
+       WHERE ${ACCOUNT_DATA_SCOPE} OR account_id IN (${MERGED_ACCOUNT_IDS})`,
     )
     .bind(connectorId)
     .first<{ date: string | null }>();
