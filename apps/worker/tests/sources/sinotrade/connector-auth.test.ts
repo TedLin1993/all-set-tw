@@ -8,7 +8,9 @@ import {
   querySinotradeSavingsTrades,
   readSinotradeNewwebSession,
   readSinotradeSavingsOverview,
+  SinotradeBrowserClosedError,
 } from "../../../src/sources/sinotrade/connector";
+import { PageUnresponsiveError } from "../../../src/sources/sinotrade/login-form";
 import { SinotradeServiceSuspendedError } from "../../../src/sources/sinotrade/protocol";
 import {
   SINOTRADE_ORIGINS,
@@ -393,6 +395,9 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
         config,
       ]);
       expect(page.evaluate).toHaveBeenCalledTimes(4);
+      expect(browserMocks.launch).toHaveBeenCalledWith(expect.anything(), {
+        keep_alive: 60_000,
+      });
       expect(browserMocks.close).toHaveBeenCalledOnce();
     });
 
@@ -513,6 +518,91 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
       );
       expect(failures[3]).not.toBeInstanceOf(SinotradeServiceSuspendedError);
       expect((failures[3] as Error).message).toContain("HTTP 405");
+    });
+
+    it("查詢途中自動重登遇到瀏覽器分頁中斷或無回應時，轉成一般同步失敗並記錄步驟，不標記未連線", async () => {
+      const targetClosed = Object.assign(
+        new Error("Protocol error (Runtime.callFunctionOn): Target closed"),
+        { name: "TargetCloseError" },
+      );
+      const unresponsive = new PageUnresponsiveError();
+      for (const { arrange, errorName } of [
+        {
+          arrange: () =>
+            loginMocks.credentials.mockRejectedValueOnce(targetClosed),
+          errorName: "TargetCloseError",
+        },
+        {
+          arrange: () =>
+            loginMocks.credentials.mockRejectedValueOnce(unresponsive),
+          errorName: "PageUnresponsiveError",
+        },
+        // 送出帳密後讀不到官方步驟（頁面沒有回應或仍在切換）：不是官方要求驗證或拒絕登入。
+        {
+          arrange: () =>
+            loginMocks.credentials.mockResolvedValueOnce(
+              challenge("blocked", unresponsive.message),
+            ),
+          errorName: "PageUnresponsiveError",
+        },
+        {
+          arrange: () =>
+            loginMocks.credentials.mockResolvedValueOnce(
+              challenge(
+                "blocked",
+                "官方頁面仍在切換，請稍後按「更新驗證狀態」。",
+              ),
+            ),
+          errorName: "PageUnresponsiveError",
+        },
+      ]) {
+        loginMocks.credentials.mockReset();
+        arrange();
+        browserMocks.close.mockReset().mockResolvedValue(true);
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+          newwebBrowser(
+            [
+              storedSession,
+              { httpStatus: 200, payload: { success: "True" } },
+              { httpStatus: 401, payload: null },
+              undefined,
+            ],
+            savingsPage(),
+          );
+          const failure = await fetchSinotradeSnapshot(
+            { fetch: vi.fn() },
+            config,
+          ).catch((error: unknown) => error);
+          expect(failure).toBeInstanceOf(SinotradeBrowserClosedError);
+          expect(failure).not.toBeInstanceOf(SinotradeConnectionError);
+          expect(failure).not.toBeInstanceOf(SinotradeUnattendedLoginError);
+          expect((failure as Error).cause).toMatchObject({ name: errorName });
+          expect(browserMocks.close).toHaveBeenCalledOnce();
+          const events = warn.mock.calls.map(([line]) =>
+            JSON.parse(String(line)),
+          );
+          expect(events).toContainEqual(
+            expect.objectContaining({
+              event: "sinotrade_session_relogin_failed",
+              platform: "newweb",
+              stage: "query",
+              phase: "credentials",
+              errorName,
+            }),
+          );
+          expect(events).toContainEqual(
+            expect.objectContaining({
+              event: "sinotrade_sync_failed",
+              step: "newweb_relogin:query",
+              relogins: ["newweb"],
+              errorName,
+            }),
+          );
+        } finally {
+          warn.mockRestore();
+        }
+      }
     });
   });
 

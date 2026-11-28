@@ -928,6 +928,36 @@ describe("證券原生欄位與驗證授權", () => {
       const rejected = expect(submitting).rejects.toThrow(/沒有回應/);
       await vi.advanceTimersByTimeAsync(10_000);
       await rejected;
+
+      // 帳號輸入元素操作卡住且 dispose 失敗時，也在 15 秒內停止並回報無回應。
+      const hangingInput = {
+        click: vi.fn(() => new Promise(() => undefined)),
+        press: vi.fn(),
+        type: vi.fn(),
+        dispose: vi.fn().mockRejectedValue(new Error("Target closed")),
+      };
+      const credFrame = {
+        url: () => LOGIN_URL,
+        waitForSelector: vi.fn().mockResolvedValue(undefined),
+        $: vi.fn().mockResolvedValue(hangingInput),
+        click: vi.fn(),
+      } as unknown as Frame;
+      const credBrowser = {
+        pages: vi.fn().mockResolvedValue([
+          {
+            url: () => LOGIN_URL,
+            target: () => ({ opener: () => null }),
+            mainFrame: () => credFrame,
+          },
+        ]),
+      } as unknown as Browser;
+      const signingIn = submitSinotradeCredentials(credBrowser, "newweb", {
+        userId: "A000000000",
+        password: "fixture-password",
+      });
+      const credRejected = expect(signingIn).rejects.toThrow(/沒有回應/);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await credRejected;
     } finally {
       vi.useRealTimers();
     }
