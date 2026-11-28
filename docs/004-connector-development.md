@@ -400,7 +400,7 @@ Richart 帳戶是否出現在同一份存款清單、人工驗證流程與部署
 
 #### App 版本與登入
 
-- **版本**：`appVer` 須與 Google Play 台灣版公開的 Android 套件版本一致（目前 `5.2.28`），`webVer` 使用 `UtilsService.getWebVersion()` 的回傳值（目前 `(1020)`），不以商店更新日期推測。版本落後時，「我的貸款」等功能會回 `SVC` `0131` 要求更新。
+- **版本**：`appVer` 須與 Google Play 台灣版公開的 Android 套件版本一致（目前 `5.2.30`），`webVer` 使用 `UtilsService.getWebVersion()` 的回傳值（目前 `(1117)`），不以商店更新日期推測。版本落後時，登入或「我的貸款」等功能會回 `SVC` `0131` 要求更新。
 - **登入參數**：`/twrbm-general/ot001/010` 的 `rqData` 須另帶 `version`（同 `appVer`）、`twoStageVerify: true`、`userAgent` 與 `checkDeviceShare: "Y"`；envelope 的 `appVer` 不能代替 `version`。`userAgent` 與 HTTP `User-Agent` 使用與連接器裝置資訊一致的 Android WebView 值。
 - **裝置識別**：首次同步在任何銀行請求前產生 `deviceCode` UUID，首次握手後保存銀行發出的 `deviceSeed`，兩者都以設定版本 CAS 寫入 `encrypted_config`；之後所有請求沿用，不以新握手的 seed 覆蓋。初始化、登入或驗證失敗也保留；修改密碼只清除 `pendingSession`，修改身分證字號或使用者代號才清除兩者。銀行把未綁定設備的行銀視為陌生裝置，App 核准只完成當次登入；連接器沒有做設備綁定或網銀信任登記，行銀握手也回傳空 seed，因此目前每次同步都需要核准。
 - **兩階段驗證**：回應含 `isTwoStageLogin: true` 時，把這次登入的 OAuth／驗證 token、seed、clientNo、原始加密登入資料、驗證方式與期限存入 `encrypted_config.pendingSession`，期限依 `twoStageCountDownSec`，最多五分鐘。不保存 OTP、Email、Email 驗證識別或完整回應，也不放入 `sync_cursor`、公開設定、錯誤或日誌。設定 API 只提供驗證中狀態、App／Email 方式與到期時間。

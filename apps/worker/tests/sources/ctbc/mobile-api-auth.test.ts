@@ -100,7 +100,7 @@ function expectPrivateValuesAbsent(logged: string) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("中信登入診斷的憑證保護", () => {
-  it("依公開 App 5.2.28 協定送出加密登入，無待驗證訊號時完成同步", async () => {
+  it("依公開 App 5.2.30 協定送出加密登入，無待驗證訊號時完成同步", async () => {
     const fetcher = bankApi([
       loginResponse({ code: "0000", rsData: { isTwoStageLogin: false } }),
       Response.json({
@@ -127,11 +127,11 @@ describe("中信登入診斷的憑證保護", () => {
     const request = JSON.parse(String(loginInit?.body));
     expect(request).toMatchObject({
       resource: "/twrbm-general/ot001/010",
-      appVer: "5.2.28",
-      webVer: "(1020)",
+      appVer: "5.2.30",
+      webVer: "(1117)",
       rqData: {
         loginType: "PW",
-        version: "5.2.28",
+        version: "5.2.30",
         twoStageVerify: true,
         userAgent: expect.stringContaining("Android 15; Pixel 8"),
         checkDeviceShare: "Y",
@@ -248,7 +248,7 @@ describe("中信登入診斷的憑證保護", () => {
         .mock.calls.slice(3)
         .map(([, init]) => JSON.parse(String(init?.body)));
       expect(initial.rqData).toMatchObject({
-        version: "5.2.28",
+        version: "5.2.30",
         twoStageVerify: true,
         checkDeviceShare: "Y",
       });
