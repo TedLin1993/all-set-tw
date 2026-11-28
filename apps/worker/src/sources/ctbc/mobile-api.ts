@@ -20,10 +20,10 @@ import { isNoCreditCardMessage } from "../credit-card-status";
 const CTBC_IMP_ORIGIN = "https://eb.ctbcbank.com/IMP";
 const CTBC_APPLICATION = "EBMW_Adapter";
 const CTBC_RESOURCE_ENDPOINT = `${CTBC_IMP_ORIGIN}/api/adapters/${CTBC_APPLICATION}/resource/ebmwResource`;
-// Google Play Taiwan latest version, verified on 2026-11-02.
-const CTBC_APP_VERSION = "5.2.28";
-// UtilsService.getWebVersion() in the public Android 5.2.28 package.
-const CTBC_WEB_VERSION = "(1020)";
+// Google Play Taiwan latest version, verified on 2026-11-28.
+const CTBC_APP_VERSION = "5.2.30";
+// UtilsService.getWebVersion() in the public Android 5.2.30 package.
+const CTBC_WEB_VERSION = "(1117)";
 const CTBC_USER_AGENT =
   "Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP3A.241005.015; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.6723.58 Mobile Safari/537.36";
 // MobileFirst client-credential value shipped in the public Android package.
