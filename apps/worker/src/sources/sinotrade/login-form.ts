@@ -94,6 +94,7 @@ const TRANSIENT_PAGE_ERROR =
   /Execution context|Cannot find context|Target closed|Session closed|Connection closed|detached|Inspected target navigated/i;
 
 const INSPECT_TIMEOUT_MS = 10_000;
+const ACTION_TIMEOUT_MS = 15_000;
 // Issuing and deploying the certificate, then the official page's own alert.
 const CERTIFICATE_IMPORT_TIMEOUT_MS = 60_000;
 // The official RA database can lag behind a newly issued certificate (rcode 8040), so the
@@ -109,7 +110,7 @@ const CERTIFICATE_RECORD_MISSING =
   "官方系統尚未登記剛簽發的憑證（rcode 8040），已自動重試仍未完成。請取消後重新連線。";
 
 /** The page cannot answer, typically because a dialog is waiting for a reply. */
-class PageUnresponsiveError extends SinotradeConnectionError {
+export class PageUnresponsiveError extends SinotradeConnectionError {
   constructor() {
     super(
       "官方頁面暫時沒有回應，請稍後按「更新驗證狀態」；若持續沒有回應，請取消後重新連線。",
@@ -705,7 +706,10 @@ async function inspect(
 }
 
 /** Gives up instead of waiting forever on a page that cannot answer. */
-async function withinTimeout<T>(work: Promise<T>) {
+async function withinTimeout<T>(
+  work: Promise<T>,
+  timeoutMs = INSPECT_TIMEOUT_MS,
+) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   // A failure that arrives after the timeout is not worth an unhandled rejection.
   work.catch(() => undefined);
@@ -715,12 +719,24 @@ async function withinTimeout<T>(work: Promise<T>) {
       new Promise<never>((_, reject) => {
         timer = setTimeout(
           () => reject(new PageUnresponsiveError()),
-          INSPECT_TIMEOUT_MS,
+          timeoutMs,
         );
       }),
     ]);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** Best-effort handle cleanup: never mask the operation error or hang on a dead target. */
+async function safeDispose(handle: { dispose: () => unknown }) {
+  try {
+    await withinTimeout(
+      Promise.resolve().then(() => handle.dispose()),
+      2_000,
+    );
+  } catch {
+    // Target closed or unresponsive; the session teardown will reclaim handles.
   }
 }
 
@@ -897,67 +913,72 @@ async function fillControl(
   value: string,
 ) {
   if (!isSinotradeLoginUrl(frame.url())) throw new SinotradeConnectionError();
-  const control = (await frame.$$(PAGE_SELECTORS.control))[expected.index];
+  const control = (
+    await withinTimeout(frame.$$(PAGE_SELECTORS.control), ACTION_TIMEOUT_MS)
+  )[expected.index];
   if (!control) throw new SinotradeConnectionError(FIELD_CHANGED);
   try {
-    const filled = await control.evaluate(
-      (el, data) => {
-        const input = el as HTMLInputElement & HTMLSelectElement;
-        const owner = document.querySelectorAll(data.selector)[data.scope];
-        if (
-          !owner?.contains(el) ||
-          input.id !== data.id ||
-          input.name !== data.name ||
-          input.type !== data.type ||
-          input.disabled ||
-          input.readOnly
-        )
-          return false;
-        const notify = () => {
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-        };
-        if (data.kind === "radio") {
-          // A real click lets the page's own handlers reveal the matching section.
-          input.click();
-          return input.checked;
-        }
-        if (data.kind === "checkbox") {
-          const wanted = data.value === "true";
-          if (input.checked !== wanted) input.click();
-          return input.checked === wanted;
-        }
-        if (el.getBoundingClientRect().width <= 0) return false;
-        if (data.kind === "select") {
-          const option = Array.from(input.options).filter(
-            (item) => item.value !== "" && !item.disabled,
-          )[Number(data.value)];
-          if (!option) return false;
-          input.value = option.value;
+    const filled = await withinTimeout(
+      control.evaluate(
+        (el, data) => {
+          const input = el as HTMLInputElement & HTMLSelectElement;
+          const owner = document.querySelectorAll(data.selector)[data.scope];
+          if (
+            !owner?.contains(el) ||
+            input.id !== data.id ||
+            input.name !== data.name ||
+            input.type !== data.type ||
+            input.disabled ||
+            input.readOnly
+          )
+            return false;
+          const notify = () => {
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+          };
+          if (data.kind === "radio") {
+            // A real click lets the page's own handlers reveal the matching section.
+            input.click();
+            return input.checked;
+          }
+          if (data.kind === "checkbox") {
+            const wanted = data.value === "true";
+            if (input.checked !== wanted) input.click();
+            return input.checked === wanted;
+          }
+          if (el.getBoundingClientRect().width <= 0) return false;
+          if (data.kind === "select") {
+            const option = Array.from(input.options).filter(
+              (item) => item.value !== "" && !item.disabled,
+            )[Number(data.value)];
+            if (!option) return false;
+            input.value = option.value;
+            notify();
+            return input.value === option.value;
+          }
+          const setValue = Object.getOwnPropertyDescriptor(
+            HTMLInputElement.prototype,
+            "value",
+          )!.set!;
+          setValue.call(el, data.value);
           notify();
-          return input.value === option.value;
-        }
-        const setValue = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value",
-        )!.set!;
-        setValue.call(el, data.value);
-        notify();
-        return true;
-      },
-      {
-        selector: PAGE_SELECTORS.scope,
-        scope,
-        value,
-        kind: expected.kind ?? "text",
-        id: expected.id,
-        name: expected.name,
-        type: expected.type,
-      },
+          return true;
+        },
+        {
+          selector: PAGE_SELECTORS.scope,
+          scope,
+          value,
+          kind: expected.kind ?? "text",
+          id: expected.id,
+          name: expected.name,
+          type: expected.type,
+        },
+      ),
+      ACTION_TIMEOUT_MS,
     );
     if (!filled) throw new SinotradeConnectionError(FIELD_CHANGED);
   } finally {
-    await control.dispose();
+    await safeDispose(control);
   }
 }
 
@@ -1011,25 +1032,30 @@ export async function submitSinotradeCredentials(
       : { user: "#txt_IDNO", password: "#txt_PW", submit: "#Btn_Next" };
   await frame.waitForSelector(selectors.password, {
     visible: true,
-    timeout: 15_000,
+    timeout: ACTION_TIMEOUT_MS,
   });
   for (const [selector, value] of [
     [selectors.user, config.userId],
     [selectors.password, config.password],
   ] as const) {
-    const input = await frame.$(selector);
+    const input = await withinTimeout(frame.$(selector), ACTION_TIMEOUT_MS);
     if (!input || !isSinotradeLoginUrl(frame.url()))
       throw new SinotradeConnectionError();
     try {
-      await input.click({ clickCount: 3 });
-      await input.press("Backspace");
-      await input.type(value);
+      await withinTimeout(
+        (async () => {
+          await input.click({ clickCount: 3 });
+          await input.press("Backspace");
+          await input.type(value);
+        })(),
+        ACTION_TIMEOUT_MS,
+      );
     } finally {
-      await input.dispose();
+      await safeDispose(input);
     }
   }
   if (!isSinotradeLoginUrl(frame.url())) throw new SinotradeConnectionError();
-  await frame.click(selectors.submit);
+  await withinTimeout(frame.click(selectors.submit), ACTION_TIMEOUT_MS);
   return waitForVerification(browser, platform);
 }
 
@@ -1092,42 +1118,48 @@ export async function submitSinotradeVerification(
     )
   )
     return updated.challenge;
-  const button = (await updated.frame.$$(PAGE_SELECTORS.button))[
-    updatedButton.index
-  ];
+  const button = (
+    await withinTimeout(
+      updated.frame.$$(PAGE_SELECTORS.button),
+      ACTION_TIMEOUT_MS,
+    )
+  )[updatedButton.index];
   if (!button) throw new SinotradeConnectionError(STEP_CHANGED);
   try {
-    const allowed = await button.evaluate(
-      (el, expected) => {
-        const owner = document.querySelectorAll(expected.selector)[
-          expected.scope
-        ];
-        const label = (
-          el instanceof HTMLInputElement ? el.value : (el.textContent ?? "")
-        ).replace(/\s+/g, "");
-        const rect = el.getBoundingClientRect();
-        return Boolean(
-          owner?.contains(el) &&
-          label === expected.label &&
-          rect.width > 0 &&
-          rect.height > 0 &&
-          !(el as HTMLButtonElement).disabled &&
-          el.getAttribute("aria-disabled") !== "true",
-        );
-      },
-      {
-        selector: PAGE_SELECTORS.scope,
-        scope: updated.scope,
-        label: updatedButton.label,
-      },
+    const allowed = await withinTimeout(
+      button.evaluate(
+        (el, expected) => {
+          const owner = document.querySelectorAll(expected.selector)[
+            expected.scope
+          ];
+          const label = (
+            el instanceof HTMLInputElement ? el.value : (el.textContent ?? "")
+          ).replace(/\s+/g, "");
+          const rect = el.getBoundingClientRect();
+          return Boolean(
+            owner?.contains(el) &&
+            label === expected.label &&
+            rect.width > 0 &&
+            rect.height > 0 &&
+            !(el as HTMLButtonElement).disabled &&
+            el.getAttribute("aria-disabled") !== "true",
+          );
+        },
+        {
+          selector: PAGE_SELECTORS.scope,
+          scope: updated.scope,
+          label: updatedButton.label,
+        },
+      ),
+      ACTION_TIMEOUT_MS,
     );
     if (!allowed)
       throw new SinotradeConnectionError(
         "驗證按鈕尚未通過官方檢查，請更新狀態後再試。",
       );
-    await button.click();
+    await withinTimeout(button.click(), ACTION_TIMEOUT_MS);
   } finally {
-    await button.dispose();
+    await safeDispose(button);
   }
   return input.action === "accept_terms"
     ? finishCertificateLogin(browser, platform, config, updated.challenge)

@@ -694,7 +694,7 @@ Email 驗證與部署環境的同步尚未驗證。網銀的「信任此瀏覽�
 
 - 官方 `service.sinotrade.com.tw` 的 API 防火牆會拒絕 Browser Run 預設的 `HeadlessChrome` User-Agent，因此改用同版本的一般 Chrome UA（只把 `HeadlessChrome/` 換成 `Chrome/`，並與 `sec-ch-ua` 一致）。UA 覆寫只對設定它的 CDP 連線有效，官方另開的憑證視窗也不會繼承，所以每次連上 Browser 都對現有頁面重新套用，並監聽之後開啟的頁面。
 - 未回覆的 JavaScript 對話框會凍結頁面，所以每次連上 Browser 都會回覆官方對話框：`alert`、`beforeunload` 按確定，`confirm`、`prompt` 一律取消。
-- 頁面導覽與等待官方回應各最多 30 秒，頁面內的 API 請求各最多 20 秒。同步取得 Browser 後整段最多 120 秒，逾時立即關閉 Browser 再回報失敗。
+- 頁面導覽與等待官方回應各最多 30 秒，頁面內的 API 請求各最多 20 秒，登入表單的單次元素操作最多 15 秒。同步取得 Browser 時 `keep_alive` 為 60 秒（與其他自動同步一致），整段上限 120 秒，逾時立即關閉 Browser 再回報失敗；同步期間瀏覽器頁面中斷或無回應時以一般同步失敗回報，不清除已保存的登入狀態。
 
 #### 首次連線
 
@@ -719,7 +719,7 @@ Email 驗證與部署環境的同步尚未驗證。網銀的「信任此瀏覽�
 - 每次同步每個平台最多自動登入一次，已重新登入過仍回應未登入時照原錯誤停止，不送第二次帳密。403、5xx 與格式錯誤不重送帳密。
 - 新理財網 API 回應官方暫停服務（HTTP 405、`errorType: "AccessError"`、訊息含「暫停服務」）時，以固定訊息回報並停止，不重新登入、不更新持倉，也不改變已保存的登入狀態。
 - 官方要求生日、OTP 或條款、拒絕登入、登入頁顯示暫停服務等錯誤，或重新登入後仍未登入時，回報 `SINOTRADE_CONNECTION_REQUIRED`，並把該平台存成 `authenticated: false`（保留帳密與憑證）。之後的同步在送出帳密前就停止，直到使用者重新連線，避免每天重送被拒絕的密碼而鎖住帳戶。
-- 每次自動登入記錄 `sinotrade_session_relogin`（平台、時機、停下的步驟與耗時），不記帳號、頁面文字或官方訊息。
+- 每次自動登入記錄 `sinotrade_session_relogin`（平台、時機、停下的步驟與耗時），自動登入中斷與同步失敗分別記錄 `sinotrade_session_relogin_failed` 與 `sinotrade_sync_failed`（只記步驟、平台、階段、錯誤類別與耗時），不記帳號、頁面文字或官方訊息。
 
 #### 持倉
 

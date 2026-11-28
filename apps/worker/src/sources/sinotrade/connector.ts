@@ -8,6 +8,7 @@ import {
   launchBrowserWithRetry,
   connectBrowserWithCancellation,
   closeBrowserSession,
+  BrowserRunCapacityError,
   BrowserSessionCleanupError,
 } from "../browser";
 import {
@@ -51,6 +52,7 @@ import {
 import {
   acknowledgeOfficialDialogs,
   isSinotradeOfficialLoginError,
+  PageUnresponsiveError,
   readSinotradeVerification,
   submitSinotradeCredentials,
   submitSinotradeVerification,
@@ -64,6 +66,8 @@ const LOGIN_TTL_MS = 5 * 60_000;
 // A normal sync takes about 20 seconds; stop and close the browser well before it can spend
 // the daily Browser Run quota, like HNCB.
 const SYNC_DEADLINE_MS = 120_000;
+// 自動同步不等人輸入，與其他自動同步一致壓在 60 秒，避免 Worker 異常中斷時多耗額度。
+const SYNC_KEEP_ALIVE_MS = 60_000;
 const NAVIGATION_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const LOGIN_PATHS = {
@@ -491,29 +495,47 @@ export async function signInSinotradeUnattended(
   stage: SinotradeReloginStage = "check",
 ) {
   const startedAt = Date.now();
-  let challenge = await submitSinotradeCredentials(browser, platform, config);
-  if (
-    challenge.step === "certificate" &&
-    challenge.fields.length === 0 &&
-    challenge.actions.length === 1 &&
-    challenge.actions[0] === "confirm_certificate"
-  )
-    challenge = await submitSinotradeVerification(
-      browser,
-      platform,
-      { action: "confirm_certificate", values: {} },
-      config,
+  let phase: "credentials" | "confirm_certificate" = "credentials";
+  let challenge: SinotradeVerificationChallenge;
+  try {
+    challenge = await submitSinotradeCredentials(browser, platform, config);
+    if (
+      challenge.step === "certificate" &&
+      challenge.fields.length === 0 &&
+      challenge.actions.length === 1 &&
+      challenge.actions[0] === "confirm_certificate"
+    ) {
+      phase = "confirm_certificate";
+      challenge = await submitSinotradeVerification(
+        browser,
+        platform,
+        { action: "confirm_certificate", values: {} },
+        config,
+      );
+    }
+    // 只記平台、時機、停下的步驟與耗時；不記帳號、頁面文字或官方訊息。
+    console.log(
+      JSON.stringify({
+        event: "sinotrade_session_relogin",
+        platform,
+        stage,
+        step: challenge.step,
+        durationMs: Date.now() - startedAt,
+      }),
     );
-  // 只記平台、時機、停下的步驟與耗時；不記帳號、頁面文字或官方訊息。
-  console.log(
-    JSON.stringify({
-      event: "sinotrade_session_relogin",
-      platform,
-      stage,
-      step: challenge.step,
-      durationMs: Date.now() - startedAt,
-    }),
-  );
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "sinotrade_session_relogin_failed",
+        platform,
+        stage,
+        phase,
+        errorName: error instanceof Error ? error.name : "UNKNOWN_ERROR",
+        durationMs: Date.now() - startedAt,
+      }),
+    );
+    throw error;
+  }
   if (challenge.step === "ready") return;
   throw new SinotradeUnattendedLoginError(
     platform,
@@ -561,7 +583,11 @@ async function reloginSinotradePlatform(
 async function withSessionRelogin<T>(
   page: Page,
   platform: SinotradePlatform,
-  session: { config: SinotradeConfig; relogins: Set<SinotradePlatform> },
+  session: {
+    config: SinotradeConfig;
+    relogins: Set<SinotradePlatform>;
+    enter: (step: string) => void;
+  },
   stage: SinotradeReloginStage,
   run: () => Promise<T>,
   /**
@@ -580,6 +606,7 @@ async function withSessionRelogin<T>(
       throw error;
   }
   session.relogins.add(platform);
+  session.enter(`${platform}_relogin:${stage}`);
   await reloginSinotradePlatform(page, platform, session.config, stage);
   try {
     if (!restore) return await run();
@@ -997,8 +1024,20 @@ export async function fetchSinotradeSnapshot(
     throw new SinotradeConnectionError(
       "請先完成或取消目前的登入驗證，再同步。",
     );
-  const browser = await launchBrowserWithRetry(binding);
-  const work = collectSnapshot(browser, config);
+  const startedAt = Date.now();
+  const progress = {
+    step: "launch",
+    stepStartedAt: startedAt,
+    relogins: new Set<SinotradePlatform>(),
+    enter(step: string) {
+      this.step = step;
+      this.stepStartedAt = Date.now();
+    },
+  };
+  const browser = await launchBrowserWithRetry(binding, {
+    keep_alive: SYNC_KEEP_ALIVE_MS,
+  });
+  const work = collectSnapshot(browser, config, progress);
   // A step still waiting at the deadline fails once the browser closes; nobody awaits it then.
   work.catch(() => undefined);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1012,6 +1051,20 @@ export async function fetchSinotradeSnapshot(
         );
       }),
     ]);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: "sinotrade_sync_failed",
+        step: progress.step,
+        stepDurationMs: Date.now() - progress.stepStartedAt,
+        durationMs: Date.now() - startedAt,
+        relogins: [...progress.relogins],
+        errorName: error instanceof Error ? error.name : "UNKNOWN_ERROR",
+      }),
+    );
+    if (error instanceof PageUnresponsiveError || isBrowserClosedError(error))
+      throw new SinotradeBrowserClosedError(error);
+    throw error;
   } finally {
     clearTimeout(timer);
     await closeBrowserSession(binding, browser);
@@ -1027,16 +1080,56 @@ class SinotradeSyncTimeoutError extends Error {
   }
 }
 
-async function collectSnapshot(browser: Browser, config: SinotradeConfig) {
+const BROWSER_CLOSED_ERROR =
+  /Target closed|Session closed|Connection closed|WebSocket is not open|browser has disconnected|Browser closed/i;
+
+function isBrowserClosedError(error: unknown) {
+  if (
+    !(error instanceof Error) ||
+    error instanceof SinotradeConnectionError ||
+    error instanceof SinotradeSyncTimeoutError ||
+    error instanceof BrowserRunCapacityError
+  )
+    return false;
+  return (
+    error.name === "TargetCloseError" ||
+    BROWSER_CLOSED_ERROR.test(error.message)
+  );
+}
+
+/** 同步時瀏覽器分頁中斷或元素操作無回應；屬暫時性異常，不清除已保存的登入狀態。 */
+export class SinotradeBrowserClosedError extends Error {
+  constructor(cause: unknown) {
+    super("永豐證券同步時瀏覽器頁面中斷或無回應，未更新持倉，請稍後再試。", {
+      cause,
+    });
+    this.name = "SinotradeBrowserClosedError";
+  }
+}
+
+async function collectSnapshot(
+  browser: Browser,
+  config: SinotradeConfig,
+  progress: {
+    relogins: Set<SinotradePlatform>;
+    enter: (step: string) => void;
+  },
+) {
   // 兩個平台都先確認官方仍認得保存的登入，失效就重新登入，之後才查詢。
   // 每個平台在這次同步最多重新登入一次。
-  const session = { config, relogins: new Set<SinotradePlatform>() };
+  const session = {
+    config,
+    relogins: progress.relogins,
+    enter: (step: string) => progress.enter(step),
+  };
+  progress.enter("newweb_open");
   const newweb = await browser.newPage();
   await restoreOrigin(
     newweb,
     "newweb",
     restorableSinotradeState(config.webState, "newweb"),
   );
+  progress.enter("newweb_check");
   const newwebSession = await withSessionRelogin(
     newweb,
     "newweb",
@@ -1046,6 +1139,7 @@ async function collectSnapshot(browser: Browser, config: SinotradeConfig) {
   );
   const { accounts } = newwebSession;
   let { token } = newwebSession;
+  progress.enter("savings_open");
   const savings = await browser.newPage();
   // 剛重新登入時保留新取得的父網域 cookie，不被保存的舊值覆寫。
   await restoreOrigin(
@@ -1060,6 +1154,7 @@ async function collectSnapshot(browser: Browser, config: SinotradeConfig) {
       throw new SinotradeConnectionError();
     return identities;
   };
+  progress.enter("savings_check");
   const savingsAccounts = await withSessionRelogin(
     savings,
     "savings",
@@ -1101,13 +1196,16 @@ async function collectSnapshot(browser: Browser, config: SinotradeConfig) {
       )
     )
       throw new Error("兩平台的券商分公司與帳戶無法對應，未更新持倉。");
+    progress.enter("query_general");
     const general = await queryNewweb(() =>
       queryGeneral(newweb, account, token),
     );
+    progress.enter("query_savings");
     const recurring = await querySavings(() =>
       querySinotradeSavings(savings, account),
     );
     // 台股以對帳單為準（含賣出與費稅）；豐存美股的買進只在豐存股「成交」頁。
+    progress.enter("query_trades");
     const trades =
       account.market === "TW"
         ? await queryNewweb(() =>
@@ -1122,6 +1220,7 @@ async function collectSnapshot(browser: Browser, config: SinotradeConfig) {
       trades,
     });
   }
+  progress.enter("capture_state");
   return {
     accountHoldings,
     webState: {
