@@ -525,8 +525,39 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
         new Error("Protocol error (Runtime.callFunctionOn): Target closed"),
         { name: "TargetCloseError" },
       );
-      for (const cause of [targetClosed, new PageUnresponsiveError()]) {
-        loginMocks.credentials.mockReset().mockRejectedValueOnce(cause);
+      const unresponsive = new PageUnresponsiveError();
+      for (const { arrange, errorName } of [
+        {
+          arrange: () =>
+            loginMocks.credentials.mockRejectedValueOnce(targetClosed),
+          errorName: "TargetCloseError",
+        },
+        {
+          arrange: () =>
+            loginMocks.credentials.mockRejectedValueOnce(unresponsive),
+          errorName: "PageUnresponsiveError",
+        },
+        // 送出帳密後讀不到官方步驟（頁面沒有回應或仍在切換）：不是官方要求驗證或拒絕登入。
+        {
+          arrange: () =>
+            loginMocks.credentials.mockResolvedValueOnce(
+              challenge("blocked", unresponsive.message),
+            ),
+          errorName: "PageUnresponsiveError",
+        },
+        {
+          arrange: () =>
+            loginMocks.credentials.mockResolvedValueOnce(
+              challenge(
+                "blocked",
+                "官方頁面仍在切換，請稍後按「更新驗證狀態」。",
+              ),
+            ),
+          errorName: "PageUnresponsiveError",
+        },
+      ]) {
+        loginMocks.credentials.mockReset();
+        arrange();
         browserMocks.close.mockReset().mockResolvedValue(true);
         const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
         try {
@@ -546,7 +577,7 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
           expect(failure).toBeInstanceOf(SinotradeBrowserClosedError);
           expect(failure).not.toBeInstanceOf(SinotradeConnectionError);
           expect(failure).not.toBeInstanceOf(SinotradeUnattendedLoginError);
-          expect((failure as Error).cause).toBe(cause);
+          expect((failure as Error).cause).toMatchObject({ name: errorName });
           expect(browserMocks.close).toHaveBeenCalledOnce();
           const events = warn.mock.calls.map(([line]) =>
             JSON.parse(String(line)),
@@ -557,7 +588,7 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
               platform: "newweb",
               stage: "query",
               phase: "credentials",
-              errorName: cause.name,
+              errorName,
             }),
           );
           expect(events).toContainEqual(
@@ -565,7 +596,7 @@ describe("永豐證券登入恢復與豐存股 origin 邊界", () => {
               event: "sinotrade_sync_failed",
               step: "newweb_relogin:query",
               relogins: ["newweb"],
-              errorName: cause.name,
+              errorName,
             }),
           );
         } finally {

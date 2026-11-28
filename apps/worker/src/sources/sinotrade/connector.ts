@@ -52,6 +52,7 @@ import {
 import {
   acknowledgeOfficialDialogs,
   isSinotradeOfficialLoginError,
+  isSinotradePageUnavailable,
   PageUnresponsiveError,
   readSinotradeVerification,
   submitSinotradeCredentials,
@@ -513,6 +514,10 @@ export async function signInSinotradeUnattended(
         config,
       );
     }
+    // 頁面切換中或沒有回應時讀不到官方步驟：這是瀏覽器異常，不是官方要求驗證或拒絕登入，
+    // 不得當成自動登入未完成而把平台標成未連線。
+    if (isSinotradePageUnavailable(challenge))
+      throw new PageUnresponsiveError();
     // 只記平台、時機、停下的步驟與耗時；不記帳號、頁面文字或官方訊息。
     console.log(
       JSON.stringify({

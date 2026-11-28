@@ -77,6 +77,8 @@ type VerificationForm = {
 const STEP_CHANGED = "驗證步驟已變更，請更新驗證狀態。";
 const FIELD_CHANGED = "驗證欄位已變更，請更新驗證狀態。";
 const PAGE_SWITCHING = "官方頁面仍在切換，請稍後按「更新驗證狀態」。";
+const PAGE_UNRESPONSIVE =
+  "官方頁面暫時沒有回應，請稍後按「更新驗證狀態」；若持續沒有回應，請取消後重新連線。";
 const REQUEST_OTP_LABEL =
   /^(?:取得|發送|傳送|寄送|重送|重新取得|重新發送)(?:簡訊)?(?:驗證碼|認證碼|OTP)$/i;
 const SUBMIT_LABEL =
@@ -112,9 +114,7 @@ const CERTIFICATE_RECORD_MISSING =
 /** The page cannot answer, typically because a dialog is waiting for a reply. */
 export class PageUnresponsiveError extends SinotradeConnectionError {
   constructor() {
-    super(
-      "官方頁面暫時沒有回應，請稍後按「更新驗證狀態」；若持續沒有回應，請取消後重新連線。",
-    );
+    super(PAGE_UNRESPONSIVE);
     this.name = "PageUnresponsiveError";
   }
 }
@@ -125,6 +125,14 @@ export const isSinotradeOfficialLoginError = (
 ) =>
   challenge.step === "blocked" &&
   Boolean(challenge.message?.startsWith(OFFICIAL_ERROR_PREFIX));
+
+/** The page was switching or did not answer, so no official step could be read at all. */
+export const isSinotradePageUnavailable = (
+  challenge: SinotradeVerificationChallenge,
+) =>
+  challenge.step === "blocked" &&
+  (challenge.message === PAGE_SWITCHING ||
+    challenge.message === PAGE_UNRESPONSIVE);
 
 const blocked = (message: string): SinotradeVerificationChallenge => ({
   step: "blocked",
